@@ -11,9 +11,11 @@ from story_ranker import patch_story_selection
 from learning_runtime import sync_factory_analytics
 from quality_runtime import patch_quality_control
 from visual_runtime import patch_visual_pipeline
+from semantic_runtime import patch_semantic_dedup
 
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
+patch_semantic_dedup()
 patch_story_selection(ultimate_bot)
 patch_quality_control(ultimate_bot)
 patch_visual_pipeline(ultimate_bot)
