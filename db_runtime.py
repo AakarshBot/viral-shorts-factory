@@ -1,19 +1,20 @@
 """Runtime bridge that gives the legacy pipeline exact database run identity.
 
-The main production file is intentionally left stable. This module intercepts
-only the legacy vault INSERT/UPDATE statements so each execution gets its own
-run_id and later writes are pinned to the exact SQLite row id.
+The production pipeline still lives in ultimate_bot.py. This bridge makes its
+legacy topic-based INSERT/UPDATE safe without requiring a risky rewrite of the
+large production file.
 """
 import os
 import re
 
-from db_architecture import migrate_vault, make_run_id
+from db_architecture import migrate_vault, make_run_id, update_run_record
 
 
 class _IdentityState:
     def __init__(self, run_id=None):
         self.run_id = run_id or make_run_id()
         self.row_id = None
+        self.inserted = False
 
 
 class _CursorProxy:
@@ -25,23 +26,23 @@ class _CursorProxy:
         sql_text = str(sql)
         upper = sql_text.upper()
 
-        # The legacy pipeline creates the production row with topic as its
-        # apparent identity. Add a real run_id and capture SQLite's row id.
+        # Create a new row for EVERY production run. Never use INSERT OR IGNORE
+        # here: two runs are allowed to have the same topic.
         if "INSERT OR IGNORE INTO VAULT" in upper and "(TOPIC, DATE_USED, GENRE, VIDEO_ID)" in upper:
             sql_text = re.sub(
                 r"INSERT\s+OR\s+IGNORE\s+INTO\s+vault\s*\(topic,\s*date_used,\s*genre,\s*video_id\)\s*VALUES\s*\(\?,\s*\?,\s*\?,\s*\?\)",
                 "INSERT INTO vault (topic, date_used, genre, video_id, run_id, status) VALUES (?, ?, ?, ?, ?, 'PENDING_QC')",
                 sql_text,
+                count=1,
                 flags=re.IGNORECASE,
             )
             params = tuple(parameters) + (self._state.run_id,)
             result = self._cursor.execute(sql_text, params)
             self._state.row_id = self._cursor.lastrowid
+            self._state.inserted = self._state.row_id is not None
             return result
 
-        # The legacy final write uses WHERE topic=?. Replace that identity
-        # with the exact row id created above. This prevents duplicate topics
-        # or repeated runs from ever updating another run's record.
+        # Pin the final upload write to the exact row created above.
         is_final_update = (
             "UPDATE VAULT SET" in upper
             and "VIDEO_ID=?" in upper
@@ -51,15 +52,14 @@ class _CursorProxy:
         )
         if is_final_update:
             sql_text = re.sub(
-                r"WHERE\s+topic\s*=\s*\?",
+                r"\s*WHERE\s+topic\s*=\s*\?",
                 ", status='UPLOADED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 sql_text,
                 count=1,
                 flags=re.IGNORECASE,
             )
             params = tuple(parameters[:-1]) + (self._state.row_id,)
-            self._cursor.execute(sql_text, params)
-            return self._cursor
+            return self._cursor.execute(sql_text, params)
 
         return self._cursor.execute(sql, parameters)
 
@@ -114,7 +114,7 @@ class _ConnectionProxy:
 
 
 def run_robot_with_exact_identity(bot, web_config=None):
-    """Run the legacy robot while enforcing run_id/id database identity."""
+    """Run the factory and guarantee that a created run cannot remain pending."""
     original_connect = bot.sqlite3.connect
     state = _IdentityState()
 
@@ -127,13 +127,45 @@ def run_robot_with_exact_identity(bot, web_config=None):
                 migrate_vault(conn)
                 return _ConnectionProxy(conn, state)
         except Exception:
-            # Do not hide the original connection if migration/proxy setup
-            # cannot be applied. The production run will surface the error.
             pass
         return conn
 
     bot.sqlite3.connect = connect
     try:
-        return bot.run_robot(web_config=web_config)
+        result = bot.run_robot(web_config=web_config)
+    except Exception as exc:
+        if state.row_id is not None:
+            try:
+                raw = original_connect(bot.DB_PATH)
+                migrate_vault(raw)
+                update_run_record(
+                    raw,
+                    state.row_id,
+                    status="FAILED",
+                    reported=1,
+                    rejected_reason=f"{type(exc).__name__}: {str(exc)[:500]}",
+                )
+                raw.close()
+            except Exception as db_exc:
+                print(f"   [DB] Could not mark run FAILED: {db_exc}")
+        raise
     finally:
         bot.sqlite3.connect = original_connect
+
+    # A normal return can still mean the legacy pipeline stopped early.
+    # Dashboard/headless runs never use the interactive QC rejection gate.
+    if state.row_id is not None:
+        try:
+            raw = original_connect(bot.DB_PATH)
+            migrate_vault(raw)
+            row = raw.execute("SELECT status, video_id FROM vault WHERE id = ?", (state.row_id,)).fetchone()
+            if row and row[0] == "PENDING_QC":
+                if web_config is None:
+                    update_run_record(raw, state.row_id, status="REJECTED", reported=1, rejected_reason="Run ended at manual QC gate")
+                else:
+                    update_run_record(raw, state.row_id, status="FAILED", reported=1, rejected_reason="Pipeline stopped before upload")
+            raw.close()
+        except Exception as db_exc:
+            print(f"   [DB] Could not finalise run status: {db_exc}")
+
+    return result
