@@ -32,6 +32,7 @@ def _entity_context(seg, video_title=""):
 def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
     """Ask Gemini whether the actual pixels match the requested scene."""
     if not api_key:
+        print("   [Visual QA] Gemini semantic verifier is not configured (missing GEMINI_API_KEY).")
         return None
     try:
         b64 = base64.b64encode(img_bytes).decode("utf-8")
@@ -51,10 +52,11 @@ def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, 
             f"Search prompt: {prompt}\n"
             f"Scene narration: {voice}"
         )
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
         import requests
         response = requests.post(
             url,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [
                     {"text": instruction},
@@ -65,12 +67,15 @@ def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, 
             timeout=12,
         )
         if response.status_code != 200:
+            detail = response.text[:300].replace("\n", " ")
+            print(f"   [Visual QA] Gemini verifier HTTP {response.status_code}: {detail}")
             return None
         text = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip().upper()
         if text.startswith("PASS"):
             return True
         if text.startswith("FAIL"):
             return False
+        print(f"   [Visual QA] Gemini returned an unexpected verdict: {text[:80]}")
     except Exception as exc:
         print(f"   [Visual QA] Semantic verifier unavailable: {exc}")
     return None
