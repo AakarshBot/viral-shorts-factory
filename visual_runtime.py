@@ -10,8 +10,11 @@ import base64
 import io
 import os
 import re
+import threading
 
 from PIL import Image, ImageDraw
+
+VISUAL_FETCH_TIMEOUT_SECONDS = 15
 
 
 def _tokens(text):
@@ -103,8 +106,6 @@ def _strict_gate(bot, img_bytes, seg, video_title=""):
         print(f"   [Visual QA] REJECTED: image does not match '{entity}' / '{intent}'.")
         return False
 
-    # Without a functioning semantic verifier we cannot honestly claim strict
-    # relevance. Reject the asset instead of silently accepting an unrelated one.
     print("   [Visual QA] REJECTED: semantic relevance could not be verified.")
     return False
 
@@ -123,6 +124,28 @@ def _build_search_variants(seg, video_title=""):
         if value and value not in variants:
             variants.append(value)
     return variants[:4]
+
+
+def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETCH_TIMEOUT_SECONDS):
+    """Run legacy synchronous image providers without blocking the async factory forever."""
+    result = {"value": None, "error": None}
+
+    def worker():
+        try:
+            result["value"] = fetcher(*args)
+        except Exception as exc:
+            result["error"] = exc
+
+    thread = threading.Thread(target=worker, name=f"visual-{source.lower()}-fetch", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        print(f"   [Visual Source] {source} | timed out after {timeout}s | query='{query}'")
+        return None
+    if result["error"] is not None:
+        print(f"   [Visual Source] {source} | failed: {result['error']} | query='{query}'")
+        return None
+    return result["value"]
 
 
 def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
@@ -149,44 +172,42 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             used_hashes.add(h)
             print(f"   [Visual Source] {source} | verified | query='{query}'")
             return Image.open(io.BytesIO(data)).convert("RGB"), False, source
-        except Exception:
+        except Exception as exc:
+            print(f"   [Visual Source] {source} | candidate rejected: {exc}")
             return None
 
     for query in variants:
+        print(f"   [Visual Search] Scene entity='{entity}' | query='{query}'")
         if editorial:
-            for fetcher, name in (
-                (bot.fetch_wiki_person_image, "Wikipedia"),
-                (bot.fetch_wikimedia_commons, "Commons"),
+            for fetcher, name, args in (
+                (bot.fetch_wiki_person_image, "Wikipedia", (entity, used_urls, query, video_title)),
+                (bot.fetch_wikimedia_commons, "Commons", (query, used_urls, query, video_title)),
             ):
-                try:
-                    result = try_bytes(fetcher(entity if name == "Wikipedia" else query, used_urls, query, video_title), name, query)
-                    if result:
-                        return result
-                except Exception:
-                    pass
+                data = _call_fetcher_with_timeout(fetcher, args, name, query)
+                result = try_bytes(data, name, query)
+                if result:
+                    return result
 
         for fetcher, name in (
             (bot.fetch_pexels, "Pexels"),
             (bot.fetch_unsplash, "Unsplash"),
             (bot.fetch_duckduckgo, "DDG"),
         ):
-            try:
-                result = try_bytes(fetcher(query, used_urls, query, video_title), name, query)
-                if result:
-                    return result
-            except Exception:
-                pass
+            data = _call_fetcher_with_timeout(fetcher, (query, used_urls, query, video_title), name, query)
+            result = try_bytes(data, name, query)
+            if result:
+                return result
 
-    # Last resort: generate a scene-specific image, then run the same semantic gate.
     ai_prompts = [
         f"Photorealistic editorial image of {entity}. {str(seg.get('visual_intent','')).strip()}. {str(seg.get('voiceover','')).strip()[:180]}",
         f"Photorealistic documentary photograph showing {entity} in context. {video_title}",
     ]
     for ai_prompt in ai_prompts:
+        print(f"   [Visual Source] AI-generated attempt | prompt='{ai_prompt[:140]}'")
+        ai = _call_fetcher_with_timeout(bot.fetch_hf_ai_image, (ai_prompt,), "HF-AI", ai_prompt)
+        if ai is None:
+            continue
         try:
-            ai = bot.fetch_hf_ai_image(ai_prompt)
-            if ai is None:
-                continue
             buf = io.BytesIO()
             ai.convert("RGB").save(buf, format="JPEG", quality=95)
             data = buf.getvalue()
@@ -196,8 +217,8 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
                     used_hashes.add(h)
                     print("   [Visual Source] AI-generated | verified")
                     return ai.convert("RGB"), True, "AI-generated"
-        except Exception:
-            continue
+        except Exception as exc:
+            print(f"   [Visual Source] AI-generated | candidate rejected: {exc}")
 
     raise RuntimeError(f"No strictly relevant visual could be verified for scene entity '{entity}'.")
 
@@ -244,6 +265,7 @@ async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"
 
     for idx, seg in enumerate(scenes):
         video_title = script_data.get("title", "") or script_data.get("titles", [""])[0]
+        print(f"   [Visual Pipeline] Scene {idx + 1}/{len(scenes)} starting...")
         category = str(seg.get("sport_or_topic_category", "")).lower()
         bg_img, used_ai, source_type = _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title)
         ai_count += int(used_ai)
