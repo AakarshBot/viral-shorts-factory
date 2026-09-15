@@ -1,275 +1,278 @@
-"""Runtime hardening helpers for the Streamlit dashboard."""
+"""Dashboard runtime upgrades: data-driven scoring, semantic deduplication and visual design."""
+import io, random, re, sys, traceback, urllib.parse, xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import requests
+from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 
-import io
-import re
-import sys
-import traceback
-
-from PIL import Image, ImageDraw
+_FITTED_WEIGHTS = None
+_FITTED_SAMPLE_COUNT = -1
+_SEMANTIC_MODEL = None
+_SEMANTIC_ERROR = None
 
 
 def install_safe_exception_hook():
-    """Install a headless-safe exception hook that never waits for console input."""
-    def safe_hook(exctype, value, tb):
+    def hook(exctype, value, tb):
         print("💥 UNCAUGHT EXCEPTION DETECTED:")
-        print("!" * 60)
         traceback.print_exception(exctype, value, tb)
-        print("!" * 60)
-
-    sys.excepthook = safe_hook
+    sys.excepthook = hook
 
 
 def normalise_publish_mode(value):
-    """Return only the two publish modes supported by the dashboard."""
     return "public" if str(value).strip().lower() == "public" else "private"
 
 
+def fit_retention_weights(conn, min_samples=30, refit_every=20):
+    """Fit editorial dimensions against normalized observed retention."""
+    global _FITTED_WEIGHTS, _FITTED_SAMPLE_COUNT
+    if conn is None: return None
+    try:
+        rows = conn.execute("""SELECT hook_strength,narrative_completeness,audience_fit,
+            monetization_risk,shelf_life,avg_view_percentage FROM vault
+            WHERE video_id NOT IN ('PENDING_QC','REJECTED')
+            AND hook_strength IS NOT NULL AND narrative_completeness IS NOT NULL
+            AND audience_fit IS NOT NULL AND monetization_risk IS NOT NULL
+            AND shelf_life IS NOT NULL AND avg_view_percentage IS NOT NULL""").fetchall()
+        n = len(rows)
+        if n < min_samples: return None
+        if _FITTED_WEIGHTS is not None and n - _FITTED_SAMPLE_COUNT < refit_every:
+            return _FITTED_WEIGHTS
+        x = np.asarray([r[:5] for r in rows], dtype=float)
+        y0 = np.asarray([r[5] for r in rows], dtype=float)
+        if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y0)) or y0.max() == y0.min(): return None
+        y = (y0-y0.min())/(y0.max()-y0.min())
+        std = x.std(axis=0); std[std < 1e-9] = 1.0
+        design = np.column_stack([np.ones(n),(x-x.mean(axis=0))/std])
+        coeffs,_,_,_ = np.linalg.lstsq(design,y,rcond=None)
+        raw = coeffs[1:]; denom=float(np.abs(raw).sum())
+        if denom < 1e-9: return None
+        names=["hook_strength","narrative_completeness","audience_fit","monetization_risk","shelf_life"]
+        _FITTED_WEIGHTS={k:float(v/denom) for k,v in zip(names,raw)}
+        _FITTED_SAMPLE_COUNT=n
+        print("   [Retention Model] Fitted from %d videos: %s" % (n,", ".join(f"{k}={v:+.3f}" for k,v in _FITTED_WEIGHTS.items())))
+        return _FITTED_WEIGHTS
+    except Exception as exc:
+        print(f"   [Retention Model] Fit unavailable: {exc}")
+        return None
+
+
+def _get_semantic_model():
+    global _SEMANTIC_MODEL, _SEMANTIC_ERROR
+    if _SEMANTIC_MODEL is not None: return _SEMANTIC_MODEL
+    if _SEMANTIC_ERROR: return None
+    try:
+        from sentence_transformers import SentenceTransformer
+        print("   [Semantic Dedup] Loading all-MiniLM-L6-v2 on CPU (first run only)...")
+        _SEMANTIC_MODEL=SentenceTransformer("all-MiniLM-L6-v2",device="cpu")
+        return _SEMANTIC_MODEL
+    except Exception as exc:
+        _SEMANTIC_ERROR=str(exc)
+        print(f"   [Semantic Dedup] Model unavailable: {exc}")
+        return None
+
+
+def semantic_duplicate_filter(stories, vault_topics, threshold=0.82):
+    """Remove semantically duplicate titles using cosine similarity."""
+    if not stories: return stories
+    model=_get_semantic_model()
+    if model is None:
+        seen={re.sub(r"\W+"," ",str(x).lower()).strip() for x in vault_topics}
+        return [s for s in stories if re.sub(r"\W+"," ",str(s.get("title","")).lower()).strip() not in seen]
+    titles=[str(s.get("title","")).strip() for s in stories]
+    refs=[str(x).strip() for x in vault_topics if str(x).strip()]
+    emb=model.encode(titles+refs,normalize_embeddings=True,convert_to_numpy=True,show_progress_bar=False)
+    cand,ref=emb[:len(titles)],emb[len(titles):]
+    kept=[]; kept_emb=[]; dropped=0
+    for story,e in zip(stories,cand):
+        dup=bool(len(ref) and float(np.max(ref@e))>=threshold)
+        if not dup and kept_emb: dup=float(np.max(np.asarray(kept_emb)@e))>=threshold
+        if dup: dropped+=1
+        else: kept.append(story); kept_emb.append(e)
+    if dropped: print(f"   [Semantic Dedup] Removed {dropped} duplicates (cosine >= {threshold:.2f}).")
+    return kept
+
+
+def get_trend_signal_bonus(bot, keyword):
+    """Return graded 0..10 Google Trends interest instead of binary 2.5/0."""
+    keyword=bot.safe_text(keyword)
+    if not keyword: return 0.0
+    try:
+        from pytrends.request import TrendReq
+        stop={"the","and","for","with","from","this","that","into","after","before","over","under","what","how","why","world","news","latest","today","just"}
+        terms=list(dict.fromkeys(t for t in re.findall(r"[A-Za-z][A-Za-z0-9'-]{2,}",keyword) if t.lower() not in stop))[:5]
+        if not terms: return 0.0
+        p=TrendReq(hl="en-US",tz=330,retries=1,backoff_factor=0.2)
+        p.build_payload(terms,timeframe="now 7-d",geo="IN")
+        df=p.interest_over_time()
+        vals=[float(v) for t in terms if t in df.columns for v in df[t].tolist() if np.isfinite(v)] if df is not None and not df.empty else []
+        return round(max(0,min(10,(max(vals)/10 if vals else 0))),2)
+    except Exception: return 0.0
+
+
+def _cheap_score(s):
+    return float(s.get("corroboration_bonus",0))*2+float(s.get("velocity_score",0))-float(s.get("recency_penalty",0))+float(s.get("trend_bonus",0))
+
+
+def preselect_candidates(stories, limit=15):
+    """Rank a wider source pool cheaply, then send only the best 15 to the LLM."""
+    return sorted(stories,key=_cheap_score,reverse=True)[:limit]
+
+
+def genre_aware_epsilon_selection(options_dict,scores_dict,epsilon=0.2,strong_sample_threshold=8):
+    keys=list(options_dict.keys())
+    under=[k for k in keys if k not in scores_dict or scores_dict[k].get("score") is None or scores_dict[k].get("count",0)<5]
+    strong=sum(1 for k in keys if scores_dict.get(k,{}).get("count",0)>=strong_sample_threshold and scores_dict.get(k,{}).get("score") is not None)
+    eps=0.1 if strong>=max(1,len(keys)//2) else epsilon
+    if under and random.random()<eps: return random.choice(under)
+    scored=[(k,scores_dict.get(k,{}).get("score")) for k in keys if scores_dict.get(k,{}).get("score") is not None]
+    return max(scored,key=lambda x:x[1])[0] if scored else random.choice(keys)
+
+
+def auto_pilot_selection(bot,conn):
+    fs=bot.get_smart_metrics(conn,"format_used","avg_view_percentage")
+    fmt=genre_aware_epsilon_selection({"regular":1,"top5":1,"trending":1},fs)
+    cs=bot.get_smart_metrics(conn,"genre","avg_view_percentage")
+    cats={k:v for k,v in bot.CONTENT_CATEGORIES.items() if (v["usable_regular"] if fmt in ["regular","trending"] else v["usable_top5"]) and k!="tech_reviews"}
+    cat=genre_aware_epsilon_selection(cats,cs)
+    ls=bot.get_smart_metrics(conn,"language_used","avg_view_percentage")
+    lang=genre_aware_epsilon_selection(bot.LANGUAGES,ls)
+    print(f"   [Auto-Pilot] Genre-aware selection: {cat}; format={fmt}; language={lang}")
+    return fmt,cat,bot.LANGUAGES[lang],f"{fmt}|{cat}|{lang}"
+
+
+# ----------------------------- visual system -----------------------------
+_TEMPLATES={"HYPE COMMENTATOR":["Bold Poster","Split Focus"],"ANALYTICAL INSIDER":["Magazine Cover","Split Focus"],"CYNICAL CRITIC":["Magazine Cover","Bold Poster"],"LISTICLE HOST":["Bold Poster","Split Focus"],"TECH REVIEWER":["Magazine Cover","Split Focus"]}
+
+def _template(data): return random.choice(_TEMPLATES.get(str(data.get("persona_used","HYPE COMMENTATOR")).upper(),["Bold Poster","Magazine Cover"]))
+
+def _vignette(size,strength=.5):
+    small=Image.new("L",(120,213),0); p=small.load(); cx,cy=60,106.5; md=(cx*cx+cy*cy)**.5
+    for y in range(213):
+        for x in range(120):
+            d=(((x-cx)**2+(y-cy)**2)**.5)/md; p[x,y]=int(max(0,min(255,((d-.18)/.82)**1.8*255*strength)))
+    mask=small.resize(size,Image.Resampling.BILINEAR); out=Image.new("RGBA",size,(0,0,0,0)); out.paste((0,0,0,255),(0,0,*size),mask); return out
+
+def _grain(img,opacity=12):
+    g=Image.effect_noise((160,284),9).resize(img.size,Image.Resampling.BILINEAR); layer=Image.new("RGBA",img.size,(128,128,128,0)); layer.putalpha(g.point(lambda p:int(p*opacity/255))); return Image.alpha_composite(img,layer)
+
+def _card_base(bg,box):
+    base=bg.convert("RGBA"); crop=base.crop(box).filter(ImageFilter.GaussianBlur(24)); crop=ImageEnhance.Contrast(crop).enhance(1.12); crop=ImageEnhance.Color(crop).enhance(1.15); base.paste(crop,box); return _grain(Image.alpha_composite(base,_vignette(base.size)))
+
+def _emphasis(text):
+    words=text.split();
+    if not words:return set()
+    n=min(4,len(words)); return {re.sub(r"\W","",w).lower() for w in words[:n]}
+
+def _hierarchy(draw,text,box,bot,font_choice,accent,start=80):
+    font,lines=bot.fit_text_in_box(text,font_choice,box[2]-box[0],box[3]-box[1],start_size=start); size=getattr(font,"size",start); normal=bot.get_bold_font(size,font_choice); big=bot.get_bold_font(int(size*1.4),font_choice); emph=_emphasis(text); y=box[1]; center=(box[0]+box[2])/2
+    for line in lines:
+        ws=line.split(); widths=[draw.textlength(w,font=big if re.sub(r"\W","",w).lower() in emph else normal) for w in ws]; space=draw.textlength(" ",font=normal); x=center-(sum(widths)+space*(len(ws)-1))/2; lh=0
+        for w,ww in zip(ws,widths):
+            f=big if re.sub(r"\W","",w).lower() in emph else normal; fill=accent if f==big else (255,255,255); bb=draw.textbbox((0,0),w,font=f); lh=max(lh,bb[3]-bb[1]); draw.text((x+4,y+5),w,font=f,fill=(0,0,0,190)); draw.text((x,y),w,font=f,fill=fill,stroke_width=max(2,int(size*.035)),stroke_fill=(0,0,0,230)); x+=ww+space
+        y+=lh+20
+
+def render_hook_card(bot,bg_img,hook_text,width=1080,height=1920,font_choice=None,script_data=None):
+    data=script_data or {}; accent=bot.PALETTE.get("accent_primary",(0,191,255)); box=[60,430,width-60,height-430]; base=_card_base(bg_img,box); draw=ImageDraw.Draw(base); t=_template(data)
+    if t=="Bold Poster":
+        draw.rounded_rectangle(box,radius=42,fill=(8,12,24,210),outline=accent+(220,),width=3); draw.rectangle([box[0],box[1],box[0]+12,box[3]],fill=accent+(255,)); _hierarchy(draw,hook_text,[120,640,width-120,height-620],bot,font_choice,accent,88)
+    elif t=="Split Focus":
+        draw.polygon([(box[0],box[1]),(box[2],box[1]),(box[2]-180,box[3]),(box[0],box[3])],fill=(8,12,24,222)); draw.line([(box[2]-180,box[1]),(box[2],box[1]+180)],fill=accent+(255,),width=9); _hierarchy(draw,hook_text,[105,1030,width-120,height-650],bot,font_choice,accent,76)
+    else:
+        draw.rounded_rectangle(box,radius=28,fill=(8,12,24,214),outline=(255,255,255,80),width=2); draw.line([(box[0]+75,box[1]+90),(box[2]-75,box[1]+90)],fill=accent+(255,),width=5); draw.text((box[0]+75,box[1]+42),str(data.get("persona_used","Editorial")).title(),font=bot.get_bold_font(34,font_choice),fill=accent); _hierarchy(draw,hook_text,[120,650,width-120,height-650],bot,font_choice,(255,255,255),70)
+    stripe=Image.new("RGBA",base.size,(0,0,0,0)); sd=ImageDraw.Draw(stripe); sd.polygon([(width-250,0),(width,0),(width,70),(width-180,70)],fill=accent+(180,)); return Image.alpha_composite(base,stripe)
+
+def create_branded_slide(bot,title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None,script_data=None):
+    data=script_data or {}; accent=bot.PALETTE.get("accent_primary",(0,191,255)); box=[60,420,width-60,height-360]; base=_card_base(Image.new("RGBA",(width,height),bot.PALETTE["bg"]+(255,)),box); draw=ImageDraw.Draw(base); t=_template(data); draw.rounded_rectangle(box,radius=36,fill=(8,12,24,220),outline=accent+(180,),width=3)
+    if t=="Magazine Cover": draw.line([(box[0]+70,box[1]+90),(box[2]-70,box[1]+90)],fill=accent+(255,),width=4); draw.text((box[0]+70,box[1]+42),"VIRAL SHORTS FACTORY",font=bot.get_bold_font(32,font_choice),fill=accent)
+    _hierarchy(draw,title_text,[120,box[1]+210,width-120,box[3]-300],bot,font_choice,accent,78)
+    if subtitle_text:
+        f=bot.get_bold_font(48,font_choice); bb=draw.textbbox((0,0),subtitle_text,font=f); x=(width-bb[2]+bb[0])/2; y=box[3]-210; draw.rounded_rectangle([x-35,y-20,x+bb[2]-bb[0]+35,y+70],radius=35,fill=(5,7,14,225),outline=accent+(190,),width=2); draw.text((x,y),subtitle_text,font=f,fill=accent)
+    return _grain(base)
+
+def render_top5_card(bot,bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None,script_data=None):
+    box=[60,280,width-60,height-280]; base=_card_base(bg_img,box); draw=ImageDraw.Draw(base); accent=bot.PALETTE.get("accent_primary",(0,191,255)); draw.rounded_rectangle(box,radius=40,fill=(8,12,24,200),outline=accent+(180,),width=3); draw.text((115,350),f"#{item_number}",font=bot.get_bold_font(112,font_choice),fill=accent); _hierarchy(draw,summary_text,[120,560,width-120,height-430],bot,font_choice,(255,255,255),66); return base
+
+
 def patch_dashboard_runtime(bot):
-    """Patch deterministic scoring, classification and visual-routing issues for dashboard runs."""
-    original_process = bot.process_scored_candidates
+    """Apply requested improvements to Streamlit execution."""
+    def score(scored_data,batch,bonuses,last_genre,fmt):
+        weights=fit_retention_weights(getattr(bot,"_active_scoring_conn",None)) or {"hook_strength":.25,"narrative_completeness":.20,"audience_fit":.20,"monetization_risk":-.20,"shelf_life":.15}
+        out=[]
+        for i,s in enumerate(scored_data):
+            if i>=len(batch) or not isinstance(s,dict):continue
+            try: vals={k:max(1,min(10,float(s.get(k,5)))) for k in weights}
+            except (TypeError,ValueError):continue
+            if s.get("hard_reject",False) or vals["monetization_risk"]>=8:continue
+            story=batch[i]; story.update(vals); trend=get_trend_signal_bonus(bot,story.get("title","")); story["trend_bonus"]=trend
+            comp=sum(vals[k]*weights[k] for k in weights)+trend+float(story.get("velocity_score",0))-float(story.get("recency_penalty",1))-((vals["monetization_risk"]-1)*.20)
+            comp+=float(story.get("corroboration_bonus",0))+(bonuses.get(story.get("genre"),0) if fmt=="regular" else 0)+(2 if fmt=="regular" and story.get("genre")==last_genre else 0)
+            story["composite_score"]=round(comp,3); out.append(story)
+        return sorted(out,key=lambda x:x["composite_score"],reverse=True) or batch
+    bot.process_scored_candidates=score
 
-    def fixed_process_scored_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode):
-        scored_candidates = []
-        for idx, scores in enumerate(scored_data):
-            if idx >= len(batch_stories) or not isinstance(scores, dict):
-                continue
+    # Replace token-overlap filtering by semantic filtering after source collection.
+    # The legacy collector's exact duplicate check is harmless; the similarity
+    # decision itself is now semantic and catches rewritten headlines.
+    original_gather=bot.gather_and_filter_stories
+    def gather(conn,genre_key,genre_cfg,trend_keyword=None,custom_gnews_q=None,custom_rss_url=None):
+        stories=original_gather(conn,genre_key,genre_cfg,trend_keyword,custom_gnews_q,custom_rss_url)
+        recent=[r[0] for r in conn.execute("SELECT topic FROM vault WHERE date_used >= ?",(datetime.now()-timedelta(days=30),)).fetchall()]
+        return semantic_duplicate_filter(stories,recent,.82)
+    bot.gather_and_filter_stories=gather
 
-            story = batch_stories[idx]
-            try:
-                hs = max(1.0, min(10.0, float(scores.get("hook_strength", 5))))
-                nc = max(1.0, min(10.0, float(scores.get("narrative_completeness", 5))))
-                af = max(1.0, min(10.0, float(scores.get("audience_fit", 5))))
-                mr = max(1.0, min(10.0, float(scores.get("monetization_risk", 5))))
-                sl = max(1.0, min(10.0, float(scores.get("shelf_life", 5))))
-            except (TypeError, ValueError):
-                continue
+    original_editorial=bot.editorial_gate_batch
+    def editorial(stories,bonuses,last_genre,fmt): return original_editorial(preselect_candidates(stories,15),bonuses,last_genre,fmt) if stories else None
+    bot.editorial_gate_batch=editorial
+    bot.get_trend_signal_bonus=lambda keyword:get_trend_signal_bonus(bot,keyword)
+    bot.auto_pilot_selection=lambda conn:auto_pilot_selection(bot,conn)
 
-            if scores.get("hard_reject", False) or mr >= 8.0:
-                continue
-
-            trend_bonus = bot.get_trend_signal_bonus(story.get("title", ""))
-            freshness = story.get("velocity_score", 0.0)
-            risk_penalty = (mr - 1.0) * 0.20
-
-            composite = (
-                hs * 0.25
-                + nc * 0.20
-                + af * 0.20
-                + (10.0 - mr) * 0.20
-                + sl * 0.15
-                + (bonuses.get(story.get("genre"), 0) if format_mode == "regular" else 0)
-                + (2.0 if format_mode == "regular" and story.get("genre") == last_genre else 0)
-                + story.get("corroboration_bonus", 0)
-                + trend_bonus
-                + freshness
-                - story.get("recency_penalty", 1.0)
-                - risk_penalty
-            )
-
-            story.update({
-                "hook_strength": hs,
-                "narrative_completeness": nc,
-                "audience_fit": af,
-                "monetization_risk": mr,
-                "shelf_life": sl,
-                "composite_score": round(composite, 2),
-            })
-            scored_candidates.append(story)
-
-        if scored_candidates:
-            scored_candidates.sort(key=lambda item: item["composite_score"], reverse=True)
-            return scored_candidates
-
-        return original_process([], batch_stories, bonuses, last_genre, format_mode) or batch_stories
-
-    bot.process_scored_candidates = fixed_process_scored_candidates
-
-    def fixed_infer_genre_from_title(title):
-        t_lower = str(title or "").lower()
-        if any(k in t_lower for k in ["smartphone", "launch", "review", "gadget", "laptop", "processor", "pixel", "iphone"]):
-            return "tech_reviews"
-        if any(k in t_lower for k in ["cricket", "match", "goal", "isl", "premier league", "tennis", "sport", "squad", "debut", "odi", "test", "formula", "f1"]):
-            return "sports_stories_of_day"
-        if any(k in t_lower for k in ["movie", "bollywood", "tollywood", "gossip", "box office", "trailer"]):
-            return "entertainment"
-        if any(k in t_lower for k in ["ai", "artificial intelligence", "tech", "gadgets", "startup", "software"]):
-            return "technology"
-        if any(k in t_lower for k in ["stock", "finance", "business", "market", "economy", "wealth"]):
-            return "business_finance"
-        if any(k in t_lower for k in ["health", "fitness", "wellness", "nutrition", "diet"]):
-            return "health_lifestyle"
-        if any(k in t_lower for k in ["telangana", "hyderabad", "andhra", "amaravati"]):
-            return "regional_state_news"
-        if any(k in t_lower for k in ["viral", "trend", "phenomenon", "challenge"]):
-            return "viral_phenomenon"
-        return "national_global_affairs"
-
-    bot.infer_genre_from_title = fixed_infer_genre_from_title
-
-    # ------------------------------------------------------------------
-    # Visual quality gate: preserve the existing checks and add a useful
-    # OpenCV Haar-cascade face check for person/editorial image searches.
-    # Images that are not person-oriented are not rejected merely because
-    # they contain no face.
-    # ------------------------------------------------------------------
-    original_quality_gate = bot.passes_quality_gate
-
-    def fixed_passes_quality_gate(img_data, search_prompt="", video_title=""):
-        if not original_quality_gate(img_data, search_prompt, video_title):
-            return False
-
-        cv2 = getattr(bot, "cv2", None)
-        np = getattr(bot, "np", None)
-        if cv2 is None or np is None:
-            return True
-
-        prompt_text = f"{search_prompt} {video_title}".lower()
-        person_terms = (
-            "person", "people", "man", "woman", "player", "actor", "actress",
-            "celebrity", "politician", "president", "prime minister", "coach",
-            "cricketer", "footballer", "athlete", "singer", "director"
-        )
-        if not any(term in prompt_text for term in person_terms):
-            return True
-
+    original_quality=bot.passes_quality_gate
+    def quality(data,search_prompt="",video_title=""):
+        if not original_quality(data,search_prompt,video_title):return False
+        cv2=getattr(bot,"cv2",None); npmod=getattr(bot,"np",None); text=f"{search_prompt} {video_title}".lower(); terms=["person","people","man","woman","player","actor","actress","celebrity","politician","president","coach","cricketer","footballer","athlete","singer","director"]
+        if cv2 is None or npmod is None or not any(t in text for t in terms):return True
         try:
-            pil_img = Image.open(io.BytesIO(img_data)).convert("RGB")
-            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY)
-            cascade_path = getattr(cv2.data, "haarcascades", "") + "haarcascade_frontalface_default.xml"
-            if not cascade_path:
-                return True
-            cascade = cv2.CascadeClassifier(cascade_path)
-            if cascade.empty():
-                return True
-            faces = cascade.detectMultiScale(
-                cv_img,
-                scaleFactor=1.1,
-                minNeighbors=4,
-                minSize=(40, 40),
-            )
-            if len(faces) == 0:
-                return False
-        except Exception:
-            # Quality checking must never crash the asset pipeline.
-            return True
+            img=Image.open(io.BytesIO(data)).convert("RGB"); gray=cv2.cvtColor(npmod.array(img),cv2.COLOR_RGB2GRAY); c=cv2.CascadeClassifier(getattr(cv2.data,"haarcascades","")+"haarcascade_frontalface_default.xml"); return True if c.empty() else len(c.detectMultiScale(gray,1.1,4,minSize=(40,40)))>0
+        except Exception:return True
+    bot.passes_quality_gate=quality
 
-        return True
-
-    bot.passes_quality_gate = fixed_passes_quality_gate
-
-    # ------------------------------------------------------------------
-    # Single visual router for dashboard runs. It uses the current script
-    # schema: primary_entity, visual_intent and specific_search_prompt.
-    # Each successful route reports its real source immediately.
-    # ------------------------------------------------------------------
-    def fixed_fetch_scene_asset(seg, category, used_urls, used_image_hashes, video_title=""):
-        primary_entity = bot.safe_text(seg.get("primary_entity", "none")).strip() or "none"
-        visual_intent = bot.safe_text(seg.get("visual_intent", "conceptual")).strip() or "conceptual"
-        specific_prompt = bot.safe_text(
-            seg.get("specific_search_prompt", f"{video_title} {primary_entity}")
-        ).strip()
-        if not specific_prompt:
-            specific_prompt = f"{video_title} {primary_entity}".strip()
-
-        is_entertainment = any(k in category for k in ["entertainment", "movie", "cinema", "showbiz"])
-        intent_text = visual_intent.lower()
-        is_editorial = (
-            any(k in intent_text for k in ["editorial", "stadium", "news", "trophy", "event", "person"])
-            or is_entertainment
-            or any(k in category for k in ["sport", "cricket", "football", "news", "politics"])
-        )
-
-        if is_entertainment and primary_entity.lower() != "none":
-            specific_prompt = f"{specific_prompt} movie still high resolution"
-
-        def accept(img_bytes, source_name):
-            if not img_bytes:
-                return None
+    def scene(seg,category,used_urls,used_hashes,video_title=""):
+        primary=bot.safe_text(seg.get("primary_entity","none")).strip() or "none"; intent=bot.safe_text(seg.get("visual_intent","conceptual")); prompt=bot.safe_text(seg.get("specific_search_prompt",f"{video_title} {primary}")); editorial=any(k in intent.lower() for k in ["editorial","stadium","news","trophy","event","person"]) or any(k in category for k in ["sport","cricket","football","news","politics","entertainment","movie"])
+        def accept(data,name):
+            if not data:return None
             try:
-                image_hash = bot.get_image_hash(img_bytes)
-                if image_hash in used_image_hashes:
-                    return None
-                used_image_hashes.add(image_hash)
-                print(f"   [Visual Source] {source_name}")
-                return Image.open(io.BytesIO(img_bytes)).convert("RGB"), False, source_name
-            except Exception:
-                return None
+                h=bot.get_image_hash(data)
+                if h in used_hashes:return None
+                used_hashes.add(h); print(f"   [Visual Source] {name}"); return Image.open(io.BytesIO(data)).convert("RGB"),False,name
+            except Exception:return None
+        if editorial and primary.lower()!="none":
+            attempts=[(bot.fetch_wiki_person_image(primary,used_urls,prompt,video_title),"Wikipedia"),(bot.fetch_wikimedia_commons(prompt,used_urls,prompt,video_title),"Commons"),(bot.fetch_pexels(prompt,used_urls,prompt,video_title),"Pexels"),(bot.fetch_unsplash(prompt,used_urls,prompt,video_title),"Unsplash"),(bot.fetch_duckduckgo(prompt,used_urls,prompt,video_title),"DDG")]
+        else: attempts=[(bot.fetch_pexels(prompt,used_urls,prompt,video_title),"Pexels"),(bot.fetch_unsplash(prompt,used_urls,prompt,video_title),"Unsplash"),(bot.fetch_duckduckgo(prompt or video_title,used_urls,prompt,video_title),"DDG")]
+        for data,name in attempts:
+            result=accept(data,name)
+            if result:return result
+        ai=bot.fetch_hf_ai_image(f"{prompt}, high resolution cinematic photography, detailed")
+        if ai is not None: print("   [Visual Source] AI-generated"); return ai,True,"AI-generated"
+        fallback=Image.new("RGB",(1080,1920),bot.PALETTE["bg"]); d=ImageDraw.Draw(fallback)
+        for i in range(1920):d.line([(0,i),(1080,i)],fill=(15,20+int(i/1920*30),35+int(i/1920*50)))
+        print("   [Visual Source] gradient-fallback"); return fallback,True,"gradient-fallback"
+    bot.fetch_scene_asset=scene
 
-        # People/editorial searches get a person-specific Wikipedia attempt first.
-        if is_editorial and primary_entity.lower() != "none":
-            img_bytes = bot.fetch_wiki_person_image(
-                primary_entity, used_urls, specific_prompt, video_title
-            )
-            result = accept(img_bytes, "Wikipedia")
-            if result:
-                return result
-
-            img_bytes = bot.fetch_wikimedia_commons(
-                specific_prompt, used_urls, specific_prompt, video_title
-            )
-            result = accept(img_bytes, "Commons")
-            if result:
-                return result
-
-            fallback_prompt = (
-                f"{primary_entity} movie still"
-                if is_entertainment
-                else f"{primary_entity} high resolution"
-            )
-            img_bytes = bot.fetch_pexels(
-                fallback_prompt, used_urls, specific_prompt, video_title
-            )
-            result = accept(img_bytes, "Pexels")
-            if result:
-                return result
-
-            img_bytes = bot.fetch_unsplash(
-                fallback_prompt, used_urls, specific_prompt, video_title
-            )
-            result = accept(img_bytes, "Unsplash")
-            if result:
-                return result
-
-            img_bytes = bot.fetch_duckduckgo(
-                specific_prompt, used_urls, specific_prompt, video_title
-            )
-            result = accept(img_bytes, "DDG")
-            if result:
-                return result
-
-        # General searches use the same ordered public-image fallback chain.
-        img_bytes = bot.fetch_pexels(specific_prompt, used_urls, specific_prompt, video_title)
-        result = accept(img_bytes, "Pexels")
-        if result:
-            return result
-
-        img_bytes = bot.fetch_unsplash(specific_prompt, used_urls, specific_prompt, video_title)
-        result = accept(img_bytes, "Unsplash")
-        if result:
-            return result
-
-        img_bytes = bot.fetch_duckduckgo(video_title or specific_prompt, used_urls, specific_prompt, video_title)
-        result = accept(img_bytes, "DDG")
-        if result:
-            return result
-
-        ai_prompt = f"{specific_prompt}, high resolution cinematic photography, detailed"
-        bg_img = bot.fetch_hf_ai_image(ai_prompt)
-        if bg_img is not None:
-            print("   [Visual Source] AI-generated")
-            return bg_img, True, "AI-generated"
-
-        # Last-resort deterministic gradient. This is deliberately labelled
-        # so a missing-image complaint can be diagnosed from the console.
-        bg_img = Image.new("RGB", (1080, 1920), color=bot.PALETTE["bg"])
-        draw = ImageDraw.Draw(bg_img)
-        for i in range(1920):
-            draw.line(
-                [(0, i), (1080, i)],
-                fill=(15, 20 + int((i / 1920) * 30), 35 + int((i / 1920) * 50)),
-            )
-        print("   [Visual Source] gradient-fallback")
-        return bg_img, True, "gradient-fallback"
-
-    bot.fetch_scene_asset = fixed_fetch_scene_asset
+    bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
+    bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
+    bot.render_top5_card=lambda bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None:render_top5_card(bot,bg_img,item_number,total_items,summary_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
+    old_write=bot.write_script
+    def write(*a,**kw):
+        result=old_write(*a,**kw); bot._active_script_data=result or {}; return result
+    bot.write_script=write
+    old_run=bot.run_robot
+    def run(web_config=None):
+        import sqlite3
+        old_connect=sqlite3.connect
+        def connect(*a,**kw):
+            c=old_connect(*a,**kw); bot._active_scoring_conn=c; return c
+        sqlite3.connect=connect
+        try:return old_run(web_config=web_config)
+        finally:sqlite3.connect=old_connect; bot._active_scoring_conn=None
+    bot.run_robot=run
     return bot
