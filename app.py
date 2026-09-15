@@ -111,9 +111,10 @@ elif pipeline_choice == "Cricket Focus Pipeline":
     format_map = {"Regular Deep-Dive": "regular", "Top 5 Countdown": "top5"}
     language_options = {val["label"]: key for key, val in ultimate_bot.LANGUAGES.items()}
     lang_friendly = st.selectbox("Language:", list(language_options.keys()))
-    web_config = {"format_mode": format_map[format_choice], "category": "sports_stories_of_day", "language": language_options[lang_friendly]}
+    lang_cfg_key = language_options[lang_friendly]
+    web_config = {"format_mode": format_map[format_choice], "category": "sports_stories_of_day", "language": lang_cfg_key}
     if "Asian Giants" in cricket_sub:
-        web_config["custom_q"] = "India Cricket OR Pakistan Cricket OR Sri Lanka Cricket OR Bangladesh Cricket"
+        web_config["custom_q"] = "India Cricket OR Pakistan Cricket OR Sri Lanka Cricket OR Bangladesh Cricket OR BCCI OR PCB OR SLC OR BCB OR ACB"
         web_config["custom_rss"] = "https://news.google.com/rss/search?q=India+Cricket+OR+Pakistan+Cricket+OR+BCCI&hl=en-IN&gl=IN&ceid=IN:en"
     elif "Global & Test" in cricket_sub:
         web_config["custom_q"] = "Test Cricket OR ICC OR Ashes OR Border Gavaskar Trophy OR Australia Cricket"
@@ -136,6 +137,12 @@ if st.button("🚀 Start The Factory", type="primary"):
     video_path = os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
     run_started_at = time.time()
 
+    print("\n[Dashboard] START FACTORY BUTTON RECEIVED", flush=True)
+    print(f"[Dashboard] web_config={web_config}", flush=True)
+    print(f"[Dashboard] DB_PATH={ultimate_bot.DB_PATH}", flush=True)
+    print(f"[Dashboard] ASSETS_DIR={ultimate_bot.ASSETS_DIR}", flush=True)
+    print("[Dashboard] Calling run_robot_with_exact_identity()...", flush=True)
+
     try:
         if os.path.exists(video_path):
             os.remove(video_path)
@@ -145,7 +152,9 @@ if st.button("🚀 Start The Factory", type="primary"):
     st.info("⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress.")
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
+            print("[Dashboard] Entering factory execution spinner.", flush=True)
             run_robot_with_exact_identity(ultimate_bot, web_config=web_config)
+            print("[Dashboard] run_robot_with_exact_identity() returned.", flush=True)
         fresh_video = os.path.exists(video_path) and os.path.getmtime(video_path) >= run_started_at
         if fresh_video:
             st.success(f"✅ Factory run completed and a fresh Short was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result.")
