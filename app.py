@@ -2,10 +2,11 @@ import os
 import sqlite3
 import streamlit as st
 import ultimate_bot
-from factory_runtime import install_safe_exception_hook, normalise_publish_mode
+from factory_runtime import install_safe_exception_hook, normalise_publish_mode, patch_dashboard_runtime
 
 # Streamlit/Cloud must never wait for console input after an uncaught error.
 install_safe_exception_hook()
+patch_dashboard_runtime(ultimate_bot)
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 st.title("🎬 Viral Shorts Factory")
