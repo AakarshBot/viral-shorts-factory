@@ -3,6 +3,7 @@ import sqlite3
 import streamlit as st
 import ultimate_bot
 from db_architecture import migrate_vault
+from db_runtime import run_robot_with_exact_identity
 from factory_runtime import install_safe_exception_hook, normalise_publish_mode, patch_dashboard_runtime
 
 install_safe_exception_hook()
@@ -83,7 +84,7 @@ if st.button("🚀 Start The Factory", type="primary"):
     st.info("⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress.")
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
-            ultimate_bot.run_robot(web_config=web_config)
+            run_robot_with_exact_identity(ultimate_bot, web_config=web_config)
         video_path = os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
         if os.path.exists(video_path):
             st.success(f"✅ Factory run completed and a video was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result.")
