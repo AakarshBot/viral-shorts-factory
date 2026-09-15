@@ -1,0 +1,5 @@
+[server]
+# The factory uses Transformers/sentence-transformers, whose optional vision
+# modules can trigger noisy Streamlit watcher imports when torchvision is absent.
+# The app does not need hot-reload file watching in production.
+fileWatcherType = "none"
