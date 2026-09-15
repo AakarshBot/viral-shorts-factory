@@ -5,6 +5,7 @@ import ultimate_bot
 from db_architecture import migrate_vault
 from db_runtime import run_robot_with_exact_identity
 from factory_runtime import install_safe_exception_hook, normalise_publish_mode, patch_dashboard_runtime
+from autopilot_runtime import select_auto_pilot
 
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
@@ -40,12 +41,12 @@ if pipeline_choice == "Manual Mode":
     web_config = {"format_mode": format_map[format_choice], "category": selected_cat_key, "language": language_options[lang_friendly]}
 
 elif pipeline_choice == "Auto-Pilot Mode (AI Selection)":
-    st.info("🤖 Auto-Pilot will select the format, category and language from your historical performance data.")
+    st.info("🤖 Auto-Pilot will select the best-supported format, category and language from relevant historical performance segments, while still testing under-used combinations.")
     try:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
             migrate_vault(conn)
-            format_mode, selected_cat_key, lang_cfg, combo_key = ultimate_bot.auto_pilot_selection(conn)
+            format_mode, selected_cat_key, lang_cfg, combo_key = select_auto_pilot(ultimate_bot, conn)
         finally:
             conn.close()
         web_config = {"format_mode": format_mode, "category": selected_cat_key, "language": lang_cfg["key"], "combo_key": combo_key}
