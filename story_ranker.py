@@ -1,7 +1,6 @@
 """Shorts story ranking based on live story signals and historical performance."""
 import math
 import re
-import sqlite3
 
 
 def _clean(value):
@@ -88,16 +87,14 @@ def _load_history(conn):
     if conn is None:
         return []
     try:
-        conn.row_factory = sqlite3.Row
-        return [
-            dict(row)
-            for row in conn.execute(
-                """SELECT status, video_id, avg_view_percentage, genre,
-                          format_used, language_used, combo_key, topic
-                   FROM vault
-                   WHERE avg_view_percentage IS NOT NULL"""
-            ).fetchall()
-        ]
+        cursor = conn.execute(
+            """SELECT status, video_id, avg_view_percentage, genre,
+                      format_used, language_used, combo_key, topic
+               FROM vault
+               WHERE avg_view_percentage IS NOT NULL"""
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
     except Exception as exc:
         print(f"   [Story Ranker] Historical data unavailable: {exc}")
         return []
@@ -113,8 +110,8 @@ def rank_story_candidates(
     """Return stories ordered for the selected Shorts segment.
 
     Live signals remain the primary driver. Historical retention is deliberately
-    capped so an old successful topic pattern cannot overpower a genuinely
-    stronger current story.
+    capped so an old successful topic pattern cannot overpower a stronger
+    current story.
     """
     if not stories:
         return stories
