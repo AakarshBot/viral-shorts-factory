@@ -80,16 +80,19 @@ PALETTE = {
     "shadow": (0, 0, 0, 180)
 }
 
-DESKTOP_PATH = os.path.join(os.path.expanduser("~"), "Desktop")
-ASSETS_DIR = os.path.join(DESKTOP_PATH, "output")
-DB_PATH = os.path.join(os.path.dirname(__file__), "vault.db")
-CLIENT_SECRETS_FILE = os.path.join(DESKTOP_PATH, "MoneyPrinterTurbo", "client_secret.json")
-TOKEN_FILE = os.path.join(os.path.dirname(__file__), "token.json")
+# ==========================================
+# STEP 1 UPDATE: DYNAMIC RELATIVE PATHS
+# ==========================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(BASE_DIR, "output")
+DB_PATH = os.path.join(BASE_DIR, "vault.db")
+CLIENT_SECRETS_FILE = os.path.join(BASE_DIR, "client_secret.json")
+TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
 
-BRAND_ASSETS_DIR = os.path.join(DESKTOP_PATH, "MoneyPrinterTurbo", "brand_assets")
+BRAND_ASSETS_DIR = os.path.join(BASE_DIR, "brand_assets")
 BGM_DIR = os.path.join(BRAND_ASSETS_DIR, "bgm")
 SFX_DIR = os.path.join(BRAND_ASSETS_DIR, "sfx")
-ASSET_CACHE_DIR = os.path.join(DESKTOP_PATH, "MoneyPrinterTurbo", "asset_cache")
+ASSET_CACHE_DIR = os.path.join(BASE_DIR, "asset_cache")
 
 os.makedirs(BGM_DIR, exist_ok=True)
 os.makedirs(SFX_DIR, exist_ok=True)
@@ -328,7 +331,6 @@ def parse_groq_json_response(content_str):
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Some providers occasionally prepend/append prose around the JSON.
         match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
         if not match:
             raise ValueError(
@@ -357,10 +359,9 @@ def parse_groq_json_response(content_str):
                 if not isinstance(scene, dict):
                     continue
                 scene["voiceover"] = safe_text(scene.get("voiceover"), "")
-                scene["primary_subject"] = safe_text(scene.get("primary_subject"), "none")
-                scene["background_context"] = safe_text(
-                    scene.get("background_context"), "abstract background"
-                )
+                scene["primary_entity"] = safe_text(scene.get("primary_entity"), "none")
+                scene["visual_intent"] = safe_text(scene.get("visual_intent"), "conceptual")
+                scene["specific_search_prompt"] = safe_text(scene.get("specific_search_prompt"), "")
                 scene["sport_or_topic_category"] = safe_text(
                     scene.get("sport_or_topic_category"), ""
                 )
@@ -483,7 +484,6 @@ def calculate_smart_score(records):
     if len(valid) < 3:
         return None
 
-    # Trim one low and one high observation when there is enough history.
     if len(valid) >= 5:
         valid = sorted(valid, key=lambda item: item[0])[1:-1]
 
@@ -923,7 +923,6 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         "matching the input order one-to-one."
     )
     
-    # 1. Try Groq First
     for attempt in range(1, 4):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
@@ -949,7 +948,6 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         except Exception as e:
             time.sleep(2)
 
-    # 2. Fallback to Gemini if Groq Editorial Gate is exhausted
     if GEMINI_API_KEY:
         print("   [!] Groq editorial gate exhausted. Falling back to Gemini API...")
         for g_attempt in range(1, 3):
@@ -1006,13 +1004,12 @@ def get_insights_for_script(conn):
         best_titles = [r[0] for r in c.fetchall() if r[0]]
         title_hint = f"Highest CTR titles previously: {best_titles}. Mimic this click-psychology." if best_titles else ""
         
-        # Pull past editorial feedback logs
-        log_path = os.path.join(os.path.dirname(__file__), "editorial_feedback_log.txt")
+        log_path = os.path.join(BASE_DIR, "editorial_feedback_log.txt")
         feedback_history = ""
         if os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-                feedback_history = "MANDATORY EDITORIAL CORRECTIONS TO FOLLOW FROM PAST CRITIQUES:\n" + "".join(lines[-10:]) # Keeps last 10 rules
+                feedback_history = "MANDATORY EDITORIAL CORRECTIONS TO FOLLOW FROM PAST CRITIQUES:\n" + "".join(lines[-10:])
 
         return f"{title_hint}\n{feedback_history}"
     except Exception as e:
@@ -1053,7 +1050,6 @@ def validate_script(script_data, source_text, format_mode):
     return True, "Passed"
 
 def self_critique_pass(script_data, format_mode):
-    # Maintained for compatibility if called later
     return 8, "Passed"
 
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
@@ -1219,14 +1215,13 @@ async def generate_voiceover_and_timestamps(script_data, language_cfg):
 def passes_quality_gate(img_data, search_prompt="", video_title=""):
     if cv2 is not None:
         try:
-            cv_img = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
-            if cv_img is None: return False
+            pil_img = Image.open(io.BytesIO(img_data)).convert("RGB")
+            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
             h, w = cv_img.shape[:2]
             if min(h, w) < 300: return False
             ratio = w / h
             if ratio > 2.5 or ratio < 0.4: return False
-            # Lowered Laplacian requirement significantly to allow action/motion blur shots
-            if cv2.Laplacian(cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < 40.0: return False
+            if cv2.Laplacian(cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < 25.0: return False
         except Exception:
             pass
 
@@ -1238,7 +1233,7 @@ def passes_quality_gate(img_data, search_prompt="", video_title=""):
                 f"You are a fast QA reviewer.\n"
                 f"Topic: {video_title} | Search Term: {search_prompt}\n"
                 f"Reject ONLY IF the image is a heavy internet meme with text overlays, a massive watermark across the center, or completely garbage clip-art.\n"
-                f"If it is a real photo (even if slightly imperfect), return 'TRUE'.\n"
+                f"If it is a real photo or actual movie still (even if slightly imperfect), return 'TRUE'.\n"
                 f"Return ONLY 'TRUE' or 'FALSE'."
             )
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
@@ -1251,7 +1246,7 @@ def passes_quality_gate(img_data, search_prompt="", video_title=""):
                 txt = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip().lower()
                 if "false" in txt: return False
         except Exception:
-            pass # Benefit of the doubt if Gemini times out
+            pass 
     return True
 
 def get_cached_asset(query):
@@ -1344,6 +1339,12 @@ def fetch_unsplash(query, used_urls, search_prompt, video_title):
 
 def fetch_duckduckgo(query, used_urls, search_prompt, video_title):
     if DDGS is None: return None
+    spoofed_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/"
+    }
     try:
         with DDGS() as ddgs:
             results = ddgs.images(query, max_results=10)
@@ -1352,7 +1353,7 @@ def fetch_duckduckgo(query, used_urls, search_prompt, video_title):
                 if not img_url or img_url in used_urls:
                     continue
                 try:
-                    img_resp = requests.get(img_url, timeout=5)
+                    img_resp = requests.get(img_url, headers=spoofed_headers, timeout=6)
                     if img_resp.status_code == 200 and passes_quality_gate(img_resp.content, search_prompt, video_title):
                         used_urls.add(img_url)
                         return img_resp.content
@@ -1389,29 +1390,25 @@ def fetch_scene_asset(seg, category, used_urls, used_image_hashes, video_title="
     specific_prompt = safe_text(seg.get('specific_search_prompt', f"{video_title} {primary_entity}")).strip()
 
     img_bytes, source_type = None, "bg"
-    is_editorial = any(k in visual_intent.lower() for k in ["editorial", "stadium", "news", "trophy", "event", "person"]) or any(k in category for k in ["sport", "cricket", "football", "news", "politics", "entertainment"])
+    is_entertainment = any(k in category for k in ["entertainment", "movie", "cinema", "showbiz"])
+    is_editorial = any(k in visual_intent.lower() for k in ["editorial", "stadium", "news", "trophy", "event", "person"]) or is_entertainment or any(k in category for k in ["sport", "cricket", "football", "news", "politics"])
+
+    if is_entertainment and primary_entity.lower() != 'none':
+        specific_prompt = f"{specific_prompt} movie still high resolution"
 
     if is_editorial and primary_entity.lower() != 'none':
-        # 1. Try highly specific DDG (best for action shots/poses)
         img_bytes = fetch_duckduckgo(specific_prompt, used_urls, specific_prompt, video_title)
-        
-        # 2. Try Wikimedia Commons
         if not img_bytes:
             img_bytes = fetch_wikimedia_commons(specific_prompt, used_urls, specific_prompt, video_title)
-            
-        # 3. Fallback DDG just on the entity name
         if not img_bytes:
-            img_bytes = fetch_duckduckgo(f"{primary_entity} high resolution", used_urls, specific_prompt, video_title)
-            
+            fallback_prompt = f"{primary_entity} movie still" if is_entertainment else f"{primary_entity} high resolution"
+            img_bytes = fetch_duckduckgo(fallback_prompt, used_urls, specific_prompt, video_title)
         if img_bytes: source_type = "editorial"
 
-    # If still None or not editorial, try stock
     if not img_bytes:
         img_bytes = fetch_pexels(specific_prompt, used_urls, specific_prompt, video_title)
     if not img_bytes:
         img_bytes = fetch_unsplash(specific_prompt, used_urls, specific_prompt, video_title)
-    
-    # Ultimate DDG Fallback on the main topic
     if not img_bytes:
         img_bytes = fetch_duckduckgo(video_title, used_urls, video_title, video_title)
 
@@ -1421,11 +1418,9 @@ def fetch_scene_asset(seg, category, used_urls, used_image_hashes, video_title="
             used_image_hashes.add(img_hash)
             return Image.open(io.BytesIO(img_bytes)).convert("RGB"), False, source_type
 
-    # AI Generation Fallback
     ai_prompt = f"{specific_prompt}, high resolution cinematic photography, detailed"
     bg_img = fetch_hf_ai_image(ai_prompt)
     if not bg_img: 
-        # Create a cinematic gradient instead of flat color
         bg_img = Image.new('RGB', (1080, 1920), color=PALETTE["bg"])
         draw = ImageDraw.Draw(bg_img)
         for i in range(1920):
@@ -1493,344 +1488,6 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
 
     script_data["ai_image_ratio"] = round(ai_count / max(1, trackable_scenes), 2)
     print(f"   [+] Visual routing complete. AI Usage Ratio: {script_data['ai_image_ratio']}")
-    return packages
-
-async def generate_voiceover_and_timestamps(script_data, language_cfg):
-    print(f"\n🎙️ Generating Audio & Mapping Karaoke Timestamps...")
-    audio_paths, word_timings = [], []
-    profile = PERSONA_PROFILES[next((k for k in PERSONA_PROFILES.keys() if k in script_data.get("persona_used", "LISTICLE HOST").upper()), "LISTICLE HOST")]
-    script_data["voice_gender"] = profile["gender"]
-    
-    scenes = script_data.get("script", [])
-    for idx, seg in enumerate(tqdm(scenes, desc="Generating Audio", unit="scene")):
-        path = os.path.join(ASSETS_DIR, f"voiceover_{idx+1}.mp3")
-        text = re.sub(r'[*_#`\[\]()~^"“”‘’]', '', seg.get("voiceover", "")).strip() or f"Point number {idx+1}."
-        success, scene_timings = False, []
-        for attempt in range(1, 4):
-            try:
-                communicate = edge_tts.Communicate(text, language_cfg["voices"][profile["gender"]], rate=profile["rate"], pitch=profile["pitch"])
-                with open(path, "wb") as f:
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio": f.write(chunk["data"])
-                        elif chunk["type"] == "WordBoundary": scene_timings.append({"word": chunk["text"], "start": chunk["offset"] / 10000000.0, "end": (chunk["offset"] + chunk["duration"]) / 10000000.0})
-                if os.path.exists(path) and os.path.getsize(path) > 500:
-                    audio_paths.append(path); word_timings.append(scene_timings); success = True; break
-            except Exception:
-                pass
-        if not success: return [], []
-    return audio_paths, word_timings
-
-def passes_quality_gate(img_data, primary_subject="none", background_context="", video_title=""):
-    if cv2 is not None:
-        try:
-            cv_img = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
-            if cv_img is None: return False
-            h, w = cv_img.shape[:2]
-            if min(h, w) < 400: return False
-            ratio = w / h
-            if ratio > 2.5 or ratio < 0.4: return False
-            if cv2.Laplacian(cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < 60.0: return False
-            if primary_subject.lower() != 'none' and len(primary_subject.split()) <= 3:
-                cascade_path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
-                if os.path.exists(cascade_path):
-                    if len(cv2.CascadeClassifier(cascade_path).detectMultiScale(cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY), 1.1, 4)) == 0:
-                        return False
-        except Exception:
-            pass
-
-    if GEMINI_API_KEY:
-        try:
-            import base64
-            b64_img = base64.b64encode(img_data).decode('utf-8')
-            sys_prompt = (
-                f"You are a strict QA reviewer for YouTube Shorts.\n"
-                f"Video Topic: {video_title}\n"
-                f"Scene Context: {background_context}\n"
-                f"Primary Subject Requested: {primary_subject}\n\n"
-                f"RULES:\n"
-                f"1. If Primary Subject is a specific person/celebrity, does the image clearly feature them?\n"
-                f"2. If no subject, does it match the Scene Context strictly?\n"
-                f"3. Reject heavy watermarks, memes, or totally unrelated clip-art.\n"
-                f"Return ONLY 'TRUE' if perfect, or 'FALSE' if it fails any rule."
-            )
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": sys_prompt},
-                        {"inlineData": {"mimeType": "image/jpeg", "data": b64_img}}
-                    ]
-                }],
-                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 10}
-            }
-            resp = requests.post(url, json=payload, timeout=8)
-            if resp.status_code == 200:
-                txt = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip().lower()
-                if "false" in txt: return False
-        except Exception:
-            pass
-    return True
-
-def get_cached_asset(query):
-    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', query.lower().strip()) + ".jpg"
-    cache_path = os.path.join(ASSET_CACHE_DIR, safe_name)
-    if os.path.exists(cache_path): return Image.open(cache_path).convert("RGB"), cache_path
-    return None, cache_path
-
-def save_to_cache(img_bytes, cache_path):
-    try:
-        with open(cache_path, "wb") as f: f.write(img_bytes)
-    except:
-        pass
-
-def fetch_wiki_person_image(query, used_urls, primary_subject, background_context, video_title):
-    search_url = "https://en.wikipedia.org/w/api.php?action=opensearch&search=" + urllib.parse.quote(query) + "&limit=1&namespace=0&format=json"
-    try:
-        resp = requests.get(search_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-        if resp.status_code == 200 and resp.json()[1]:
-            img_url = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&piprop=original&titles=" + urllib.parse.quote(resp.json()[1][0]) + "&format=json"
-            img_resp = requests.get(img_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-            if img_resp.status_code == 200:
-                for p_id, p_info in img_resp.json().get('query', {}).get('pages', {}).items():
-                    if 'original' in p_info:
-                        source_url = p_info['original']['source']
-                        if source_url not in used_urls:
-                            img_data = requests.get(source_url, timeout=7)
-                            if img_data.status_code == 200 and passes_quality_gate(img_data.content, primary_subject, background_context, video_title):
-                                used_urls.add(source_url)
-                                return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_wikimedia_commons(query, used_urls, primary_subject, background_context, video_title):
-    search_url = "https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=" + urllib.parse.quote(query) + "&srnamespace=6&format=json"
-    try:
-        resp = requests.get(search_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-        if resp.status_code == 200 and resp.json().get('query', {}).get('search', []):
-            for res in resp.json()['query']['search'][:3]:
-                img_url = "https://commons.wikimedia.org/w/api.php?action=query&titles=" + urllib.parse.quote(res['title']) + "&prop=imageinfo&iiprop=url&format=json"
-                img_resp = requests.get(img_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-                if img_resp.status_code == 200:
-                    for p_id, p_info in img_resp.json().get('query', {}).get('pages', {}).items():
-                        if 'imageinfo' in p_info:
-                            actual_url = p_info['imageinfo'][0]['url']
-                            if actual_url not in used_urls:
-                                img_data = requests.get(actual_url, timeout=7)
-                                if img_data.status_code == 200 and passes_quality_gate(img_data.content, primary_subject, background_context, video_title):
-                                    used_urls.add(actual_url)
-                                    return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_pexels(query, used_urls, primary_subject, background_context, video_title):
-    if not PEXELS_API_KEY: return None
-    try:
-        resp = requests.get("https://api.pexels.com/v1/search", headers={"Authorization": PEXELS_API_KEY}, params={"query": query, "orientation": "portrait", "per_page": 3}, timeout=5)
-        if resp.status_code == 200 and resp.json().get('photos'):
-            for photo in resp.json()['photos']:
-                if photo['src']['large2x'] not in used_urls:
-                    img_data = requests.get(photo['src']['large2x'], timeout=7)
-                    if img_data.status_code == 200 and passes_quality_gate(img_data.content, primary_subject, background_context, video_title):
-                        used_urls.add(photo['src']['large2x'])
-                        return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_unsplash(query, used_urls, primary_subject, background_context, video_title):
-    if not UNSPLASH_ACCESS_KEY:
-        return None
-    try:
-        resp = requests.get(
-            "https://api.unsplash.com/search/photos",
-            params={
-                "query": query,
-                "orientation": "portrait",
-                "per_page": 3,
-                "client_id": UNSPLASH_ACCESS_KEY,
-            },
-            timeout=8,
-        )
-        resp.raise_for_status()
-        for result in resp.json().get("results", []):
-            url = result.get("urls", {}).get("regular")
-            if not url or url in used_urls:
-                continue
-            try:
-                img_resp = requests.get(url, timeout=8)
-                if img_resp.status_code == 200 and passes_quality_gate(
-                    img_resp.content, primary_subject, background_context, video_title
-                ):
-                    used_urls.add(url)
-                    return img_resp.content
-            except requests.RequestException:
-                continue
-    except (requests.RequestException, ValueError, KeyError):
-        return None
-    return None
-
-def fetch_duckduckgo(query, used_urls, primary_subject, background_context, video_title):
-    if DDGS is None:
-        return None
-    try:
-        search_query = re.sub(r"[^\w\s]", " ", query).strip() + " cinematic portrait"
-        with DDGS() as ddgs:
-            results = ddgs.images(search_query, max_results=5)
-            for result in results:
-                img_url = result.get("image") or result.get("url")
-                if not img_url or img_url in used_urls:
-                    continue
-                try:
-                    img_resp = requests.get(img_url, timeout=8)
-                    if img_resp.status_code == 200 and passes_quality_gate(
-                        img_resp.content, primary_subject, background_context, video_title
-                    ):
-                        used_urls.add(img_url)
-                        return img_resp.content
-                except requests.RequestException:
-                    continue
-    except Exception:
-        return None
-    return None
-
-def fetch_hf_ai_image(prompt):
-    if not HF_TOKEN:
-        return None
-    try:
-        response = requests.post(
-            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
-            headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            json={"inputs": prompt},
-            timeout=30,
-        )
-        if response.status_code == 200 and response.content:
-            try:
-                return Image.open(io.BytesIO(response.content)).convert("RGB")
-            except (UnidentifiedImageError, OSError):
-                return None
-    except requests.RequestException:
-        return None
-    return None
-
-def get_image_hash(img_bytes):
-    return hashlib.md5(img_bytes).hexdigest()
-
-def fetch_scene_asset(seg, category, used_urls, used_image_hashes, video_title=""):
-    primary_subject = seg.get('primary_subject', 'none').strip()
-    background_context = seg.get('background_context', 'abstract background').strip()
-    clean_subject = re.sub(r'[^\w\s]', '', primary_subject).strip()
-    clean_bg = re.sub(r'[^\w\s]', '', background_context).strip()
-    clean_title = re.sub(r'[^\w\s]', '', video_title).strip()
-
-    context_string = clean_bg if clean_subject.lower() != 'none' else f"{clean_title} {clean_bg}"
-
-    img_bytes, source_type = None, "bg"
-    is_entity_heavy = any(k in category for k in ["sport", "cricket", "football", "news", "politics", "finance", "tech", "entertainment", "review", "movie"])
-
-    is_person = (clean_subject.lower() != 'none' and len(clean_subject.split()) <= 3)
-
-    if is_person and is_entity_heavy:
-        img_bytes = fetch_wiki_person_image(clean_subject, used_urls, primary_subject, background_context, video_title)
-        if not img_bytes: 
-            img_bytes = fetch_wikimedia_commons(f"{clean_subject} portrait", used_urls, primary_subject, background_context, video_title)
-        if img_bytes: 
-            source_type = "person"
-
-    if not img_bytes or get_image_hash(img_bytes) in used_image_hashes:
-        query = f"{clean_subject} portrait professional" if is_person else f"{context_string} high resolution"
-        img_bytes = fetch_pexels(query, used_urls, primary_subject, background_context, video_title)
-        
-    if not img_bytes or get_image_hash(img_bytes) in used_image_hashes:
-        query = f"{clean_subject} high quality portrait" if is_person else f"{context_string} real photo"
-        img_bytes = fetch_unsplash(query, used_urls, primary_subject, background_context, video_title)
-
-    if not img_bytes or get_image_hash(img_bytes) in used_image_hashes:
-        specific_query = f"{clean_subject} official portrait photo" if is_person else f"{context_string} news photography high quality"
-        img_bytes = fetch_duckduckgo(specific_query, used_urls, primary_subject, background_context, video_title)
-
-    if img_bytes:
-        img_hash = get_image_hash(img_bytes)
-        if img_hash not in used_image_hashes:
-            used_image_hashes.add(img_hash)
-            bg_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-            return bg_img, False, source_type
-
-    ai_prompt = f"Professional high-resolution photo of {clean_subject}, {clean_bg}, sharp facial features, studio lighting" if is_person else f"{context_string} cinematic high quality realistic"
-    bg_img = fetch_hf_ai_image(ai_prompt)
-    if not bg_img: 
-        bg_img = Image.new('RGB', (1080, 1920), color=PALETTE["bg"])
-    
-    return bg_img, True, source_type
-
-async def process_visuals_async(script_data, language_cfg, format_mode="regular"):
-    print(f"\n🎨 Asynchronously Sourcing Unique Visual Packages (Diversity Matrix Active)...")
-    width, height = 1080, 1920
-    target_size = (width, height)
-    script_scenes = script_data.get("script", [])
-    total_scenes = len(script_scenes)
-    font_choice = language_cfg.get("font")
-    trackable_scenes = total_scenes if format_mode in ["regular", "trending", "tech_reviews"] else max(1, total_scenes - 2)
-
-    packages = [None] * total_scenes
-    used_urls = set()
-    used_image_hashes = set()
-    ai_count = 0
-    last_source_type = None
-
-    loop = asyncio.get_running_loop()
-
-    async def fetch_task(idx, seg):
-        nonlocal ai_count, last_source_type
-        img_path = os.path.join(ASSETS_DIR, f"scene_{idx+1}_img.jpg")
-        
-        if format_mode == "top5" and (idx == 0 or idx == total_scenes - 1):
-            slide_img = create_branded_slide(script_data.get('title', 'Top 5 Countdown') if idx == 0 else seg.get("voiceover", "Surprised?"), "TODAY'S SPECIAL" if idx == 0 else "SUBSCRIBE!", is_outro=(idx != 0), font_choice=font_choice)
-            slide_img.convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": "", "ai_generated": False, "source_type": "bg"}]
-            
-        if format_mode in ["regular", "trending", "tech_reviews"] and idx == total_scenes - 1:
-            create_branded_slide(seg.get("voiceover", "What do you think?"), "SUBSCRIBE FOR MORE!", is_outro=True, font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": "", "ai_generated": False, "source_type": "bg"}]
-
-        category = seg.get('sport_or_topic_category', '').lower()
-        video_title = script_data.get('title', '')
-        
-        bg_img, used_ai, source_type = await loop.run_in_executor(None, fetch_scene_asset, seg, category, used_urls, used_image_hashes, video_title)
-        
-        if source_type == last_source_type and source_type == "person":
-            seg["primary_subject"] = "none"
-            bg_img, used_ai, source_type = await loop.run_in_executor(None, fetch_scene_asset, seg, category, used_urls, used_image_hashes, video_title)
-        
-        last_source_type = source_type
-        if used_ai: ai_count += 1
-
-        bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
-
-        if format_mode == "top5":
-            clean_vo = re.sub(r'(number\s*\d+|story\s*#?\d+|#\d+)', '', seg.get("voiceover", ""), flags=re.IGNORECASE).strip()
-            render_top5_card(bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
-        elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:
-            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
-        else:
-            overlay = Image.new("RGBA", target_size, (0,0,0,0))
-            draw_bars = ImageDraw.Draw(overlay)
-            draw_bars.rectangle([0, 0, width, 40], fill=PALETTE["accent_primary"] + (200,))
-            draw_bars.rectangle([0, height - 40, width, height], fill=PALETTE["accent_secondary"] + (200,))
-            Image.alpha_composite(bg_img, overlay).convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": seg.get("voiceover", ""), "ai_generated": used_ai, "source_type": source_type}]
-
-    tasks = [fetch_task(idx, seg) for idx, seg in enumerate(script_scenes)]
-    results = await asyncio.gather(*tasks)
-
-    for idx, pkg in results:
-        packages[idx] = pkg
-
-    script_data["ai_image_ratio"] = round(ai_count / max(1, trackable_scenes), 2)
-    print(f"   [+] Visual diversity matrix applied. AI Usage Ratio: {script_data['ai_image_ratio']}")
     return packages
 
 def get_bold_font(size, custom_font_name=None):
@@ -2175,7 +1832,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                         continue
                     wt["word"] = w_text
                     
-                    # Tighter character limit per chunk so words render massively
                     if current_len + len(w_text) > 18 and current_chunk:
                         chunks.append(current_chunk)
                         current_chunk, current_len = [], 0
@@ -2184,7 +1840,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 if current_chunk:
                     chunks.append(current_chunk)
 
-                # Move text closer to the center of the screen
                 safe_y_pos = int(height * 0.60) if scene_source_type == "person" else int(height * 0.50)
 
                 for chunk_idx, chunk in enumerate(chunks):
@@ -2443,12 +2098,16 @@ def font_preflight_check(lang_cfg):
     except Exception as e:
         pass
 
-def run_robot():
+# ==========================================
+# STEP 1 UPDATE: STREAMLIT DASHBOARD SUPPORT
+# ==========================================
+def run_robot(web_config=None):
     print("==================================================")
-    print("    PRO VIRAL STUDIO AUTOMATION FACTORY (v2)      ")
+    print("   PRO VIRAL STUDIO AUTOMATION FACTORY (v2)       ")
     print("==================================================")
 
-    is_headless = "--headless" in sys.argv
+    # If web_config is passed, it forces headless mode automatically
+    is_headless = "--headless" in sys.argv or web_config is not None
     conn = sqlite3.connect(DB_PATH)
 
     try:
@@ -2465,9 +2124,7 @@ def run_robot():
         )
         conn.commit()
 
-        sync_file = os.path.join(
-            DESKTOP_PATH, "MoneyPrinterTurbo", "last_sync.txt"
-        )
+        sync_file = os.path.join(BASE_DIR, "last_sync.txt")
         should_sync = True
         if os.path.exists(sync_file):
             try:
@@ -2482,7 +2139,6 @@ def run_robot():
         if should_sync:
             run_analytics_sweep(conn)
             try:
-                os.makedirs(os.path.dirname(sync_file), exist_ok=True)
                 with open(sync_file, "w", encoding="utf-8") as f:
                     f.write(datetime.now().isoformat())
             except OSError:
@@ -2493,8 +2149,18 @@ def run_robot():
 
         trend_keyword = custom_q = custom_rss = None
 
-        if is_headless:
-            print("\n👻 GHOST MODE ACTIVATED: Running fully headless.")
+        if web_config:
+            print("\n🌐 WEB DASHBOARD MODE ACTIVATED: Pulling settings from Streamlit.")
+            format_mode = web_config.get("format_mode", "regular")
+            cat_choice = web_config.get("category", "national_global_affairs")
+            lang_key = web_config.get("language", "english")
+            lang_cfg = LANGUAGES.get(lang_key, LANGUAGES["english"])
+            combo_key = f"{format_mode}|{cat_choice}|{lang_key}"
+            trend_keyword = web_config.get("trend_keyword")
+            custom_q = web_config.get("custom_q")
+            custom_rss = web_config.get("custom_rss")
+        elif is_headless:
+            print("\n👻 GHOST MODE ACTIVATED: Running fully headless Auto-Pilot.")
             format_mode, cat_choice, lang_cfg, combo_key = auto_pilot_selection(conn)
         else:
             print(
@@ -2590,7 +2256,8 @@ def run_robot():
             rec_idx = 1
         rec_idx = max(1, min(rec_idx, len(titles)))
 
-        if is_headless:
+        # Bypass manual title selection if running from Dashboard or Headless
+        if web_config or is_headless:
             script_data["title"] = titles[rec_idx - 1]
         else:
             print("\n🛑 A/B TITLE TESTING GATE")
@@ -2657,7 +2324,8 @@ def run_robot():
         except Exception as exc:
             print(f"   [!] Could not validate video duration: {exc}")
 
-        if not is_headless:
+        # Bypass QC checking if running from Dashboard or Headless
+        if not is_headless and not web_config:
             print("\n🔍 QUALITY CONTROL GATE")
             print(f"🎬 Title: {script_data.get('title')}")
             print(f"📁 Video ready for review at: {video_path}")
@@ -2668,16 +2336,11 @@ def run_robot():
                 safe_cleanup(ASSETS_DIR)
                 return
 
-        pub_mode = (
-            "private"
-            if (
-                not is_headless
-                and input(
-                    "  [1] Public\n  [2] Private\nChoice: "
-                ).strip() == "2"
-            )
-            else "now"
-        )
+        # Assign publishing mode
+        if web_config or is_headless:
+            pub_mode = web_config.get("publish_mode", "private") if web_config else "private"
+        else:
+            pub_mode = "private" if input("  [1] Public\n  [2] Private\nChoice: ").strip() == "2" else "now"
 
         vid_id = upload_to_youtube(
             video_path,
@@ -2724,7 +2387,6 @@ def run_robot():
 
     finally:
         conn.close()
-
 
 if __name__ == "__main__":
     run_robot()
