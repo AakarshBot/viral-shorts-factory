@@ -11,4 +11,3 @@ tqdm
 moviepy
 requests
 pytrends
-sentence-transformers
