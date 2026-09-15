@@ -1,10 +1,8 @@
 """Production-safe voice generation for Viral Shorts Factory.
 
-The original Edge TTS loop can leave a Streamlit worker with no useful
-progress message if a stream stalls during async cleanup. This runtime keeps
-per-scene timeouts, explicit completion markers, atomic file writes, and
-memory cleanup so the dashboard can distinguish audio completion from a worker
-termination.
+This patch deliberately updates run_robot()'s global namespace as well as the
+module attribute. That makes the override unambiguous even when Streamlit has
+cached the imported module/function object between reruns.
 """
 import asyncio
 import gc
@@ -14,7 +12,6 @@ import tempfile
 
 
 async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_seconds=45):
-    """Generate one scene with a hard timeout and atomic output."""
     timings = []
 
     async def consume():
@@ -49,7 +46,7 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
 
 
 async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
-    print("\n🎙️ Generating Audio & Mapping Karaoke Timestamps...", flush=True)
+    print("\n🎙️ Generating Audio & Mapping Karaoke Timestamps [SAFE AUDIO PATCH]...", flush=True)
 
     audio_paths = []
     word_timings = []
@@ -77,7 +74,6 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
         ).strip() or f"Point number {idx + 1}."
 
         success = False
-        timings = []
         for attempt in range(1, 4):
             try:
                 print(
@@ -98,8 +94,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                 success = True
                 print(
                     f"   [Audio] Scene {idx + 1}/{len(scenes)} complete: "
-                    f"{os.path.getsize(path) / 1024:.1f} KB, "
-                    f"{len(timings)} word timings.",
+                    f"{os.path.getsize(path) / 1024:.1f} KB, {len(timings)} word timings.",
                     flush=True,
                 )
                 break
@@ -118,10 +113,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
             gc.collect()
 
         if not success:
-            print(
-                f"   [Audio] FATAL: Could not generate scene {idx + 1}.",
-                flush=True,
-            )
+            print(f"   [Audio] FATAL: Could not generate scene {idx + 1}.", flush=True)
             return [], []
 
     gc.collect()
@@ -134,9 +126,20 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
 
 
 def patch_audio_pipeline(bot):
-    """Replace the unbounded Edge TTS loop with the production-safe version."""
+    """Patch both the module attribute and run_robot's actual global lookup."""
     async def process(script_data, language_cfg):
         return await generate_voiceover_and_timestamps(bot, script_data, language_cfg)
 
+    # Normal module-level lookup.
     bot.generate_voiceover_and_timestamps = process
+
+    # Definitive lookup used by the compiled run_robot function.
+    run_robot = getattr(bot, "run_robot", None)
+    if run_robot is not None and hasattr(run_robot, "__globals__"):
+        run_robot.__globals__["generate_voiceover_and_timestamps"] = process
+
+    print(
+        "   [Audio Patch] Safe Edge-TTS pipeline installed into run_robot globals.",
+        flush=True,
+    )
     return bot
