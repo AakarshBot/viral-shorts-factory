@@ -9,17 +9,18 @@ from factory_runtime import install_safe_exception_hook, normalise_publish_mode,
 from autopilot_runtime import select_auto_pilot
 from story_ranker import patch_story_selection
 from learning_runtime import sync_factory_analytics
+from quality_runtime import patch_quality_control
 
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_story_selection(ultimate_bot)
+patch_quality_control(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
 
 # Replace the legacy topic-based/channel-wide analytics sweep with the exact
 # video-ID learning sync. run_robot() resolves this global by name at runtime.
 ultimate_bot.run_analytics_sweep = lambda conn: sync_factory_analytics(ultimate_bot, conn)
 
-# Upgrade an existing local/Cloud vault before the legacy bot touches it.
 try:
     _db = sqlite3.connect(ultimate_bot.DB_PATH)
     migrate_vault(_db)
@@ -112,8 +113,6 @@ if st.button("🚀 Start The Factory", type="primary"):
     video_path = os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
     run_started_at = time.time()
 
-    # Remove the stale render so a failed run can never look successful merely
-    # because the previous run left final_video_output.mp4 behind.
     try:
         if os.path.exists(video_path):
             os.remove(video_path)
@@ -124,7 +123,6 @@ if st.button("🚀 Start The Factory", type="primary"):
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
             run_robot_with_exact_identity(ultimate_bot, web_config=web_config)
-
         fresh_video = os.path.exists(video_path) and os.path.getmtime(video_path) >= run_started_at
         if fresh_video:
             st.success(f"✅ Factory run completed and a fresh Short was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result.")
