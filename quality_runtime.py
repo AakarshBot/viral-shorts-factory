@@ -28,7 +28,6 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
     if not scenes:
         return False, "Script contains no scenes."
 
-    # Every generated scene must have actual narration and visual direction.
     for i, scene in enumerate(scenes, 1):
         voice = str(scene.get("voiceover", "")).strip()
         entity = str(scene.get("primary_entity", "")).strip()
@@ -40,7 +39,6 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
         if len(_words(prompt)) < 2:
             return False, f"Scene {i} has an unusable visual search prompt."
 
-    # Prevent the model from repeating the same scene in different wording.
     for i in range(len(scenes)):
         for j in range(i + 1, len(scenes)):
             similarity = difflib.SequenceMatcher(
@@ -51,7 +49,6 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
             if similarity >= 0.88:
                 return False, f"Scenes {i+1} and {j+1} are near-duplicates."
 
-    # The first scene must be the factual hook, not a generic creator intro.
     first = _normalise(scenes[0].get("voiceover", ""))
     forbidden_openers = (
         "welcome to", "hey everyone", "hey guys", "today we are going to",
@@ -61,12 +58,10 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
     if any(first.startswith(x) for x in forbidden_openers):
         return False, "Scene 1 starts with a generic or performative opener."
 
-    # Final scene must contain the factory's required CTA/question structure.
-    final = str(scenes[-1].get("voiceover", "")).strip()
-    if "like, share, and subscribe" not in _normalise(final):
+    final = _normalise(scenes[-1].get("voiceover", ""))
+    if "like share and subscribe" not in final:
         return False, "Final scene is missing the required CTA."
 
-    # Metadata sanity checks prevent malformed output from reaching rendering.
     titles = script_data.get("titles")
     if not isinstance(titles, list) or len(titles) != 3:
         return False, "Exactly three titles are required."
@@ -83,9 +78,6 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
     if len(_words(description)) < 10:
         return False, "SEO description is too short."
 
-    # For normal deep-dives/trending stories, each middle scene should retain
-    # meaningful source overlap. The original validator already catches most
-    # weak bridges; this catches scripts that merely repeat the headline.
     source_words = set(_words(source_text))
     if len(source_words) >= 12 and format_mode in ("regular", "trending"):
         weak = 0
@@ -111,7 +103,7 @@ def _self_critique(script_data, format_mode):
     if any(first.startswith(x) for x in ("welcome to", "hey everyone", "today we are going to", "in this video")):
         score -= 2
         reasons.append("generic opener")
-    if "like, share, and subscribe" not in _normalise(scenes[-1].get("voiceover", "")):
+    if "like share and subscribe" not in _normalise(scenes[-1].get("voiceover", "")):
         score -= 2
         reasons.append("missing CTA")
     if len(scenes) < (7 if format_mode == "top5" else 5):
