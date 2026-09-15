@@ -8,10 +8,8 @@ for small samples and controlled exploration for under-tested combinations.
 import math
 import random
 import re
+import sqlite3
 
-
-MIN_RETENTION = 0.01
-MAX_RETENTION = 100.0
 PRIOR_STRENGTH = 8.0
 EXPLORATION_RATE = 0.14
 
@@ -26,12 +24,6 @@ def _safe_float(value):
         return x if math.isfinite(x) else None
     except (TypeError, ValueError):
         return None
-
-
-def _normalise_key(value):
-    value = _clean(value)
-    value = re.sub(r"[^a-z0-9_+|.-]+", "_", value)
-    return value.strip("_")
 
 
 def _parse_combo(combo):
@@ -65,10 +57,10 @@ def _shrunk_mean(values, prior, strength=PRIOR_STRENGTH):
 
 
 def _extract_rows(conn):
-    conn.row_factory = __import__("sqlite3").Row
+    conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """SELECT status, video_id, avg_view_percentage, genre, format_used,
-                  language_used, combo_key, category
+                  language_used, combo_key
            FROM vault
            WHERE avg_view_percentage IS NOT NULL"""
     ).fetchall()
@@ -77,7 +69,7 @@ def _extract_rows(conn):
 
 def _category_from_row(row):
     _, combo_category, _ = _parse_combo(row.get("combo_key"))
-    return combo_category or _clean(row.get("category")) or _clean(row.get("genre"))
+    return combo_category or _clean(row.get("genre"))
 
 
 def _family(category, genre):
@@ -103,9 +95,6 @@ def _build_model(rows):
     eligible = [r for r in rows if _eligible_row(r)]
     global_values = [_safe_float(r.get("avg_view_percentage")) for r in eligible]
     global_prior = _mean(global_values) or 50.0
-
-    def collect(predicate):
-        return [_safe_float(r.get("avg_view_percentage")) for r in eligible if predicate(r)]
 
     model = {
         "rows": eligible,
@@ -154,9 +143,7 @@ def _evidence(model, bucket, key):
     if not key:
         return None, 0
     item = model[bucket].get(key)
-    if not item:
-        return None, 0
-    return item
+    return item if item else (None, 0)
 
 
 def _candidate_score(model, fmt, category, language):
@@ -166,7 +153,7 @@ def _candidate_score(model, fmt, category, language):
     fmt = _clean(fmt)
     fam = _family(category, category)
 
-    global_score, global_n = model["global"]
+    global_score, _ = model["global"]
     combo_score, combo_n = _evidence(model, "combo", combo)
     cf_score, cf_n = _evidence(model, "category_format", f"{cat}|{fmt}")
     cl_score, cl_n = _evidence(model, "category_language", f"{cat}|{lang}")
@@ -176,11 +163,8 @@ def _candidate_score(model, fmt, category, language):
     fmt_score, fmt_n = _evidence(model, "format", fmt)
     lang_score, lang_n = _evidence(model, "language", lang)
 
-    # Hierarchical evidence. Exact combinations dominate only after they have
-    # enough observations; sparse combinations are pulled toward their segment.
     score = global_score
     weight = 1.0
-
     layers = [
         (fam_score, fam_n, 0.35),
         (cat_score, cat_n, 0.70),
@@ -199,8 +183,6 @@ def _candidate_score(model, fmt, category, language):
         score = (score * weight + value * w) / (weight + w)
         weight += w
 
-    # Uncertainty bonus prevents a small-sample result from being treated as
-    # proven. It is deliberately modest so exploration does not dominate.
     evidence_n = combo_n + cf_n + cl_n + cat_n
     uncertainty = 1.8 / math.sqrt(max(1, evidence_n))
     return score + uncertainty, {
@@ -218,7 +200,7 @@ def _candidate_score(model, fmt, category, language):
 
 def select_auto_pilot(bot, conn):
     """Return format, category, language config and combo key."""
-    model = _build_model(conn)
+    model = _build_model(_extract_rows(conn))
     categories = {
         key: value for key, value in bot.CONTENT_CATEGORIES.items()
         if key != "tech_reviews"
@@ -243,10 +225,6 @@ def select_auto_pilot(bot, conn):
         return "regular", "national_global_affairs", bot.LANGUAGES["english"], "regular|national_global_affairs|english"
 
     candidates.sort(reverse=True, key=lambda x: x[0])
-
-    # Exploration is based on evidence for the candidate itself, not one global
-    # epsilon pool. This keeps new genres/languages/formats alive while the
-    # system learns.
     under_tested = [c for c in candidates if c[4]["combo_n"] < 5]
     if under_tested and random.random() < EXPLORATION_RATE:
         chosen = random.choice(under_tested[:max(3, min(12, len(under_tested)))])
@@ -257,7 +235,7 @@ def select_auto_pilot(bot, conn):
 
     _, fmt, category, language, details = chosen
     print(
-        "   [Auto-Pilot] %s | %s | category=%s | language=%s | "
+        "   [Auto-Pilot] %s | format=%s | category=%s | language=%s | "
         "score=%.2f | combo_n=%d | category_n=%d | family_n=%d"
         % (mode, fmt, category, language, details["score"], details["combo_n"],
            details["category_n"], details["family_n"])
