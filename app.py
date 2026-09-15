@@ -18,6 +18,43 @@ from audio_runtime import patch_audio_pipeline
 # including warnings emitted by startup/database checks.
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 
+# Streamlit Cloud exposes secrets through st.secrets rather than necessarily
+# exporting them into os.environ. ultimate_bot reads several provider keys at
+# import time, so bridge the supported factory secrets into both locations
+# before installing the runtime patches.
+def load_streamlit_secrets_into_runtime():
+    secret_names = (
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "GNEWS_API_KEY",
+        "UNSPLASH_ACCESS_KEY",
+        "HF_TOKEN",
+        "PEXELS_API_KEY",
+    )
+    loaded = []
+    for name in secret_names:
+        value = os.getenv(name)
+        if not value:
+            try:
+                value = st.secrets.get(name)
+            except Exception:
+                value = None
+        if value:
+            value = str(value).strip()
+            os.environ[name] = value
+            setattr(ultimate_bot, name, value)
+            loaded.append(name)
+    print(
+        "[Dashboard] Provider secrets loaded: "
+        + ", ".join(loaded)
+        if loaded
+        else "[Dashboard] WARNING: No provider secrets were found in environment or Streamlit secrets.",
+        flush=True,
+    )
+    return set(loaded)
+
+_runtime_secrets = load_streamlit_secrets_into_runtime()
+
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_semantic_dedup()
@@ -141,6 +178,8 @@ if st.button("🚀 Start The Factory", type="primary"):
     print(f"[Dashboard] web_config={web_config}", flush=True)
     print(f"[Dashboard] DB_PATH={ultimate_bot.DB_PATH}", flush=True)
     print(f"[Dashboard] ASSETS_DIR={ultimate_bot.ASSETS_DIR}", flush=True)
+    print(f"[Dashboard] GEMINI_API_KEY configured={bool(os.getenv('GEMINI_API_KEY'))}", flush=True)
+    print(f"[Dashboard] GROQ_API_KEY configured={bool(os.getenv('GROQ_API_KEY'))}", flush=True)
     print("[Dashboard] Calling run_robot_with_exact_identity()...", flush=True)
 
     try:
