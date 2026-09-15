@@ -1,13 +1,12 @@
-"""Segmented Auto-Pilot selection for the Viral Shorts Factory.
+"""Shorts-only Auto-Pilot selection for the Viral Shorts Factory.
 
-The selector evaluates complete format/category/language combinations instead of
-choosing each dimension from one global average. It uses hierarchical evidence:
-exact combination -> category/genre -> format/language -> global, with shrinkage
-for small samples and controlled exploration for under-tested combinations.
+The selector evaluates complete Shorts format/category/language combinations
+instead of choosing each dimension from one global average. It uses hierarchical
+evidence with shrinkage for small samples and controlled exploration for
+under-tested combinations.
 """
 import math
 import random
-import re
 import sqlite3
 
 PRIOR_STRENGTH = 8.0
@@ -57,6 +56,7 @@ def _shrunk_mean(values, prior, strength=PRIOR_STRENGTH):
 
 
 def _extract_rows(conn):
+    """Read only columns that exist in the current vault schema."""
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """SELECT status, video_id, avg_view_percentage, genre, format_used,
@@ -68,12 +68,13 @@ def _extract_rows(conn):
 
 
 def _category_from_row(row):
+    """Recover category from combo_key; fall back to the historical genre."""
     _, combo_category, _ = _parse_combo(row.get("combo_key"))
     return combo_category or _clean(row.get("genre"))
 
 
 def _family(category, genre):
-    """Create a broad segment key when historical data has sparse exact labels."""
+    """Create a broad segment key when exact historical labels are sparse."""
     text = f"{category} {genre}".lower()
     groups = {
         "sports": ("sport", "cricket", "football", "tennis", "ipl", "icc"),
@@ -118,6 +119,7 @@ def _build_model(rows):
         value = _safe_float(r.get("avg_view_percentage"))
         if value is None:
             continue
+
         keys = [
             ("format", fmt),
             ("language", lang),
@@ -132,10 +134,13 @@ def _build_model(rows):
             if key:
                 model[bucket].setdefault(key, []).append(value)
 
-    for bucket in ("format", "language", "category", "family", "combo",
-                   "category_format", "category_language", "family_format"):
+    for bucket in (
+        "format", "language", "category", "family", "combo",
+        "category_format", "category_language", "family_format",
+    ):
         for key, values in model[bucket].items():
             model[bucket][key] = _shrunk_mean(values, global_prior)
+
     return model
 
 
@@ -151,7 +156,7 @@ def _candidate_score(model, fmt, category, language):
     cat = _clean(category)
     lang = _clean(language)
     fmt = _clean(fmt)
-    fam = _family(category, category)
+    fam = _family(category, "")
 
     global_score, _ = model["global"]
     combo_score, combo_n = _evidence(model, "combo", combo)
@@ -175,6 +180,7 @@ def _candidate_score(model, fmt, category, language):
         (lang_score, lang_n, 0.15),
         (combo_score, combo_n, 1.30),
     ]
+
     for value, count, layer_weight in layers:
         if value is None or count <= 0:
             continue
@@ -199,12 +205,15 @@ def _candidate_score(model, fmt, category, language):
 
 
 def select_auto_pilot(bot, conn):
-    """Return format, category, language config and combo key."""
+    """Select the next Shorts format, category and language."""
     model = _build_model(_extract_rows(conn))
+
     categories = {
         key: value for key, value in bot.CONTENT_CATEGORIES.items()
         if key != "tech_reviews"
     }
+
+    # These are Shorts formats only. There is deliberately no long-form path.
     formats = {
         "regular": lambda c: bool(categories[c].get("usable_regular")),
         "top5": lambda c: bool(categories[c].get("usable_top5")),
@@ -218,16 +227,28 @@ def select_auto_pilot(bot, conn):
             if not allowed(category):
                 continue
             for language in languages:
-                selection_score, details = _candidate_score(model, fmt, category, language)
-                candidates.append((selection_score, fmt, category, language, details))
+                selection_score, details = _candidate_score(
+                    model, fmt, category, language
+                )
+                candidates.append(
+                    (selection_score, fmt, category, language, details)
+                )
 
     if not candidates:
-        return "regular", "national_global_affairs", bot.LANGUAGES["english"], "regular|national_global_affairs|english"
+        return (
+            "regular",
+            "national_global_affairs",
+            bot.LANGUAGES["english"],
+            "regular|national_global_affairs|english",
+        )
 
     candidates.sort(reverse=True, key=lambda x: x[0])
+
+    # Explore genuinely under-tested Shorts combinations, but keep exploration
+    # bounded so the factory remains mostly driven by proven performance.
     under_tested = [c for c in candidates if c[4]["combo_n"] < 5]
     if under_tested and random.random() < EXPLORATION_RATE:
-        chosen = random.choice(under_tested[:max(3, min(12, len(under_tested)))])
+        chosen = random.choice(under_tested[: max(3, min(12, len(under_tested)))])
         mode = "exploration"
     else:
         chosen = candidates[0]
@@ -235,10 +256,18 @@ def select_auto_pilot(bot, conn):
 
     _, fmt, category, language, details = chosen
     print(
-        "   [Auto-Pilot] %s | format=%s | category=%s | language=%s | "
+        "   [Auto-Pilot] %s | Shorts format=%s | category=%s | language=%s | "
         "score=%.2f | combo_n=%d | category_n=%d | family_n=%d"
-        % (mode, fmt, category, language, details["score"], details["combo_n"],
-           details["category_n"], details["family_n"])
+        % (
+            mode,
+            fmt,
+            category,
+            language,
+            details["score"],
+            details["combo_n"],
+            details["category_n"],
+            details["family_n"],
+        )
     )
 
     return fmt, category, bot.LANGUAGES[language], f"{fmt}|{category}|{language}"
