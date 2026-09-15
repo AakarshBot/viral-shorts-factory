@@ -22,6 +22,20 @@ install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_semantic_dedup()
 patch_story_selection(ultimate_bot)
+
+# Keep hook generation aligned with QC: the registry must not intentionally
+# generate the same generic openers that QC is designed to reject.
+ultimate_bot.HOOK_STYLES_REGISTRY["Urgent Warning"] = [
+    "Watch what happens next as this update changes the picture.",
+    "A new development just changed the situation in a measurable way.",
+    "Here is the detail that makes this update worth watching."
+]
+ultimate_bot.HOOK_STYLES_REGISTRY["Absurd Reality"] = [
+    "The facts behind this development are stranger than they first appear.",
+    "This sounds unlikely, but the documented sequence is real.",
+    "One overlooked detail makes this story far more surprising."
+]
+
 patch_quality_control(ultimate_bot)
 patch_visual_pipeline(ultimate_bot)
 patch_audio_pipeline(ultimate_bot)
