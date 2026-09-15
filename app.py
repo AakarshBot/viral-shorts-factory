@@ -2,12 +2,15 @@ import os
 import sqlite3
 import streamlit as st
 import ultimate_bot
+from factory_runtime import install_safe_exception_hook, normalise_publish_mode
+
+# Streamlit/Cloud must never wait for console input after an uncaught error.
+install_safe_exception_hook()
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 st.title("🎬 Viral Shorts Factory")
 st.write("Configure and launch your YouTube Shorts automation.")
 
-# 1. Pipeline Selection
 pipeline_choice = st.radio(
     "Select Factory Pipeline:",
     ["Manual Mode", "Auto-Pilot Mode (AI Selection)", "Cricket Focus Pipeline"]
@@ -38,11 +41,8 @@ if pipeline_choice == "Manual Mode":
     }
 
 elif pipeline_choice == "Auto-Pilot Mode (AI Selection)":
-    st.info(
-        "🤖 Auto-Pilot will select the format, category and language from your historical performance data."
-    )
+    st.info("🤖 Auto-Pilot will select the format, category and language from your historical performance data.")
 
-    # Resolve Auto-Pilot here so the dashboard's visibility choice is not lost.
     try:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
@@ -57,7 +57,6 @@ elif pipeline_choice == "Auto-Pilot Mode (AI Selection)":
             "language": lang_cfg["key"],
             "combo_key": combo_key,
         }
-
         st.caption(
             f"Auto-Pilot selected: **{format_mode}** · **{ultimate_bot.CONTENT_CATEGORIES[selected_cat_key]['label']}** · **{lang_cfg['label']}**"
         )
@@ -98,7 +97,6 @@ elif pipeline_choice == "Cricket Focus Pipeline":
         web_config["custom_q"] = "Test Cricket OR ICC OR Ashes OR Border Gavaskar Trophy OR Australia Cricket"
         web_config["custom_rss"] = "https://news.google.com/rss/search?q=Test+Cricket+OR+ICC+OR+Ashes&hl=en-IN&gl=IN&ceid=IN:en"
     else:
-        # This is the actual live-trend path advertised by the UI.
         try:
             trends = ultimate_bot.fetch_trending_topics(
                 target="india",
@@ -114,12 +112,9 @@ st.divider()
 publish_choice = st.selectbox("YouTube Visibility:", ["Private", "Public"])
 
 if st.button("🚀 Start The Factory", type="primary"):
-    # Every dashboard mode now passes the visibility choice, including Auto-Pilot.
-    web_config["publish_mode"] = publish_choice.lower()
+    web_config["publish_mode"] = normalise_publish_mode(publish_choice)
 
-    st.info(
-        "⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress."
-    )
+    st.info("⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress.")
 
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
@@ -131,8 +126,6 @@ if st.button("🚀 Start The Factory", type="primary"):
                 f"✅ Factory run completed and a video was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result."
             )
         else:
-            st.warning(
-                "⚠️ The factory stopped without producing a final video. Check the logs above for the exact reason."
-            )
+            st.warning("⚠️ The factory stopped without producing a final video. Check the logs above for the exact reason.")
     except Exception as e:
         st.error(f"❌ An error occurred: {e}")
