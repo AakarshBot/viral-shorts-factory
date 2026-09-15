@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Import core runtime modules
+        run: |
+          python - <<'PY'
+          import audio_runtime
+          import autopilot_runtime
+          import db_architecture
+          import db_runtime
+          import factory_runtime
+          import learning_runtime
+          import quality_runtime
+          import semantic_runtime
+          import story_ranker
+          import ultimate_bot
+          import visual_runtime
+          print('Core runtime imports passed.')
+          PY
+
+      - name: Validate required factory files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          required = [
+              'app.py',
+              'ultimate_bot.py',
+              'audio_runtime.py',
+              'visual_runtime.py',
+              'quality_runtime.py',
+              'factory_runtime.py',
+              'db_architecture.py',
+              'db_runtime.py',
+              'learning_runtime.py',
+              'autopilot_runtime.py',
+              'story_ranker.py',
+              'semantic_runtime.py',
+              'requirements.txt',
+          ]
+          missing = [path for path in required if not Path(path).is_file()]
+          if missing:
+              raise SystemExit(f'Missing required files: {missing}')
+          print(f'Validated {len(required)} required factory files.')
+          PY
