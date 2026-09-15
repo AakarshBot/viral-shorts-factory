@@ -7,11 +7,16 @@ from db_runtime import run_robot_with_exact_identity
 from factory_runtime import install_safe_exception_hook, normalise_publish_mode, patch_dashboard_runtime
 from autopilot_runtime import select_auto_pilot
 from story_ranker import patch_story_selection
+from learning_runtime import sync_factory_analytics
 
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_story_selection(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
+
+# Replace the legacy topic-based/channel-wide analytics sweep with the exact
+# video-ID learning sync. run_robot() resolves this global by name at runtime.
+ultimate_bot.run_analytics_sweep = lambda conn: sync_factory_analytics(ultimate_bot, conn)
 
 # Upgrade an existing local/Cloud vault before the legacy bot touches it.
 try:
