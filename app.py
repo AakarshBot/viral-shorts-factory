@@ -6,9 +6,11 @@ from db_architecture import migrate_vault
 from db_runtime import run_robot_with_exact_identity
 from factory_runtime import install_safe_exception_hook, normalise_publish_mode, patch_dashboard_runtime
 from autopilot_runtime import select_auto_pilot
+from story_ranker import patch_story_selection
 
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
+patch_story_selection(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
 
 # Upgrade an existing local/Cloud vault before the legacy bot touches it.
@@ -41,7 +43,7 @@ if pipeline_choice == "Manual Mode":
     web_config = {"format_mode": format_map[format_choice], "category": selected_cat_key, "language": language_options[lang_friendly]}
 
 elif pipeline_choice == "Auto-Pilot Mode (AI Selection)":
-    st.info("🤖 Auto-Pilot will select the best-supported format, category and language from relevant historical performance segments, while still testing under-used combinations.")
+    st.info("🤖 Auto-Pilot will select the best-supported Shorts format, category and language from relevant historical performance segments, while still testing under-used combinations.")
     try:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
@@ -82,6 +84,7 @@ publish_choice = st.selectbox("YouTube Visibility:", ["Private", "Public"])
 
 if st.button("🚀 Start The Factory", type="primary"):
     web_config["publish_mode"] = normalise_publish_mode(publish_choice)
+    ultimate_bot._active_web_config = dict(web_config)
     st.info("⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress.")
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
