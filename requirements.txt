@@ -10,3 +10,4 @@ python-dotenv
 tqdm
 moviepy
 requests
+pytrends
