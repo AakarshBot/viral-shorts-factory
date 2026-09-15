@@ -1,0 +1,12 @@
+streamlit
+opencv-python-headless
+Pillow
+edge-tts
+duckduckgo-search
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+python-dotenv
+tqdm
+moviepy
+requests
