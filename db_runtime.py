@@ -6,8 +6,6 @@ run_id and later writes are pinned to the exact SQLite row id.
 """
 import os
 import re
-import sqlite3
-from functools import wraps
 
 from db_architecture import migrate_vault, make_run_id
 
@@ -54,14 +52,14 @@ class _CursorProxy:
         if is_final_update:
             sql_text = re.sub(
                 r"WHERE\s+topic\s*=\s*\?",
-                "status='UPLOADED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                ", status='UPLOADED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 sql_text,
                 count=1,
                 flags=re.IGNORECASE,
             )
             params = tuple(parameters[:-1]) + (self._state.row_id,)
-            result = self._cursor.execute(sql_text, params)
-            return result
+            self._cursor.execute(sql_text, params)
+            return self._cursor
 
         return self._cursor.execute(sql, parameters)
 
@@ -136,8 +134,6 @@ def run_robot_with_exact_identity(bot, web_config=None):
 
     bot.sqlite3.connect = connect
     try:
-        result = bot.run_robot(web_config=web_config)
-        return result
+        return bot.run_robot(web_config=web_config)
     finally:
         bot.sqlite3.connect = original_connect
-
