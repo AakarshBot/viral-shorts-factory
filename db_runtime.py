@@ -26,6 +26,21 @@ class _CursorProxy:
         sql_text = str(sql)
         upper = sql_text.upper()
 
+        # Stale PENDING_QC records are explicitly rejected rather than being
+        # left with a misleading PENDING_QC status.
+        if (
+            "UPDATE VAULT SET VIDEO_ID = 'REJECTED'" in upper
+            and "WHERE VIDEO_ID = 'PENDING_QC'" in upper
+        ):
+            sql_text = re.sub(
+                r"UPDATE\s+vault\s+SET\s+video_id\s*=\s*'REJECTED'\s*,\s*reported\s*=\s*1\s*,\s*rejected_reason\s*=\s*'Stale timeout'",
+                "UPDATE vault SET video_id = 'REJECTED', reported = 1, rejected_reason = 'Stale timeout', status = 'REJECTED', updated_at = CURRENT_TIMESTAMP",
+                sql_text,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            return self._cursor.execute(sql_text, parameters)
+
         # Create a new row for EVERY production run. Never use INSERT OR IGNORE
         # here: two runs are allowed to have the same topic.
         if "INSERT OR IGNORE INTO VAULT" in upper and "(TOPIC, DATE_USED, GENRE, VIDEO_ID)" in upper:
@@ -158,12 +173,27 @@ def run_robot_with_exact_identity(bot, web_config=None):
         try:
             raw = original_connect(bot.DB_PATH)
             migrate_vault(raw)
-            row = raw.execute("SELECT status, video_id FROM vault WHERE id = ?", (state.row_id,)).fetchone()
+            row = raw.execute(
+                "SELECT status, video_id FROM vault WHERE id = ?",
+                (state.row_id,),
+            ).fetchone()
             if row and row[0] == "PENDING_QC":
                 if web_config is None:
-                    update_run_record(raw, state.row_id, status="REJECTED", reported=1, rejected_reason="Run ended at manual QC gate")
+                    update_run_record(
+                        raw,
+                        state.row_id,
+                        status="REJECTED",
+                        reported=1,
+                        rejected_reason="Run ended at manual QC gate",
+                    )
                 else:
-                    update_run_record(raw, state.row_id, status="FAILED", reported=1, rejected_reason="Pipeline stopped before upload")
+                    update_run_record(
+                        raw,
+                        state.row_id,
+                        status="FAILED",
+                        reported=1,
+                        rejected_reason="Pipeline stopped before upload",
+                    )
             raw.close()
         except Exception as db_exc:
             print(f"   [DB] Could not finalise run status: {db_exc}")
