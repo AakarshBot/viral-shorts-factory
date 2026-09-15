@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import time
 import streamlit as st
 import ultimate_bot
 from db_architecture import migrate_vault
@@ -32,6 +33,24 @@ st.write("Configure and launch your YouTube Shorts automation.")
 
 pipeline_choice = st.radio("Select Factory Pipeline:", ["Manual Mode", "Auto-Pilot Mode (AI Selection)", "Cricket Focus Pipeline"])
 web_config = {}
+
+# Analytics controls are deliberately separate from production. Syncing is
+# explicit so a Streamlit page refresh can never unexpectedly trigger OAuth.
+if st.button("📊 Sync YouTube Performance"):
+    try:
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        try:
+            migrate_vault(conn)
+            with st.spinner("Refreshing YouTube performance for factory-created Shorts..."):
+                result = sync_factory_analytics(ultimate_bot, conn)
+        finally:
+            conn.close()
+        st.success(
+            f"Analytics sync complete: {result['updated']} videos refreshed; "
+            f"{result['retention_ready']} now have retention data."
+        )
+    except Exception as e:
+        st.error(f"❌ Analytics sync failed: {e}")
 
 if pipeline_choice == "Manual Mode":
     format_choice = st.selectbox("Format:", ["Regular Deep-Dive", "Top 5 Countdown", "Trending Now"])
@@ -90,14 +109,26 @@ publish_choice = st.selectbox("YouTube Visibility:", ["Private", "Public"])
 if st.button("🚀 Start The Factory", type="primary"):
     web_config["publish_mode"] = normalise_publish_mode(publish_choice)
     ultimate_bot._active_web_config = dict(web_config)
+    video_path = os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
+    run_started_at = time.time()
+
+    # Remove the stale render so a failed run can never look successful merely
+    # because the previous run left final_video_output.mp4 behind.
+    try:
+        if os.path.exists(video_path):
+            os.remove(video_path)
+    except Exception as e:
+        st.warning(f"Could not clear the previous output file: {e}")
+
     st.info("⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress.")
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
             run_robot_with_exact_identity(ultimate_bot, web_config=web_config)
-        video_path = os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
-        if os.path.exists(video_path):
-            st.success(f"✅ Factory run completed and a video was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result.")
+
+        fresh_video = os.path.exists(video_path) and os.path.getmtime(video_path) >= run_started_at
+        if fresh_video:
+            st.success(f"✅ Factory run completed and a fresh Short was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result.")
         else:
-            st.warning("⚠️ The factory stopped without producing a final video. Check the logs above for the exact reason.")
+            st.warning("⚠️ The factory stopped without producing a fresh final video. Check the logs above for the exact reason.")
     except Exception as e:
         st.error(f"❌ An error occurred: {e}")
