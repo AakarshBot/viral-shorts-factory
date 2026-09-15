@@ -2,24 +2,26 @@ import os
 import sqlite3
 import streamlit as st
 import ultimate_bot
+from db_architecture import migrate_vault
 from factory_runtime import install_safe_exception_hook, normalise_publish_mode, patch_dashboard_runtime
 
-# Streamlit/Cloud must never wait for console input after an uncaught error.
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
-# The semantic model is now the duplicate detector. Disable the legacy
-# token-overlap heuristic so it cannot reject differently-worded headlines.
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
+
+# Upgrade an existing local/Cloud vault before the legacy bot touches it.
+try:
+    _db = sqlite3.connect(ultimate_bot.DB_PATH)
+    migrate_vault(_db)
+    _db.close()
+except Exception as e:
+    st.warning(f"Database migration check failed: {e}")
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 st.title("🎬 Viral Shorts Factory")
 st.write("Configure and launch your YouTube Shorts automation.")
 
-pipeline_choice = st.radio(
-    "Select Factory Pipeline:",
-    ["Manual Mode", "Auto-Pilot Mode (AI Selection)", "Cricket Focus Pipeline"]
-)
-
+pipeline_choice = st.radio("Select Factory Pipeline:", ["Manual Mode", "Auto-Pilot Mode (AI Selection)", "Cricket Focus Pipeline"])
 web_config = {}
 
 if pipeline_choice == "Manual Mode":
@@ -41,7 +43,7 @@ elif pipeline_choice == "Auto-Pilot Mode (AI Selection)":
     try:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
-            ultimate_bot.init_db(conn)
+            migrate_vault(conn)
             format_mode, selected_cat_key, lang_cfg, combo_key = ultimate_bot.auto_pilot_selection(conn)
         finally:
             conn.close()
