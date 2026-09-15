@@ -12,6 +12,7 @@ from learning_runtime import sync_factory_analytics
 from quality_runtime import patch_quality_control
 from visual_runtime import patch_visual_pipeline
 from semantic_runtime import patch_semantic_dedup
+from audio_runtime import patch_audio_pipeline
 
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
@@ -19,6 +20,7 @@ patch_semantic_dedup()
 patch_story_selection(ultimate_bot)
 patch_quality_control(ultimate_bot)
 patch_visual_pipeline(ultimate_bot)
+patch_audio_pipeline(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
 
 # Replace the legacy topic-based/channel-wide analytics sweep with the exact
@@ -132,5 +134,9 @@ if st.button("🚀 Start The Factory", type="primary"):
             st.success(f"✅ Factory run completed and a fresh Short was generated. YouTube visibility was set to **{publish_choice}**. Check the logs for the upload result.")
         else:
             st.warning("⚠️ The factory stopped without producing a fresh final video. Check the logs above for the exact reason.")
-    except Exception as e:
-        st.error(f"❌ An error occurred: {e}")
+    except BaseException as e:
+        print("\n[Dashboard] FACTORY RUN CRASHED", flush=True)
+        print(f"[Dashboard] {type(e).__name__}: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        st.error(f"❌ Factory crashed: {type(e).__name__}: {e}")
