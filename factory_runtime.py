@@ -1,11 +1,15 @@
 """Runtime hardening helpers for the Streamlit dashboard."""
 
+import io
+import re
 import sys
 import traceback
 
+from PIL import Image, ImageDraw
+
 
 def install_safe_exception_hook():
-    """Install a headless-safe exception hook that never waits for input."""
+    """Install a headless-safe exception hook that never waits for console input."""
     def safe_hook(exctype, value, tb):
         print("💥 UNCAUGHT EXCEPTION DETECTED:")
         print("!" * 60)
@@ -21,7 +25,7 @@ def normalise_publish_mode(value):
 
 
 def patch_dashboard_runtime(bot):
-    """Patch deterministic scoring/classification bugs for dashboard runs."""
+    """Patch deterministic scoring, classification and visual-routing issues for dashboard runs."""
     original_process = bot.process_scored_candidates
 
     def fixed_process_scored_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode):
@@ -40,8 +44,6 @@ def patch_dashboard_runtime(bot):
             except (TypeError, ValueError):
                 continue
 
-            # The field is explicitly "monetization_risk": higher risk must
-            # lower the score, not increase it.
             if scores.get("hard_reject", False) or mr >= 8.0:
                 continue
 
@@ -103,4 +105,171 @@ def patch_dashboard_runtime(bot):
         return "national_global_affairs"
 
     bot.infer_genre_from_title = fixed_infer_genre_from_title
+
+    # ------------------------------------------------------------------
+    # Visual quality gate: preserve the existing checks and add a useful
+    # OpenCV Haar-cascade face check for person/editorial image searches.
+    # Images that are not person-oriented are not rejected merely because
+    # they contain no face.
+    # ------------------------------------------------------------------
+    original_quality_gate = bot.passes_quality_gate
+
+    def fixed_passes_quality_gate(img_data, search_prompt="", video_title=""):
+        if not original_quality_gate(img_data, search_prompt, video_title):
+            return False
+
+        cv2 = getattr(bot, "cv2", None)
+        np = getattr(bot, "np", None)
+        if cv2 is None or np is None:
+            return True
+
+        prompt_text = f"{search_prompt} {video_title}".lower()
+        person_terms = (
+            "person", "people", "man", "woman", "player", "actor", "actress",
+            "celebrity", "politician", "president", "prime minister", "coach",
+            "cricketer", "footballer", "athlete", "singer", "director"
+        )
+        if not any(term in prompt_text for term in person_terms):
+            return True
+
+        try:
+            pil_img = Image.open(io.BytesIO(img_data)).convert("RGB")
+            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY)
+            cascade_path = getattr(cv2.data, "haarcascades", "") + "haarcascade_frontalface_default.xml"
+            if not cascade_path:
+                return True
+            cascade = cv2.CascadeClassifier(cascade_path)
+            if cascade.empty():
+                return True
+            faces = cascade.detectMultiScale(
+                cv_img,
+                scaleFactor=1.1,
+                minNeighbors=4,
+                minSize=(40, 40),
+            )
+            if len(faces) == 0:
+                return False
+        except Exception:
+            # Quality checking must never crash the asset pipeline.
+            return True
+
+        return True
+
+    bot.passes_quality_gate = fixed_passes_quality_gate
+
+    # ------------------------------------------------------------------
+    # Single visual router for dashboard runs. It uses the current script
+    # schema: primary_entity, visual_intent and specific_search_prompt.
+    # Each successful route reports its real source immediately.
+    # ------------------------------------------------------------------
+    def fixed_fetch_scene_asset(seg, category, used_urls, used_image_hashes, video_title=""):
+        primary_entity = bot.safe_text(seg.get("primary_entity", "none")).strip() or "none"
+        visual_intent = bot.safe_text(seg.get("visual_intent", "conceptual")).strip() or "conceptual"
+        specific_prompt = bot.safe_text(
+            seg.get("specific_search_prompt", f"{video_title} {primary_entity}")
+        ).strip()
+        if not specific_prompt:
+            specific_prompt = f"{video_title} {primary_entity}".strip()
+
+        is_entertainment = any(k in category for k in ["entertainment", "movie", "cinema", "showbiz"])
+        intent_text = visual_intent.lower()
+        is_editorial = (
+            any(k in intent_text for k in ["editorial", "stadium", "news", "trophy", "event", "person"])
+            or is_entertainment
+            or any(k in category for k in ["sport", "cricket", "football", "news", "politics"])
+        )
+
+        if is_entertainment and primary_entity.lower() != "none":
+            specific_prompt = f"{specific_prompt} movie still high resolution"
+
+        def accept(img_bytes, source_name):
+            if not img_bytes:
+                return None
+            try:
+                image_hash = bot.get_image_hash(img_bytes)
+                if image_hash in used_image_hashes:
+                    return None
+                used_image_hashes.add(image_hash)
+                print(f"   [Visual Source] {source_name}")
+                return Image.open(io.BytesIO(img_bytes)).convert("RGB"), False, source_name
+            except Exception:
+                return None
+
+        # People/editorial searches get a person-specific Wikipedia attempt first.
+        if is_editorial and primary_entity.lower() != "none":
+            img_bytes = bot.fetch_wiki_person_image(
+                primary_entity, used_urls, specific_prompt, video_title
+            )
+            result = accept(img_bytes, "Wikipedia")
+            if result:
+                return result
+
+            img_bytes = bot.fetch_wikimedia_commons(
+                specific_prompt, used_urls, specific_prompt, video_title
+            )
+            result = accept(img_bytes, "Commons")
+            if result:
+                return result
+
+            fallback_prompt = (
+                f"{primary_entity} movie still"
+                if is_entertainment
+                else f"{primary_entity} high resolution"
+            )
+            img_bytes = bot.fetch_pexels(
+                fallback_prompt, used_urls, specific_prompt, video_title
+            )
+            result = accept(img_bytes, "Pexels")
+            if result:
+                return result
+
+            img_bytes = bot.fetch_unsplash(
+                fallback_prompt, used_urls, specific_prompt, video_title
+            )
+            result = accept(img_bytes, "Unsplash")
+            if result:
+                return result
+
+            img_bytes = bot.fetch_duckduckgo(
+                specific_prompt, used_urls, specific_prompt, video_title
+            )
+            result = accept(img_bytes, "DDG")
+            if result:
+                return result
+
+        # General searches use the same ordered public-image fallback chain.
+        img_bytes = bot.fetch_pexels(specific_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "Pexels")
+        if result:
+            return result
+
+        img_bytes = bot.fetch_unsplash(specific_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "Unsplash")
+        if result:
+            return result
+
+        img_bytes = bot.fetch_duckduckgo(video_title or specific_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "DDG")
+        if result:
+            return result
+
+        ai_prompt = f"{specific_prompt}, high resolution cinematic photography, detailed"
+        bg_img = bot.fetch_hf_ai_image(ai_prompt)
+        if bg_img is not None:
+            print("   [Visual Source] AI-generated")
+            return bg_img, True, "AI-generated"
+
+        # Last-resort deterministic gradient. This is deliberately labelled
+        # so a missing-image complaint can be diagnosed from the console.
+        bg_img = Image.new("RGB", (1080, 1920), color=bot.PALETTE["bg"])
+        draw = ImageDraw.Draw(bg_img)
+        for i in range(1920):
+            draw.line(
+                [(0, i), (1080, i)],
+                fill=(15, 20 + int((i / 1920) * 30), 35 + int((i / 1920) * 50)),
+            )
+        print("   [Visual Source] gradient-fallback")
+        return bg_img, True, "gradient-fallback"
+
+    bot.fetch_scene_asset = fixed_fetch_scene_asset
     return bot
