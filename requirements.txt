@@ -2,7 +2,7 @@ streamlit
 opencv-python-headless
 Pillow
 edge-tts
-duckduckgo-search
+ddgs
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
