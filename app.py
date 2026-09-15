@@ -14,6 +14,10 @@ from visual_runtime import patch_visual_pipeline
 from semantic_runtime import patch_semantic_dedup
 from audio_runtime import patch_audio_pipeline
 
+# Streamlit requires page configuration before any other Streamlit command,
+# including warnings emitted by startup/database checks.
+st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
+
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_semantic_dedup()
@@ -34,7 +38,6 @@ try:
 except Exception as e:
     st.warning(f"Database migration check failed: {e}")
 
-st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 st.title("🎬 Viral Shorts Factory")
 st.write("Configure and launch your YouTube Shorts automation.")
 
