@@ -1,0 +1,254 @@
+name: Visual code cleanup
+
+on:
+  push:
+    paths:
+      - "visual_cleanup_trigger.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clean duplicate visual functions and harden routing
+        shell: python
+        run: |
+          import ast
+          from pathlib import Path
+
+          path = Path("ultimate_bot.py")
+          source = path.read_text(encoding="utf-8")
+          target_names = {
+              "fetch_wiki_person_image",
+              "fetch_wikimedia_commons",
+              "fetch_pexels",
+              "fetch_unsplash",
+              "fetch_duckduckgo",
+              "fetch_hf_ai_image",
+              "get_image_hash",
+              "fetch_scene_asset",
+              "process_visuals_async",
+              "passes_quality_gate",
+              "get_cached_asset",
+              "save_to_cache",
+              "generate_voiceover_and_timestamps",
+          }
+
+          def function_nodes(text):
+              tree = ast.parse(text)
+              return [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in target_names]
+
+          nodes = function_nodes(source)
+          duplicates = {}
+          for node in nodes:
+              duplicates.setdefault(node.name, []).append(node)
+
+          # Keep exactly one implementation of every requested function.
+          # For the schema-sensitive visual functions, prefer an implementation
+          # that already uses the current fields.
+          removals = []
+          for name, group in duplicates.items():
+              if len(group) <= 1:
+                  continue
+              if name in {"fetch_scene_asset", "process_visuals_async"}:
+                  candidates = [n for n in group if "primary_entity" in ast.get_source_segment(source, n) and "specific_search_prompt" in ast.get_source_segment(source, n)]
+                  keep = candidates[-1] if candidates else group[-1]
+              else:
+                  keep = group[-1]
+              for node in group:
+                  if node is not keep:
+                      removals.append(node)
+
+          if removals:
+              lines = source.splitlines(keepends=True)
+              for node in sorted(removals, key=lambda n: n.lineno, reverse=True):
+                  start = node.lineno - 1
+                  end = node.end_lineno
+                  del lines[start:end]
+              source = "".join(lines)
+
+          # Re-parse after duplicate removal.
+          tree = ast.parse(source)
+          by_name = {}
+          for node in tree.body:
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in target_names:
+                  by_name[node.name] = node
+
+          for required in target_names:
+              count = sum(1 for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == required)
+              if count != 1:
+                  raise RuntimeError(f"Expected exactly one {required}, found {count}")
+
+          scene_node = by_name["fetch_scene_asset"]
+          process_node = by_name["process_visuals_async"]
+          scene_text = ast.get_source_segment(source, scene_node) or ""
+          process_text = ast.get_source_segment(source, process_node) or ""
+          if "primary_entity" not in scene_text or "visual_intent" not in scene_text or "specific_search_prompt" not in scene_text:
+              raise RuntimeError("fetch_scene_asset is not using the current visual schema")
+          if "primary_subject" in scene_text or "background_context" in scene_text:
+              raise RuntimeError("fetch_scene_asset still uses the retired visual schema")
+          if "primary_entity" not in process_text or "visual_intent" not in process_text or "specific_search_prompt" not in process_text:
+              raise RuntimeError("process_visuals_async is not using the current visual schema")
+          if "primary_subject" in process_text or "background_context" in process_text:
+              raise RuntimeError("process_visuals_async still uses the retired visual schema")
+
+          # Merge the useful face-detection gate into the single quality gate
+          # only if it is not already present.
+          quality_node = by_name["passes_quality_gate"]
+          quality_text = ast.get_source_segment(source, quality_node) or ""
+          if "haarcascade_frontalface_default.xml" not in quality_text:
+              lines = source.splitlines(keepends=True)
+              # Re-derive the node from the current source so line numbers match.
+              qtree = ast.parse(source)
+              qnode = next(n for n in qtree.body if isinstance(n, ast.FunctionDef) and n.name == "passes_quality_gate")
+              returns = [n for n in ast.walk(qnode) if isinstance(n, ast.Return)]
+              final_return = max(returns, key=lambda n: n.lineno)
+              insert_at = final_return.lineno - 1
+              indent = " " * (final_return.col_offset)
+              block = (
+                  f"{indent}# Face-detection check for person-focused visual searches.\n"
+                  f"{indent}# Non-person searches are unaffected.\n"
+                  f"{indent}if cv2 is not None and np is not None:\n"
+                  f"{indent}    _prompt_text = f\"{{search_prompt}} {{video_title}}\".lower()\n"
+                  f"{indent}    _person_terms = (\"person\", \"people\", \"man\", \"woman\", \"player\", \"actor\", \"actress\", \"celebrity\", \"politician\", \"president\", \"prime minister\", \"coach\", \"cricketer\", \"footballer\", \"athlete\", \"singer\", \"director\")\n"
+                  f"{indent}    if any(term in _prompt_text for term in _person_terms):\n"
+                  f"{indent}        try:\n"
+                  f"{indent}            _pil_img = Image.open(io.BytesIO(img_data)).convert(\"RGB\")\n"
+                  f"{indent}            _gray = cv2.cvtColor(np.array(_pil_img), cv2.COLOR_RGB2GRAY)\n"
+                  f"{indent}            _cascade_path = cv2.data.haarcascades + \"haarcascade_frontalface_default.xml\"\n"
+                  f"{indent}            _cascade = cv2.CascadeClassifier(_cascade_path)\n"
+                  f"{indent}            if not _cascade.empty():\n"
+                  f"{indent}                _faces = _cascade.detectMultiScale(_gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))\n"
+                  f"{indent}                if len(_faces) == 0:\n"
+                  f"{indent}                    return False\n"
+                  f"{indent}        except Exception:\n"
+                  f"{indent}            pass\n"
+              )
+              lines.insert(insert_at, block)
+              source = "".join(lines)
+
+          # Replace fetch_scene_asset with one schema-correct implementation
+          # that logs the actual successful source for every scene.
+          tree = ast.parse(source)
+          scene_node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "fetch_scene_asset")
+          lines = source.splitlines(keepends=True)
+          scene_start = scene_node.lineno - 1
+          scene_end = scene_node.end_lineno
+          new_scene = '''def fetch_scene_asset(seg, category, used_urls, used_image_hashes, video_title=""):
+    primary_entity = safe_text(seg.get("primary_entity", "none")).strip() or "none"
+    visual_intent = safe_text(seg.get("visual_intent", "conceptual")).strip() or "conceptual"
+    specific_prompt = safe_text(seg.get("specific_search_prompt", f"{video_title} {primary_entity}")).strip()
+    if not specific_prompt:
+        specific_prompt = f"{video_title} {primary_entity}".strip()
+
+    is_entertainment = any(k in category for k in ["entertainment", "movie", "cinema", "showbiz"])
+    intent_text = visual_intent.lower()
+    is_editorial = (
+        any(k in intent_text for k in ["editorial", "stadium", "news", "trophy", "event", "person"])
+        or is_entertainment
+        or any(k in category for k in ["sport", "cricket", "football", "news", "politics"])
+    )
+
+    if is_entertainment and primary_entity.lower() != "none":
+        specific_prompt = f"{specific_prompt} movie still high resolution"
+
+    def accept(img_bytes, source_name):
+        if not img_bytes:
+            return None
+        try:
+            image_hash = get_image_hash(img_bytes)
+            if image_hash in used_image_hashes:
+                return None
+            used_image_hashes.add(image_hash)
+            print(f"   [Visual Source] {source_name}")
+            return Image.open(io.BytesIO(img_bytes)).convert("RGB"), False, source_name
+        except Exception:
+            return None
+
+    if is_editorial and primary_entity.lower() != "none":
+        img_bytes = fetch_wiki_person_image(primary_entity, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "Wikipedia")
+        if result:
+            return result
+
+        img_bytes = fetch_wikimedia_commons(specific_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "Commons")
+        if result:
+            return result
+
+        fallback_prompt = f"{primary_entity} movie still" if is_entertainment else f"{primary_entity} high resolution"
+        img_bytes = fetch_pexels(fallback_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "Pexels")
+        if result:
+            return result
+
+        img_bytes = fetch_unsplash(fallback_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "Unsplash")
+        if result:
+            return result
+
+        img_bytes = fetch_duckduckgo(specific_prompt, used_urls, specific_prompt, video_title)
+        result = accept(img_bytes, "DDG")
+        if result:
+            return result
+
+    img_bytes = fetch_pexels(specific_prompt, used_urls, specific_prompt, video_title)
+    result = accept(img_bytes, "Pexels")
+    if result:
+        return result
+
+    img_bytes = fetch_unsplash(specific_prompt, used_urls, specific_prompt, video_title)
+    result = accept(img_bytes, "Unsplash")
+    if result:
+        return result
+
+    img_bytes = fetch_duckduckgo(video_title or specific_prompt, used_urls, specific_prompt, video_title)
+    result = accept(img_bytes, "DDG")
+    if result:
+        return result
+
+    ai_prompt = f"{specific_prompt}, high resolution cinematic photography, detailed"
+    bg_img = fetch_hf_ai_image(ai_prompt)
+    if bg_img is not None:
+        print("   [Visual Source] AI-generated")
+        return bg_img, True, "AI-generated"
+
+    bg_img = Image.new("RGB", (1080, 1920), color=PALETTE["bg"])
+    draw = ImageDraw.Draw(bg_img)
+    for i in range(1920):
+        draw.line(
+            [(0, i), (1080, i)],
+            fill=(15, 20 + int((i / 1920) * 30), 35 + int((i / 1920) * 50)),
+        )
+    print("   [Visual Source] gradient-fallback")
+    return bg_img, True, "gradient-fallback"
+'''
+          lines[scene_start:scene_end] = [new_scene]
+          source = "".join(lines)
+
+          # Final safety checks.
+          final_tree = ast.parse(source)
+          for name in target_names:
+              count = sum(1 for n in final_tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
+              if count != 1:
+                  raise RuntimeError(f"Final check failed: {name} appears {count} times")
+
+          path.write_text(source, encoding="utf-8")
+          print("Visual cleanup complete.")
+
+      - name: Syntax check
+        run: python -m py_compile ultimate_bot.py factory_runtime.py app.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ultimate_bot.py
+          git diff --cached --quiet && exit 0
+          git commit -m "Clean duplicate visual functions and improve asset diagnostics"
+          git push
