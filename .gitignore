@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+*.sqlite3
+
+output/
+asset_cache/
+
+# Local Google/YouTube authentication files
+client_secret.json
+token.json
