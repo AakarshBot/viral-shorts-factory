@@ -49,9 +49,23 @@ def bind_dashboard_patches(bot):
             bound.append(name)
 
     # The legacy run_robot() catches render exceptions and historically printed
-    # only "TypeError: ...", which hides the actual source line. Wrap the
-    # compile stage so the complete traceback is emitted before that handler
-    # catches and returns. The wrapper re-raises unchanged.
+    # only "TypeError: ...", which hides the actual source line. Wrap both the
+    # visual stage and compile stage so the complete traceback is emitted before
+    # the legacy handler catches and returns. Each wrapper re-raises unchanged.
+    original_process_visuals = getattr(bot, "process_visuals_async", None)
+    if original_process_visuals is not None and not getattr(original_process_visuals, "_traceback_bound", False):
+        async def process_visuals_with_traceback(*args, **kwargs):
+            try:
+                return await original_process_visuals(*args, **kwargs)
+            except BaseException:
+                print("   [Bindings] FULL TRACEBACK FROM process_visuals_async:", flush=True)
+                traceback.print_exc()
+                raise
+        process_visuals_with_traceback._traceback_bound = True
+        bot.process_visuals_async = process_visuals_with_traceback
+        namespace["process_visuals_async"] = process_visuals_with_traceback
+        bound.append("process_visuals_async(traceback)")
+
     original_compile_video = getattr(bot, "compile_video", None)
     if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
         def compile_video_with_traceback(*args, **kwargs):
