@@ -15,6 +15,18 @@ def bind_dashboard_patches(bot):
         print("   [Bindings] WARNING: run_robot globals unavailable.", flush=True)
         return bot
 
+    # The quality layer historically allowed zero as an index even though the
+    # factory consumes this value as a one-based selection. Normalize the only
+    # harmless mismatch instead of spending another LLM request on a retry.
+    current_validate = getattr(bot, "validate_script", None)
+    if current_validate is not None and not getattr(current_validate, "_index_normalized", False):
+        def validate(script_data, source_text, format_mode):
+            if isinstance(script_data, dict) and script_data.get("recommended_title_index") == 0:
+                script_data["recommended_title_index"] = 1
+            return current_validate(script_data, source_text, format_mode)
+        validate._index_normalized = True
+        bot.validate_script = validate
+
     namespace = run_robot.__globals__
     names = (
         "gather_and_filter_stories",
@@ -37,8 +49,6 @@ def bind_dashboard_patches(bot):
             namespace[name] = value
             bound.append(name)
 
-    # write_script() is a separate compiled function but uses the same module
-    # globals dictionary, so the assignment above also fixes its validator.
     print(
         "   [Bindings] Legacy factory globals bound to active runtime patches: "
         + ", ".join(bound),
