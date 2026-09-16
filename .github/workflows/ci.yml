@@ -38,6 +38,9 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q .
 
+      - name: Explicitly validate dashboard syntax
+        run: python -m py_compile app.py
+
       - name: Import core runtime modules
         run: |
           python - <<'PY'
