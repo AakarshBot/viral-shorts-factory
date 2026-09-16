@@ -6,13 +6,14 @@ runtime hard-reject layer removed high-risk stories. This module fixes that
 logic without rewriting the legacy production engine.
 """
 
+import os
 import re
+import sqlite3
 
 
 def _num(value, default=0.0):
     try:
-        value = float(value)
-        return value
+        return float(value)
     except (TypeError, ValueError):
         return default
 
@@ -46,12 +47,16 @@ def _repetition_penalty(story, prior_topics):
     return min(3.0, strongest * 3.0)
 
 
-def _load_prior_topics(conn):
-    if conn is None:
+def _load_prior_topics(db_path):
+    if not db_path or not os.path.exists(db_path):
         return []
     try:
-        rows = conn.execute("SELECT topic FROM vault WHERE topic IS NOT NULL").fetchall()
-        return [row[0] for row in rows if row and row[0]]
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute("SELECT topic FROM vault WHERE topic IS NOT NULL").fetchall()
+            return [row[0] for row in rows if row and row[0]]
+        finally:
+            conn.close()
     except Exception:
         return []
 
@@ -72,7 +77,6 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         story = batch_stories[idx]
         if not isinstance(story, dict):
             continue
-
         if scores.get("hard_reject", False):
             continue
 
@@ -82,7 +86,7 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         mr = max(0.0, min(10.0, _num(scores.get("monetization_risk"), 5.0)))
         sl = max(0.0, min(10.0, _num(scores.get("shelf_life"), 5.0)))
 
-        # Risk is NOT a quality dimension. 10 risk must hurt the score.
+        # Risk is NOT a quality dimension. A risk score of 10 must hurt the score.
         quality_score = (
             hs * 0.25
             + nc * 0.20
@@ -96,9 +100,6 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         corroboration = _num(story.get("corroboration_bonus"), 0.0)
         recency_penalty = _num(story.get("recency_penalty"), 0.0)
         genre_bonus = _num(bonuses.get(story.get("genre"), 0.0), 0.0) if format_mode == "regular" else 0.0
-
-        # Do not reward repeating the immediately previous genre. Diversity is
-        # useful; the old +2 bonus actively encouraged repetition.
         repetition = _repetition_penalty(story, prior_topics)
 
         composite = (
@@ -126,19 +127,21 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
     return scored_candidates
 
 
-def patch_editorial_scoring(bot, conn=None):
+def patch_editorial_scoring(bot):
     """Replace only the legacy candidate scoring function."""
     if getattr(bot, "_editorial_scoring_patch_installed", False):
         return bot
 
     def process(scored_data, batch_stories, bonuses, last_genre, format_mode):
+        db_path = getattr(bot, "DB_PATH", "")
+        prior_topics = _load_prior_topics(db_path)
         return score_candidates(
             scored_data,
             batch_stories,
             bonuses or {},
             last_genre,
             format_mode,
-            prior_topics=_load_prior_topics(conn),
+            prior_topics=prior_topics,
         )
 
     process._editorial_scoring_corrected = True
