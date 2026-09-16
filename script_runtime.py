@@ -203,5 +203,6 @@ def wrap_write_script(bot):
         return cleaned
 
     write_script._content_dense_bound = True
+    write_script._research_layer_live = bool(getattr(current, "_research_wrapped", False))
     bot.write_script = write_script
     return write_script
