@@ -101,16 +101,29 @@ def _split_lines(words, font, max_width):
 
 
 def _fit_layout(words, base_font_size, font_path, max_width, max_lines=2):
-    """Use the largest font that keeps captions inside the safe width."""
+    """Use the largest font that keeps every rendered line inside max_width."""
     size = int(base_font_size)
-    while size >= 50:
+    while size >= 24:
         font = _load_font(font_path, size)
         lines = _split_lines(words, font, max_width)
-        if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width + 1 for line in lines):
+        if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width for line in lines):
             return font, lines
         size -= 2
-    font = _load_font(font_path, 50)
-    return font, _split_lines(words, font, max_width)[:max_lines]
+
+    # Extremely long captions should still obey the geometry contract.  Keep
+    # shrinking the scalable font until the two-line layout fits, rather than
+    # returning an over-wide fallback line.
+    size = 22
+    while size >= 10:
+        font = _load_font(font_path, size)
+        lines = _split_lines(words, font, max_width)
+        if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width for line in lines):
+            return font, lines
+        size -= 2
+
+    font = _load_font(font_path, 10)
+    lines = _split_lines(words, font, max_width)
+    return font, [line for line in lines if line][:max_lines]
 
 
 def _validate_active_index(active_index: int, word_count: int) -> int:
