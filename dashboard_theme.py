@@ -17,24 +17,13 @@ def apply_dashboard_theme() -> None:
     st.markdown(
         r"""
 <style>
-/* =========================================================
-   Viral Shorts Factory — newsroom visual system
-   Light, warm, editorial, glassy — no heavy dark UI.
-   ========================================================= */
 :root {
   --vsf-ink: #17212b;
   --vsf-muted: #66727e;
-  --vsf-soft: #8a96a2;
   --vsf-line: rgba(23,33,43,.09);
-  --vsf-card: rgba(255,255,255,.92);
-  --vsf-card-strong: rgba(255,255,255,.98);
   --vsf-blue: #177fd1;
   --vsf-blue-soft: #eaf5ff;
   --vsf-gold: #d7a247;
-  --vsf-gold-soft: #fff7e9;
-  --vsf-green: #258b67;
-  --vsf-green-soft: #edf9f4;
-  --vsf-red: #c65d55;
   --vsf-shadow: 0 18px 55px rgba(37,55,72,.08);
   --vsf-shadow-small: 0 8px 28px rgba(37,55,72,.06);
 }
@@ -57,32 +46,19 @@ html, body, [class*="css"] {
   padding-bottom: 3rem !important;
 }
 
-/* Streamlit header / chrome */
 header[data-testid="stHeader"] {
   background: rgba(251,252,253,.78) !important;
   backdrop-filter: blur(14px);
 }
 
-button[kind="header"] {
-  border-radius: 12px !important;
-}
+h1, h2, h3, h4, p, label, span, div { color: var(--vsf-ink); }
+.stCaption, [data-testid="stCaptionContainer"] p { color: var(--vsf-muted) !important; }
 
-/* Global typography */
-h1, h2, h3, h4, p, label, span, div {
-  color: var(--vsf-ink);
-}
-
-.stCaption, [data-testid="stCaptionContainer"] p {
-  color: var(--vsf-muted) !important;
-}
-
-/* Top brand card */
 .brand-card {
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(23,33,43,.075) !important;
-  background:
-    linear-gradient(135deg, rgba(255,255,255,.98), rgba(248,251,253,.90)) !important;
+  background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(248,251,253,.90)) !important;
   box-shadow: var(--vsf-shadow) !important;
   border-radius: 28px !important;
   padding: 26px 30px !important;
@@ -115,7 +91,6 @@ h1, h2, h3, h4, p, label, span, div {
   max-width: 850px;
 }
 
-/* Panels */
 .panel {
   border: 1px solid var(--vsf-line) !important;
   background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(250,252,253,.90)) !important;
@@ -125,34 +100,51 @@ h1, h2, h3, h4, p, label, span, div {
   margin-bottom: 15px !important;
 }
 
-.qc-title {
-  font-size: 1.2rem !important;
-  font-weight: 820 !important;
-  letter-spacing: -.02em;
-}
+.qc-title { font-size: 1.2rem !important; font-weight: 820 !important; letter-spacing: -.02em; }
+.small-muted { color: var(--vsf-muted) !important; font-size: .82rem !important; }
 
-.small-muted {
-  color: var(--vsf-muted) !important;
+/* Elevated dropdown controls */
+.stSelectbox { margin-bottom: 8px !important; }
+.stSelectbox label {
+  font-weight: 760 !important;
+  color: #34414d !important;
   font-size: .82rem !important;
+  letter-spacing: .01em !important;
+  margin-bottom: 5px !important;
 }
-
-/* Left control rail */
-[data-testid="stVerticalBlock"] .stSelectbox > div > div,
-[data-testid="stVerticalBlock"] .stMultiSelect > div > div {
+.stSelectbox [data-baseweb="select"] > div {
+  min-height: 46px !important;
   border-radius: 14px !important;
   border: 1px solid rgba(23,33,43,.10) !important;
-  background: rgba(255,255,255,.88) !important;
-  box-shadow: 0 4px 14px rgba(30,50,70,.035) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(247,250,252,.96)) !important;
+  box-shadow: 0 5px 16px rgba(30,50,70,.035) !important;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease !important;
 }
-
-.stSelectbox label, .stTextInput label, .stTextArea label {
+.stSelectbox [data-baseweb="select"] > div:hover {
+  border-color: rgba(23,127,209,.30) !important;
+  box-shadow: 0 8px 20px rgba(30,50,70,.07) !important;
+  transform: translateY(-1px);
+}
+.stSelectbox [data-baseweb="select"] input,
+.stSelectbox [data-baseweb="select"] div { color: var(--vsf-ink) !important; }
+[data-baseweb="popover"] {
+  border: 1px solid rgba(23,33,43,.09) !important;
+  border-radius: 15px !important;
+  box-shadow: 0 18px 50px rgba(30,45,60,.15) !important;
+  background: rgba(255,255,255,.98) !important;
+  overflow: hidden !important;
+}
+[data-baseweb="menu"] [role="option"] { min-height: 42px !important; padding: 9px 12px !important; }
+[data-baseweb="menu"] [role="option"]:hover { background: var(--vsf-blue-soft) !important; }
+[data-baseweb="menu"] [aria-selected="true"] {
+  background: #f3f8fc !important;
+  color: var(--vsf-blue) !important;
   font-weight: 720 !important;
-  color: #34414d !important;
 }
 
-/* Buttons */
-.stButton > button,
-.stLinkButton > a {
+.stTextInput label, .stTextArea label { font-weight: 720 !important; color: #34414d !important; }
+
+.stButton > button, .stLinkButton > a {
   border-radius: 13px !important;
   min-height: 2.65rem !important;
   border: 1px solid rgba(23,33,43,.10) !important;
@@ -160,27 +152,19 @@ h1, h2, h3, h4, p, label, span, div {
   font-weight: 730 !important;
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease !important;
 }
-
-.stButton > button:hover,
-.stLinkButton > a:hover {
+.stButton > button:hover, .stLinkButton > a:hover {
   transform: translateY(-1px);
   box-shadow: 0 9px 22px rgba(30,48,64,.09) !important;
   border-color: rgba(23,127,209,.28) !important;
 }
-
 .stButton > button[kind="primary"] {
   background: linear-gradient(135deg, #1984d5, #4aa9e7) !important;
   color: #fff !important;
   border: 0 !important;
   box-shadow: 0 11px 24px rgba(23,127,209,.20) !important;
 }
+.stButton > button[kind="primary"] p, .stButton > button[kind="primary"] span { color: #fff !important; }
 
-.stButton > button[kind="primary"] p,
-.stButton > button[kind="primary"] span {
-  color: #fff !important;
-}
-
-/* Candidate cards */
 .candidate {
   position: relative;
   border: 1px solid rgba(23,33,43,.085) !important;
@@ -191,40 +175,17 @@ h1, h2, h3, h4, p, label, span, div {
   box-shadow: var(--vsf-shadow-small) !important;
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
-
 .candidate:hover {
   transform: translateY(-2px);
   box-shadow: 0 15px 34px rgba(37,55,72,.10) !important;
   border-color: rgba(23,127,209,.20) !important;
 }
+.candidate-rank { color: var(--vsf-blue) !important; font-weight: 850 !important; font-size: .72rem !important; letter-spacing: .13em !important; }
+.candidate-title { color: var(--vsf-ink) !important; font-size: 1.06rem !important; line-height: 1.38 !important; font-weight: 790 !important; margin: 9px 0 11px !important; }
+.candidate-reason { color: var(--vsf-muted) !important; font-size: .88rem !important; line-height: 1.5 !important; }
 
-.candidate-rank {
-  color: var(--vsf-blue) !important;
-  font-weight: 850 !important;
-  font-size: .72rem !important;
-  letter-spacing: .13em !important;
-}
-
-.candidate-title {
-  color: var(--vsf-ink) !important;
-  font-size: 1.06rem !important;
-  line-height: 1.38 !important;
-  font-weight: 790 !important;
-  margin: 9px 0 11px !important;
-}
-
-.candidate-reason {
-  color: var(--vsf-muted) !important;
-  font-size: .88rem !important;
-  line-height: 1.5 !important;
-}
-
-/* Progress bars — make Streamlit's basic bars look like an editorial console */
-div[data-testid="stProgress"] {
-  padding: 0 !important;
-  margin: 5px 0 11px !important;
-}
-
+/* Progress bars */
+div[data-testid="stProgress"] { padding: 0 !important; margin: 5px 0 11px !important; }
 div[data-testid="stProgress"] > div {
   background: rgba(23,33,43,.065) !important;
   border-radius: 999px !important;
@@ -232,65 +193,34 @@ div[data-testid="stProgress"] > div {
   overflow: hidden !important;
   box-shadow: inset 0 1px 2px rgba(20,30,40,.05) !important;
 }
-
 div[data-testid="stProgress"] > div > div {
   background: linear-gradient(90deg, #1984d5, #68b8ec) !important;
   border-radius: 999px !important;
   box-shadow: 0 2px 8px rgba(23,127,209,.20) !important;
 }
 
-/* Inputs / editor surfaces */
-.stTextInput input,
-.stTextArea textarea {
+.stTextInput input, .stTextArea textarea {
   border-radius: 13px !important;
   border: 1px solid rgba(23,33,43,.10) !important;
   background: rgba(255,255,255,.94) !important;
   box-shadow: inset 0 1px 2px rgba(20,30,40,.025) !important;
 }
-
-.stTextInput input:focus,
-.stTextArea textarea:focus {
+.stTextInput input:focus, .stTextArea textarea:focus {
   border-color: rgba(23,127,209,.48) !important;
   box-shadow: 0 0 0 3px rgba(23,127,209,.08) !important;
 }
 
-/* Expander / dialogs */
-[data-testid="stExpander"] {
-  border: 1px solid var(--vsf-line) !important;
-  border-radius: 17px !important;
-  background: rgba(255,255,255,.84) !important;
-}
-
+[data-testid="stExpander"] { border: 1px solid var(--vsf-line) !important; border-radius: 17px !important; background: rgba(255,255,255,.84) !important; }
 [data-testid="stDialog"] [role="dialog"] {
   border-radius: 24px !important;
   border: 1px solid rgba(23,33,43,.09) !important;
   box-shadow: 0 30px 90px rgba(24,39,54,.18) !important;
   background: rgba(255,255,255,.97) !important;
 }
-
-/* Status messages */
-[data-testid="stAlert"] {
-  border-radius: 15px !important;
-}
-
-/* Video frame */
-video {
-  border-radius: 20px !important;
-  box-shadow: 0 18px 40px rgba(26,43,58,.12) !important;
-  border: 1px solid rgba(23,33,43,.08) !important;
-}
-
-/* Dividers */
-hr {
-  border-color: rgba(23,33,43,.08) !important;
-}
-
-/* Make columns breathe */
-[data-testid="column"] {
-  min-width: 0;
-}
-
-/* Tidy Streamlit's empty whitespace around controls */
+[data-testid="stAlert"] { border-radius: 15px !important; }
+video { border-radius: 20px !important; box-shadow: 0 18px 40px rgba(26,43,58,.12) !important; border: 1px solid rgba(23,33,43,.08) !important; }
+hr { border-color: rgba(23,33,43,.08) !important; }
+[data-testid="column"] { min-width: 0; }
 .stMarkdown { margin-bottom: .2rem !important; }
 </style>
 """,
