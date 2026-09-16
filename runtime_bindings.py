@@ -43,6 +43,21 @@ def _install_moviepy_compatibility():
         return False
 
 
+def _install_authoritative_person_sources(bot):
+    """Attach direct Wikipedia/Commons image fetchers used by PERSON sourcing."""
+    try:
+        from person_source_runtime import fetch_wikipedia_person_image, fetch_wikimedia_commons_image
+        if not callable(getattr(bot, "fetch_wiki_person_image", None)):
+            bot.fetch_wiki_person_image = fetch_wikipedia_person_image
+        if not callable(getattr(bot, "fetch_wikimedia_commons", None)):
+            bot.fetch_wikimedia_commons = fetch_wikimedia_commons_image
+        print("   [Bindings] Authoritative person image sources installed: Wikipedia + Wikimedia Commons.", flush=True)
+        return True
+    except Exception as exc:
+        print(f"   [Bindings] Authoritative person image sources unavailable: {type(exc).__name__}: {exc}", flush=True)
+        return False
+
+
 def _install_visual_cache_safety():
     """Cache only assets that actually passed the visual verification gate."""
     try:
@@ -265,6 +280,7 @@ def bind_dashboard_patches(bot):
     _wrap_content_dense_script(bot)
     _wrap_content_first_visuals(bot)
     _patch_youtube_creator_comments(bot)
+    _install_authoritative_person_sources(bot)
     _install_visual_cache_safety()
 
     namespace = run_robot.__globals__
