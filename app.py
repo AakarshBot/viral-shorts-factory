@@ -15,6 +15,7 @@ import visual_runtime
 from visual_qa_runtime import install_visual_qa_bridge
 from semantic_runtime import patch_semantic_dedup
 from audio_runtime import patch_audio_pipeline
+from provider_runtime import patch_provider_adapters
 from runtime_bindings import bind_dashboard_patches, harden_editorial_defaults
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
@@ -39,9 +40,6 @@ def load_streamlit_secrets_into_runtime():
 
 _runtime_secrets = load_streamlit_secrets_into_runtime()
 
-# Streamlit reruns reuse imported Python modules. Patch installers therefore
-# must run only once per process; otherwise each rerun nests another wrapper
-# around the same legacy functions and multiplies work/logging.
 if not getattr(ultimate_bot, "_dashboard_runtime_initialized", False):
     install_safe_exception_hook()
     patch_dashboard_runtime(ultimate_bot)
@@ -52,15 +50,15 @@ if not getattr(ultimate_bot, "_dashboard_runtime_initialized", False):
     install_visual_qa_bridge(visual_runtime)
     patch_visual_pipeline(ultimate_bot)
     patch_audio_pipeline(ultimate_bot)
+    patch_provider_adapters(ultimate_bot)
     ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
     ultimate_bot.run_analytics_sweep = lambda conn: sync_factory_analytics(ultimate_bot, conn)
     ultimate_bot._dashboard_runtime_initialized = True
     print("[Dashboard] Runtime patch stack initialized once for this process.", flush=True)
 else:
-    # Keep bindings authoritative across Streamlit reruns without installing
-    # another layer of wrappers.
     harden_editorial_defaults(ultimate_bot)
     install_visual_qa_bridge(visual_runtime)
+    patch_provider_adapters(ultimate_bot)
 
 ultimate_bot.process_visuals_async = ultimate_bot.process_visuals_async
 print("[Dashboard] Visual pipeline patch installed and bound to run_robot globals.", flush=True)
