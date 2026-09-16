@@ -253,7 +253,7 @@ def _patch_youtube_creator_comments(bot):
 
 
 def bind_dashboard_patches(bot):
-    """Bind patched callables into the actual globals used by run_robot."""
+    """Bind patched callables into the actual globals used by the legacy factory."""
     try:
         apply_dashboard_theme()
     except Exception as exc:
@@ -276,7 +276,7 @@ def bind_dashboard_patches(bot):
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
     _wrap_content_dense_script(bot)
-    _patch_content_first_visuals(bot)
+    _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
     _patch_subtitles(bot)
     _patch_youtube_creator_comments(bot)
