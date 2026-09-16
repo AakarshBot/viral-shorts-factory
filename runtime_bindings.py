@@ -207,6 +207,16 @@ def _wrap_editorial_provider_usage(bot):
     return guarded
 
 
+def _patch_research_pipeline(bot):
+    """Activate the multi-source evidence pass before content-density script wrapping."""
+    try:
+        from research_runtime import patch_research_pipeline
+        return patch_research_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Multi-source research runtime unavailable: {exc}", flush=True)
+        return bot
+
+
 def _wrap_content_dense_script(bot):
     try:
         from script_runtime import wrap_write_script
@@ -275,6 +285,7 @@ def bind_dashboard_patches(bot):
     _patch_editorial_scoring(bot)
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
+    _patch_research_pipeline(bot)
     _wrap_content_dense_script(bot)
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
