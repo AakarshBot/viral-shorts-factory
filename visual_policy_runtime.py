@@ -4,7 +4,8 @@ Keeps the existing visual sourcing/render pipeline intact while:
 - removing opaque hook/outro cards from non-Top-5 formats;
 - limiting the same visual subject/search term to two scene uses per run;
 - simplifying image search to the clean primary visual subject, with a
-  headline-derived fallback only when the primary subject yields nothing.
+  headline-derived fallback only when the primary subject is missing or has
+  already been used twice.
 """
 from __future__ import annotations
 
@@ -55,7 +56,6 @@ def _clean_search_subject(value):
     if not text:
         return ""
 
-    # Remove common prompt/query labels that are not part of the subject.
     text = re.sub(
         r"^(?:primary\s+entity|visual\s+subject|subject|search\s+term|keyword)\s*[:=-]\s*",
         "",
@@ -67,7 +67,6 @@ def _clean_search_subject(value):
     # "Sachin Tendulkar's best innings" -> "Sachin Tendulkar".
     text = re.split(r"(?:'s|’s)\s+", text, maxsplit=1, flags=re.I)[0].strip()
 
-    # Strip common trailing search noise while preserving the underlying name.
     text = re.sub(
         r"\s+(?:official|official\s+photo|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|best\s+innings|latest\s+update|latest\s+news|breaking\s+news|photo|image)\s*$",
         "",
@@ -78,12 +77,13 @@ def _clean_search_subject(value):
     return text
 
 
-def _headline_fallback(video_title):
-    """Pick one compact subject from a headline when a scene has no usable entity."""
+def _headline_fallback(video_title, exclude=""):
+    """Pick one compact headline subject, avoiding the already-used entity when possible."""
     text = _clean_search_subject(video_title)
     if not text:
         return ""
 
+    excluded = _clean_search_subject(exclude).lower()
     stop = {
         "the", "a", "an", "and", "or", "but", "for", "with", "from", "into", "after", "before",
         "over", "under", "this", "that", "these", "those", "here", "there", "why", "how", "what",
@@ -94,20 +94,25 @@ def _headline_fallback(video_title):
     if not words:
         return ""
 
-    # Prefer a short proper-name-like chunk; otherwise use the first meaningful keyword.
-    for length in (3, 2):
+    candidates = []
+    for length in (3, 2, 1):
         for i in range(max(1, len(words) - length + 1)):
-            chunk = " ".join(words[i:i + length])
-            if any(c.isupper() for c in chunk if c.isalpha()):
-                return _clean_search_subject(chunk)
+            chunk = " ".join(words[i:i + length]).strip()
+            if chunk:
+                candidates.append(chunk)
+
+    for chunk in candidates:
+        cleaned = _clean_search_subject(chunk)
+        if cleaned and cleaned.lower() != excluded:
+            return cleaned
     return _clean_search_subject(words[0])
 
 
 def _simple_build_deep_queries(seg, video_title="", visual_type=None):
     """Build intentionally simple search queries.
 
-    The search subject is the script's primary_entity and nothing else. A title
-    keyword is only a fallback when the scene lacks a usable primary_entity.
+    The search subject is the script's primary_entity and nothing else. If a
+    scene has no usable entity, the headline supplies one fallback keyword.
     There is no scene-action, intent, category, or title-stacking query here.
     """
     entity = _clean_search_subject(seg.get("primary_entity", ""))
@@ -123,14 +128,13 @@ def _simple_build_deep_queries(seg, video_title="", visual_type=None):
     queries = []
     if entity and entity.lower() not in {"none", "unknown", "n/a"}:
         queries.append(entity)
-
-    if not queries:
+    else:
         fallback = _headline_fallback(video_title)
         if fallback:
             queries.append(fallback)
 
-    # Do not issue more than one distinct search term per scene. The subject
-    # repeat wrapper below controls how many scenes may reuse the same term.
+    # Keep every scene search deliberately simple: one subject, one search term.
+    # The subject-repeat wrapper below controls reuse across scenes.
     return queries[:1], resolved_type
 
 
@@ -152,18 +156,6 @@ def _install_simple_search_policy():
     return False
 
 
-def _scene_fallback_subject(seg):
-    """Create a compact fallback term after a subject has already been used twice."""
-    try:
-        from visual_strategy_runtime import _scene_phrase
-        phrase = str(_scene_phrase(seg) or "").strip()
-    except Exception:
-        phrase = ""
-    if not phrase:
-        phrase = str(seg.get("specific_search_prompt", "") or "").strip()
-    return _clean_search_subject(phrase)
-
-
 def _subject_limit_wrapper(original):
     if getattr(original, "_subject_limit_bound", False):
         return original
@@ -180,15 +172,21 @@ def _subject_limit_wrapper(original):
                 if count < 2:
                     run_counts[key] += 1
                 else:
-                    fallback = _scene_fallback_subject(seg)
+                    # After two uses of a subject, switch to a simple headline
+                    # keyword rather than building a more elaborate scene query.
+                    fallback = _headline_fallback(video_title, exclude=entity)
                     if fallback and fallback.lower() != key:
                         chosen_seg = dict(seg)
                         chosen_seg["primary_entity"] = fallback
                         chosen_seg["visual_type"] = "GENERAL_CONTEXT"
                         chosen_seg["visual_intent"] = "documentary context"
                         chosen_seg["specific_search_prompt"] = fallback
-                    # If no fallback exists, retain the original subject. The
-                    # underlying image-hash gate still prevents the same image.
+                        print(
+                            f"   [Visual Policy] Subject '{entity}' already used twice; using headline fallback '{fallback}'.",
+                            flush=True,
+                        )
+                    # If no alternate headline keyword exists, retain the original
+                    # subject. The image-hash gate still prevents the same image.
 
         try:
             return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
