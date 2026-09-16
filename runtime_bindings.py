@@ -28,6 +28,7 @@ def bind_dashboard_patches(bot):
         "get_trend_signal_bonus",
         "auto_pilot_selection",
         "run_analytics_sweep",
+        "token_overlap_ratio",
     )
     bound = []
     for name in names:
