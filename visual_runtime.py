@@ -1,12 +1,13 @@
-"""Strict visual sourcing for Viral Shorts Factory.
+"""Strict, scene-aware visual sourcing for Viral Shorts Factory.
 
-Every scene must receive a real, relevant visual. Placeholder/gradient-only
-slides are rejected. Gemini vision is used as the semantic relevance gate when
-available; the factory fails the run rather than silently publishing a blank
-or unrelated slide.
+Rules:
+- Every rendered scene gets a verified visual asset.
+- Search gets deeper when a candidate is missing or irrelevant.
+- Real people/events/products are never replaced by fabricated AI imagery.
+- AI imagery is reserved for genuinely conceptual/process/context scenes.
+- A bad or unverified image is rejected, never silently used.
 """
 import asyncio
-import base64
 import io
 import os
 import re
@@ -14,71 +15,21 @@ import threading
 
 from PIL import Image, ImageDraw
 
-VISUAL_FETCH_TIMEOUT_SECONDS = 15
+VISUAL_FETCH_TIMEOUT_SECONDS = int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "15"))
+VISUAL_MAX_SEARCH_QUERIES = int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "28"))
 
-
-def _tokens(text):
-    return [t.lower() for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]{2,}", str(text or ""))]
+REAL_ENTITY_TYPES = {"PERSON", "EVENT", "PRODUCT", "LOCATION", "QUOTE", "DOCUMENT"}
+AI_ALLOWED_TYPES = {"PROCESS", "CONCEPT", "GENERAL_CONTEXT"}
 
 
 def _entity_context(seg, video_title=""):
-    entity = str(seg.get("primary_entity", "")).strip()
-    intent = str(seg.get("visual_intent", "")).strip()
-    prompt = str(seg.get("specific_search_prompt", "")).strip()
-    voice = str(seg.get("voiceover", "")).strip()
-    return entity, intent, prompt, voice, str(video_title or "").strip()
-
-
-def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
-    """Ask Gemini whether the actual pixels match the requested scene."""
-    if not api_key:
-        print("   [Visual QA] Gemini semantic verifier is not configured (missing GEMINI_API_KEY).")
-        return None
-    try:
-        b64 = base64.b64encode(img_bytes).decode("utf-8")
-        instruction = (
-            "You are a strict visual editor for a factual YouTube Short. "
-            "Inspect the image itself. PASS only when the image clearly depicts "
-            "the requested primary entity AND is appropriate to the requested visual intent. "
-            "For a named person, PASS only if the person is plausibly identifiable as that person. "
-            "Do not pass an image merely because it is generally related to the topic. "
-            "Reject generic stock photos, unrelated people, wrong teams/products/events, "
-            "generic concept art when a specific real entity was requested, memes, screenshots "
-            "with misleading context, and images where the requested subject is absent. "
-            "If uncertain, return FAIL. Return exactly PASS or FAIL.\n\n"
-            f"Video topic: {video_title}\n"
-            f"Primary entity: {entity}\n"
-            f"Visual intent: {intent}\n"
-            f"Search prompt: {prompt}\n"
-            f"Scene narration: {voice}"
-        )
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
-        import requests
-        response = requests.post(
-            url,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [
-                    {"text": instruction},
-                    {"inlineData": {"mimeType": "image/jpeg", "data": b64}},
-                ]}],
-                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4},
-            },
-            timeout=12,
-        )
-        if response.status_code != 200:
-            detail = response.text[:300].replace("\n", " ")
-            print(f"   [Visual QA] Gemini verifier HTTP {response.status_code}: {detail}")
-            return None
-        text = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip().upper()
-        if text.startswith("PASS"):
-            return True
-        if text.startswith("FAIL"):
-            return False
-        print(f"   [Visual QA] Gemini returned an unexpected verdict: {text[:80]}")
-    except Exception as exc:
-        print(f"   [Visual QA] Semantic verifier unavailable: {exc}")
-    return None
+    return (
+        str(seg.get("primary_entity", "")).strip(),
+        str(seg.get("visual_intent", "")).strip(),
+        str(seg.get("specific_search_prompt", "")).strip(),
+        str(seg.get("voiceover", "")).strip(),
+        str(video_title or "").strip(),
+    )
 
 
 def _local_visual_sanity(img_bytes):
@@ -86,11 +37,20 @@ def _local_visual_sanity(img_bytes):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         if min(img.size) < 300:
             return False
-        if img.width / max(1, img.height) > 2.5 or img.width / max(1, img.height) < 0.4:
-            return False
-        return True
+        ratio = img.width / max(1, img.height)
+        return 0.4 <= ratio <= 2.5
     except Exception:
         return False
+
+
+def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
+    """Fallback verifier. visual_qa_runtime normally replaces this at startup."""
+    try:
+        from visual_qa_runtime import strict_gemini_check
+        return strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key)
+    except Exception as exc:
+        print(f"   [Visual QA] Gemini bridge unavailable: {exc}", flush=True)
+        return None
 
 
 def _strict_gate(bot, img_bytes, seg, video_title=""):
@@ -98,9 +58,8 @@ def _strict_gate(bot, img_bytes, seg, video_title=""):
         return False
     entity, intent, prompt, voice, title = _entity_context(seg, video_title)
     if not entity or entity.lower() in {"none", "unknown", "n/a"}:
-        print("   [Visual QA] REJECTED: scene has no specific primary_entity.")
+        print("   [Visual QA] REJECTED: scene has no specific primary_entity.", flush=True)
         return False
-
     result = _strict_gemini_check(
         img_bytes, entity, intent, prompt, voice, title,
         os.getenv("GEMINI_API_KEY"),
@@ -108,31 +67,25 @@ def _strict_gate(bot, img_bytes, seg, video_title=""):
     if result is True:
         return True
     if result is False:
-        print(f"   [Visual QA] REJECTED: image does not match '{entity}' / '{intent}'.")
+        print(f"   [Visual QA] REJECTED: image does not match '{entity}' / '{intent}'.", flush=True)
         return False
-
-    print("   [Visual QA] REJECTED: semantic relevance could not be verified.")
+    print("   [Visual QA] REJECTED: semantic relevance could not be verified.", flush=True)
     return False
 
 
 def _build_search_variants(seg, video_title=""):
-    entity, intent, prompt, voice, title = _entity_context(seg, video_title)
-    category = str(seg.get("sport_or_topic_category", "")).strip()
-    variants = []
-    for value in (
-        prompt,
-        f"{entity} {intent} {category}",
-        f"{entity} {title}",
-        f"{entity} {voice[:140]}",
-    ):
-        value = re.sub(r"\s+", " ", value).strip()
-        if value and value not in variants:
-            variants.append(value)
-    return variants[:4]
+    try:
+        from visual_strategy_runtime import build_deep_queries
+        queries, visual_type = build_deep_queries(seg, video_title)
+        return queries[:VISUAL_MAX_SEARCH_QUERIES], visual_type
+    except Exception as exc:
+        print(f"   [Visual Strategy] fallback query builder: {exc}", flush=True)
+        entity, intent, prompt, voice, title = _entity_context(seg, video_title)
+        values = [prompt, f"{entity} {intent}", f"{entity} {title}", f"{entity} {voice[:180]}"]
+        return [re.sub(r"\s+", " ", v).strip() for v in values if str(v).strip()], "GENERAL_CONTEXT"
 
 
 def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETCH_TIMEOUT_SECONDS):
-    """Run legacy synchronous image providers without blocking the async factory forever."""
     result = {"value": None, "error": None}
 
     def worker():
@@ -145,25 +98,46 @@ def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETC
     thread.start()
     thread.join(timeout)
     if thread.is_alive():
-        print(f"   [Visual Source] {source} | timed out after {timeout}s | query='{query}'")
+        print(f"   [Visual Source] {source} | timed out after {timeout}s | query='{query}'", flush=True)
         return None
     if result["error"] is not None:
-        print(f"   [Visual Source] {source} | failed: {result['error']} | query='{query}'")
+        print(f"   [Visual Source] {source} | failed: {result['error']} | query='{query}'", flush=True)
         return None
     return result["value"]
 
 
+def _source_plan(bot, visual_type, category):
+    editorial = any(k in f"{category} {visual_type}".lower() for k in (
+        "sport", "football", "cricket", "news", "politics", "entertainment", "movie", "event"
+    ))
+    plan = []
+    if visual_type == "PERSON":
+        plan += [("Wikipedia", getattr(bot, "fetch_wiki_person_image", None)),
+                 ("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
+    elif visual_type in {"EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
+        plan += [("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
+    if editorial:
+        # DDG is deliberately early for factual/editorial subjects because it can
+        # discover actual event imagery that stock libraries cannot.
+        plan += [("DDG", getattr(bot, "fetch_duckduckgo", None))]
+    plan += [("Pexels", getattr(bot, "fetch_pexels", None)),
+             ("Unsplash", getattr(bot, "fetch_unsplash", None))]
+    if not editorial:
+        plan += [("DDG", getattr(bot, "fetch_duckduckgo", None))]
+    return [(name, fn) for name, fn in plan if callable(fn)]
+
+
 def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
-    """Try several increasingly broad searches, but verify every candidate."""
     entity = str(seg.get("primary_entity", "")).strip()
     if not entity or entity.lower() in {"none", "unknown", "n/a"}:
         raise RuntimeError("Visual pipeline requires a specific primary_entity for every scene.")
 
-    variants = _build_search_variants(seg, video_title)
-    editorial = any(k in str(seg.get("visual_intent", "")).lower() for k in
-                    ["editorial", "stadium", "news", "trophy", "event", "person"]) or any(
-                        k in category for k in ["sport", "cricket", "football", "news", "politics", "entertainment", "movie"]
-                    )
+    queries, visual_type = _build_search_variants(seg, video_title)
+    print(
+        f"   [Visual Strategy] entity='{entity}' type={visual_type} "
+        f"deep_searches={len(queries)}",
+        flush=True,
+    )
 
     def try_bytes(data, source, query):
         if not data:
@@ -175,61 +149,62 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             if not _strict_gate(bot, data, seg, video_title):
                 return None
             used_hashes.add(h)
-            print(f"   [Visual Source] {source} | verified | query='{query}'")
+            print(f"   [Visual Source] {source} | VERIFIED | type={visual_type} | query='{query}'", flush=True)
             return Image.open(io.BytesIO(data)).convert("RGB"), False, source
         except Exception as exc:
-            print(f"   [Visual Source] {source} | candidate rejected: {exc}")
+            print(f"   [Visual Source] {source} | candidate rejected: {exc}", flush=True)
             return None
 
-    for query in variants:
-        print(f"   [Visual Search] Scene entity='{entity}' | query='{query}'")
-        if editorial:
-            for fetcher, name, args in (
-                (bot.fetch_wiki_person_image, "Wikipedia", (entity, used_urls, query, video_title)),
-                (bot.fetch_wikimedia_commons, "Commons", (query, used_urls, query, video_title)),
-            ):
-                data = _call_fetcher_with_timeout(fetcher, args, name, query)
-                result = try_bytes(data, name, query)
-                if result:
-                    return result
-
-        for fetcher, name in (
-            (bot.fetch_pexels, "Pexels"),
-            (bot.fetch_unsplash, "Unsplash"),
-            (bot.fetch_duckduckgo, "DDG"),
-        ):
-            data = _call_fetcher_with_timeout(fetcher, (query, used_urls, query, video_title), name, query)
+    # Search progressively harder. We do not stop because one provider or one
+    # query failed; every query is allowed to try the complete source ladder.
+    for query_index, query in enumerate(queries, 1):
+        print(f"   [Visual Search] {query_index}/{len(queries)} | '{query}'", flush=True)
+        for name, fetcher in _source_plan(bot, visual_type, category):
+            if name == "Wikipedia":
+                args = (entity, used_urls, query, video_title)
+            else:
+                args = (query, used_urls, query, video_title)
+            data = _call_fetcher_with_timeout(fetcher, args, name, query)
             result = try_bytes(data, name, query)
             if result:
                 return result
 
-    ai_prompts = [
-        f"Photorealistic editorial image of {entity}. {str(seg.get('visual_intent','')).strip()}. {str(seg.get('voiceover','')).strip()[:180]}",
-        f"Photorealistic documentary photograph showing {entity} in context. {video_title}",
-    ]
-    for ai_prompt in ai_prompts:
-        print(f"   [Visual Source] AI-generated attempt | prompt='{ai_prompt[:140]}'")
-        ai = _call_fetcher_with_timeout(bot.fetch_hf_ai_image, (ai_prompt,), "HF-AI", ai_prompt)
-        if ai is None:
-            continue
-        try:
-            buf = io.BytesIO()
-            ai.convert("RGB").save(buf, format="JPEG", quality=95)
-            data = buf.getvalue()
-            if _strict_gate(bot, data, seg, video_title):
-                h = bot.get_image_hash(data)
-                if h not in used_hashes:
-                    used_hashes.add(h)
-                    print("   [Visual Source] AI-generated | verified")
-                    return ai.convert("RGB"), True, "AI-generated"
-        except Exception as exc:
-            print(f"   [Visual Source] AI-generated | candidate rejected: {exc}")
+    # AI is NOT a substitute for real evidence. It is only allowed for scenes
+    # whose visual meaning is conceptual/process/contextual rather than a claim
+    # that a specific real person/event/product existed in that exact form.
+    if visual_type in AI_ALLOWED_TYPES:
+        ai_prompts = [
+            f"Photorealistic documentary illustration of {entity}. {seg.get('visual_intent','')}. {seg.get('voiceover','')[:220]}",
+            f"High-quality editorial concept image showing {entity} in context. {video_title}",
+            f"Clear technical/editorial illustration of {entity}. No logos, no invented people, no fake documents. {seg.get('visual_intent','')}",
+        ]
+        for ai_prompt in ai_prompts:
+            print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{ai_prompt[:160]}'", flush=True)
+            ai = _call_fetcher_with_timeout(
+                bot.fetch_hf_ai_image, (ai_prompt,), "HF-AI", ai_prompt
+            )
+            if ai is None:
+                continue
+            try:
+                buf = io.BytesIO()
+                ai.convert("RGB").save(buf, format="JPEG", quality=95)
+                data = buf.getvalue()
+                result = try_bytes(data, "AI-generated", ai_prompt)
+                if result:
+                    return result[0], True, "AI-generated"
+            except Exception as exc:
+                print(f"   [Visual Source] AI candidate rejected: {exc}", flush=True)
 
-    raise RuntimeError(f"No strictly relevant visual could be verified for scene entity '{entity}'.")
+    # This is intentionally the final failure condition. The factory has already
+    # searched deeply; it must never publish an unverified or misleading visual.
+    raise RuntimeError(
+        f"No strictly relevant visual could be verified for '{entity}' after "
+        f"{len(queries)} deep searches (visual_type={visual_type})."
+    )
 
 
 def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=None, accent=None):
-    """Image-backed title/CTA slide; never uses a flat gradient as the visual."""
+    """Image-backed title card. It never becomes a flat placeholder slide."""
     bg = bg_img.convert("RGBA").resize((1080, 1920), Image.Resampling.LANCZOS)
     overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -255,7 +230,7 @@ def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=N
 
 
 async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"):
-    print("\n🎨 Sourcing strictly relevant visuals for every Shorts slide...")
+    print("\n🎨 Sourcing strictly relevant visuals for every Shorts slide...", flush=True)
     width, height = 1080, 1920
     target_size = (width, height)
     scenes = script_data.get("script", [])
@@ -264,31 +239,28 @@ async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"
 
     font_choice = language_cfg.get("font")
     packages = [None] * len(scenes)
-    used_urls = set()
-    used_hashes = set()
+    used_urls, used_hashes = set(), set()
     ai_count = 0
 
     for idx, seg in enumerate(scenes):
-        video_title = script_data.get("title", "") or script_data.get("titles", [""])[0]
-        print(f"   [Visual Pipeline] Scene {idx + 1}/{len(scenes)} starting...")
+        video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
+        print(f"   [Visual Pipeline] Scene {idx + 1}/{len(scenes)} starting...", flush=True)
         category = str(seg.get("sport_or_topic_category", "")).lower()
-        bg_img, used_ai, source_type = _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title)
+        bg_img, used_ai, source_type = _relevant_asset(
+            bot, seg, category, used_urls, used_hashes, video_title
+        )
         ai_count += int(used_ai)
         bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
         img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
-        if format_mode == "top5":
-            if idx == 0:
-                rendered = _render_image_slide(bot, bg_img, video_title or seg.get("voiceover", "Top 5"), "TODAY'S SPECIAL", font_choice)
-            elif idx == len(scenes) - 1:
-                rendered = _render_image_slide(bot, bg_img, seg.get("voiceover", "What do you think?"), "SUBSCRIBE!", font_choice)
-            else:
-                clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", seg.get("voiceover", ""), flags=re.IGNORECASE).strip()
-                rendered = bot.render_top5_card(bg_img, 6 - idx, 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
+        # Every scene remains factual. There is no subscription-only outro.
+        if format_mode == "top5" and idx == 0:
+            rendered = _render_image_slide(bot, bg_img, video_title or seg.get("voiceover", "Top 5"), "TODAY'S TOP 5", font_choice)
+        elif format_mode == "top5":
+            clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", str(seg.get("voiceover", "")), flags=re.IGNORECASE).strip()
+            rendered = bot.render_top5_card(bg_img, max(1, 6 - idx), 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
         elif idx == 0:
-            rendered = bot.render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice)
-        elif idx == len(scenes) - 1:
-            rendered = _render_image_slide(bot, bg_img, seg.get("voiceover", "What do you think?"), "SUBSCRIBE FOR MORE!", font_choice)
+            rendered = bot.render_hook_card(bot=bot, bg_img=bg_img, text=seg.get("voiceover", ""), font_choice=font_choice) if False else bot.render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice)
         else:
             overlay = Image.new("RGBA", target_size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(overlay)
@@ -299,20 +271,15 @@ async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"
         rendered.convert("RGB").save(img_path, "JPEG", quality=95)
         packages[idx] = [{
             "image": img_path,
-            "text": "" if (format_mode == "top5" or idx in (0, len(scenes) - 1)) else seg.get("voiceover", ""),
+            "text": "" if (format_mode == "top5" or idx == 0) else seg.get("voiceover", ""),
             "ai_generated": used_ai,
             "source_type": source_type,
         }]
+        seg["visual_verified"] = True
+        seg["visual_source"] = source_type
 
     script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2)
     script_data["visual_coverage"] = 1.0
-    print(f"   [+] Visual QA complete: {len(scenes)}/{len(scenes)} slides have verified relevant images.")
+    script_data["visuals_verified"] = True
+    print(f"   [+] Visual QA complete: {len(scenes)}/{len(scenes)} slides have verified relevant visuals.", flush=True)
     return packages
-
-
-def patch_visual_pipeline(bot):
-    """Install strict visual sourcing and replace the placeholder-producing renderer."""
-    async def process(script_data, language_cfg, format_mode="regular"):
-        return await _process_visuals(bot, script_data, language_cfg, format_mode)
-    bot.process_visuals_async = process
-    return bot
