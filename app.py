@@ -396,11 +396,11 @@ with right:
         script_data = snapshot.get("script_data") or {}
         title = str(snapshot.get("final_metadata", {}).get("title") or script_data.get("title") or snapshot.get("selected_story", {}).get("title") or "").strip()
         description = str(snapshot.get("final_metadata", {}).get("description") or script_data.get("seo_description") or "").strip()
-        comment = str(snapshot.get("final_metadata", {}).get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
+        comment = str(snapshot.get("final_metadata", {}).get("creator_comment") or snapshot.get("final_metadata", {}).get("pinned_comment") or script_data.get("creator_comment") or script_data.get("pinned_comment") or "").strip()
 
         title = st.text_input("Final title", value=title, max_chars=100, key="final_title")
         description = st.text_area("Final description", value=description, height=150, key="final_description")
-        comment = st.text_area("Creator / pinned comment", value=comment, height=110, key="final_comment")
+        comment = st.text_area("Creator comment (pin it manually in YouTube Studio if desired)", value=comment, height=110, key="final_comment")
         visibility = st.selectbox("YouTube visibility", ["Private", "Public"], index=0, key="final_visibility")
 
         video_path = snapshot.get("video_path") or os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
