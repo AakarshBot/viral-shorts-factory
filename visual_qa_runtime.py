@@ -4,9 +4,11 @@ Keeps the strict visual gate fail-closed while using the supported Gemini SDK
 for current API-key authentication and multimodal image understanding.
 """
 import os
+import time
 
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.8-flash")
 GEMINI_VISUAL_TIMEOUT_SECONDS = 20
+GEMINI_VISUAL_RETRIES = 2
 
 
 def _clean_api_key(value):
@@ -65,6 +67,51 @@ def _response_diagnostic(response):
     )
 
 
+def _is_institutional_entity(entity):
+    """Institutions are not literal objects; verify their concrete visual context instead."""
+    text = str(entity or "").lower()
+    markers = (
+        "government", "ministry", "department", "administration", "authority",
+        "council", "commission", "committee", "organization", "organisation",
+        "party", "company", "corporation", "university", "institution", "agency",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _build_instruction(entity, intent, prompt, voice, video_title):
+    institutional = _is_institutional_entity(entity)
+    if institutional:
+        entity_rule = (
+            "The primary entity is an institution rather than a physical object. "
+            "Do not require the institution's name or logo to be literally visible. "
+            "PASS only when the image shows a concrete, recognizable visual manifestation "
+            "of the requested institution/event/context (for example identifiable officials, "
+            "a signing meeting, government venue, document/signing scene, or clearly attributable "
+            "delegation) and the surrounding evidence is consistent with the supplied topic. "
+            "Reject generic government buildings, generic people, generic meetings, and unrelated events."
+        )
+    else:
+        entity_rule = (
+            "The primary entity must be visibly present. For a named person, PASS only if the "
+            "person is plausibly identifiable as that person. Reject images where the requested "
+            "subject is absent."
+        )
+    return (
+        "You are a strict visual editor for a factual YouTube Short. Inspect the supplied image "
+        "itself and judge the whole requested scene, not just keyword overlap. "
+        f"{entity_rule} "
+        "The image must also match the requested visual intent and event/context. Reject generic "
+        "stock photos, unrelated people, wrong events, generic concept art, memes, misleading "
+        "screenshots, and images that are only loosely related to the topic. If uncertain, return FAIL. "
+        "Return exactly one word: PASS or FAIL.\n\n"
+        f"Video topic: {video_title}\n"
+        f"Primary entity: {entity}\n"
+        f"Visual intent: {intent}\n"
+        f"Search prompt: {prompt}\n"
+        f"Scene narration: {voice}"
+    )
+
+
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
     api_key = _clean_api_key(api_key)
     if not api_key:
@@ -75,21 +122,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         from google import genai
         from google.genai import types
 
-        instruction = (
-            "You are a strict visual editor for a factual YouTube Short. "
-            "Inspect the supplied image itself. Return PASS only if the image clearly depicts "
-            "the requested primary entity and matches the requested visual intent. "
-            "For a named person, PASS only if the person is plausibly identifiable as that person. "
-            "Reject generic stock photos, unrelated people, wrong events, generic concept art, "
-            "memes, misleading screenshots, and images where the requested subject is absent. "
-            "If uncertain, return FAIL. Return exactly one word: PASS or FAIL.\n\n"
-            f"Video topic: {video_title}\n"
-            f"Primary entity: {entity}\n"
-            f"Visual intent: {intent}\n"
-            f"Search prompt: {prompt}\n"
-            f"Scene narration: {voice}"
-        )
-
+        instruction = _build_instruction(entity, intent, prompt, voice, video_title)
         print(
             f"   [Visual QA] Gemini request model={GEMINI_VISUAL_MODEL} "
             f"auth={_key_diagnostic(api_key)}",
@@ -101,33 +134,47 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
             http_options=types.HttpOptions(timeout=GEMINI_VISUAL_TIMEOUT_SECONDS * 1000),
         )
         image_part = types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
-        response = client.models.generate_content(
-            model=GEMINI_VISUAL_MODEL,
-            contents=[instruction, image_part],
-            config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(thinking_level="low"),
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            ),
-        )
 
-        text = _extract_verdict(response).strip().upper()
-        diagnostic = _response_diagnostic(response)
-        print(
-            f"   [Visual QA] Gemini verdict={text[:40] or '<empty>'} "
-            f"model={GEMINI_VISUAL_MODEL} {diagnostic}",
-            flush=True,
-        )
-        if text.startswith("PASS"):
-            return True
-        if text.startswith("FAIL"):
-            return False
-
-        print(
-            f"   [Visual QA] Gemini returned an unusable verdict: {text[:120] or '<empty>'} "
-            f"({diagnostic})",
-            flush=True,
-        )
-        return None
+        for attempt in range(GEMINI_VISUAL_RETRIES + 1):
+            try:
+                response = client.models.generate_content(
+                    model=GEMINI_VISUAL_MODEL,
+                    contents=[instruction, image_part],
+                    config=types.GenerateContentConfig(
+                        thinking_config=types.ThinkingConfig(thinking_level="low"),
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                    ),
+                )
+                text = _extract_verdict(response).strip().upper()
+                diagnostic = _response_diagnostic(response)
+                print(
+                    f"   [Visual QA] Gemini verdict={text[:40] or '<empty>'} "
+                    f"model={GEMINI_VISUAL_MODEL} {diagnostic}",
+                    flush=True,
+                )
+                if text.startswith("PASS"):
+                    return True
+                if text.startswith("FAIL"):
+                    return False
+                print(
+                    f"   [Visual QA] Gemini returned an unusable verdict: "
+                    f"{text[:120] or '<empty>'} ({diagnostic})",
+                    flush=True,
+                )
+                return None
+            except Exception as exc:
+                message = str(exc)
+                transient = any(code in message for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+                if transient and attempt < GEMINI_VISUAL_RETRIES:
+                    delay = 2 ** attempt
+                    print(
+                        f"   [Visual QA] Gemini transient error on attempt {attempt + 1}/"
+                        f"{GEMINI_VISUAL_RETRIES + 1}: {type(exc).__name__}; retrying in {delay}s",
+                        flush=True,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise
     except Exception as exc:
         print(
             f"   [Visual QA] Gemini verifier exception: {type(exc).__name__}: {exc}",
