@@ -19,7 +19,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-16-v4"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-16-v5"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -97,7 +97,7 @@ Return only YES if the image clearly shows the named entity or is a strong, dire
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="STRICT", visual_type=""):
     """Return True/False/None. Gemini is never called for cheap-pass tiers."""
-    global _CIRCUIT_OPEN
+    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN
     tier = tier or _tier_for(intent, visual_type, "")
     if tier == "CURATED_PERSON":
         print("   [Visual QA] Tier=STRICT(person) source=curated | Gemini=SKIPPED", flush=True)
@@ -149,13 +149,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
 
 
 def install_visual_qa_bridge(visual_runtime_module):
-    """Compatibility bridge used by app.py and the legacy runtime.
-
-    The bounded visual_runtime now imports the QA function directly, but the
-    dashboard still calls this installer so older execution paths can use the
-    same QA implementation. Keeping the bridge explicit also prevents an old
-    in-memory legacy verifier from silently replacing the bounded verifier.
-    """
+    """Compatibility bridge used by app.py and the legacy runtime."""
     if visual_runtime_module is None:
         return False
     visual_runtime_module.strict_gemini_check = strict_gemini_check
