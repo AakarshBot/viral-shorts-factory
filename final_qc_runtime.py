@@ -19,7 +19,6 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
     title = str(title or "").strip()
     description = str(description or "").strip()
     comment = str(comment or "").strip()
-
     if not title:
         return False, "final title is empty"
     if len(title) > 100:
@@ -36,14 +35,12 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
 
 
 def validate_final_video(path: str) -> None:
-    """Raise when the actual final MP4 fails artifact QC."""
     ok, reason = _validate_final_artifact(path)
     if not ok:
         raise RuntimeError(reason)
 
 
 def validate_final_upload_metadata(title: str, description: str, comment: str = "") -> tuple[str, str, str]:
-    """Validate editable final metadata and return cleaned values unchanged."""
     cleaned_title = str(title or "").strip()
     cleaned_description = str(description or "").strip()
     cleaned_comment = str(comment or "").strip()
@@ -54,27 +51,20 @@ def validate_final_upload_metadata(title: str, description: str, comment: str = 
 
 
 def _install_exact_run_identity(controller_cls):
-    """Route production execution through the existing exact-row DB bridge."""
     if getattr(controller_cls, "_exact_run_identity_patched", False):
         return
-
     original_install = controller_cls._install_production_wrappers
 
     def install_with_exact_identity(self):
         original_install(self)
         if getattr(self, "_exact_identity_runner_installed", False):
             return
-
         original_run_robot = getattr(self.bot, "run_robot", None)
         if not callable(original_run_robot):
             return
 
         def exact_identity_runner(web_config=None):
             from db_runtime import run_robot_with_exact_identity
-
-            # db_runtime temporarily calls the genuine legacy runner while it
-            # intercepts the production DB connection. Restore it before entry
-            # so the bridge cannot recurse into itself.
             self.bot.run_robot = original_run_robot
             try:
                 return run_robot_with_exact_identity(self.bot, web_config=web_config)
@@ -91,36 +81,31 @@ def _install_exact_run_identity(controller_cls):
 
 
 def _mark_exact_run_ready_for_upload(controller, fallback_ready, topic: str):
-    """Mark the exact DB row created by the current production run READY_FOR_UPLOAD."""
+    """Use exact run identity only; never silently fall back to topic matching."""
     row_id = getattr(controller.bot, "_last_run_row_id", None)
     if row_id is None:
-        return fallback_ready(controller, topic)
+        raise RuntimeError("Exact production run identity is unavailable; refusing topic-based READY_FOR_UPLOAD fallback.")
 
+    import sqlite3
+    import ultimate_bot
+    conn = sqlite3.connect(ultimate_bot.DB_PATH)
     try:
-        import sqlite3
-        import ultimate_bot
-        conn = sqlite3.connect(ultimate_bot.DB_PATH)
-        try:
-            updated = conn.execute(
-                """UPDATE vault
-                   SET video_id='READY_FOR_UPLOAD', status='READY_FOR_UPLOAD', updated_at=CURRENT_TIMESTAMP
-                   WHERE id=?""",
-                (row_id,),
-            ).rowcount
-            conn.commit()
-        finally:
-            conn.close()
-        if updated != 1:
-            raise RuntimeError(f"exact production run row {row_id} was not updated")
-        print(f"   [Final QC] Marked exact production run row {row_id} READY_FOR_UPLOAD.", flush=True)
-        return None
-    except Exception:
-        # Never silently lose the pre-existing fallback behavior.
-        return fallback_ready(controller, topic)
+        updated = conn.execute(
+            """UPDATE vault
+               SET video_id='READY_FOR_UPLOAD', status='READY_FOR_UPLOAD', updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (row_id,),
+        ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if updated != 1:
+        raise RuntimeError(f"exact production run row {row_id} was not updated")
+    print(f"   [Final QC] Marked exact production run row {row_id} READY_FOR_UPLOAD.", flush=True)
+    return None
 
 
 def patch_workflow_qc(bot) -> bool:
-    """Require final artifact + metadata QC before READY_FOR_UPLOAD and upload."""
     try:
         import workflow_runtime
     except Exception as exc:
@@ -138,17 +123,12 @@ def patch_workflow_qc(bot) -> bool:
     def guarded_ready(self, topic):
         video_path = str(getattr(getattr(self, "state", None), "video_path", "") or "")
         validate_final_video(video_path)
-
         script_data = dict(getattr(getattr(self, "state", None), "script_data", {}) or {})
         try:
             from youtube_comment_runtime import _build_clean_metadata, build_pinned_comment
             category = str(getattr(self.bot, "_active_web_config", {}).get("category", "national_global_affairs"))
             genre_cfg = self.bot.CONTENT_CATEGORIES.get(category, self.bot.CONTENT_CATEGORIES["national_global_affairs"])
-            title, description, _tags = _build_clean_metadata(
-                script_data,
-                genre_cfg,
-                getattr(self.bot, "_active_web_config", {}).get("trend_keyword", ""),
-            )
+            title, description, _tags = _build_clean_metadata(script_data, genre_cfg, getattr(self.bot, "_active_web_config", {}).get("trend_keyword", ""))
             comment = build_pinned_comment(script_data, title, genre_cfg.get("label", ""))
         except Exception as exc:
             raise RuntimeError(f"Final metadata QC could not run before READY_FOR_UPLOAD: {type(exc).__name__}: {exc}") from exc
@@ -161,17 +141,7 @@ def patch_workflow_qc(bot) -> bool:
         validate_final_video(video_path)
         validate_final_upload_metadata(title, description, comment)
         print("   [Final QC] Manual-upload gate passed.", flush=True)
-        return original_upload(
-            self,
-            video_path,
-            script_data,
-            title,
-            description,
-            comment,
-            publish_mode,
-            genre_cfg,
-            trend_keyword,
-        )
+        return original_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword)
 
     guarded_ready._final_qc_wrapped = True
     guarded_upload._final_qc_wrapped = True
