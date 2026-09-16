@@ -10,6 +10,6 @@ google-genai>=2.23.0
 huggingface_hub>=0.31.0
 python-dotenv
 tqdm
-moviepy
+moviepy==2.2.1
 requests
 pytrends
