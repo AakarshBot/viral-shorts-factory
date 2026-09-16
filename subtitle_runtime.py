@@ -13,12 +13,49 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
+_WINDOWS_FONT_CANDIDATES = (
+    r"C:\\Windows\\Fonts\\segoeuib.ttf",
+    r"C:\\Windows\\Fonts\\segoeui.ttf",
+    r"C:\\Windows\\Fonts\\arialbd.ttf",
+    r"C:\\Windows\\Fonts\\arial.ttf",
+)
+_LINUX_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+)
+
+
+def _resolve_font_path(font_path: str | None) -> str | None:
+    """Resolve a real scalable font instead of Pillow's tiny bitmap fallback."""
+    candidates = []
+    if font_path:
+        candidates.append(str(font_path))
+    candidates.extend(_WINDOWS_FONT_CANDIDATES)
+    candidates.extend(_LINUX_FONT_CANDIDATES)
+    for candidate in candidates:
+        try:
+            if candidate and os.path.isfile(candidate):
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def _load_font(font_path: str, size: int):
-    try:
-        if font_path and os.path.isfile(font_path):
-            return ImageFont.truetype(font_path, size=size)
-    except Exception:
-        pass
+    """Load a scalable font; never silently downgrade to the tiny default font."""
+    resolved = _resolve_font_path(font_path)
+    if resolved:
+        try:
+            return ImageFont.truetype(resolved, size=max(1, int(size)))
+        except Exception:
+            pass
+    for module_font in ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf"):
+        try:
+            return ImageFont.truetype(module_font, size=max(1, int(size)))
+        except Exception:
+            continue
     return ImageFont.load_default()
 
 
@@ -66,13 +103,13 @@ def _split_lines(words, font, max_width):
 def _fit_layout(words, base_font_size, font_path, max_width, max_lines=2):
     """Use the largest font that keeps captions inside the safe width."""
     size = int(base_font_size)
-    while size >= 44:
+    while size >= 50:
         font = _load_font(font_path, size)
         lines = _split_lines(words, font, max_width)
         if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width + 1 for line in lines):
             return font, lines
         size -= 2
-    font = _load_font(font_path, 44)
+    font = _load_font(font_path, 50)
     return font, _split_lines(words, font, max_width)[:max_lines]
 
 
@@ -93,9 +130,9 @@ def generate_readable_karaoke_clip(
     bg_img_path=None,
     source_type="bg",
 ):
-    """Render large premium captions without a visible subtitle-box border."""
+    """Render very large premium captions without a visible subtitle-box border."""
     width = max(1, int(video_width))
-    height = 300
+    height = 360
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
     words = [_clean_word(item.get("word") if isinstance(item, dict) else item) for item in chunk]
@@ -104,23 +141,25 @@ def generate_readable_karaoke_clip(
         canvas.save(output_path)
         return output_path
 
-    max_text_width = int(width * 0.88)
-    base_font_size = max(72, min(92, int(width * 0.080)))
+    max_text_width = int(width * 0.90)
+    # Deliberately much larger than the previous 72-92px range.
+    base_font_size = max(96, min(124, int(width * 0.108)))
     font, lines = _fit_layout(words, base_font_size, font_path, max_text_width, max_lines=2)
     font_size = getattr(font, "size", base_font_size)
     line_height = int(font_size * 1.05)
-    line_gap = max(8, int(font_size * 0.10))
+    line_gap = max(10, int(font_size * 0.12))
     active_index = _validate_active_index(active_index, len(words))
 
     text_block_h = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
     y = max(12, (height - text_block_h) // 2)
 
-    normal = (244, 246, 248, 255)
-    active = (229, 181, 92, 255)
-    shadow = (0, 0, 0, 190)
+    normal = (242, 244, 246, 255)
+    active = (214, 171, 92, 255)
+    shadow = (0, 0, 0, 205)
 
     flat_index = 0
     space = font.getlength(" ")
+    draw = ImageDraw.Draw(canvas)
     for line in lines:
         widths = [font.getlength(word) for word in line]
         total = sum(widths) + space * max(0, len(line) - 1)
@@ -129,15 +168,13 @@ def generate_readable_karaoke_clip(
             is_active = flat_index == active_index
             fill = active if is_active else normal
 
-            # Soft shadow only: no enclosing box, border, or bright glow.
-            draw = ImageDraw.Draw(canvas)
             draw.text(
-                (x + 4, y + 6),
+                (x + 5, y + 7),
                 word,
                 font=font,
                 fill=shadow,
-                stroke_width=3,
-                stroke_fill=(0, 0, 0, 130),
+                stroke_width=4,
+                stroke_fill=(0, 0, 0, 145),
             )
             draw.text(
                 (x, y),
@@ -145,12 +182,12 @@ def generate_readable_karaoke_clip(
                 font=font,
                 fill=fill,
                 stroke_width=2,
-                stroke_fill=(0, 0, 0, 205),
+                stroke_fill=(0, 0, 0, 220),
             )
             if is_active:
-                underline_y = y + font_size + 6
+                underline_y = y + font_size + 8
                 draw.rounded_rectangle(
-                    (x, underline_y, x + word_width, underline_y + 4),
+                    (x, underline_y, x + word_width, underline_y + 5),
                     radius=2,
                     fill=active,
                 )
@@ -210,13 +247,13 @@ def create_glossy_logo_watermark(logo_path, size=112):
 
 
 def _soften_frame_bars(image_path: str) -> bool:
-    """Replace the legacy solid 40px top/bottom bars with a restrained edge treatment."""
+    """Replace the legacy bars with thicker restrained edge treatment."""
     if not image_path or not os.path.isfile(image_path):
         return False
     try:
         image = Image.open(image_path).convert("RGB")
         width, height = image.size
-        band = min(40, max(8, height // 48))
+        band = min(64, max(14, height // 30))
         if height < band * 3:
             return False
 
@@ -232,8 +269,8 @@ def _soften_frame_bars(image_path: str) -> bool:
         draw = ImageDraw.Draw(overlay)
         draw.rectangle((0, 0, width, band - 1), fill=(8, 14, 24, 42))
         draw.rectangle((0, height - band, width, height - 1), fill=(8, 14, 24, 50))
-        draw.rectangle((0, band - 2, width, band), fill=(205, 166, 89, 135))
-        draw.rectangle((0, height - band - 1, width, height - band + 1), fill=(87, 127, 149, 120))
+        draw.rectangle((0, band - 3, width, band), fill=(205, 166, 89, 135))
+        draw.rectangle((0, height - band - 2, width, height - band + 1), fill=(87, 127, 149, 120))
         image = Image.alpha_composite(edge.convert("RGBA"), overlay).convert("RGB")
         image.save(image_path, "JPEG", quality=95)
         return True
@@ -284,5 +321,5 @@ def patch_subtitle_pipeline(bot):
     bot.create_glossy_logo_watermark = create_glossy_logo_watermark
     _patch_scene_overlay(bot)
     bot._subtitle_pipeline_patch_installed = True
-    print("   [Subtitle Patch] Large clean subtitles + compact channel badge + refined frame overlay installed.", flush=True)
+    print("   [Subtitle Patch] Oversized scalable subtitles + compact channel badge + refined frame overlay installed.", flush=True)
     return bot
