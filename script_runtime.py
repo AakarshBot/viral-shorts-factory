@@ -166,20 +166,28 @@ def validate_content_density(script_data, story_data, format_mode):
     if not scenes:
         return False, "Script became empty after removing performative filler."
     topic_terms = _topic_terms(story_data)
-    all_words = []
+    grounding_words = []
     filler_hits = []
     for index, scene in enumerate(scenes, 1):
         text = str(scene.get("voiceover", "")).strip()
         words = _words(text)
-        all_words.extend(words)
+        grounding_words.extend(words)
+        grounding_words.extend(_words(scene.get("primary_entity", "")))
+        grounding_words.extend(_words(scene.get("specific_search_prompt", "")))
         if len(words) < 3:
             return False, f"Scene {index} contains too little usable narration."
         if _looks_like_filler(text):
             filler_hits.append(index)
     if filler_hits:
         return False, "Performative filler remains in scene(s): " + ", ".join(map(str, filler_hits))
-    if topic_terms and len(set(all_words) & topic_terms) < min(2, len(topic_terms)):
-        return False, "Narration is not sufficiently grounded in the selected topic."
+    if topic_terms:
+        overlap = len(set(grounding_words) & topic_terms)
+        required = 1 if any(
+            set(_words(str(scene.get("primary_entity", "")))) & topic_terms
+            for scene in scenes
+        ) else min(2, len(topic_terms))
+        if overlap < required:
+            return False, "Narration is not sufficiently grounded in the selected topic."
     return True, "Passed story-specific content-density and anti-filler checks"
 
 

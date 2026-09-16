@@ -169,7 +169,8 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
         cricket_cfg = CRICKET_CATEGORIES.get(cricket_name, CRICKET_CATEGORIES["AI-assisted top story in cricket"])
         genre_key = "sports_stories_of_day"
         genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key, {})
-        custom_q = cricket_cfg["query"]
+        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+        custom_q = requested_topic or cricket_cfg["query"]
         custom_rss = cricket_cfg["rss"]
     else:
         genre_key = category or "national_global_affairs"
@@ -179,6 +180,9 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
         custom_q = None
         custom_rss = None
 
+    requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+    if requested_topic:
+        print(f"   [Workflow] Requested topic locked: {requested_topic}", flush=True)
     print(f"   [Workflow] Discovery only: format={fmt}, category={category}, language={language}", flush=True)
     stories = bot.gather_and_filter_stories(
         conn,

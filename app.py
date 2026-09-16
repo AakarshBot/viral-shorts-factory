@@ -300,6 +300,7 @@ def build_config() -> Dict[str, Any]:
             "language": language_key,
             "cricket_pipeline": True,
             "cricket_category": st.session_state.get("cricket_category", "AI-assisted top story in cricket"),
+            "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),
             "language_label": language_label,
         }
 
@@ -391,7 +392,13 @@ with left:
 
     if st.session_state.format_label == "Cricket":
         st.selectbox("Cricket category", list(CRICKET_CATEGORIES.keys()), key="cricket_category")
-        st.caption("Cricket is a dedicated pipeline. The AI-assisted option searches for the strongest cricket story available today.")
+        st.text_input(
+            "Specific cricket topic (optional)",
+            placeholder="e.g. BCCI to suspend Impact Player rule",
+            key="requested_topic",
+            help="When supplied, discovery is locked to this topic instead of selecting any broad cricket story.",
+        )
+        st.caption("Leave the topic blank for AI-assisted broad cricket discovery. Enter a topic to force topic-specific discovery.")
     else:
         options = category_options(FORMAT_OPTIONS[st.session_state.format_label])
         labels = list(options.keys())

@@ -269,6 +269,33 @@ def _apply_sports_niche_bonus(story, target_category):
     return 3.0 if any(term in _text_blob(story) for term in SPORTS_NICHE_TERMS) else 0.0
 
 
+def _requested_topic_pass(story, requested_topic):
+    topic_terms = _tokens(requested_topic)
+    if not topic_terms:
+        return True
+    story_terms = _tokens(_text_blob(story))
+    overlap = len(topic_terms & story_terms)
+    required = 2 if len(topic_terms) >= 3 else 1
+    if overlap >= required:
+        story["requested_topic_overlap"] = overlap
+        return True
+    story["discovery_rejection"] = "Does not match requested topic"
+    story["requested_topic_overlap"] = overlap
+    return False
+
+
+def _cricket_relevance_pass(story, genre_key):
+    if _clean(genre_key) != "sports_stories_of_day":
+        return True
+    story_terms = _tokens(_text_blob(story))
+    if story_terms & {term for term in CRICKET_TERMS if " " not in term}:
+        return True
+    if "test cricket" in _text_blob(story) or "formula 1" in _text_blob(story):
+        return False
+    story["discovery_rejection"] = "Not cricket-relevant"
+    return False
+
+
 @lru_cache(maxsize=1)
 def _india_trend_terms():
     try:
@@ -736,6 +763,20 @@ def patch_story_selection(bot):
             compact.append(story)
 
         config = getattr(bot, "_active_web_config", {}) or {}
+        requested_topic = str(config.get("requested_topic", "") or "").strip()
+        relevance_filtered = []
+        for candidate in compact:
+            if not _cricket_relevance_pass(candidate, genre_key):
+                continue
+            if not _requested_topic_pass(candidate, requested_topic):
+                continue
+            relevance_filtered.append(candidate)
+        if requested_topic or genre_key == "sports_stories_of_day":
+            print(
+                f"   [Discovery Relevance] {len(compact)} intake -> {len(relevance_filtered)} topic/category-relevant candidates",
+                flush=True,
+            )
+        compact = relevance_filtered
         ai_cricket = genre_key == "sports_stories_of_day" and str(config.get("cricket_category", "")) == "AI-assisted top story in cricket"
         ranked = rank_story_candidates(
             compact,
