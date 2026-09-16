@@ -11,7 +11,7 @@ from PIL import Image
 
 ACCENT = "0x40C4FF"
 ACCENT_SOFT = "0x40C4FF@0.72"
-BRANDING_VERSION = "2026-09-16-v4"
+BRANDING_VERSION = "2026-09-16-v5"
 
 
 def _assets(bot):
@@ -50,6 +50,64 @@ def _probe(path: str) -> tuple[int, int, float, int]:
         return 0, 0, 0.0, 0
 
 
+def _artifact_qc(
+    path: str,
+    expected_width: int | None = None,
+    expected_height: int | None = None,
+    expected_duration: float | None = None,
+    expected_audio_count: int | None = None,
+) -> tuple[bool, str]:
+    """Validate the actual rendered MP4 before it is allowed out of the factory."""
+    if not path or not os.path.isfile(path):
+        return False, "rendered video file is missing"
+    try:
+        if os.path.getsize(path) < 10_000:
+            return False, "rendered video file is unexpectedly small"
+    except OSError:
+        return False, "rendered video file size could not be checked"
+
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=index,codec_type,width,height,codec_name",
+                "-show_entries", "format=duration,format_name",
+                "-of", "json", path,
+            ], capture_output=True, text=True, timeout=10, check=False,
+        )
+        if completed.returncode != 0:
+            return False, "ffprobe could not read the rendered video"
+        data = json.loads(completed.stdout or "{}")
+        streams = data.get("streams") or []
+        video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+        audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+        if len(video_streams) != 1:
+            return False, f"expected exactly one video stream, found {len(video_streams)}"
+        if not audio_streams:
+            return False, "final rendered video has no audio stream"
+
+        video = video_streams[0]
+        width = int(video.get("width") or 0)
+        height = int(video.get("height") or 0)
+        duration = float((data.get("format") or {}).get("duration") or 0.0)
+        format_name = str((data.get("format") or {}).get("format_name") or "")
+        if width <= 0 or height <= 0 or duration <= 0:
+            return False, "rendered video has invalid dimensions or duration"
+        if abs((width / height) - (9 / 16)) > 0.015:
+            return False, f"rendered video is not Shorts-shaped: {width}x{height}"
+        if "mp4" not in format_name.lower() and not str(path).lower().endswith(".mp4"):
+            return False, "rendered video is not an MP4 container"
+        if expected_width is not None and expected_height is not None and (width, height) != (expected_width, expected_height):
+            return False, f"rendered geometry changed {expected_width}x{expected_height} -> {width}x{height}"
+        if expected_duration is not None and abs(duration - expected_duration) > 0.15:
+            return False, f"rendered duration changed {expected_duration:.2f}s -> {duration:.2f}s"
+        if expected_audio_count is not None and len(audio_streams) != expected_audio_count:
+            return False, f"audio stream count changed {expected_audio_count} -> {len(audio_streams)}"
+        return True, f"artifact passed: {width}x{height}, {duration:.2f}s, audio_streams={len(audio_streams)}"
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+        return False, f"artifact QC exception: {type(exc).__name__}: {exc}"
+
+
 def _overlay_is_caption_safe(overlay_path: Path, width: int, height: int) -> tuple[bool, str]:
     """Reject full-frame brand overlays that could cover the central subtitle safe area."""
     try:
@@ -70,18 +128,28 @@ def _overlay_is_caption_safe(overlay_path: Path, width: int, height: int) -> tup
 
 
 def apply_branded_finish(bot, video_path: str) -> str:
-    """Add restrained branding while preserving geometry, timing, audio and subtitle readability."""
+    """Add restrained branding while enforcing final rendered-artifact QC."""
     if not video_path or not os.path.isfile(video_path):
-        return video_path
-    logo, overlay = _assets(bot)
-    if not logo.exists() and not overlay.exists():
-        print("   [Branding] No logo/overlay asset found; leaving video unchanged.", flush=True)
         return video_path
 
     source_w, source_h, source_duration, source_audio_count = _probe(video_path)
-    if source_w <= 0 or source_h <= 0 or source_duration <= 0:
-        print("   [Branding] Source video metadata could not be verified; leaving video unchanged.", flush=True)
+    valid, reason = _artifact_qc(
+        video_path,
+        expected_width=source_w or None,
+        expected_height=source_h or None,
+        expected_duration=source_duration or None,
+        expected_audio_count=source_audio_count or None,
+    )
+    if not valid:
+        raise RuntimeError(f"Final render QC failed before branding: {reason}")
+
+    logo, overlay = _assets(bot)
+    if not logo.exists() and not overlay.exists():
+        print(f"   [Branding] No logo/overlay asset found; final artifact QC passed: {reason}", flush=True)
         return video_path
+
+    if source_w <= 0 or source_h <= 0 or source_duration <= 0:
+        raise RuntimeError("Final render QC failed: source video metadata could not be verified")
 
     use_overlay = False
     if overlay.exists():
@@ -127,21 +195,23 @@ def apply_branded_finish(bot, video_path: str) -> str:
     try:
         completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=240)
         if completed.returncode != 0 or not os.path.isfile(output):
-            print(f"   [Branding] FFmpeg finish failed: {completed.stderr[-800:]}", flush=True)
-            return video_path
+            raise RuntimeError(f"FFmpeg branding finish failed: {completed.stderr[-800:]}")
+
         out_w, out_h, out_duration, out_audio_count = _probe(output)
-        if (out_w, out_h) != (source_w, source_h):
-            print(f"   [Branding] QC failed: geometry changed {source_w}x{source_h} -> {out_w}x{out_h}.", flush=True)
+        valid, reason = _artifact_qc(
+            output,
+            expected_width=source_w,
+            expected_height=source_h,
+            expected_duration=source_duration,
+            expected_audio_count=source_audio_count,
+        )
+        if not valid:
             os.remove(output)
-            return video_path
-        if abs(out_duration - source_duration) > 0.15:
-            print(f"   [Branding] QC failed: duration changed {source_duration:.2f}s -> {out_duration:.2f}s.", flush=True)
+            raise RuntimeError(f"Final render QC failed after branding: {reason}")
+        if (out_w, out_h) != (source_w, source_h) or abs(out_duration - source_duration) > 0.15 or out_audio_count != source_audio_count:
             os.remove(output)
-            return video_path
-        if out_audio_count != source_audio_count:
-            print(f"   [Branding] QC failed: audio stream count changed {source_audio_count} -> {out_audio_count}.", flush=True)
-            os.remove(output)
-            return video_path
+            raise RuntimeError("Final render QC failed after branding: geometry, duration or audio changed")
+
         os.replace(output, video_path)
         mode = "overlay" if use_overlay else ("logo" if logo.exists() else "border-only")
         print(
@@ -151,13 +221,13 @@ def apply_branded_finish(bot, video_path: str) -> str:
         )
         return video_path
     except Exception as exc:
-        print(f"   [Branding] Finish failed: {type(exc).__name__}: {exc}", flush=True)
         try:
             if os.path.isfile(output):
                 os.remove(output)
         except OSError:
             pass
-        return video_path
+        print(f"   [Branding] Finish failed: {type(exc).__name__}: {exc}", flush=True)
+        raise
 
 
 def patch_branding_pipeline(bot):
@@ -180,5 +250,5 @@ def patch_branding_pipeline(bot):
     globals_dict["compile_video"] = branded_compile
     bot.compile_video = branded_compile
     bot._branding_pipeline_patch_installed = True
-    print("   [Branding Patch] Branded finishing layer installed with output QC.", flush=True)
+    print("   [Branding Patch] Branded finishing layer installed with final artifact QC.", flush=True)
     return bot
