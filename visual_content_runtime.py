@@ -1,74 +1,13 @@
 """Content-first visual rendering for Shorts.
 
-Every factual scene is rendered with a verified visual. The renderer delegates
-scene classification and deep source searching to visual_runtime and never
-creates a subscription-only outro.
+Every factual scene is rendered with a verified visual. Person scenes now go
+through the single authoritative visual runtime instead of a separate curated
+Commons shortcut, so search scope stays broad and identity QA remains consistent.
 """
 
-import io
 import os
 import re
 from PIL import Image, ImageDraw
-
-
-def _curated_person_asset(bot, seg, video_title, used_urls, used_hashes, visual_runtime):
-    """Try a direct Wikimedia Commons person source before expensive deep QA."""
-    try:
-        from visual_strategy_runtime import classify_scene
-        category = str(seg.get("sport_or_topic_category", "")).lower()
-        visual_type = classify_scene(seg, category)
-    except Exception:
-        visual_type = str(seg.get("visual_type", "GENERAL_CONTEXT")).upper()
-
-    if visual_type != "PERSON":
-        return None
-
-    entity = str(seg.get("primary_entity", "")).strip()
-    if not entity or entity.lower() in {"none", "unknown", "n/a"}:
-        return None
-
-    try:
-        from curated_person_visual_runtime import fetch_person_from_commons
-        data, source_url = fetch_person_from_commons(
-            entity,
-            query=str(seg.get("specific_search_prompt", "")),
-            used_urls=used_urls,
-        )
-        if not data:
-            return None
-
-        try:
-            image_hash = bot.get_image_hash(data)
-        except Exception:
-            import hashlib
-            image_hash = hashlib.sha256(data).hexdigest()
-        if image_hash in used_hashes:
-            return None
-
-        context = visual_runtime._context_fingerprint(
-            str(seg.get("visual_intent", "")),
-            str(seg.get("specific_search_prompt", "")),
-            str(seg.get("voiceover", "")),
-            video_title,
-        )
-        cache_path = visual_runtime.save_to_cache(
-            bot, data, entity, "PERSON", "commons", context
-        )
-        used_hashes.add(image_hash)
-        seg["visual_type"] = "PERSON"
-        seg["visual_verified"] = True
-        seg["visual_source"] = "commons"
-        seg["visual_source_url"] = source_url or ""
-        if cache_path:
-            print(f"   [Visual Cache] Saved curated person asset for '{entity}'.", flush=True)
-        print(
-            f"   [Visual Source] Commons | VERIFIED | tier=STRICT(person) | entity='{entity}' | Gemini calls=0",
-            flush=True,
-        )
-        return Image.open(io.BytesIO(data)).convert("RGB"), False, "commons"
-    except Exception as exc:
-        print(f"   [Curated Person] Direct Commons source unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return None
 
 
 def patch_content_first_visuals(bot):
@@ -95,15 +34,11 @@ def patch_content_first_visuals(bot):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
-            curated = _curated_person_asset(
-                bot, seg, video_title, used_urls, used_hashes, visual_runtime
+            # One visual path only. This deliberately avoids the old curated
+            # person shortcut that narrowed queries to portrait/photo variants.
+            bg_img, used_ai, source_type = visual_runtime._relevant_asset(
+                bot, seg, category, used_urls, used_hashes, video_title
             )
-            if curated is not None:
-                bg_img, used_ai, source_type = curated
-            else:
-                bg_img, used_ai, source_type = visual_runtime._relevant_asset(
-                    bot, seg, category, used_urls, used_hashes, video_title
-                )
 
             ai_count += int(used_ai)
             bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
