@@ -4,6 +4,45 @@ import functools
 import traceback
 
 
+def _install_moviepy_compatibility():
+    """Expose MoviePy v2 classes at the root package for the legacy renderer.
+
+    The renderer still uses ``from moviepy import ...`` while some MoviePy v2
+    builds no longer re-export every class from ``moviepy.__init__``. Import
+    the canonical submodules and add only missing root attributes. This keeps
+    the renderer itself unchanged and works across MoviePy v2 layouts.
+    """
+    try:
+        import moviepy
+        from moviepy.video.VideoClip import ImageClip
+        from moviepy.video.io.VideoFileClip import VideoFileClip
+        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip, concatenate_videoclips
+        from moviepy.audio.io.AudioFileClip import AudioFileClip
+        from moviepy.audio.AudioClip import CompositeAudioClip
+
+        exports = {
+            "ImageClip": ImageClip,
+            "VideoFileClip": VideoFileClip,
+            "CompositeVideoClip": CompositeVideoClip,
+            "concatenate_videoclips": concatenate_videoclips,
+            "AudioFileClip": AudioFileClip,
+            "CompositeAudioClip": CompositeAudioClip,
+        }
+        installed = []
+        for name, value in exports.items():
+            if not hasattr(moviepy, name):
+                setattr(moviepy, name, value)
+                installed.append(name)
+        if installed:
+            print("   [Bindings] MoviePy compatibility exports installed: " + ", ".join(installed), flush=True)
+        else:
+            print("   [Bindings] MoviePy compatibility exports already available.", flush=True)
+        return True
+    except Exception as exc:
+        print(f"   [Bindings] MoviePy compatibility bridge unavailable: {type(exc).__name__}: {exc}", flush=True)
+        return False
+
+
 def _wrap_trend_signal(bot):
     current = getattr(bot, "get_trend_signal_bonus", None)
     if current is None or getattr(current, "_cached_trend_signal", False): return current
@@ -130,6 +169,7 @@ def bind_dashboard_patches(bot):
     original_compile_video = getattr(bot, "compile_video", None)
     if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
         def compile_video_with_traceback(*args, **kwargs):
+            _install_moviepy_compatibility()
             try: return original_compile_video(*args, **kwargs)
             except BaseException:
                 print("   [Bindings] FULL TRACEBACK FROM compile_video:", flush=True)
