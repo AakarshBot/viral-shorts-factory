@@ -50,6 +50,19 @@ def _looks_like_filler(text):
     return any(re.fullmatch(pattern, value, flags=re.IGNORECASE) for pattern in _GENERIC_FILLER)
 
 
+def _clean_titles(script_data):
+    """Titles should win on relevance/CTR, not by carrying a mandatory hashtag."""
+    titles = script_data.get("titles")
+    if not isinstance(titles, list):
+        return
+    cleaned = []
+    for title in titles:
+        value = re.sub(r"\s*#shorts\b", "", str(title or ""), flags=re.IGNORECASE).strip()
+        value = re.sub(r"\s{2,}", " ", value)
+        cleaned.append(value)
+    script_data["titles"] = cleaned
+
+
 def clean_script_data(script_data, story_data, format_mode):
     if not isinstance(script_data, dict): return script_data, {"removed_cta": False, "removed_scenes": 0, "changed_scenes": 0}
     scenes = script_data.get("script")
@@ -70,6 +83,7 @@ def clean_script_data(script_data, story_data, format_mode):
         if duplicate: removed_scenes += 1
         else: deduped.append(scene)
     result = dict(script_data); result["script"] = deduped; result["cta_required"] = False; result["script_focus"] = "information_dense_storytelling"
+    _clean_titles(result)
     return result, {"removed_cta": removed_cta, "removed_scenes": removed_scenes, "changed_scenes": changed_scenes}
 
 
