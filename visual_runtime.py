@@ -6,9 +6,12 @@ Rules:
 - Real people/events/products are never replaced by fabricated AI imagery.
 - AI imagery is reserved for genuinely conceptual/process/context scenes.
 - A bad or unverified image is rejected, never silently used.
+- Previously verified entity assets are cached and reused before network/QA work.
 """
 import asyncio
+import hashlib
 import io
+import json
 import os
 import re
 import threading
@@ -17,9 +20,76 @@ from PIL import Image, ImageDraw
 
 VISUAL_FETCH_TIMEOUT_SECONDS = int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "15"))
 VISUAL_MAX_SEARCH_QUERIES = int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "28"))
+VISUAL_CACHE_MAX_AGE_SECONDS = int(os.getenv("VISUAL_CACHE_MAX_AGE_SECONDS", str(7 * 86400)))
 
 REAL_ENTITY_TYPES = {"PERSON", "EVENT", "PRODUCT", "LOCATION", "QUOTE", "DOCUMENT"}
 AI_ALLOWED_TYPES = {"PROCESS", "CONCEPT", "GENERAL_CONTEXT"}
+
+
+def _cache_root(bot):
+    root = getattr(bot, "ASSET_CACHE_DIR", None) or os.getenv("ASSET_CACHE_DIR")
+    if not root:
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "asset_cache")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _cache_key(entity, visual_type):
+    raw = f"{str(entity).strip().lower()}::{str(visual_type).strip().upper()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+
+
+def get_cached_asset(bot, entity, visual_type):
+    """Return a previously verified entity/type asset, or (None, None)."""
+    if not entity or str(entity).strip().lower() in {"none", "unknown", "n/a"}:
+        return None, None
+    key = _cache_key(entity, visual_type)
+    root = _cache_root(bot)
+    image_path = os.path.join(root, f"{key}.jpg")
+    meta_path = os.path.join(root, f"{key}.json")
+    try:
+        if not os.path.exists(image_path) or not os.path.exists(meta_path):
+            return None, None
+        if (os.path.getmtime(image_path) < 1) or (os.path.getmtime(image_path) < __import__("time").time() - VISUAL_CACHE_MAX_AGE_SECONDS):
+            return None, None
+        with open(meta_path, "r", encoding="utf-8") as fh:
+            meta = json.load(fh)
+        if meta.get("entity", "").strip().lower() != str(entity).strip().lower():
+            return None, None
+        if str(meta.get("visual_type", "")).upper() != str(visual_type).upper():
+            return None, None
+        with open(image_path, "rb") as fh:
+            data = fh.read()
+        if not _local_visual_sanity(data):
+            return None, None
+        return Image.open(io.BytesIO(data)).convert("RGB"), image_path
+    except Exception as exc:
+        print(f"   [Visual Cache] Read failed: {type(exc).__name__}: {exc}", flush=True)
+        return None, None
+
+
+def save_to_cache(bot, img_bytes, entity, visual_type, source_type):
+    """Persist only an already strictly verified visual asset."""
+    if not img_bytes or not entity:
+        return None
+    key = _cache_key(entity, visual_type)
+    root = _cache_root(bot)
+    image_path = os.path.join(root, f"{key}.jpg")
+    meta_path = os.path.join(root, f"{key}.json")
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        img.save(image_path, "JPEG", quality=95)
+        with open(meta_path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "entity": str(entity).strip(),
+                "visual_type": str(visual_type).upper(),
+                "source_type": str(source_type),
+                "verified": True,
+            }, fh, ensure_ascii=False, indent=2)
+        return image_path
+    except Exception as exc:
+        print(f"   [Visual Cache] Write failed: {type(exc).__name__}: {exc}", flush=True)
+        return None
 
 
 def _entity_context(seg, video_title=""):
@@ -121,6 +191,21 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
     queries, visual_type = _build_search_variants(seg, video_title)
     print(f"   [Visual Strategy] entity='{entity}' type={visual_type} deep_searches={len(queries)}", flush=True)
 
+    # Cache is checked before any network source or Gemini QA call. Only assets
+    # that previously passed strict QA are written to this cache.
+    cached_img, cache_path = get_cached_asset(bot, entity, visual_type)
+    if cached_img is not None:
+        cached_bytes = io.BytesIO(); cached_img.save(cached_bytes, format="JPEG", quality=95)
+        cached_data = cached_bytes.getvalue()
+        try:
+            img_hash = bot.get_image_hash(cached_data)
+        except Exception:
+            img_hash = hashlib.sha256(cached_data).hexdigest()
+        if img_hash not in used_hashes:
+            used_hashes.add(img_hash)
+            print(f"   [Visual Cache] VERIFIED cache hit | entity='{entity}' type={visual_type} | path='{cache_path}' | Gemini calls=0", flush=True)
+            return cached_img, False, "cached"
+
     def try_bytes(data, source, query):
         if not data:
             return None
@@ -131,7 +216,10 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             if not _strict_gate(bot, data, seg, video_title):
                 return None
             used_hashes.add(h)
+            cache_path = save_to_cache(bot, data, entity, visual_type, source)
             print(f"   [Visual Source] {source} | VERIFIED | type={visual_type} | query='{query}'", flush=True)
+            if cache_path:
+                print(f"   [Visual Cache] Saved verified asset for entity='{entity}' type={visual_type}.", flush=True)
             return Image.open(io.BytesIO(data)).convert("RGB"), False, source
         except Exception as exc:
             print(f"   [Visual Source] {source} | candidate rejected: {exc}", flush=True)
@@ -191,8 +279,20 @@ async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"
     width, height = 1080, 1920; target_size = (width, height)
     scenes = script_data.get("script", [])
     if not scenes: raise RuntimeError("Visual pipeline received an empty script.")
+
+    # Reset the per-video QA counters once, then reset the scene budget before
+    # each scene. This keeps usage visible and bounded.
+    try:
+        from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene, get_visual_qa_calls_used
+        reset_visual_qa_video_budget()
+    except Exception:
+        start_visual_qa_scene = None
+        get_visual_qa_calls_used = lambda: 0
+
     font_choice = language_cfg.get("font"); packages = [None] * len(scenes); used_urls, used_hashes = set(), set(); ai_count = 0
     for idx, seg in enumerate(scenes):
+        if start_visual_qa_scene:
+            start_visual_qa_scene()
         video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
         print(f"   [Visual Pipeline] Scene {idx + 1}/{len(scenes)} starting...", flush=True)
         category = str(seg.get("sport_or_topic_category", "")).lower()
@@ -213,8 +313,16 @@ async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"
         rendered.convert("RGB").save(img_path, "JPEG", quality=95)
         packages[idx] = [{"image": img_path, "text": "" if (format_mode == "top5" or idx == 0) else seg.get("voiceover", ""), "ai_generated": used_ai, "source_type": source_type}]
         seg["visual_verified"] = True; seg["visual_source"] = source_type
-    script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2); script_data["visual_coverage"] = 1.0; script_data["visuals_verified"] = True
+
+    script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2)
+    script_data["visual_coverage"] = 1.0
+    script_data["visuals_verified"] = True
+    try:
+        script_data["gemini_qa_calls_used"] = get_visual_qa_calls_used()
+    except Exception:
+        script_data["gemini_qa_calls_used"] = 0
     print(f"   [+] Visual QA complete: {len(scenes)}/{len(scenes)} slides have verified relevant visuals.", flush=True)
+    print(f"   [Visual QA] Gemini calls used for video: {script_data['gemini_qa_calls_used']}", flush=True)
     return packages
 
 
