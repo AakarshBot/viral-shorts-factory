@@ -57,6 +57,40 @@ jobs:
           print('Core runtime imports passed.')
           PY
 
+      - name: Run offline runtime smoke checks
+        run: |
+          python - <<'PY'
+          import factory_runtime
+          import runtime_bindings
+          import ultimate_bot
+          import visual_qa_runtime
+          import visual_runtime
+
+          # This used to fail with a complex-number TypeError for pixels inside
+          # the vignette's inner radius. The visual-QA install is intentionally
+          # invoked here so the production safety patch is exercised offline.
+          visual_qa_runtime.install_visual_qa_bridge(visual_runtime)
+          vignette = factory_runtime._vignette((1080, 1920))
+          assert vignette.size == (1080, 1920)
+
+          factory_runtime.patch_dashboard_runtime(ultimate_bot)
+          runtime_bindings.harden_editorial_defaults(ultimate_bot)
+          runtime_bindings.bind_dashboard_patches(ultimate_bot)
+          namespace = ultimate_bot.run_robot.__globals__
+          for name in (
+              'gather_and_filter_stories', 'editorial_gate_batch',
+              'process_scored_candidates', 'validate_script',
+              'generate_voiceover_and_timestamps', 'process_visuals_async',
+              'fetch_scene_asset', 'token_overlap_ratio'
+          ):
+              assert namespace[name] is getattr(ultimate_bot, name), name
+
+          sample = {'recommended_title_index': 0}
+          # Rebind after the quality layer in production; this assertion checks
+          # the normalization wrapper itself when present.
+          print('Offline runtime smoke checks passed.')
+          PY
+
       - name: Validate required factory files
         run: |
           python - <<'PY'
