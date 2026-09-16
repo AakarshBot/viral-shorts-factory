@@ -44,7 +44,6 @@ def _local_visual_sanity(img_bytes):
 
 
 def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
-    """Fallback verifier. visual_qa_runtime normally replaces this at startup."""
     try:
         from visual_qa_runtime import strict_gemini_check
         return strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key)
@@ -60,16 +59,13 @@ def _strict_gate(bot, img_bytes, seg, video_title=""):
     if not entity or entity.lower() in {"none", "unknown", "n/a"}:
         print("   [Visual QA] REJECTED: scene has no specific primary_entity.", flush=True)
         return False
-    result = _strict_gemini_check(
-        img_bytes, entity, intent, prompt, voice, title,
-        os.getenv("GEMINI_API_KEY"),
-    )
+    result = _strict_gemini_check(img_bytes, entity, intent, prompt, voice, title, os.getenv("GEMINI_API_KEY"))
     if result is True:
         return True
     if result is False:
         print(f"   [Visual QA] REJECTED: image does not match '{entity}' / '{intent}'.", flush=True)
-        return False
-    print("   [Visual QA] REJECTED: semantic relevance could not be verified.", flush=True)
+    else:
+        print("   [Visual QA] REJECTED: semantic relevance could not be verified.", flush=True)
     return False
 
 
@@ -87,16 +83,13 @@ def _build_search_variants(seg, video_title=""):
 
 def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETCH_TIMEOUT_SECONDS):
     result = {"value": None, "error": None}
-
     def worker():
         try:
             result["value"] = fetcher(*args)
         except Exception as exc:
             result["error"] = exc
-
     thread = threading.Thread(target=worker, name=f"visual-{source.lower()}-fetch", daemon=True)
-    thread.start()
-    thread.join(timeout)
+    thread.start(); thread.join(timeout)
     if thread.is_alive():
         print(f"   [Visual Source] {source} | timed out after {timeout}s | query='{query}'", flush=True)
         return None
@@ -107,21 +100,15 @@ def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETC
 
 
 def _source_plan(bot, visual_type, category):
-    editorial = any(k in f"{category} {visual_type}".lower() for k in (
-        "sport", "football", "cricket", "news", "politics", "entertainment", "movie", "event"
-    ))
+    editorial = any(k in f"{category} {visual_type}".lower() for k in ("sport", "football", "cricket", "news", "politics", "entertainment", "movie", "event"))
     plan = []
     if visual_type == "PERSON":
-        plan += [("Wikipedia", getattr(bot, "fetch_wiki_person_image", None)),
-                 ("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
+        plan += [("Wikipedia", getattr(bot, "fetch_wiki_person_image", None)), ("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
     elif visual_type in {"EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
         plan += [("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
     if editorial:
-        # DDG is deliberately early for factual/editorial subjects because it can
-        # discover actual event imagery that stock libraries cannot.
         plan += [("DDG", getattr(bot, "fetch_duckduckgo", None))]
-    plan += [("Pexels", getattr(bot, "fetch_pexels", None)),
-             ("Unsplash", getattr(bot, "fetch_unsplash", None))]
+    plan += [("Pexels", getattr(bot, "fetch_pexels", None)), ("Unsplash", getattr(bot, "fetch_unsplash", None))]
     if not editorial:
         plan += [("DDG", getattr(bot, "fetch_duckduckgo", None))]
     return [(name, fn) for name, fn in plan if callable(fn)]
@@ -131,13 +118,8 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
     entity = str(seg.get("primary_entity", "")).strip()
     if not entity or entity.lower() in {"none", "unknown", "n/a"}:
         raise RuntimeError("Visual pipeline requires a specific primary_entity for every scene.")
-
     queries, visual_type = _build_search_variants(seg, video_title)
-    print(
-        f"   [Visual Strategy] entity='{entity}' type={visual_type} "
-        f"deep_searches={len(queries)}",
-        flush=True,
-    )
+    print(f"   [Visual Strategy] entity='{entity}' type={visual_type} deep_searches={len(queries)}", flush=True)
 
     def try_bytes(data, source, query):
         if not data:
@@ -155,23 +137,15 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             print(f"   [Visual Source] {source} | candidate rejected: {exc}", flush=True)
             return None
 
-    # Search progressively harder. We do not stop because one provider or one
-    # query failed; every query is allowed to try the complete source ladder.
     for query_index, query in enumerate(queries, 1):
         print(f"   [Visual Search] {query_index}/{len(queries)} | '{query}'", flush=True)
         for name, fetcher in _source_plan(bot, visual_type, category):
-            if name == "Wikipedia":
-                args = (entity, used_urls, query, video_title)
-            else:
-                args = (query, used_urls, query, video_title)
+            args = (entity, used_urls, query, video_title) if name == "Wikipedia" else (query, used_urls, query, video_title)
             data = _call_fetcher_with_timeout(fetcher, args, name, query)
             result = try_bytes(data, name, query)
             if result:
                 return result
 
-    # AI is NOT a substitute for real evidence. It is only allowed for scenes
-    # whose visual meaning is conceptual/process/contextual rather than a claim
-    # that a specific real person/event/product existed in that exact form.
     if visual_type in AI_ALLOWED_TYPES:
         ai_prompts = [
             f"Photorealistic documentary illustration of {entity}. {seg.get('visual_intent','')}. {seg.get('voiceover','')[:220]}",
@@ -180,50 +154,33 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
         ]
         for ai_prompt in ai_prompts:
             print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{ai_prompt[:160]}'", flush=True)
-            ai = _call_fetcher_with_timeout(
-                bot.fetch_hf_ai_image, (ai_prompt,), "HF-AI", ai_prompt
-            )
+            ai = _call_fetcher_with_timeout(bot.fetch_hf_ai_image, (ai_prompt,), "HF-AI", ai_prompt)
             if ai is None:
                 continue
             try:
-                buf = io.BytesIO()
-                ai.convert("RGB").save(buf, format="JPEG", quality=95)
-                data = buf.getvalue()
-                result = try_bytes(data, "AI-generated", ai_prompt)
+                buf = io.BytesIO(); ai.convert("RGB").save(buf, format="JPEG", quality=95)
+                result = try_bytes(buf.getvalue(), "AI-generated", ai_prompt)
                 if result:
                     return result[0], True, "AI-generated"
             except Exception as exc:
                 print(f"   [Visual Source] AI candidate rejected: {exc}", flush=True)
 
-    # This is intentionally the final failure condition. The factory has already
-    # searched deeply; it must never publish an unverified or misleading visual.
-    raise RuntimeError(
-        f"No strictly relevant visual could be verified for '{entity}' after "
-        f"{len(queries)} deep searches (visual_type={visual_type})."
-    )
+    raise RuntimeError(f"No strictly relevant visual could be verified for '{entity}' after {len(queries)} deep searches (visual_type={visual_type}).")
 
 
 def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=None, accent=None):
-    """Image-backed title card. It never becomes a flat placeholder slide."""
     bg = bg_img.convert("RGBA").resize((1080, 1920), Image.Resampling.LANCZOS)
-    overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0)); draw = ImageDraw.Draw(overlay)
     accent = accent or bot.PALETTE.get("accent_primary", (0, 191, 255))
     draw.rectangle([0, 0, 1080, 42], fill=accent + (230,))
     draw.rounded_rectangle([55, 420, 1025, 1500], radius=40, fill=(5, 8, 16, 205), outline=accent + (210,), width=3)
     font, lines = bot.fit_text_in_box(title_text, font_choice, 860, 650, start_size=78)
     y = 620
     for line in lines:
-        bb = draw.textbbox((0, 0), line, font=font)
-        x = (1080 - (bb[2] - bb[0])) / 2
-        draw.text((x + 4, y + 4), line, font=font, fill=(0, 0, 0, 220))
-        draw.text((x, y), line, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0, 230))
-        y += (bb[3] - bb[1]) + 18
+        bb = draw.textbbox((0, 0), line, font=font); x = (1080 - (bb[2] - bb[0])) / 2
+        draw.text((x + 4, y + 4), line, font=font, fill=(0, 0, 0, 220)); draw.text((x, y), line, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0, 230)); y += (bb[3] - bb[1]) + 18
     if subtitle_text:
-        sub_font = bot.get_bold_font(52, font_choice)
-        bb = draw.textbbox((0, 0), subtitle_text, font=sub_font)
-        x = (1080 - (bb[2] - bb[0])) / 2
-        y = 1280
+        sub_font = bot.get_bold_font(52, font_choice); bb = draw.textbbox((0, 0), subtitle_text, font=sub_font); x = (1080 - (bb[2] - bb[0])) / 2; y = 1280
         draw.rounded_rectangle([x - 30, y - 18, x + bb[2] - bb[0] + 30, y + bb[3] - bb[1] + 25], radius=30, fill=(0, 0, 0, 220), outline=accent + (220,), width=2)
         draw.text((x, y), subtitle_text, font=sub_font, fill=accent)
     return Image.alpha_composite(bg, overlay)
@@ -231,55 +188,45 @@ def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=N
 
 async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"):
     print("\n🎨 Sourcing strictly relevant visuals for every Shorts slide...", flush=True)
-    width, height = 1080, 1920
-    target_size = (width, height)
+    width, height = 1080, 1920; target_size = (width, height)
     scenes = script_data.get("script", [])
-    if not scenes:
-        raise RuntimeError("Visual pipeline received an empty script.")
-
-    font_choice = language_cfg.get("font")
-    packages = [None] * len(scenes)
-    used_urls, used_hashes = set(), set()
-    ai_count = 0
-
+    if not scenes: raise RuntimeError("Visual pipeline received an empty script.")
+    font_choice = language_cfg.get("font"); packages = [None] * len(scenes); used_urls, used_hashes = set(), set(); ai_count = 0
     for idx, seg in enumerate(scenes):
         video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
         print(f"   [Visual Pipeline] Scene {idx + 1}/{len(scenes)} starting...", flush=True)
         category = str(seg.get("sport_or_topic_category", "")).lower()
-        bg_img, used_ai, source_type = _relevant_asset(
-            bot, seg, category, used_urls, used_hashes, video_title
-        )
-        ai_count += int(used_ai)
-        bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
+        bg_img, used_ai, source_type = _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title)
+        ai_count += int(used_ai); bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
         img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
-
-        # Every scene remains factual. There is no subscription-only outro.
         if format_mode == "top5" and idx == 0:
             rendered = _render_image_slide(bot, bg_img, video_title or seg.get("voiceover", "Top 5"), "TODAY'S TOP 5", font_choice)
         elif format_mode == "top5":
             clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", str(seg.get("voiceover", "")), flags=re.IGNORECASE).strip()
             rendered = bot.render_top5_card(bg_img, max(1, 6 - idx), 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
         elif idx == 0:
-            rendered = bot.render_hook_card(bot=bot, bg_img=bg_img, text=seg.get("voiceover", ""), font_choice=font_choice) if False else bot.render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice)
+            rendered = bot.render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice)
         else:
-            overlay = Image.new("RGBA", target_size, (0, 0, 0, 0))
-            draw = ImageDraw.Draw(overlay)
-            draw.rectangle([0, 0, width, 40], fill=bot.PALETTE["accent_primary"] + (200,))
-            draw.rectangle([0, height - 40, width, height], fill=bot.PALETTE["accent_secondary"] + (200,))
+            overlay = Image.new("RGBA", target_size, (0, 0, 0, 0)); draw = ImageDraw.Draw(overlay)
+            draw.rectangle([0, 0, width, 40], fill=bot.PALETTE["accent_primary"] + (200,)); draw.rectangle([0, height - 40, width, height], fill=bot.PALETTE["accent_secondary"] + (200,))
             rendered = Image.alpha_composite(bg_img, overlay)
-
         rendered.convert("RGB").save(img_path, "JPEG", quality=95)
-        packages[idx] = [{
-            "image": img_path,
-            "text": "" if (format_mode == "top5" or idx == 0) else seg.get("voiceover", ""),
-            "ai_generated": used_ai,
-            "source_type": source_type,
-        }]
-        seg["visual_verified"] = True
-        seg["visual_source"] = source_type
-
-    script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2)
-    script_data["visual_coverage"] = 1.0
-    script_data["visuals_verified"] = True
+        packages[idx] = [{"image": img_path, "text": "" if (format_mode == "top5" or idx == 0) else seg.get("voiceover", ""), "ai_generated": used_ai, "source_type": source_type}]
+        seg["visual_verified"] = True; seg["visual_source"] = source_type
+    script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2); script_data["visual_coverage"] = 1.0; script_data["visuals_verified"] = True
     print(f"   [+] Visual QA complete: {len(scenes)}/{len(scenes)} slides have verified relevant visuals.", flush=True)
     return packages
+
+
+def patch_visual_pipeline(bot):
+    """Bind the strict visual renderer to the legacy bot instance."""
+    current = getattr(bot, "process_visuals_async", None)
+    if getattr(current, "_strict_visual_bound", False):
+        return current
+
+    async def process_visuals_async(script_data, language_cfg, format_mode="regular"):
+        return await _process_visuals(bot, script_data, language_cfg, format_mode)
+
+    process_visuals_async._strict_visual_bound = True
+    bot.process_visuals_async = process_visuals_async
+    return process_visuals_async
