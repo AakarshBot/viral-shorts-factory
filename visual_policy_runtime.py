@@ -1,8 +1,10 @@
 """Small runtime-only visual policy patches.
 
-Keeps the existing visual sourcing/render pipeline intact while removing the
-opaque hook/outro cards from non-Top-5 formats. Top-5 card behavior is kept.
-Also limits repeated visual subjects to two uses per production run.
+Keeps the existing visual sourcing/render pipeline intact while:
+- removing opaque hook/outro cards from non-Top-5 formats;
+- limiting the same visual subject/search term to two scene uses per run;
+- simplifying image search to the clean primary visual subject, with a
+  headline-derived fallback only when the primary subject yields nothing.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 _CONTEXT = threading.local()
 _INSTALLED = False
+_SIMPLE_SEARCH_INSTALLED = False
 _SUBJECT_LOCK = threading.Lock()
 _SUBJECT_RUNS = {}
 
@@ -46,8 +49,111 @@ def _font(bot, size, font_choice=None):
     return ImageFont.load_default()
 
 
+def _clean_search_subject(value):
+    """Reduce a visual entity/query to the smallest useful search subject."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-:;|\"'")
+    if not text:
+        return ""
+
+    # Remove common prompt/query labels that are not part of the subject.
+    text = re.sub(
+        r"^(?:primary\s+entity|visual\s+subject|subject|search\s+term|keyword)\s*[:=-]\s*",
+        "",
+        text,
+        flags=re.I,
+    ).strip()
+
+    # Possessive scene descriptions are noise for image search:
+    # "Sachin Tendulkar's best innings" -> "Sachin Tendulkar".
+    text = re.split(r"(?:'s|’s)\s+", text, maxsplit=1, flags=re.I)[0].strip()
+
+    # Strip common trailing search noise while preserving the underlying name.
+    text = re.sub(
+        r"\s+(?:official|official\s+photo|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|best\s+innings|latest\s+update|latest\s+news|breaking\s+news|photo|image)\s*$",
+        "",
+        text,
+        flags=re.I,
+    ).strip(" ,.-:;|\"'")
+
+    return text
+
+
+def _headline_fallback(video_title):
+    """Pick one compact subject from a headline when a scene has no usable entity."""
+    text = _clean_search_subject(video_title)
+    if not text:
+        return ""
+
+    stop = {
+        "the", "a", "an", "and", "or", "but", "for", "with", "from", "into", "after", "before",
+        "over", "under", "this", "that", "these", "those", "here", "there", "why", "how", "what",
+        "when", "where", "who", "will", "would", "could", "should", "just", "now", "today", "latest",
+        "breaking", "news", "update", "updates", "story", "stories", "report", "reports",
+    }
+    words = [w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9&./'-]*", text) if w.lower() not in stop]
+    if not words:
+        return ""
+
+    # Prefer a short proper-name-like chunk; otherwise use the first meaningful keyword.
+    for length in (3, 2):
+        for i in range(max(1, len(words) - length + 1)):
+            chunk = " ".join(words[i:i + length])
+            if any(c.isupper() for c in chunk if c.isalpha()):
+                return _clean_search_subject(chunk)
+    return _clean_search_subject(words[0])
+
+
+def _simple_build_deep_queries(seg, video_title="", visual_type=None):
+    """Build intentionally simple search queries.
+
+    The search subject is the script's primary_entity and nothing else. A title
+    keyword is only a fallback when the scene lacks a usable primary_entity.
+    There is no scene-action, intent, category, or title-stacking query here.
+    """
+    entity = _clean_search_subject(seg.get("primary_entity", ""))
+    try:
+        from visual_strategy_runtime import classify_scene, VISUAL_TYPES
+        category = str(seg.get("sport_or_topic_category", "") or "")
+        resolved_type = visual_type or classify_scene(seg, category)
+        if resolved_type not in VISUAL_TYPES:
+            resolved_type = "GENERAL_CONTEXT"
+    except Exception:
+        resolved_type = visual_type or "GENERAL_CONTEXT"
+
+    queries = []
+    if entity and entity.lower() not in {"none", "unknown", "n/a"}:
+        queries.append(entity)
+
+    if not queries:
+        fallback = _headline_fallback(video_title)
+        if fallback:
+            queries.append(fallback)
+
+    # Do not issue more than one distinct search term per scene. The subject
+    # repeat wrapper below controls how many scenes may reuse the same term.
+    return queries[:1], resolved_type
+
+
+def _install_simple_search_policy():
+    global _SIMPLE_SEARCH_INSTALLED
+    if _SIMPLE_SEARCH_INSTALLED:
+        return True
+    try:
+        import visual_strategy_runtime
+        current = getattr(visual_strategy_runtime, "build_deep_queries", None)
+        if current and not getattr(current, "_simple_search_bound", False):
+            _simple_build_deep_queries._simple_search_bound = True
+            visual_strategy_runtime.build_deep_queries = _simple_build_deep_queries
+            _SIMPLE_SEARCH_INSTALLED = True
+            print("   [Visual Policy] Simple visual search installed: primary subject only; headline fallback when missing.", flush=True)
+            return True
+    except Exception as exc:
+        print(f"   [Visual Policy] Simple search unavailable: {type(exc).__name__}: {exc}", flush=True)
+    return False
+
+
 def _scene_fallback_subject(seg):
-    """Create a contextual search subject when the same entity has already been used twice."""
+    """Create a compact fallback term after a subject has already been used twice."""
     try:
         from visual_strategy_runtime import _scene_phrase
         phrase = str(_scene_phrase(seg) or "").strip()
@@ -55,8 +161,7 @@ def _scene_fallback_subject(seg):
         phrase = ""
     if not phrase:
         phrase = str(seg.get("specific_search_prompt", "") or "").strip()
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", phrase)
-    return " ".join(words[:8]).strip() or "documentary context"
+    return _clean_search_subject(phrase)
 
 
 def _subject_limit_wrapper(original):
@@ -64,33 +169,30 @@ def _subject_limit_wrapper(original):
         return original
 
     def limited_relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
-        entity = str(seg.get("primary_entity", "") or "").strip()
+        entity = _clean_search_subject(seg.get("primary_entity", "") or "")
         key = re.sub(r"\s+", " ", entity.lower()).strip()
         run_key = id(used_hashes)
+        chosen_seg = seg
         if key:
             with _SUBJECT_LOCK:
                 run_counts = _SUBJECT_RUNS.setdefault(run_key, defaultdict(int))
                 count = run_counts[key]
                 if count < 2:
                     run_counts[key] += 1
-                    chosen_seg = seg
                 else:
-                    chosen_seg = dict(seg)
-                    chosen_seg["primary_entity"] = _scene_fallback_subject(seg)
-                    chosen_seg["visual_type"] = "GENERAL_CONTEXT"
-                    chosen_seg["visual_intent"] = "documentary context"
-                    chosen_seg["specific_search_prompt"] = chosen_seg["primary_entity"]
-                    # Mark the fallback as a separate contextual subject so the
-                    # same entity can be mentioned in the narration without
-                    # forcing the image search back onto it.
-                    chosen_seg["subject_repeat_limited"] = True
-        else:
-            chosen_seg = seg
+                    fallback = _scene_fallback_subject(seg)
+                    if fallback and fallback.lower() != key:
+                        chosen_seg = dict(seg)
+                        chosen_seg["primary_entity"] = fallback
+                        chosen_seg["visual_type"] = "GENERAL_CONTEXT"
+                        chosen_seg["visual_intent"] = "documentary context"
+                        chosen_seg["specific_search_prompt"] = fallback
+                    # If no fallback exists, retain the original subject. The
+                    # underlying image-hash gate still prevents the same image.
 
         try:
             return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
         finally:
-            # Keep memory bounded; each run's hash-set is unique.
             with _SUBJECT_LOCK:
                 if len(_SUBJECT_RUNS) > 32:
                     oldest_key = next(iter(_SUBJECT_RUNS))
@@ -107,7 +209,7 @@ def _install_subject_limit():
         current = getattr(visual_runtime, "_relevant_asset", None)
         if current and not getattr(current, "_subject_limit_bound", False):
             visual_runtime._relevant_asset = _subject_limit_wrapper(current)
-            print("   [Visual Policy] Subject repeat limit installed: max two uses per entity/run.", flush=True)
+            print("   [Visual Policy] Subject repeat limit installed: max two primary-subject uses per run.", flush=True)
             return True
     except Exception as exc:
         print(f"   [Visual Policy] Subject limit unavailable: {type(exc).__name__}: {exc}", flush=True)
@@ -115,8 +217,9 @@ def _install_subject_limit():
 
 
 def install_visual_card_policy(bot=None):
-    """Patch the legacy card renderers once, without replacing the visual pipeline."""
+    """Patch the legacy card renderers and visual search policy once."""
     global _INSTALLED
+    _install_simple_search_policy()
     if _INSTALLED:
         _install_subject_limit()
         return True
@@ -132,7 +235,6 @@ def install_visual_card_policy(bot=None):
         original_hook = namespace.get("render_hook_card")
         if callable(original_hook) and not getattr(original_hook, "_qc_hook_passthrough", False):
             def render_hook_card_no_card(bg_img, hook_text, width=1080, height=1920, font_choice=None):
-                # Non-Top-5 first frames simply reveal the fetched image.
                 return bg_img.convert("RGBA")
             render_hook_card_no_card._qc_hook_passthrough = True
             namespace["render_hook_card"] = render_hook_card_no_card
