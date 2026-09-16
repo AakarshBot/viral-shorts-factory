@@ -11,13 +11,7 @@ _VISUAL_CACHE_STATE = threading.local()
 
 
 def _install_moviepy_compatibility():
-    """Expose MoviePy v2 classes at the root package for the legacy renderer.
-
-    The renderer still uses ``from moviepy import ...`` while some MoviePy v2
-    builds no longer re-export every class from ``moviepy.__init__``. Import
-    the canonical submodules and add only missing root attributes. This keeps
-    the renderer itself unchanged and works across MoviePy v2 layouts.
-    """
+    """Expose MoviePy v2 classes at the root package for the legacy renderer."""
     try:
         import moviepy
         from moviepy.video.VideoClip import ImageClip
@@ -50,15 +44,7 @@ def _install_moviepy_compatibility():
 
 
 def _install_visual_cache_safety():
-    """Cache only assets that actually passed the visual verification gate.
-
-    The legacy visual runtime calls save_to_cache() both for genuinely accepted
-    assets and for the best-available soft fallback. The old implementation
-    marked both as verified. This wrapper records the result of _strict_gate()
-    and permits a cache write only after an accepted result. A version marker
-    also invalidates older cache entries that may have been created by the
-    unsafe implementation.
-    """
+    """Cache only assets that actually passed the visual verification gate."""
     try:
         import visual_runtime
         if getattr(visual_runtime, "_verified_cache_safety_bound", False):
@@ -150,20 +136,69 @@ def _patch_editorial_scoring(bot):
 def _wrap_scored_candidates(bot):
     current = getattr(bot, "process_scored_candidates", None)
     if current is None or getattr(current, "_hard_reject_safe", False): return current
+
     def safe_process(scored_data, batch_stories, bonuses, last_genre, format_mode):
+        scored_count = len(scored_data) if isinstance(scored_data, list) else 0
+        story_count = len(batch_stories) if isinstance(batch_stories, list) else 0
+        print(f"   [Editorial Diagnostics] Received {story_count} stories and {scored_count} Groq score records.", flush=True)
+
+        if not isinstance(scored_data, list) or not scored_data:
+            print("   [Editorial Diagnostics] STOP: Groq returned no usable score records.", flush=True)
+            return []
+
+        hard_reject_count = 0
+        risk_reject_count = 0
+        malformed_count = 0
+        risk_values = []
+        for index, story in enumerate(batch_stories if isinstance(batch_stories, list) else []):
+            if index >= len(scored_data) or not isinstance(scored_data[index], dict):
+                malformed_count += 1
+                continue
+            scores = scored_data[index]
+            try:
+                risk = float(scores.get("monetization_risk", 5))
+            except (TypeError, ValueError):
+                risk = 5.0
+            risk_values.append(risk)
+            if scores.get("hard_reject", False):
+                hard_reject_count += 1
+            if risk >= 8:
+                risk_reject_count += 1
+
+        print(
+            "   [Editorial Diagnostics] Rejection inputs: "
+            f"hard_reject={hard_reject_count}, monetization_risk>=8={risk_reject_count}, "
+            f"malformed/missing={malformed_count}, risks={risk_values}",
+            flush=True,
+        )
+
         result = current(scored_data, batch_stories, bonuses, last_genre, format_mode)
-        if not result: return []
+        if not result:
+            print("   [Editorial Diagnostics] Corrected scorer returned 0 candidates.", flush=True)
+            return []
+
         allowed = []
         for index, story in enumerate(batch_stories):
-            if index >= len(scored_data) or not isinstance(story, dict): continue
+            if index >= len(scored_data) or not isinstance(story, dict):
+                continue
             scores = scored_data[index]
-            if not isinstance(scores, dict): continue
-            try: risk = float(scores.get("monetization_risk", 5))
-            except (TypeError, ValueError): continue
-            if scores.get("hard_reject", False) or risk >= 8: continue
+            if not isinstance(scores, dict):
+                continue
+            try:
+                risk = float(scores.get("monetization_risk", 5))
+            except (TypeError, ValueError):
+                continue
+            if scores.get("hard_reject", False) or risk >= 8:
+                continue
             allowed.append(story)
+
         allowed_ids = {id(item) for item in allowed}
-        return [item for item in result if id(item) in allowed_ids]
+        filtered = [item for item in result if id(item) in allowed_ids]
+        print(f"   [Editorial Diagnostics] Corrected scorer candidates={len(result)}; after hard/risk gate={len(filtered)}.", flush=True)
+        if not filtered and result:
+            print("   [Editorial Diagnostics] WARNING: all scored candidates were removed by the final safety gate.", flush=True)
+        return filtered
+
     safe_process._hard_reject_safe = True
     bot.process_scored_candidates = safe_process
     return safe_process
