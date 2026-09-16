@@ -6,10 +6,12 @@ import os
 import subprocess
 from pathlib import Path
 
+from PIL import Image
+
 
 ACCENT = "0x40C4FF"
 ACCENT_SOFT = "0x40C4FF@0.72"
-BRANDING_VERSION = "2026-09-16-v3"
+BRANDING_VERSION = "2026-09-16-v4"
 
 
 def _assets(bot):
@@ -48,8 +50,27 @@ def _probe(path: str) -> tuple[int, int, float, int]:
         return 0, 0, 0.0, 0
 
 
+def _overlay_is_caption_safe(overlay_path: Path, width: int, height: int) -> tuple[bool, str]:
+    """Reject full-frame brand overlays that could cover the central subtitle safe area."""
+    try:
+        with Image.open(overlay_path) as image:
+            rgba = image.convert("RGBA")
+            if rgba.size != (width, height):
+                return False, f"overlay geometry {rgba.size[0]}x{rgba.size[1]} does not match video {width}x{height}"
+            alpha = rgba.getchannel("A")
+            alpha = alpha.point(lambda value: 255 if value >= 48 else 0)
+            safe_x0 = int(width * 0.08)
+            safe_x1 = int(width * 0.92)
+            safe_y0 = max(0, height - 360)
+            if alpha.crop((safe_x0, safe_y0, safe_x1, height)).getbbox():
+                return False, "overlay has visible pixels in the central bottom caption-safe area"
+            return True, "overlay geometry and caption-safe area passed"
+    except (OSError, ValueError, TypeError):
+        return False, "overlay could not be inspected"
+
+
 def apply_branded_finish(bot, video_path: str) -> str:
-    """Add restrained branding while preserving the rendered video's geometry, timing and audio."""
+    """Add restrained branding while preserving geometry, timing, audio and subtitle readability."""
     if not video_path or not os.path.isfile(video_path):
         return video_path
     logo, overlay = _assets(bot)
@@ -62,16 +83,27 @@ def apply_branded_finish(bot, video_path: str) -> str:
         print("   [Branding] Source video metadata could not be verified; leaving video unchanged.", flush=True)
         return video_path
 
+    use_overlay = False
+    if overlay.exists():
+        use_overlay, reason = _overlay_is_caption_safe(overlay, source_w, source_h)
+        if not use_overlay:
+            print(f"   [Branding] Unsafe overlay; trying logo fallback: {reason}", flush=True)
+            if not logo.exists():
+                print("   [Branding] No safe secondary brand asset available; leaving video unchanged.", flush=True)
+                return video_path
+
+    brand_asset = overlay if use_overlay else (logo if logo.exists() else None)
     output = str(Path(video_path).with_name(Path(video_path).stem + "_branded.mp4"))
     filters = [f"[0:v]drawbox=x=10:y=10:w=iw-20:h=ih-20:color={ACCENT_SOFT}:t=5[framed]"]
     last = "[framed]"
-    if overlay.exists():
+
+    if brand_asset is not None and use_overlay:
         filters.extend([
             "[1:v]format=rgba[brand_overlay]",
             "[framed][brand_overlay]overlay=0:0:eof_action=repeat:shortest=0:format=auto[finalv]",
         ])
         last = "[finalv]"
-    elif logo.exists():
+    elif brand_asset is not None:
         filters.extend([
             "[1:v]scale=132:-1,format=rgba[logo]",
             "color=c=0x08111d@0.72:s=160x160,format=rgba[logo_card]",
@@ -81,11 +113,15 @@ def apply_branded_finish(bot, video_path: str) -> str:
         ])
         last = "[finalv]"
 
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path, "-loop", "1", "-i", str(overlay if overlay.exists() else logo),
-        "-filter_complex", ";".join(filters), "-map", last, "-map", "0:a?",
+    cmd = ["ffmpeg", "-y", "-i", video_path]
+    if brand_asset is not None:
+        cmd += ["-loop", "1", "-i", str(brand_asset)]
+    cmd += [
+        "-filter_complex", ";".join(filters),
+        "-map", last, "-map", "0:a?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-        "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", "-t", f"{source_duration:.3f}", output,
+        "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart",
+        "-t", f"{source_duration:.3f}", output,
     ]
 
     try:
@@ -107,8 +143,9 @@ def apply_branded_finish(bot, video_path: str) -> str:
             os.remove(output)
             return video_path
         os.replace(output, video_path)
+        mode = "overlay" if use_overlay else ("logo" if logo.exists() else "border-only")
         print(
-            f"   [Branding] Finishing applied: border + {'overlay' if overlay.exists() else 'logo'}; "
+            f"   [Branding] Finishing applied: border + {mode}; "
             f"{source_w}x{source_h}, {source_duration:.2f}s, audio_streams={source_audio_count}, version={BRANDING_VERSION}.",
             flush=True,
         )
