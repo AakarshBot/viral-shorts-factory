@@ -1,10 +1,4 @@
-"""Editorial scoring corrections for the production Shorts factory.
-
-The legacy scorer treated monetization_risk as a positive quality signal. A
-higher risk score therefore increased a story's composite score before the
-runtime hard-reject layer removed high-risk stories. This module fixes that
-logic without rewriting the legacy production engine.
-"""
+"""Authoritative editorial scoring for the production Shorts factory."""
 
 import os
 import re
@@ -19,7 +13,6 @@ def _num(value, default=0.0):
 
 
 def _bool(value, default=False):
-    """Safely coerce AI-returned boolean values such as string 'false'."""
     if isinstance(value, bool):
         return value
     if value is None:
@@ -78,22 +71,14 @@ def _load_prior_topics(db_path):
 
 
 def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode, prior_topics=None):
-    """Apply corrected editorial scoring and return candidates in score order.
-
-    Risk is a penalty: lower monetization risk is better. Repeated topics also
-    receive a modest penalty so a previously covered story does not repeatedly
-    beat fresher material solely because its subject is historically popular.
-    """
+    """Authoritative editorial scoring. Risk is a penalty, not a hard reject."""
     scored_candidates = []
     prior_topics = prior_topics or []
-
     for idx, scores in enumerate(scored_data or []):
         if idx >= len(batch_stories) or not isinstance(scores, dict):
             break
         story = batch_stories[idx]
-        if not isinstance(story, dict):
-            continue
-        if _bool(scores.get("hard_reject"), False):
+        if not isinstance(story, dict) or _bool(scores.get("hard_reject"), False):
             continue
 
         hs = max(0.0, min(10.0, _num(scores.get("hook_strength"), 5.0)))
@@ -101,15 +86,7 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         af = max(0.0, min(10.0, _num(scores.get("audience_fit"), 5.0)))
         mr = max(0.0, min(10.0, _num(scores.get("monetization_risk"), 5.0)))
         sl = max(0.0, min(10.0, _num(scores.get("shelf_life"), 5.0)))
-
-        # Risk is NOT a quality dimension. A risk score of 10 must hurt the score.
-        quality_score = (
-            hs * 0.25
-            + nc * 0.20
-            + af * 0.20
-            + (10.0 - mr) * 0.20
-            + sl * 0.15
-        )
+        quality_score = hs * 0.25 + nc * 0.20 + af * 0.20 + (10.0 - mr) * 0.20 + sl * 0.15
 
         trend_bonus = _num(story.get("trend_bonus"), 0.0)
         velocity_boost = _num(story.get("velocity_score"), 0.0)
@@ -117,16 +94,7 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         recency_penalty = _num(story.get("recency_penalty"), 0.0)
         genre_bonus = _num(bonuses.get(story.get("genre"), 0.0), 0.0) if format_mode == "regular" else 0.0
         repetition = _repetition_penalty(story, prior_topics)
-
-        composite = (
-            quality_score
-            + genre_bonus
-            + corroboration
-            + trend_bonus
-            + velocity_boost
-            - recency_penalty
-            - repetition
-        )
+        composite = quality_score + genre_bonus + corroboration + trend_bonus + velocity_boost - recency_penalty - repetition
 
         story.update({
             "hook_strength": round(hs, 2),
@@ -144,43 +112,28 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
 
 
 def patch_editorial_scoring(bot):
-    """Replace the legacy scorer and keep the legacy namespace bound to the active scorer."""
-    if getattr(bot, "_editorial_scoring_patch_installed", False):
-        # The legacy module can rebind its global function during dashboard
-        # startup. Re-assert the active safe target every time this patch is
-        # requested instead of assuming the first binding still exists.
-        run_robot = getattr(bot, "run_robot", None)
-        namespace = getattr(run_robot, "__globals__", None)
-        active = getattr(bot, "process_scored_candidates", None)
-        corrected = getattr(bot, "_editorial_scoring_corrected_process", None)
-        target = active if getattr(active, "_hard_reject_safe", False) else corrected
-        if isinstance(namespace, dict) and callable(target):
-            namespace["process_scored_candidates"] = target
-        return bot
-
+    """Reassert the authoritative scorer on every runtime binding pass."""
     def process(scored_data, batch_stories, bonuses, last_genre, format_mode):
         db_path = getattr(bot, "DB_PATH", "")
         prior_topics = _load_prior_topics(db_path)
-        return score_candidates(
-            scored_data,
-            batch_stories,
-            bonuses or {},
-            last_genre,
-            format_mode,
-            prior_topics=prior_topics,
-        )
+        return score_candidates(scored_data, batch_stories, bonuses or {}, last_genre, format_mode, prior_topics=prior_topics)
 
     process._editorial_scoring_corrected = True
+    process._authoritative_runtime_binding = True
     bot._editorial_scoring_corrected_process = process
     bot.process_scored_candidates = process
 
-    # The factory's legacy run_robot() resolves this name from its module
-    # globals. Rebind that exact name as well, otherwise an older legacy
-    # function can still run on a later scoring pass.
     run_robot = getattr(bot, "run_robot", None)
     namespace = getattr(run_robot, "__globals__", None)
     if isinstance(namespace, dict):
         namespace["process_scored_candidates"] = process
 
+    try:
+        from runtime_hardener import reassert_live_bindings
+        reassert_live_bindings(bot)
+    except Exception as exc:
+        print(f"   [Editorial] Runtime hardener unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     bot._editorial_scoring_patch_installed = True
+    bot._editorial_scoring_patch_version = "authoritative-v2"
     return bot
