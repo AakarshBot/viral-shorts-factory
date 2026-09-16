@@ -19,7 +19,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-16-v6"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v7"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -87,25 +87,37 @@ Instead answer whether it plausibly depicts the general real-world scene type de
 It must be a genuine real photo that is broadly relevant to that scene type, not a meme, unrelated stock image, illustration, or completely mismatched scene.
 Named entity: {entity}
 Visual intent: {intent}
-Search prompt: {prompt}
+Scene requirement: {prompt}
 Voiceover: {voice}
 Video title: {video_title}
 Return YES or NO followed by one short reason."""
 
 
 def _strict_prompt(entity, intent, prompt, voice, video_title, visual_type=""):
-    if str(visual_type).upper() == "PERSON":
-        return f"""Look at this image.
-Does this image show {entity}?
-Judge identity only.
-Do not use the news story, headline, search query, voiceover, or video title to identify the person.
-Return YES or NO followed by one short identity-based reason."""
-    return f"""Check whether this image clearly and reasonably matches the named real-world entity and scene.
-Entity: {entity}
-Visual intent: {intent}
-Specific search prompt: {prompt}
-Voiceover: {voice}
+    """Build a scene-aware relevance test.
+
+    The validator should require two things together: the named subject must be
+    represented correctly, and the image must fit what the scene is actually
+    saying/doing. A generic image of the entity alone is not enough when the
+    narration requires a particular action, setting, or context.
+    """
+    return f"""Look at this image and judge whether it is suitable for ONE specific video scene.
+
+Named subject: {entity}
+Subject type: {visual_type}
+Scene intent: {intent}
+Scene requirement: {prompt}
+Narration context: {voice}
 Video title: {video_title}
+
+Rules:
+1. The image must visibly represent the named subject or place when one is specified.
+2. It must also fit the scene requirement/context, not merely be vaguely related to the same topic.
+3. Treat organizations, locations, products, documents, and events as their actual entity types; do NOT turn them into people because people are mentioned nearby.
+4. Do not use the headline, title, or narration as proof that an unrelated image is correct.
+5. Reject memes, generic stock imagery, illustrations, screenshots of search pages, logos by themselves when a real-world scene is required, and clearly mismatched scenes.
+6. When the scene requirement is specific (for example a person speaking, an organization press conference, a city street, a product launch), require visible evidence of that specific context.
+
 Return YES or NO followed by one short reason."""
 
 
