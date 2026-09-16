@@ -109,9 +109,7 @@ def format_source_brief(sources: List[Dict[str, Any]]) -> str:
 
 
 def patch_research_pipeline(bot):
-    if getattr(bot, "_research_pipeline_patch_installed", False):
-        return bot
-
+    """Keep the evidence wrapper installed even when other runtime wrappers rebind write_script."""
     current = getattr(bot, "write_script", None)
     run_robot = getattr(bot, "run_robot", None)
     if not callable(current) or run_robot is None or not hasattr(run_robot, "__globals__"):
@@ -119,6 +117,7 @@ def patch_research_pipeline(bot):
 
     if getattr(current, "_research_wrapped", False):
         bot._research_pipeline_patch_installed = True
+        run_robot.__globals__["write_script"] = current
         return bot
 
     def researched_write_script(story_data, language_cfg, genre_key, conn, format_mode):
