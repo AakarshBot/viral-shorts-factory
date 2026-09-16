@@ -6,6 +6,8 @@ import os
 import threading
 import traceback
 
+from dashboard_theme import apply_dashboard_theme
+
 
 _VISUAL_CACHE_STATE = threading.local()
 
@@ -261,6 +263,13 @@ def _patch_youtube_creator_comments(bot):
 
 def bind_dashboard_patches(bot):
     """Bind patched callables into the actual globals used by run_robot."""
+    # This hook runs after Streamlit page configuration, so it is safe for the theme
+    # module to inject the dashboard CSS here rather than touching app.py startup.
+    try:
+        apply_dashboard_theme()
+    except Exception as exc:
+        print(f"   [Bindings] Dashboard theme unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     run_robot = getattr(bot, "run_robot", None)
     if run_robot is None or not hasattr(run_robot, "__globals__"):
         print("   [Bindings] WARNING: run_robot globals unavailable.", flush=True)
