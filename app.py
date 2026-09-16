@@ -75,6 +75,13 @@ ultimate_bot.HOOK_STYLES_REGISTRY["Absurd Reality"] = [
 
 patch_quality_control(ultimate_bot)
 patch_visual_pipeline(ultimate_bot)
+# run_robot() resolves process_visuals_async in ultimate_bot's module globals,
+# not as an attribute lookup on the bot object. The visual patch intentionally
+# installs the replacement on the bot object, so bind that patched callable
+# into the module namespace as well. Without this bridge the legacy visual
+# pipeline remains active even though patch_visual_pipeline() ran successfully.
+ultimate_bot.process_visuals_async = ultimate_bot.process_visuals_async
+print("[Dashboard] Visual pipeline patch installed and bound to run_robot globals.", flush=True)
 patch_audio_pipeline(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
 
