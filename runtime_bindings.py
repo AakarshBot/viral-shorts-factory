@@ -15,9 +15,6 @@ def bind_dashboard_patches(bot):
         print("   [Bindings] WARNING: run_robot globals unavailable.", flush=True)
         return bot
 
-    # The quality layer historically allowed zero as an index even though the
-    # factory consumes this value as a one-based selection. Normalize the only
-    # harmless mismatch instead of spending another LLM request on a retry.
     current_validate = getattr(bot, "validate_script", None)
     if current_validate is not None and not getattr(current_validate, "_index_normalized", False):
         def validate(script_data, source_text, format_mode):
@@ -49,9 +46,20 @@ def bind_dashboard_patches(bot):
             namespace[name] = value
             bound.append(name)
 
+    # Some legacy render callables may have been imported into ultimate_bot's
+    # globals. If so, make their vignette dependency point at the guarded
+    # factory implementation as well as patching factory_runtime itself.
+    try:
+        import factory_runtime
+        if hasattr(factory_runtime, "_vignette"):
+            namespace["_vignette"] = factory_runtime._vignette
+            bound.append("_vignette")
+    except Exception as exc:
+        print(f"   [Bindings] Render dependency binding skipped: {exc}", flush=True)
+
     print(
         "   [Bindings] Legacy factory globals bound to active runtime patches: "
-        + ", ".join(bound),
+        + ", ".join(dict.fromkeys(bound)),
         flush=True,
     )
     return bot
