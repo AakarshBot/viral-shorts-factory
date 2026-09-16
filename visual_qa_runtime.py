@@ -28,6 +28,43 @@ def _key_diagnostic(api_key):
     return f"unrecognized key format (length={len(key)})"
 
 
+def _extract_verdict(response):
+    """Extract visible model text even when the SDK response.text shortcut is empty."""
+    text = str(getattr(response, "text", "") or "").strip()
+    if text:
+        return text
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            part_text = str(getattr(part, "text", "") or "").strip()
+            if part_text and not bool(getattr(part, "thought", False)):
+                return part_text
+    return ""
+
+
+def _response_diagnostic(response):
+    """Return safe response metadata for diagnosing empty Gemini output."""
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return "candidates=0"
+    candidate = candidates[0]
+    finish_reason = getattr(candidate, "finish_reason", None)
+    content = getattr(candidate, "content", None)
+    parts = getattr(content, "parts", None) or []
+    visible_parts = sum(
+        1 for part in parts if str(getattr(part, "text", "") or "").strip()
+        and not bool(getattr(part, "thought", False))
+    )
+    thought_parts = sum(1 for part in parts if bool(getattr(part, "thought", False)))
+    return (
+        f"finish_reason={finish_reason or '<none>'} "
+        f"parts={len(parts)} visible_text_parts={visible_parts} thought_parts={thought_parts}"
+    )
+
+
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
     api_key = _clean_api_key(api_key)
     if not api_key:
@@ -68,16 +105,16 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
             model=GEMINI_VISUAL_MODEL,
             contents=[instruction, image_part],
             config=types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=8,
-                candidate_count=1,
+                thinking_config=types.ThinkingConfig(thinking_level="low"),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             ),
         )
 
-        text = str(getattr(response, "text", "") or "").strip().upper()
+        text = _extract_verdict(response).strip().upper()
+        diagnostic = _response_diagnostic(response)
         print(
             f"   [Visual QA] Gemini verdict={text[:40] or '<empty>'} "
-            f"model={GEMINI_VISUAL_MODEL}",
+            f"model={GEMINI_VISUAL_MODEL} {diagnostic}",
             flush=True,
         )
         if text.startswith("PASS"):
@@ -86,7 +123,8 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
             return False
 
         print(
-            f"   [Visual QA] Gemini returned an unusable verdict: {text[:120] or '<empty>'}",
+            f"   [Visual QA] Gemini returned an unusable verdict: {text[:120] or '<empty>'} "
+            f"({diagnostic})",
             flush=True,
         )
         return None
