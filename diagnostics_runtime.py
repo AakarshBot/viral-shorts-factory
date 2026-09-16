@@ -74,10 +74,21 @@ def _test_visual_strategy():
     if classify_scene(person) != "PERSON": raise AssertionError("PERSON classification failed")
     if classify_scene(event) != "EVENT": raise AssertionError("EVENT classification failed")
     if classify_scene(process) not in {"PROCESS", "CONCEPT"}: raise AssertionError("PROCESS/CONCEPT classification failed")
+
     queries, visual_type = build_deep_queries(person, "Messi's World Cup Moment")
-    if visual_type != "PERSON" or len(queries) < 10: raise AssertionError("deep query generation is too shallow")
-    if not any("official portrait" in q.lower() for q in queries): raise AssertionError("official portrait search is missing")
-    return f"Scene classification + {len(queries)} progressive visual queries passed"
+    if visual_type != "PERSON": raise AssertionError("PERSON visual type failed")
+    if not 3 <= len(queries) <= 6: raise AssertionError(f"person query ladder is not bounded: {len(queries)}")
+    if len(queries) >= 10: raise AssertionError("visual query explosion has returned")
+    if not any("official photo" in q.lower() for q in queries): raise AssertionError("official photo fallback is missing")
+    if any("editorial_person" in q.lower() for q in queries): raise AssertionError("internal visual labels leaked into search queries")
+
+    event_queries, event_type = build_deep_queries(event, "Argentina vs France")
+    if event_type != "EVENT" or not 3 <= len(event_queries) <= 6:
+        raise AssertionError("event query ladder is not bounded")
+    if len(event_queries) >= 10:
+        raise AssertionError("event query explosion has returned")
+
+    return f"Scene classification + bounded progressive visual queries passed ({len(queries)} person, {len(event_queries)} event)"
 
 
 def _test_script_guards():
