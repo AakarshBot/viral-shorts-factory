@@ -100,8 +100,10 @@ jobs:
           assert visual_type == 'PERSON'
           assert 3 <= len(queries) <= 6
           assert len(queries) < 10
-          assert any('official photo' in q.lower() for q in queries)
+          assert any(q.strip().lower() == 'lionel messi' for q in queries), queries
           assert not any('editorial_person' in q.lower() for q in queries)
+          assert not any('portrait' in q.lower() for q in queries), queries
+          assert not any('red carpet' in q.lower() for q in queries), queries
 
           from visual_qa_runtime import _tier_for
           from visual_runtime import _cache_key, _context_fingerprint
