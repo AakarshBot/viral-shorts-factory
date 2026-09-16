@@ -93,8 +93,10 @@ jobs:
           assert visual_strategy_runtime.classify_scene(concept) in {'PROCESS', 'CONCEPT'}
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
-          assert len(queries) >= 10
-          assert any('official portrait' in q for q in queries)
+          assert 3 <= len(queries) <= 6
+          assert len(queries) < 10
+          assert any('official photo' in q.lower() for q in queries)
+          assert not any('editorial_person' in q.lower() for q in queries)
 
           factory_runtime.patch_dashboard_runtime(ultimate_bot)
           provider_runtime.patch_provider_adapters(ultimate_bot)
