@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -47,6 +48,13 @@ SPORTS_NICHE_TERMS = {
 }
 
 CRICKET_TERMS = {"cricket", "icc", "bcci", "pcb", "test cricket", "t20", "odi", "ipl", "psl"}
+
+# A temporary network problem should not make every GNews query wait for the
+# full timeout. After one connection-level failure, discovery skips additional
+# GNews attempts for a short cooldown and relies on RSS/social intake instead.
+_GNEWS_COOLDOWN_SECONDS = 90.0
+_GNEWS_FAILURE_UNTIL = 0.0
+_GNEWS_FAILURE_LOGGED = False
 
 
 def _clean(value):
@@ -299,8 +307,14 @@ def _source_url_from_item(item):
 
 
 def _gnews_items(query, api_key, genre_key):
+    global _GNEWS_FAILURE_UNTIL, _GNEWS_FAILURE_LOGGED
+
     if not api_key:
         return []
+    now = time.time()
+    if now < _GNEWS_FAILURE_UNTIL:
+        return []
+
     try:
         response = requests.get(
             "https://api.gnews.io/api/v4/search",
@@ -314,7 +328,17 @@ def _gnews_items(query, api_key, genre_key):
             timeout=8,
         )
         if response.status_code != 200:
+            if response.status_code in {401, 403, 429, 500, 502, 503, 504}:
+                _GNEWS_FAILURE_UNTIL = time.time() + _GNEWS_COOLDOWN_SECONDS
+                if not _GNEWS_FAILURE_LOGGED:
+                    print(
+                        f"   [Discovery] GNews intake unavailable (HTTP {response.status_code}); using RSS/social fallback for this run.",
+                        flush=True,
+                    )
+                    _GNEWS_FAILURE_LOGGED = True
             return []
+        _GNEWS_FAILURE_UNTIL = 0.0
+        _GNEWS_FAILURE_LOGGED = False
         output = []
         for article in response.json().get("articles", []):
             title = str(article.get("title") or "").strip()
@@ -334,6 +358,15 @@ def _gnews_items(query, api_key, genre_key):
                 "collection_source": "gnews",
             })
         return output
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        _GNEWS_FAILURE_UNTIL = time.time() + _GNEWS_COOLDOWN_SECONDS
+        if not _GNEWS_FAILURE_LOGGED:
+            print(
+                f"   [Discovery] GNews network intake unavailable ({type(exc).__name__}); using RSS/social fallback for this run.",
+                flush=True,
+            )
+            _GNEWS_FAILURE_LOGGED = True
+        return []
     except Exception as exc:
         print(f"   [Discovery] GNews intake failed for query '{query[:60]}': {type(exc).__name__}", flush=True)
         return []
@@ -593,7 +626,6 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
     raw = []
 
-    # Preserve any mature intake/source handling already present in the legacy collector.
     try:
         legacy = bot.gather_and_filter_stories(
             None,
@@ -606,7 +638,6 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         if isinstance(legacy, list):
             raw.extend(legacy)
     except TypeError:
-        # Legacy collector needs a real DB connection; caller will provide the fallback pass below.
         pass
     except Exception as exc:
         print(f"   [Discovery] Legacy intake pass skipped: {type(exc).__name__}", flush=True)
@@ -618,11 +649,9 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     social_rows = _reddit_items(genre_key)
     social_titles = [row.get("title", "") for row in social_rows]
 
-    # Attach the social signal without treating social posts as factual source material.
     for story in raw:
         story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
 
-    # Exact URL/title de-duplication at intake, while deliberately retaining similar stories from different outlets.
     compact = []
     seen = set()
     for story in raw:
@@ -672,8 +701,6 @@ def patch_story_selection(bot):
     original = bot.gather_and_filter_stories
 
     def gather(conn, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None):
-        # The wrapper keeps a DB-aware legacy pass as a fallback, but the new funnel owns
-        # the high-recall discovery collection and all pre-production ranking decisions.
         def legacy_pass():
             try:
                 result = original(conn, genre_key, genre_cfg, trend_keyword, custom_gnews_q, custom_rss_url)
