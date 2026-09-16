@@ -10,6 +10,80 @@ import re
 from PIL import Image, ImageDraw
 
 
+def _human_label(value, fallback="EDITORIAL"):
+    text = re.sub(r"[_-]+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.upper() if text else fallback
+
+
+def _source_label(source_type):
+    source = str(source_type or "").strip()
+    if not source:
+        return "VERIFIED VISUAL"
+    if source.lower() == "ai-generated":
+        return "AI ILLUSTRATION"
+    if source.lower() == "gradient-fallback":
+        return "EDITORIAL BACKDROP"
+    return f"SOURCE · {_human_label(source)}"
+
+
+def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, source_type, voiceover):
+    """Add restrained editorial framing without obscuring the verified visual."""
+    canvas = image.convert("RGBA")
+    width, height = canvas.size
+    accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
+    secondary = tuple(getattr(bot, "PALETTE", {}).get("accent_secondary", (255, 140, 0)))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    # Thin identity rails replace the old heavy top/bottom bars.
+    draw.rectangle([28, 28, width - 28, 33], fill=accent + (190,))
+    draw.rectangle([28, height - 33, width - 28, height - 28], fill=secondary + (150,))
+    draw.rectangle([28, 28, 33, height - 28], fill=accent + (105,))
+
+    # Small scene marker: useful for consistency while staying visually quiet.
+    marker = f"{int(scene_number):02d} / {int(total_scenes):02d}"
+    draw.rounded_rectangle([48, 62, 184, 112], radius=20, fill=(5, 9, 16, 170))
+    draw.text((68, 75), marker, fill=(255, 255, 255, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+
+    # Visual-type label tells the viewer what the image is doing editorially.
+    type_label = _human_label(visual_type)
+    type_box_right = min(width - 48, 48 + max(190, 18 * len(type_label)))
+    draw.rounded_rectangle(
+        [48, height - 112, type_box_right, height - 62],
+        radius=20,
+        fill=(5, 9, 16, 170),
+        outline=accent + (150,),
+        width=2,
+    )
+    draw.text((68, height - 99), type_label, fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+
+    # Source badge is compact and never competes with the subtitle layer.
+    source_text = _source_label(source_type)
+    source_box_width = min(width - 220, 22 * len(source_text) + 34)
+    sx = width - source_box_width - 48
+    draw.rounded_rectangle(
+        [sx, 62, width - 48, 112],
+        radius=20,
+        fill=(5, 9, 16, 170),
+        outline=(255, 255, 255, 80),
+        width=1,
+    )
+    draw.text((sx + 18, 75), source_text, fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+
+    # Facts/numbers get one restrained emphasis chip instead of a generic effect.
+    fact_match = re.search(r"(?:₹|\$|€|£)?\b\d+(?:[.,]\d+)?%?\b", str(voiceover or ""))
+    if fact_match:
+        fact = fact_match.group(0)
+        chip_w = max(126, 22 * len(fact) + 42)
+        cx = width - chip_w - 48
+        cy = height - 178
+        draw.rounded_rectangle([cx, cy, width - 48, cy + 52], radius=22, fill=accent + (215,))
+        draw.text((cx + 20, cy + 10), fact, fill=(255, 255, 255, 250), stroke_width=1, stroke_fill=(0, 0, 0, 80))
+
+    return Image.alpha_composite(canvas, overlay)
+
+
 def patch_content_first_visuals(bot):
     try:
         import visual_runtime
@@ -69,11 +143,15 @@ def patch_content_first_visuals(bot):
                     bg_img, seg.get("voiceover", ""), font_choice=font_choice
                 )
             else:
-                overlay = Image.new("RGBA", target_size, (0, 0, 0, 0))
-                draw = ImageDraw.Draw(overlay)
-                draw.rectangle([0, 0, width, 40], fill=bot.PALETTE["accent_primary"] + (200,))
-                draw.rectangle([0, height - 40, width, height], fill=bot.PALETTE["accent_secondary"] + (200,))
-                rendered = Image.alpha_composite(bg_img, overlay)
+                rendered = _render_scene_overlay(
+                    bot,
+                    bg_img,
+                    idx + 1,
+                    len(scenes),
+                    visual_type,
+                    source_type,
+                    seg.get("voiceover", ""),
+                )
 
             rendered.convert("RGB").save(img_path, "JPEG", quality=95)
             packages[idx] = [{
