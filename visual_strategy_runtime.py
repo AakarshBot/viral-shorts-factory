@@ -1,9 +1,8 @@
 """Scene-aware visual strategy for the Shorts factory.
 
 This module is deliberately deterministic and cheap. It decides what kind of
-visual a scene needs and builds progressively deeper search queries. It does
-not decide whether an image is relevant; visual_runtime performs the strict
-pixel-level QA.
+visual a scene needs and builds a small, progressive search ladder. It does
+not decide whether an image is relevant; visual_runtime performs strict QA.
 """
 import re
 
@@ -14,7 +13,21 @@ VISUAL_TYPES = {
 
 
 def _clean(text):
-    return re.sub(r"\s+", " ", str(text or "")).strip()
+    return re.sub(r"\s+", " ", str(text or "")).strip(" ,.-")
+
+
+def _normalise_query(text):
+    """Remove internal labels/noisy punctuation without changing the subject."""
+    text = _clean(text)
+    text = re.sub(r"\b(?:editorial_)?(?:person|event|product|location|statistic|comparison|timeline|process|quote|document|concept|general_context)\b", "", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" ,.-")
+    return text
+
+
+def _add_unique(queries, *parts):
+    q = _normalise_query(" ".join(_clean(p) for p in parts if _clean(p)))
+    if q and q.lower() not in {x.lower() for x in queries}:
+        queries.append(q)
 
 
 def classify_scene(seg, category=""):
@@ -31,10 +44,6 @@ def classify_scene(seg, category=""):
     entity = _clean(seg.get("primary_entity", "")).lower()
     intent = _clean(seg.get("visual_intent", "")).lower()
 
-    # Intent is stronger evidence than incidental words in the narration.
-    # For example, a person can "score in the final" without needing an
-    # EVENT visual. This prevents event/statistic keywords from swallowing
-    # explicit person-focused visual requests.
     if any(x in intent for x in ("person", "portrait", "player", "president", "ceo", "scientist", "actor", "coach", "founder", "minister", "speaker")):
         return "PERSON"
     if any(x in intent for x in ("product", "device", "phone", "car", "chip", "console")):
@@ -74,25 +83,37 @@ def classify_scene(seg, category=""):
 
 
 def build_deep_queries(seg, video_title="", visual_type=None):
+    """Build a short, ranked search ladder instead of a Cartesian query explosion.
+
+    The first queries describe the actual scene. Later queries broaden the
+    wording or move to authoritative image indexes. This keeps easy entities
+    such as well-known people from triggering dozens of redundant searches and
+    therefore dozens of unnecessary semantic-QA candidates.
+    """
     entity = _clean(seg.get("primary_entity", ""))
-    intent = _clean(seg.get("visual_intent", ""))
-    prompt = _clean(seg.get("specific_search_prompt", ""))
+    intent = _normalise_query(seg.get("visual_intent", ""))
+    prompt = _normalise_query(seg.get("specific_search_prompt", ""))
     voice = _clean(seg.get("voiceover", ""))
     title = _clean(video_title)
     category = _clean(seg.get("sport_or_topic_category", ""))
     visual_type = visual_type or classify_scene(seg, category)
 
-    seeds = [
-        prompt,
-        f"{entity} {intent}",
-        f"{entity} {title}",
-        f"{entity} {voice[:180]}",
-        f"{entity} {category} {intent}",
-    ]
+    queries = []
 
-    modifiers = {
-        "PERSON": ["official portrait", "press photo", "match/event photo", "Getty-style editorial photo"],
-        "EVENT": ["official event photo", "editorial photo", "press photo", "actual event footage still"],
+    if visual_type == "PERSON":
+        # People are usually easy to source. Prefer exact scene/entity queries
+        # and authoritative image indexes; do not multiply every seed by every
+        # modifier (which previously produced ~25 queries for a single person).
+        _add_unique(queries, prompt, "photo")
+        _add_unique(queries, entity, intent, category, "match photo" if category.lower() in {"sports", "sport", "cricket", "football"} else "news photo")
+        _add_unique(queries, entity, title, "photo")
+        _add_unique(queries, entity, category, "editorial photo")
+        _add_unique(queries, entity, "Wikimedia Commons")
+        _add_unique(queries, entity, "official photo")
+        return queries[:6], visual_type
+
+    modifier_map = {
+        "EVENT": ["official event photo", "editorial photo", "press photo", "actual event photo"],
         "PRODUCT": ["official product photo", "product launch photo", "real product image", "press image"],
         "LOCATION": ["location photo", "aerial photo", "landmark photo", "official map"],
         "STATISTIC": ["chart", "infographic", "data visualization", "relevant editorial photo"],
@@ -103,27 +124,14 @@ def build_deep_queries(seg, video_title="", visual_type=None):
         "DOCUMENT": ["official document", "filing", "report", "study document"],
         "CONCEPT": ["concept illustration", "editorial illustration", "scientific illustration", "documentary context"],
         "GENERAL_CONTEXT": ["editorial photo", "documentary photo", "real world photo", "high resolution photo"],
-    }.get(visual_type, ["editorial photo", "documentary photo", "high resolution photo"])
+    }
+    modifiers = modifier_map.get(visual_type, modifier_map["GENERAL_CONTEXT"])
 
-    queries = []
-    for seed in seeds:
-        seed = _clean(seed)
-        if not seed:
-            continue
-        for modifier in modifiers:
-            q = _clean(f"{seed} {modifier}")
-            if q and q not in queries:
-                queries.append(q)
-
-    for q in (
-        f"{entity} {category} real photo",
-        f"{entity} {title} news photo",
-        f"{entity} Wikimedia Commons",
-        f"{entity} Wikipedia image",
-        f"{entity} official photo",
-    ):
-        q = _clean(q)
-        if q and q not in queries:
-            queries.append(q)
-
-    return queries[:28], visual_type
+    # Progressive tiers: exact scene -> story context -> authoritative/broad.
+    _add_unique(queries, prompt, modifiers[0])
+    _add_unique(queries, entity, title, modifiers[1])
+    _add_unique(queries, entity, intent, modifiers[2])
+    _add_unique(queries, entity, category, modifiers[3])
+    _add_unique(queries, entity, "Wikimedia Commons")
+    _add_unique(queries, entity, title, "news photo")
+    return queries[:6], visual_type
