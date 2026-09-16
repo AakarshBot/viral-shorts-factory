@@ -1,7 +1,7 @@
 """Offline diagnostics for Viral Shorts Factory.
 
 All diagnostics are local/no-API.  The database check uses a temporary
-*directory* rather than NamedTemporaryFile because Windows SQLite cannot
+directory rather than NamedTemporaryFile because Windows SQLite cannot
 reliably reopen a database file while the NamedTemporaryFile handle is open.
 """
 
@@ -23,10 +23,10 @@ def _run(name, fn):
 def _test_imports():
     modules = [
         "ultimate_bot", "factory_runtime", "db_architecture", "db_runtime",
-        "diagnostics_runtime", "editorial_runtime", "runtime_hardener", "script_runtime", "research_runtime",
+        "diagnostics_runtime", "editorial_runtime", "runtime_hardener", "script_guard_runtime", "script_runtime", "research_runtime",
         "audio_runtime", "audio_direction_runtime", "visual_runtime", "visual_qa_runtime",
         "visual_strategy_runtime", "visual_content_runtime", "provider_runtime",
-        "quality_runtime", "runtime_bindings", "workflow_runtime", "subtitle_runtime",
+        "quality_runtime", "runtime_bindings", "workflow_runtime", "subtitle_runtime", "newsroom_dashboard",
     ]
     for name in modules:
         __import__(name)
@@ -67,20 +67,27 @@ def _test_visual_strategy():
     from visual_runtime import _cache_key, _context_fingerprint
     person = {"primary_entity": "Lionel Messi", "voiceover": "Lionel Messi scored the winning goal", "visual_intent": "player", "specific_search_prompt": "Lionel Messi World Cup final", "sport_or_topic_category": "sports"}
     event = {"primary_entity": "2022 FIFA World Cup Final", "voiceover": "The final went to penalties", "visual_intent": "event", "specific_search_prompt": "Argentina France 2022 final penalty shootout"}
+    bcci = {"primary_entity": "BCCI", "voiceover": "BCCI announced the decision", "visual_intent": "organization", "sport_or_topic_category": "cricket"}
+    delhi = {"primary_entity": "Delhi", "voiceover": "Delhi hosted the event", "visual_intent": "location", "sport_or_topic_category": "news"}
     process = {"primary_entity": "quantum computing", "voiceover": "Quantum computers work through a different computational process", "visual_intent": "how it works", "specific_search_prompt": "quantum computing process"}
     if classify_scene(person) != "PERSON": raise AssertionError("PERSON classification failed")
     if classify_scene(event) != "EVENT": raise AssertionError("EVENT classification failed")
+    if classify_scene(bcci) != "ORGANIZATION": raise AssertionError("BCCI classification failed")
+    if classify_scene(delhi) != "LOCATION": raise AssertionError("Delhi classification failed")
     if classify_scene(process) not in {"PROCESS", "CONCEPT"}: raise AssertionError("PROCESS/CONCEPT classification failed")
     queries, visual_type = build_deep_queries(person, "Messi's World Cup Moment")
-    if visual_type != "PERSON" or not 3 <= len(queries) <= 6: raise AssertionError("PERSON query ladder is not bounded")
-    if len(queries) >= 10: raise AssertionError("visual query explosion has returned")
+    if visual_type != "PERSON" or queries != ["Lionel Messi"]: raise AssertionError(f"PERSON simple-search contract failed: {queries}")
     normalised = {str(q).strip().lower() for q in queries}
     if "lionel messi" not in normalised: raise AssertionError("exact-name PERSON search is missing")
     if any("editorial_person" in q.lower() for q in queries): raise AssertionError("internal visual labels leaked into search queries")
     if any("portrait" in q.lower() for q in queries): raise AssertionError(f"portrait narrowing returned: {queries}")
     if any("red carpet" in q.lower() for q in queries): raise AssertionError(f"red-carpet narrowing returned: {queries}")
     event_queries, event_type = build_deep_queries(event, "Argentina vs France")
-    if event_type != "EVENT" or not 3 <= len(event_queries) <= 6: raise AssertionError("event query ladder is not bounded")
+    if event_type != "EVENT" or event_queries != ["2022 FIFA World Cup Final"]: raise AssertionError(f"event simple-search contract failed: {event_queries}")
+    bcci_queries, bcci_type = build_deep_queries(bcci, "BCCI story")
+    if bcci_type != "ORGANIZATION" or bcci_queries != ["BCCI"]: raise AssertionError(f"BCCI simple-search contract failed: {bcci_queries}")
+    delhi_queries, delhi_type = build_deep_queries(delhi, "Delhi story")
+    if delhi_type != "LOCATION" or delhi_queries != ["Delhi"]: raise AssertionError(f"Delhi simple-search contract failed: {delhi_queries}")
     if _tier_for("player portrait", "PERSON", "Wikipedia") != "CURATED_PERSON": raise AssertionError("curated person tier failed")
     if _tier_for("player portrait", "PERSON", "DDG") != "STRICT": raise AssertionError("third-party person tier failed")
     if _tier_for("stadium_event", "EVENT", "DDG") != "GENRE_PLAUSIBLE_EVENT": raise AssertionError("stadium event tier failed")
@@ -89,7 +96,7 @@ def _test_visual_strategy():
     c2 = _context_fingerprint("person portrait", "Messi training", "Messi trained before the match", "Messi World Cup")
     if c1 == c2: raise AssertionError("context fingerprints are not distinct")
     if _cache_key("Lionel Messi", "PERSON", c1) == _cache_key("Lionel Messi", "PERSON", c2): raise AssertionError("context-aware cache keys are not distinct")
-    return f"Scene classification + recall-first bounded queries + visual QA tiers + context-aware cache passed ({len(queries)} person, {len(event_queries)} event)"
+    return f"Scene classification + simple subject search + visual QA tiers + context-aware cache passed ({len(queries)} person, {len(event_queries)} event)"
 
 
 def _test_scene_branding():
