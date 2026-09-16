@@ -1,14 +1,66 @@
-"""Production-safe voice generation for Viral Shorts Factory.
+"""Production-safe voice generation and word timing for Viral Shorts Factory.
 
-This patch deliberately updates run_robot()'s global namespace as well as the
-module attribute. That makes the override unambiguous even when Streamlit has
-cached the imported module/function object between reruns.
+A scene that cannot produce real speech fails instead of being replaced with
+filler narration. Edge-TTS WordBoundary metadata is normalised and stored on
+the script so subtitle/render layers can use the same timing source.
 """
+from __future__ import annotations
+
 import asyncio
 import gc
 import os
 import re
 import tempfile
+from typing import Any
+
+_AUDIO_MARKUP_RE = re.compile(r"[*_#`\[\]()~^\"“”‘’]")
+
+
+def clean_audio_text(value: Any) -> str:
+    """Return only actual narration text; never invent replacement speech."""
+    text = _AUDIO_MARKUP_RE.sub("", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalise_word_timings(timings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate, sort and de-duplicate Edge-TTS word timings."""
+    cleaned: list[dict[str, Any]] = []
+    last_start = -1.0
+    for item in timings or []:
+        try:
+            word = str(item.get("word", "")).strip()
+            start = max(0.0, float(item.get("start", 0.0)))
+            end = max(start, float(item.get("end", start)))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if not word or start < last_start:
+            continue
+        if cleaned and start == cleaned[-1]["start"] and word == cleaned[-1]["word"]:
+            continue
+        cleaned.append({"word": word, "start": start, "end": end})
+        last_start = start
+    return cleaned
+
+
+def validate_audio_timing(text: str, timings: list[dict[str, Any]]) -> tuple[bool, str]:
+    """Ensure a real narration scene has usable word-level timing data."""
+    clean_text = clean_audio_text(text)
+    if not clean_text:
+        return False, "Narration text is empty."
+    expected = len(re.findall(r"\S+", clean_text))
+    observed = len(timings)
+    if not timings:
+        return False, "Edge-TTS returned no word-boundary timings."
+    if observed < max(1, int(expected * 0.55)):
+        return False, f"Word-boundary timing coverage is too low ({observed}/{expected})."
+    previous_end = -1.0
+    for item in timings:
+        if item["start"] < previous_end - 0.05:
+            return False, "Word timings are not monotonic."
+        if item["end"] < item["start"]:
+            return False, "Word timing contains a negative duration."
+        previous_end = item["end"]
+    return True, "Valid word-level audio timing"
 
 
 async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_seconds=45):
@@ -17,18 +69,12 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
     async def consume():
         try:
             communicate = bot.edge_tts.Communicate(
-                text,
-                voice,
-                rate=rate,
-                pitch=pitch,
-                boundary="WordBoundary",
+                text, voice, rate=rate, pitch=pitch, boundary="WordBoundary"
             )
         except TypeError:
             communicate = bot.edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
 
-        fd, temp_path = tempfile.mkstemp(
-            prefix="voiceover_", suffix=".mp3", dir=bot.ASSETS_DIR
-        )
+        fd, temp_path = tempfile.mkstemp(prefix="voiceover_", suffix=".mp3", dir=bot.ASSETS_DIR)
         os.close(fd)
         try:
             with open(temp_path, "wb") as f:
@@ -48,6 +94,10 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
                             })
             if not os.path.exists(temp_path) or os.path.getsize(temp_path) <= 500:
                 raise RuntimeError("Edge TTS returned an empty or invalid audio file.")
+            timings[:] = normalise_word_timings(timings)
+            valid, reason = validate_audio_timing(text, timings)
+            if not valid:
+                raise RuntimeError(reason)
             os.replace(temp_path, final_path)
         finally:
             if os.path.exists(temp_path):
@@ -61,15 +111,13 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
 
 
 async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
-    print("\n🎙️ Generating Audio & Mapping Karaoke Timestamps [SAFE AUDIO PATCH]...", flush=True)
+    print("\n🎙️ Generating Audio & Mapping Word Timings [STRICT AUDIO PIPELINE]...", flush=True)
 
     audio_paths = []
     word_timings = []
+    scene_durations = []
     persona_key = next(
-        (
-            key for key in bot.PERSONA_PROFILES.keys()
-            if key in script_data.get("persona_used", "LISTICLE HOST").upper()
-        ),
+        (key for key in bot.PERSONA_PROFILES.keys() if key in script_data.get("persona_used", "LISTICLE HOST").upper()),
         "LISTICLE HOST",
     )
     profile = bot.PERSONA_PROFILES[persona_key]
@@ -82,19 +130,15 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
 
     for idx, seg in enumerate(scenes):
         path = os.path.join(bot.ASSETS_DIR, f"voiceover_{idx + 1}.mp3")
-        text = re.sub(
-            r'[*_#`\[\]()~^"“”‘’]',
-            "",
-            seg.get("voiceover", ""),
-        ).strip() or f"Point number {idx + 1}."
+        text = clean_audio_text(seg.get("voiceover", ""))
+        if not text:
+            print(f"   [Audio] FATAL: Scene {idx + 1} has no narration text.", flush=True)
+            return [], []
 
         success = False
         for attempt in range(1, 4):
             try:
-                print(
-                    f"   [Audio] Scene {idx + 1}/{len(scenes)} attempt {attempt}...",
-                    flush=True,
-                )
+                print(f"   [Audio] Scene {idx + 1}/{len(scenes)} attempt {attempt}...", flush=True)
                 timings = await _render_scene(
                     bot,
                     text,
@@ -106,34 +150,38 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                 )
                 audio_paths.append(path)
                 word_timings.append(timings)
+                scene_durations.append(timings[-1]["end"] + 0.15)
                 success = True
                 print(
                     f"   [Audio] Scene {idx + 1}/{len(scenes)} complete: "
-                    f"{os.path.getsize(path) / 1024:.1f} KB, {len(timings)} word timings.",
+                    f"{os.path.getsize(path) / 1024:.1f} KB, {len(timings)} word timings, "
+                    f"~{scene_durations[-1]:.2f}s speech span.",
                     flush=True,
                 )
                 break
             except asyncio.TimeoutError:
-                print(
-                    f"   [Audio] Scene {idx + 1} timed out after 45s on attempt {attempt}.",
-                    flush=True,
-                )
+                print(f"   [Audio] Scene {idx + 1} timed out after 45s on attempt {attempt}.", flush=True)
             except Exception as exc:
                 print(
                     f"   [Audio] Scene {idx + 1} failed on attempt {attempt}: "
-                    f"{type(exc).__name__}: {exc}",
-                    flush=True,
+                    f"{type(exc).__name__}: {exc}", flush=True,
                 )
             await asyncio.sleep(min(3 * attempt, 9))
             gc.collect()
 
         if not success:
-            print(f"   [Audio] FATAL: Could not generate scene {idx + 1}.", flush=True)
+            print(f"   [Audio] FATAL: Could not generate real narration for scene {idx + 1}.", flush=True)
             return [], []
+
+    script_data["audio_scene_durations"] = scene_durations
+    script_data["audio_total_duration"] = round(sum(scene_durations), 3)
+    script_data["word_timing_version"] = 2
+    script_data["word_timing_counts"] = [len(items) for items in word_timings]
 
     gc.collect()
     print(
         f"   [+] Audio generation complete: {len(audio_paths)}/{len(scenes)} scenes. "
+        f"Estimated speech duration: {script_data['audio_total_duration']:.2f}s. "
         "Transitioning to visual sourcing...",
         flush=True,
     )
@@ -155,8 +203,5 @@ def patch_audio_pipeline(bot):
     if run_robot is not None and hasattr(run_robot, "__globals__"):
         run_robot.__globals__["generate_voiceover_and_timestamps"] = process
 
-    print(
-        "   [Audio Patch] Safe Edge-TTS pipeline installed into run_robot globals.",
-        flush=True,
-    )
+    print("   [Audio Patch] Strict Edge-TTS pipeline installed into run_robot globals.", flush=True)
     return bot
