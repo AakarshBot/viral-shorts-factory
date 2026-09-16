@@ -6,7 +6,7 @@ not decide whether an image is relevant; visual_runtime performs strict QA.
 """
 import re
 
-VISUAL_STRATEGY_RUNTIME_VERSION = "2026-09-16-v4"
+VISUAL_STRATEGY_RUNTIME_VERSION = "2026-09-16-v5"
 MAX_VISUAL_SEARCH_QUERIES = 6
 
 VISUAL_TYPES = {
@@ -86,17 +86,21 @@ def classify_scene(seg, category=""):
 
 
 def build_deep_queries(seg, video_title="", visual_type=None):
-    """Build a short, ranked search ladder instead of a Cartesian query explosion.
+    """Build a ranked, recall-first search ladder.
 
-    The first queries describe the actual scene. Later queries broaden the
-    wording or move to authoritative image indexes. This keeps easy entities
-    such as well-known people from triggering dozens of redundant searches and
-    therefore dozens of unnecessary semantic-QA candidates.
+    PERSON search is intentionally different from generic scene search. The
+    entity name by itself is the broadest and highest-recall discovery query.
+    We do not narrow the primary search with terms such as portrait, red carpet
+    or headshot. Those terms can remove valid images before identity QA gets a
+    chance to evaluate them.
+
+    Later PERSON queries are fallbacks for source diversity, not attempts to
+    describe a particular pose or setting. Identity verification remains the
+    job of the visual QA layer.
     """
     entity = _clean(seg.get("primary_entity", ""))
     intent = _normalise_query(seg.get("visual_intent", ""))
     prompt = _normalise_query(seg.get("specific_search_prompt", ""))
-    voice = _clean(seg.get("voiceover", ""))
     title = _clean(video_title)
     category = _clean(seg.get("sport_or_topic_category", ""))
     visual_type = visual_type or classify_scene(seg, category)
@@ -104,15 +108,16 @@ def build_deep_queries(seg, video_title="", visual_type=None):
     queries = []
 
     if visual_type == "PERSON":
-        # People are usually easy to source. Prefer exact scene/entity queries
-        # and authoritative image indexes; do not multiply every seed by every
-        # modifier (which previously produced ~25 queries for a single person).
-        _add_unique(queries, prompt, "photo")
-        _add_unique(queries, entity, intent, category, "match photo" if category.lower() in {"sports", "sport", "cricket", "football"} else "news photo")
-        _add_unique(queries, entity, title, "photo")
-        _add_unique(queries, entity, category, "editorial photo")
+        # 1) Maximum recall: the person's exact name, with no narrowing terms.
+        _add_unique(queries, entity)
+        # 2-3) Source-oriented fallbacks. These still preserve the full person
+        # name and do not constrain the visual with pose/event adjectives.
         _add_unique(queries, entity, "Wikimedia Commons")
-        _add_unique(queries, entity, "official photo")
+        _add_unique(queries, entity, "official")
+        # Only after broad identity discovery do we use story-specific context.
+        _add_unique(queries, prompt)
+        _add_unique(queries, entity, title)
+        _add_unique(queries, entity, category)
         return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
 
     modifier_map = {
@@ -130,7 +135,6 @@ def build_deep_queries(seg, video_title="", visual_type=None):
     }
     modifiers = modifier_map.get(visual_type, modifier_map["GENERAL_CONTEXT"])
 
-    # Progressive tiers: exact scene -> story context -> authoritative/broad.
     _add_unique(queries, prompt, modifiers[0])
     _add_unique(queries, entity, title, modifiers[1])
     _add_unique(queries, entity, intent, modifiers[2])
