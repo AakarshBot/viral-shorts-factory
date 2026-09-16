@@ -1,7 +1,8 @@
 """Readable Shorts subtitle renderer.
 
-Replaces the legacy karaoke card renderer with a compact 1–2 line layout,
-strong safe margins and a restrained active-word highlight.
+Uses the word timings produced by the strict audio pipeline. The renderer keeps
+captions inside a predictable 1–2 line safe area and prevents oversized words
+from making the whole subtitle card jump in height.
 """
 from __future__ import annotations
 
@@ -32,6 +33,10 @@ def _split_lines(words, font, max_width):
     space = font.getlength(" ")
     for word in words:
         width = font.getlength(word)
+        if width > max_width:
+            # Keep the word intact rather than shrinking the whole caption.
+            # It will be clipped by the card width only in pathological cases.
+            width = max_width
         proposed = width if not current else current_width + space + width
         if current and proposed > max_width:
             lines.append(current)
@@ -44,10 +49,17 @@ def _split_lines(words, font, max_width):
         lines.append(current)
     if len(lines) <= 2:
         return lines
-    # If an unusually long chunk was supplied, preserve readability by forcing
-    # a balanced two-line split instead of shrinking the text too far.
+    # Balance long chunks into two readable lines instead of producing a tiny font.
     midpoint = max(1, len(words) // 2)
     return [words[:midpoint], words[midpoint:]]
+
+
+def _validate_active_index(active_index: int, word_count: int) -> int:
+    try:
+        value = int(active_index)
+    except (TypeError, ValueError):
+        return -1
+    return value if 0 <= value < word_count else -1
 
 
 def generate_readable_karaoke_clip(
@@ -63,8 +75,6 @@ def generate_readable_karaoke_clip(
     height = 300
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
-    # Subtitles sit above the bottom safe margin so they never collide with UI
-    # controls/captions and leave the logo area untouched.
     font_size = max(44, min(66, int(width * 0.058)))
     font = _load_font(font_path, font_size)
     words = [_clean_word(item.get("word") if isinstance(item, dict) else item) for item in chunk]
@@ -104,21 +114,19 @@ def generate_readable_karaoke_clip(
         width=2,
     )
 
-    # Cyan/white palette follows the existing factory palette without making
-    # captions look like a bright gaming overlay.
     accent = (64, 196, 255, 255)
     normal = (255, 255, 255, 255)
     active = (255, 194, 78, 255)
-    active_set = {int(active_index)}
+    active_index = _validate_active_index(active_index, len(words))
 
     flat_index = 0
     y = card_y + pad_y
     for line in lines:
-        widths = [font.getlength(word) for word in line]
-        total = sum(widths) + font.getlength(" ") * max(0, len(line) - 1)
+        raw_widths = [font.getlength(word) for word in line]
+        total = sum(raw_widths) + font.getlength(" ") * max(0, len(line) - 1)
         x = (width - total) / 2
-        for word, word_width in zip(line, widths):
-            is_active = flat_index in active_set
+        for word, word_width in zip(line, raw_widths):
+            is_active = flat_index == active_index
             fill = active if is_active else normal
             draw.text((x, y), word, font=font, fill=fill, stroke_width=2, stroke_fill=(0, 0, 0, 205))
             if is_active:
