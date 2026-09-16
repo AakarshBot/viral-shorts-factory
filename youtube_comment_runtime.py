@@ -1,5 +1,6 @@
-"""YouTube post-upload engagement comment support."""
+"""YouTube upload metadata and post-upload engagement comment support."""
 
+import os
 import re
 
 
@@ -52,36 +53,93 @@ def post_creator_comment(youtube, video_id, script_data, video_title, genre_labe
     return comment_id, comment_text
 
 
+def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
+    raw_title = str(script_data.get("title") or genre_cfg.get("label", "Shorts")).strip()
+    raw_title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip()
+    if trend_keyword and str(trend_keyword).lower() not in raw_title.lower():
+        raw_title = f"{trend_keyword}: {raw_title}"
+    title = raw_title[:100].strip()
+
+    desc_body = str(script_data.get("seo_description") or "").strip()
+    if trend_keyword and str(trend_keyword).lower() not in desc_body.lower():
+        desc_body = f"Trending now: {trend_keyword}. {desc_body}"
+    hashtags = list(genre_cfg.get("hashtags", ["#Trending"]))
+    if trend_keyword:
+        trend_tag = re.sub(r"[^a-zA-Z0-9]", "", str(trend_keyword))
+        if trend_tag:
+            hashtags.insert(0, f"#{trend_tag}")
+    description = f"{desc_body}\n\n{' '.join(hashtags[:5])}".strip()[:5000]
+
+    tags = script_data.get("tags", ["Shorts", genre_cfg.get("label", "Shorts")])
+    if not isinstance(tags, list):
+        tags = [tags]
+    tags = [str(tag).strip() for tag in tags if str(tag).strip()][:30]
+    return title, description, tags
+
+
 def patch_youtube_upload(bot):
-    """Wrap upload_to_youtube so every successful public upload gets a creator comment."""
+    """Replace the legacy upload metadata rules and add a creator comment."""
     current = getattr(bot, "upload_to_youtube", None)
     if current is None or getattr(current, "_creator_comment_wrapped", False):
         return current
 
     def upload_with_creator_comment(video_path, script_data, genre_cfg, publish_mode, trend_keyword=None):
-        video_id = current(video_path, script_data, genre_cfg, publish_mode, trend_keyword=trend_keyword)
-        if not video_id:
-            return video_id
-        if str(publish_mode).lower() != "public":
-            print("   [i] Creator comment skipped because the video is not public.", flush=True)
-            return video_id
-
         try:
             import googleapiclient.discovery
+            from googleapiclient.http import MediaFileUpload
+
+            if not video_path or not os.path.isfile(video_path):
+                raise FileNotFoundError(f"Video file not found: {video_path}")
+
             creds = bot.get_google_credentials()
             youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
-            comment_id, comment_text = post_creator_comment(
-                youtube,
-                video_id,
-                script_data,
-                script_data.get("title", genre_cfg.get("label", "Shorts")),
-                genre_cfg.get("label", ""),
-            )
-            script_data["creator_comment_id"] = comment_id or ""
-            script_data["creator_comment"] = comment_text
+            title, description, tags = _build_clean_metadata(script_data, genre_cfg, trend_keyword)
+            privacy = "private" if str(publish_mode).lower() == "private" else "public"
+            body = {
+                "snippet": {
+                    "title": title,
+                    "description": description,
+                    "tags": tags,
+                    "categoryId": str(genre_cfg.get("category_id", "24")),
+                },
+                "status": {
+                    "privacyStatus": privacy,
+                    "selfDeclaredMadeForKids": False,
+                },
+            }
+            media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
+            request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+            response = None
+            while response is None:
+                status, response = request.next_chunk()
+                if status:
+                    print(f"   [Upload Progress] {int(status.progress() * 100)}%", flush=True)
+
+            video_id = response.get("id") if response else None
+            if not video_id:
+                raise RuntimeError("YouTube upload completed without a video ID.")
+            print(f"   [+] Successfully uploaded to YouTube! Video ID: {video_id}", flush=True)
+
+            if privacy == "public":
+                try:
+                    comment_id, comment_text = post_creator_comment(
+                        youtube,
+                        video_id,
+                        script_data,
+                        title,
+                        genre_cfg.get("label", ""),
+                    )
+                    script_data["creator_comment_id"] = comment_id or ""
+                    script_data["creator_comment"] = comment_text
+                except Exception as exc:
+                    print(f"   [!] Creator comment failed, but upload succeeded: {exc}", flush=True)
+            else:
+                print("   [i] Creator comment skipped because the video is not public.", flush=True)
+
+            return video_id
         except Exception as exc:
-            print(f"   [!] Creator comment failed, but upload succeeded: {exc}", flush=True)
-        return video_id
+            print(f"   [!] YouTube upload failed: {exc}", flush=True)
+            return None
 
     upload_with_creator_comment._creator_comment_wrapped = True
     bot.upload_to_youtube = upload_with_creator_comment
