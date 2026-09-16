@@ -19,6 +19,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
+VISUAL_QA_RUNTIME_VERSION = "2026-09-16-v4"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -144,3 +145,22 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         else:
             print(f"   [Visual QA] Gemini request failed: {type(exc).__name__}: {exc}", flush=True)
         return None
+
+
+def install_visual_qa_bridge(visual_runtime_module):
+    """Compatibility bridge used by app.py and the legacy runtime.
+
+    The bounded visual_runtime now imports the QA function directly, but the
+    dashboard still calls this installer so older execution paths can use the
+    same QA implementation. Keeping the bridge explicit also prevents an old
+    in-memory legacy verifier from silently replacing the bounded verifier.
+    """
+    if visual_runtime_module is None:
+        return False
+    visual_runtime_module.strict_gemini_check = strict_gemini_check
+    visual_runtime_module.reset_visual_qa_video_budget = reset_visual_qa_video_budget
+    visual_runtime_module.start_visual_qa_scene = start_visual_qa_scene
+    visual_runtime_module.get_visual_qa_calls_used = get_visual_qa_calls_used
+    visual_runtime_module._visual_qa_bridge_version = VISUAL_QA_RUNTIME_VERSION
+    print(f"[Visual QA] Bounded bridge installed | runtime={VISUAL_QA_RUNTIME_VERSION}", flush=True)
+    return True
