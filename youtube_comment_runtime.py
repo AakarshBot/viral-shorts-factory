@@ -1,10 +1,11 @@
-"""YouTube upload metadata, creator comment and final brand/subtitle/audio hooks."""
+"""YouTube upload metadata, creator comment and newsroom runtime hooks."""
 
 import os
 import re
 
 from audio_direction_runtime import patch_audio_direction
 from branding_runtime import patch_branding_pipeline
+from research_runtime import patch_research_pipeline
 from subtitle_runtime import patch_subtitle_pipeline
 
 
@@ -82,8 +83,9 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
 
 
 def patch_youtube_upload(bot):
-    """Replace legacy upload metadata rules and install the finishing hooks."""
+    """Install newsroom research/audio/subtitle/branding hooks and safe uploader."""
     for label, fn in (
+        ("Research", patch_research_pipeline),
         ("Audio Direction", patch_audio_direction),
         ("Subtitle Patch", patch_subtitle_pipeline),
         ("Branding Patch", patch_branding_pipeline),
