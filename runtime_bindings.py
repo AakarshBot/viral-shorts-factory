@@ -50,7 +50,6 @@ def _wrap_editorial_provider_usage(bot):
 
 
 def _wrap_content_dense_script(bot):
-    """Bind post-generation content-density and anti-filler safeguards."""
     try:
         from script_runtime import wrap_write_script
         return wrap_write_script(bot)
@@ -65,7 +64,6 @@ def bind_dashboard_patches(bot):
     if run_robot is None or not hasattr(run_robot, "__globals__"):
         print("   [Bindings] WARNING: run_robot globals unavailable.", flush=True)
         return bot
-
     current_validate = getattr(bot, "validate_script", None)
     if current_validate is not None and not getattr(current_validate, "_index_normalized", False):
         def validate(script_data, source_text, format_mode):
@@ -74,26 +72,18 @@ def bind_dashboard_patches(bot):
             return current_validate(script_data, source_text, format_mode)
         validate._index_normalized = True
         bot.validate_script = validate
-
     _wrap_trend_signal(bot)
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
     _wrap_content_dense_script(bot)
-
     namespace = run_robot.__globals__
-    names = (
-        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates",
-        "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps",
-        "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection",
-        "run_analytics_sweep", "token_overlap_ratio",
-    )
+    names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio")
     bound = []
     for name in names:
         value = getattr(bot, name, None)
         if value is not None:
             namespace[name] = value
             bound.append(name)
-
     original_process_visuals = getattr(bot, "process_visuals_async", None)
     if original_process_visuals is not None and not getattr(original_process_visuals, "_traceback_bound", False):
         async def process_visuals_with_traceback(*args, **kwargs):
@@ -106,7 +96,6 @@ def bind_dashboard_patches(bot):
         bot.process_visuals_async = process_visuals_with_traceback
         namespace["process_visuals_async"] = process_visuals_with_traceback
         bound.append("process_visuals_async(traceback)")
-
     original_compile_video = getattr(bot, "compile_video", None)
     if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
         def compile_video_with_traceback(*args, **kwargs):
@@ -119,7 +108,6 @@ def bind_dashboard_patches(bot):
         bot.compile_video = compile_video_with_traceback
         namespace["compile_video"] = compile_video_with_traceback
         bound.append("compile_video(traceback)")
-
     try:
         import factory_runtime
         if hasattr(factory_runtime, "_vignette"):
@@ -127,7 +115,6 @@ def bind_dashboard_patches(bot):
             bound.append("_vignette")
     except Exception as exc:
         print(f"   [Bindings] Render dependency binding skipped: {exc}", flush=True)
-
     print("   [Bindings] Legacy factory globals bound to active runtime patches: " + ", ".join(dict.fromkeys(bound)), flush=True)
     return bot
 
@@ -144,11 +131,8 @@ def harden_editorial_defaults(bot):
         "This sounds unlikely, but the documented sequence is real.",
         "One overlooked detail makes this story more surprising.",
     ]
-    hype = bot.PERSONA_PROFILES.get("HYPE COMMENTATOR")
-    if hype:
-        hype["catchphrases"] = [
-            "Here is the key development.",
-            "The latest facts are worth a closer look.",
-            "This development deserves attention.",
-        ]
+    # Persona catchphrases are deliberately disabled. The topic itself should
+    # supply every spoken second; a catchphrase is not a substitute for reporting.
+    for persona in getattr(bot, "PERSONA_PROFILES", {}).values():
+        persona["catchphrases"] = []
     return bot
