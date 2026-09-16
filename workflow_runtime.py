@@ -1,19 +1,17 @@
-"""Newsroom-style staged workflow for the Viral Shorts Factory.
-
-This module deliberately sits above the legacy production engine. It owns the
-workflow state, candidate discovery, manual story selection and final-QC metadata
-without requiring a risky rewrite of the large legacy engine.
-"""
+"""Newsroom-style staged workflow for the Viral Shorts Factory."""
 from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-WORKFLOW_VERSION = "2026-09-16-newsroom-v1"
+from youtube_comment_runtime import _build_clean_metadata, build_pinned_comment
+
+WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
 
 FORMAT_OPTIONS = {
     "Deep Dive": "regular",
@@ -145,7 +143,6 @@ def _diverse_top_three(stories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _apply_sports_diversity_bonus(stories: List[Dict[str, Any]]) -> None:
-    """Give broader sports stories room to outrank cricket by accident of query volume."""
     non_cricket = {
         "tennis", "football", "soccer", "badminton", "athletics", "basketball",
         "formula", "f1", "motogp", "golf", "rugby", "volleyball", "hockey",
@@ -163,9 +160,6 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
-
-    # The ranker reads the active dashboard configuration. Set it here so a
-    # discovery run can never accidentally inherit the previous factory run.
     bot._active_web_config = dict(web_config)
 
     is_cricket = fmt == "cricket" or bool(web_config.get("cricket_pipeline"))
@@ -277,7 +271,6 @@ class WorkflowController:
         run_robot = getattr(self.bot, "run_robot", None)
         if run_robot is None:
             raise RuntimeError("Legacy run_robot() is not available.")
-
         globals_dict = getattr(run_robot, "__globals__", {})
 
         original_write = globals_dict.get("write_script")
@@ -333,8 +326,25 @@ class WorkflowController:
                 print("   [Workflow] Automatic upload blocked. Manual QC is required.", flush=True)
                 return "PENDING_MANUAL_UPLOAD"
             globals_dict["upload_to_youtube"] = production_blocked_upload
-
         self._patched = True
+
+    def _mark_latest_run_ready_for_qc(self, topic: str):
+        """Undo the legacy pipeline's upload-shaped DB state after its fake uploader."""
+        try:
+            import ultimate_bot
+            conn = sqlite3.connect(ultimate_bot.DB_PATH)
+            try:
+                conn.execute(
+                    """UPDATE vault
+                       SET video_id='READY_FOR_UPLOAD', status='READY_FOR_UPLOAD', updated_at=CURRENT_TIMESTAMP
+                       WHERE id=(SELECT id FROM vault WHERE topic=? ORDER BY id DESC LIMIT 1)""",
+                    (topic,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"   [Workflow] Could not mark run READY_FOR_UPLOAD: {exc}", flush=True)
 
     def start_production(self, web_config: Dict[str, Any], selected_story: Dict[str, Any]):
         if self.state.thread_alive:
@@ -376,12 +386,22 @@ class WorkflowController:
                     if original_gather is not None:
                         globals_dict["gather_and_filter_stories"] = original_gather
 
+                script = self.state.script_data or {}
+                category_key = config.get("category", "national_global_affairs")
+                genre_cfg = self.bot.CONTENT_CATEGORIES.get(category_key, self.bot.CONTENT_CATEGORIES["national_global_affairs"])
+                title, description, _tags = _build_clean_metadata(
+                    script,
+                    genre_cfg,
+                    config.get("trend_keyword", ""),
+                )
+                comment = build_pinned_comment(script, title, genre_cfg.get("label", ""))
+                self._mark_latest_run_ready_for_qc(selected.get("title", ""))
+
                 with self._lock:
-                    script = self.state.script_data or {}
                     self.state.final_metadata = {
-                        "title": str(script.get("title") or selected.get("title") or "").strip(),
-                        "description": str(script.get("seo_description") or "").strip(),
-                        "pinned_comment": str(script.get("pinned_comment") or "").strip(),
+                        "title": title or str(selected.get("title") or "").strip(),
+                        "description": description,
+                        "pinned_comment": comment,
                     }
                     self.state.stage = "qc"
                     self.state.percent = 100
