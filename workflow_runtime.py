@@ -455,10 +455,14 @@ class WorkflowController:
             raise RuntimeError("YouTube uploader is not available.")
         result = self._real_uploader(
             video_path,
-            title=final_title,
-            description=final_description,
-            tags=clean_tags,
-            publish_mode=publish_mode,
-            pinned_comment=final_comment,
+            script_data,
+            genre_cfg,
+            publish_mode,
+            trend_keyword,
+            title_override=final_title,
+            description_override=final_description,
+            comment_override=final_comment,
         )
+        if not result:
+            raise RuntimeError("YouTube uploader returned no video ID.")
         return result
