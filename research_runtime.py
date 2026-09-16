@@ -109,11 +109,21 @@ def format_source_brief(sources: List[Dict[str, Any]]) -> str:
 
 
 def patch_research_pipeline(bot):
-    """Keep the evidence wrapper installed even when other runtime wrappers rebind write_script."""
+    """Keep research immediately beneath the content-density script guard across repeated binding."""
     current = getattr(bot, "write_script", None)
     run_robot = getattr(bot, "run_robot", None)
     if not callable(current) or run_robot is None or not hasattr(run_robot, "__globals__"):
         return bot
+
+    # The canonical stack is research -> content-density. A repeated runtime
+    # bind must not wrap the content-density guard in another research layer.
+    if getattr(current, "_content_dense_bound", False):
+        if getattr(current, "_research_layer_live", False):
+            bot._research_pipeline_patch_installed = True
+            run_robot.__globals__["write_script"] = current
+            return bot
+        # Content-density without research should be repaired by the normal
+        # patch path below; this branch is intentionally not marked installed.
 
     if getattr(current, "_research_wrapped", False):
         bot._research_pipeline_patch_installed = True
