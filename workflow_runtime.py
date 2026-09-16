@@ -6,16 +6,12 @@ without requiring a risky rewrite of the large legacy engine.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
-import sqlite3
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
-
+from typing import Any, Dict, List, Optional
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v1"
 
@@ -136,12 +132,10 @@ def _diverse_top_three(stories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not selected:
             selected.append(story)
             continue
-        # Prefer different story clusters while preserving the strongest candidate.
         if all(_overlap(story.get("title", ""), old.get("title", "")) < 0.55 for old in selected):
             selected.append(story)
         if len(selected) == 3:
             return selected
-    # If there are not 3 sufficiently distinct stories, fill from the remaining pool.
     for story in stories:
         if story not in selected:
             selected.append(story)
@@ -150,13 +144,32 @@ def _diverse_top_three(stories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return selected[:3]
 
 
+def _apply_sports_diversity_bonus(stories: List[Dict[str, Any]]) -> None:
+    """Give broader sports stories room to outrank cricket by accident of query volume."""
+    non_cricket = {
+        "tennis", "football", "soccer", "badminton", "athletics", "basketball",
+        "formula", "f1", "motogp", "golf", "rugby", "volleyball", "hockey",
+        "cycling", "boxing", "mma", "wrestling", "olympic", "olympics",
+    }
+    for story in stories:
+        title_tokens = _token_set(story.get("title", ""))
+        if title_tokens & non_cricket:
+            story["candidate_score"] = _num(story.get("candidate_score")) + 2.5
+            story["sports_niche_bonus"] = 2.5
+
+
 def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dict[str, Any]]:
     """Run discovery only. No script, TTS, image or render calls happen here."""
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
 
-    if fmt == "cricket":
+    # The ranker reads the active dashboard configuration. Set it here so a
+    # discovery run can never accidentally inherit the previous factory run.
+    bot._active_web_config = dict(web_config)
+
+    is_cricket = fmt == "cricket" or bool(web_config.get("cricket_pipeline"))
+    if is_cricket:
         cricket_name = str(web_config.get("cricket_category", "AI-assisted top story in cricket"))
         cricket_cfg = CRICKET_CATEGORIES.get(cricket_name, CRICKET_CATEGORIES["AI-assisted top story in cricket"])
         genre_key = "sports_stories_of_day"
@@ -182,12 +195,20 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
     )
 
     stories = _remove_near_duplicates(stories or [], _load_used_topics(conn))
-    stories = sorted(stories, key=lambda s: _num(s.get("candidate_score"), _num(s.get("velocity_score")) + _num(s.get("trend_bonus"))), reverse=True)
+    if category == "sports":
+        _apply_sports_diversity_bonus(stories)
+    stories = sorted(
+        stories,
+        key=lambda s: _num(s.get("candidate_score"), _num(s.get("velocity_score")) + _num(s.get("trend_bonus"))),
+        reverse=True,
+    )
     top = _diverse_top_three(stories)
 
     for rank, story in enumerate(top, 1):
         story["discovery_rank"] = rank
         story["discovery_reason"] = _candidate_reason(story)
+        if story.get("sports_niche_bonus"):
+            story["discovery_reason"] += " Broader-sport diversity bonus applied."
         story["source_label"] = _source_label(story)
         story["story_url"] = _story_url(story)
         story["story_key"] = _story_key(story)
@@ -304,8 +325,6 @@ class WorkflowController:
                 return result
             globals_dict["compile_video"] = compile_wrapper
 
-        # Start Factory must NEVER publish. The original uploader is preserved for
-        # the explicit final-QC upload button.
         real_upload = getattr(self.bot, "upload_to_youtube", None)
         if callable(real_upload):
             self._real_uploader = real_upload
@@ -340,14 +359,14 @@ class WorkflowController:
 
         def worker():
             try:
-                # Force the legacy pipeline to use exactly the candidate selected by
-                # the user. Discovery has already happened, so it must not search again.
                 run_robot = self.bot.run_robot
                 globals_dict = getattr(run_robot, "__globals__", {})
                 original_gather = globals_dict.get("gather_and_filter_stories")
                 selected = dict(selected_story)
+
                 def selected_gather(*args, **kwargs):
                     return [dict(selected)]
+
                 if original_gather is not None:
                     globals_dict["gather_and_filter_stories"] = selected_gather
                 try:
@@ -380,7 +399,17 @@ class WorkflowController:
 
         threading.Thread(target=worker, name="viral-shorts-production", daemon=True).start()
 
-    def upload_manual(self, video_path: str, script_data: Dict[str, Any], title: str, description: str, comment: str, publish_mode: str, genre_cfg: Dict[str, Any], trend_keyword: str = ""):
+    def upload_manual(
+        self,
+        video_path: str,
+        script_data: Dict[str, Any],
+        title: str,
+        description: str,
+        comment: str,
+        publish_mode: str,
+        genre_cfg: Dict[str, Any],
+        trend_keyword: str = "",
+    ):
         if not video_path or not os.path.isfile(video_path):
             raise FileNotFoundError(f"Final video not found: {video_path}")
         if not callable(self._real_uploader):
