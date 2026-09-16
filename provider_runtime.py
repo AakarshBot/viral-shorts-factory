@@ -2,20 +2,19 @@
 
 Provider adapters are deliberately kept behind one idempotent patch point so
 Streamlit reruns cannot stack wrappers or duplicate expensive external calls.
+
+Gemini visual-QA budgeting is owned by visual_qa_runtime. Keeping a second
+provider-level counter here caused misleading logs and could consume a stale
+process-level budget across multiple videos.
 """
-import hashlib
 import io
 import os
-import threading
 
 from PIL import Image
 
 
 HF_IMAGE_MODEL = os.getenv(
     "HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"
-)
-GEMINI_VISUAL_REQUEST_BUDGET = max(
-    1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "8"))
 )
 
 
@@ -79,71 +78,13 @@ def _local_quality_gate(img_data, search_prompt="", video_title=""):
         return False
 
 
-def _install_visual_qa_budget(visual_runtime_module):
-    current = getattr(visual_runtime_module, "_strict_gemini_check", None)
-    if current is None or getattr(current, "_provider_budget_guard", False):
-        return current
-
-    lock = threading.Lock()
-    cache = {}
-    state = {"requests": 0}
-
-    def budgeted(img_bytes, entity, intent, prompt, voice, video_title, api_key):
-        key = (
-            hashlib.sha256(bytes(img_bytes or b"")).hexdigest(),
-            str(entity or ""),
-            str(intent or ""),
-            str(prompt or ""),
-            str(video_title or ""),
-        )
-        with lock:
-            if key in cache:
-                return cache[key]
-            if state["requests"] >= GEMINI_VISUAL_REQUEST_BUDGET:
-                print(
-                    "   [Visual QA] Per-run Gemini visual request budget exhausted; "
-                    "skipping further verifier calls.",
-                    flush=True,
-                )
-                cache[key] = None
-                return None
-            state["requests"] += 1
-            request_no = state["requests"]
-
-        print(
-            f"   [Visual QA] Request budget {request_no}/{GEMINI_VISUAL_REQUEST_BUDGET}",
-            flush=True,
-        )
-        result = current(
-            img_bytes, entity, intent, prompt, voice, video_title, api_key
-        )
-        with lock:
-            cache[key] = result
-        return result
-
-    budgeted._provider_budget_guard = True
-    budgeted._provider_budget_state = state
-    visual_runtime_module._strict_gemini_check = budgeted
-    return budgeted
-
-
 def patch_provider_adapters(bot):
-    """Bind current providers and ensure the visual gate is the only Gemini QA caller."""
+    """Bind current providers; visual_qa_runtime owns Gemini QA budgets/circuit breaking."""
     bot.fetch_hf_ai_image = hf_text_to_image
 
-    # The legacy fetchers call passes_quality_gate() before returning data.
-    # Replace that function with a local-only sanity check so it cannot make a
-    # second hidden Gemini request before visual_runtime's strict gate runs.
+    # Legacy fetchers may call passes_quality_gate() before returning data.
+    # Keep that check local-only so it cannot trigger a hidden Gemini request.
     bot.passes_quality_gate = _local_quality_gate
-
-    try:
-        import visual_runtime
-        _install_visual_qa_budget(visual_runtime)
-    except Exception as exc:
-        print(
-            f"   [Providers] Visual QA budget guard unavailable: {type(exc).__name__}: {exc}",
-            flush=True,
-        )
 
     if not getattr(bot, "_provider_adapters_installed", False):
         bot._provider_adapters_installed = True
