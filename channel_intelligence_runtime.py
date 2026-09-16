@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import datetime
 from statistics import mean
 from typing import Any, Dict, List, Tuple
 
@@ -40,6 +39,17 @@ def _title_style(title: str) -> str:
     if ":" in text:
         return "Colon-led"
     return "Statement"
+
+
+def _pace_bucket(value) -> str:
+    pace = _num(value)
+    if pace is None:
+        return "Unknown"
+    if pace < 2.0:
+        return "Slow (<2 w/s)"
+    if pace < 3.0:
+        return "Moderate (2–3 w/s)"
+    return "Fast (3+ w/s)"
 
 
 def _scene_features(script_json: str) -> Tuple[int | None, float | None, str, str]:
@@ -78,19 +88,15 @@ def _rows(conn) -> List[Dict[str, Any]]:
         item = dict(zip(columns, row))
         scene_count, pace, visual_mix, ending = _scene_features(item.get("script_json"))
         item["scene_count"] = scene_count
-        item["words_per_second"] = pace
+        item["pace_bucket"] = _pace_bucket(pace)
         item["visual_mix"] = visual_mix
         item["ending"] = ending
         item["title_style"] = _title_style(item.get("title_used"))
         item["angle"] = _feature_from_script(item.get("script_json"), "angle")
+        item["hook_pattern"] = str(item.get("hook_style_used") or item.get("hook_type") or "Unknown").strip() or "Unknown"
         item["topic_label"] = str(item.get("topic") or item.get("genre") or "Unknown").strip()
         out.append(item)
     return out
-
-
-def _metric(row: Dict[str, Any]) -> float | None:
-    values = [_num(row.get("avg_view_percentage")), _num(row.get("views"))]
-    return values[0] if values[0] is not None else values[1]
 
 
 def _group_summary(rows: List[Dict[str, Any]], key: str, minimum: int = 2) -> List[Dict[str, Any]]:
@@ -123,9 +129,9 @@ def build_intelligence(conn) -> Dict[str, Any]:
     dimensions = {
         "Topic / genre": "genre",
         "Angle": "angle",
-        "Hook": "hook_style_used",
+        "Hook": "hook_pattern",
         "Structure": "structure_used",
-        "Duration / pace": "words_per_second",
+        "Duration / pace": "pace_bucket",
         "Scene count": "scene_count",
         "Visual mix": "visual_mix",
         "Voice / persona": "persona_used",
@@ -133,17 +139,12 @@ def build_intelligence(conn) -> Dict[str, Any]:
         "Ending": "ending",
     }
     tables = {label: _group_summary(rows, key) for label, key in dimensions.items()}
-    numeric = [r for r in rows if _metric(r) is not None]
     return {
         "videos": len(rows),
         "reported": sum(1 for r in rows if _num(r.get("views")) is not None),
         "retention_ready": sum(1 for r in rows if _num(r.get("avg_view_percentage")) is not None),
         "tables": tables,
     }
-
-
-def _fmt(value, suffix=""):
-    return "—" if value in (None, "") else f"{value}{suffix}"
 
 
 def install_channel_intelligence_dialog() -> bool:
@@ -183,6 +184,7 @@ def _render_intelligence(st) -> None:
     import ultimate_bot
     from db_architecture import migrate_vault
 
+    conn = None
     try:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         migrate_vault(conn)
@@ -191,10 +193,8 @@ def _render_intelligence(st) -> None:
         st.error(f"Factory learning database unavailable: {type(exc).__name__}: {exc}")
         return
     finally:
-        try:
+        if conn is not None:
             conn.close()
-        except Exception:
-            pass
 
     st.markdown("#### Factory learning")
     c1, c2, c3 = st.columns(3)
