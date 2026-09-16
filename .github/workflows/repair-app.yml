@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   repair:
-    if: github.sha == '0b03d63bba0eef5c2a0fc966581b31d4d8ec48e0'
+    if: github.event.head_commit.message != 'fix: restore dashboard after accidental app truncation'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
