@@ -236,3 +236,13 @@ def install_visual_card_policy(bot=None):
     except Exception as exc:
         print(f"   [Visual Policy] Card/search policy unavailable: {type(exc).__name__}: {exc}", flush=True)
         return False
+
+
+# The visual strategy module imports this policy before the factory binds
+# script_runtime. Install the script guard at import time so the guard is active
+# automatically for every normal factory startup.
+try:
+    from script_guard_runtime import install as _install_script_output_guard
+    _install_script_output_guard()
+except Exception as exc:
+    print(f"   [Script Guard] Auto-install unavailable: {type(exc).__name__}: {exc}", flush=True)
