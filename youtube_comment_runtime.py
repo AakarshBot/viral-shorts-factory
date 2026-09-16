@@ -1,7 +1,10 @@
-"""YouTube upload metadata and post-upload engagement comment support."""
+"""YouTube upload metadata, creator comment and final brand/subtitle hooks."""
 
 import os
 import re
+
+from branding_runtime import patch_branding_pipeline
+from subtitle_runtime import patch_subtitle_pipeline
 
 
 def _clean_comment(text):
@@ -78,7 +81,18 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
 
 
 def patch_youtube_upload(bot):
-    """Replace the legacy upload metadata rules and add a creator comment."""
+    """Replace legacy upload metadata rules, add creator comments and install finishing hooks."""
+    # These hooks are installed while the runtime is being assembled, before a
+    # production run can be started from the newsroom dashboard.
+    try:
+        patch_subtitle_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Subtitle Patch] Could not install: {exc}", flush=True)
+    try:
+        patch_branding_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Branding Patch] Could not install: {exc}", flush=True)
+
     current = getattr(bot, "upload_to_youtube", None)
     if current is None or getattr(current, "_creator_comment_wrapped", False):
         return current
