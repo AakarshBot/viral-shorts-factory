@@ -2,6 +2,10 @@
 
 Keeps visual QA fail-closed while adding caching and a per-process request
 budget so deep visual search cannot accidentally burn unlimited Gemini calls.
+
+Important quota rule: one candidate image gets at most one Gemini API request.
+Transient verifier failures are rejected and the visual search moves on to the
+next candidate instead of retrying the same image.
 """
 import hashlib
 import os
@@ -9,7 +13,7 @@ import time
 
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.8-flash")
 GEMINI_VISUAL_TIMEOUT_SECONDS = 20
-GEMINI_VISUAL_RETRIES = 2
+GEMINI_VISUAL_RETRIES = 0  # Deliberately disabled: one candidate = one API call.
 GEMINI_VISUAL_MAX_REQUESTS = int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS", "24"))
 _GEMINI_QUOTA_EXHAUSTED = False
 _GEMINI_REQUESTS = 0
@@ -105,6 +109,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         image_hash = hashlib.sha256(img_bytes).hexdigest()
         cache_key = (image_hash, str(entity), str(intent), str(prompt), str(video_title))
         if cache_key in _GEMINI_CACHE:
+            print("   [Visual QA] Cache hit; no Gemini request used.", flush=True)
             return _GEMINI_CACHE[cache_key]
 
         if _GEMINI_REQUESTS >= GEMINI_VISUAL_MAX_REQUESTS:
@@ -118,49 +123,53 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         from google import genai
         from google.genai import types
         instruction = _build_instruction(entity, intent, prompt, voice, video_title)
+
+        # Count the API request before making it. There is intentionally no
+        # retry loop: a candidate can consume exactly one Gemini request.
+        _GEMINI_REQUESTS += 1
+        request_number = _GEMINI_REQUESTS
         print(
-            f"   [Visual QA] Gemini request {_GEMINI_REQUESTS + 1}/{GEMINI_VISUAL_MAX_REQUESTS} "
-            f"model={GEMINI_VISUAL_MODEL} auth={_key_diagnostic(api_key)}",
+            f"   [Visual QA] Gemini request {request_number}/{GEMINI_VISUAL_MAX_REQUESTS} "
+            f"(1 attempt only) model={GEMINI_VISUAL_MODEL} auth={_key_diagnostic(api_key)}",
             flush=True,
         )
+
         client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=GEMINI_VISUAL_TIMEOUT_SECONDS * 1000))
         image_part = types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
-        for attempt in range(GEMINI_VISUAL_RETRIES + 1):
-            try:
-                _GEMINI_REQUESTS += 1
-                response = client.models.generate_content(
-                    model=GEMINI_VISUAL_MODEL,
-                    contents=[instruction, image_part],
-                    config=types.GenerateContentConfig(
-                        thinking_config=types.ThinkingConfig(thinking_level="low"),
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    ),
-                )
-                text = _extract_verdict(response).strip().upper()
-                diagnostic = _response_diagnostic(response)
-                print(f"   [Visual QA] Gemini verdict={text[:40] or '<empty>'} {diagnostic}", flush=True)
-                if text.startswith("PASS"):
-                    _GEMINI_CACHE[cache_key] = True
-                    return True
-                if text.startswith("FAIL"):
-                    _GEMINI_CACHE[cache_key] = False
-                    return False
+
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_VISUAL_MODEL,
+                contents=[instruction, image_part],
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(thinking_level="low"),
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                ),
+            )
+            text = _extract_verdict(response).strip().upper()
+            diagnostic = _response_diagnostic(response)
+            print(f"   [Visual QA] Gemini verdict={text[:40] or '<empty>'} {diagnostic}", flush=True)
+            if text.startswith("PASS"):
+                _GEMINI_CACHE[cache_key] = True
+                return True
+            if text.startswith("FAIL"):
+                _GEMINI_CACHE[cache_key] = False
+                return False
+            print("   [Visual QA] Gemini returned no usable PASS/FAIL verdict; candidate rejected without retry.", flush=True)
+            return None
+        except Exception as exc:
+            message = str(exc).upper()
+            if "429" in message or "RESOURCE_EXHAUSTED" in message or "QUOTA" in message:
+                _GEMINI_QUOTA_EXHAUSTED = True
+                print("   [Visual QA] Gemini quota exhausted; circuit breaker opened. No further Gemini calls will be made in this process.", flush=True)
                 return None
-            except Exception as exc:
-                message = str(exc).upper()
-                if "429" in message or "RESOURCE_EXHAUSTED" in message or "QUOTA" in message:
-                    _GEMINI_QUOTA_EXHAUSTED = True
-                    print("   [Visual QA] Gemini quota exhausted; source search will continue but unverified candidates remain rejected.", flush=True)
-                    return None
-                transient = any(code in message for code in ("503", "UNAVAILABLE", "DEADLINE_EXCEEDED"))
-                if transient and attempt < GEMINI_VISUAL_RETRIES:
-                    delay = 2 ** attempt
-                    print(f"   [Visual QA] Gemini transient error; retrying in {delay}s", flush=True)
-                    time.sleep(delay)
-                    continue
-                raise
+            if any(code in message for code in ("503", "UNAVAILABLE", "DEADLINE_EXCEEDED", "TIMEOUT", "TIMED OUT")):
+                print(f"   [Visual QA] Gemini transient/timeout failure; candidate rejected with no retry: {type(exc).__name__}: {exc}", flush=True)
+                return None
+            print(f"   [Visual QA] Gemini verifier exception; candidate rejected with no retry: {type(exc).__name__}: {exc}", flush=True)
+            return None
     except Exception as exc:
-        print(f"   [Visual QA] Gemini verifier exception: {type(exc).__name__}: {exc}", flush=True)
+        print(f"   [Visual QA] Gemini verifier setup exception; candidate rejected with no retry: {type(exc).__name__}: {exc}", flush=True)
         return None
 
 
