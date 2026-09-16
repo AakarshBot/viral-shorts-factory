@@ -81,7 +81,6 @@ jobs:
           signature = inspect.signature(edge_tts.Communicate)
           assert 'boundary' in signature.parameters, signature
 
-          visual_qa_runtime.install_visual_qa_bridge(visual_runtime)
           vignette = factory_runtime._vignette((1080, 1920))
           assert vignette.size == (1080, 1920)
 
@@ -97,6 +96,17 @@ jobs:
           assert len(queries) < 10
           assert any('official photo' in q.lower() for q in queries)
           assert not any('editorial_person' in q.lower() for q in queries)
+
+          from visual_qa_runtime import _tier_for
+          from visual_runtime import _cache_key, _context_fingerprint
+          assert _tier_for('person portrait', 'PERSON', 'Wikipedia') == 'CURATED_PERSON'
+          assert _tier_for('person portrait', 'PERSON', 'DDG') == 'STRICT'
+          assert _tier_for('stadium_event', 'EVENT', 'DDG') == 'GENRE_PLAUSIBLE_EVENT'
+          assert _tier_for('conceptual', 'GENERAL_CONTEXT', 'DDG') == 'SKIPPED_CONCEPTUAL'
+          c1 = _context_fingerprint('person portrait', 'Messi World Cup final', 'Messi scored in the final', 'Messi story')
+          c2 = _context_fingerprint('person portrait', 'Messi training', 'Messi trained before the match', 'Messi story')
+          assert c1 != c2
+          assert _cache_key('Lionel Messi', 'PERSON', c1) != _cache_key('Lionel Messi', 'PERSON', c2)
 
           factory_runtime.patch_dashboard_runtime(ultimate_bot)
           provider_runtime.patch_provider_adapters(ultimate_bot)
