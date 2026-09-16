@@ -53,14 +53,31 @@ def _looks_like_filler(text):
 def _clean_titles(script_data):
     """Titles should win on relevance/CTR, not by carrying a mandatory hashtag."""
     titles = script_data.get("titles")
-    if not isinstance(titles, list):
-        return
+    if not isinstance(titles, list): return
     cleaned = []
     for title in titles:
         value = re.sub(r"\s*#shorts\b", "", str(title or ""), flags=re.IGNORECASE).strip()
         value = re.sub(r"\s{2,}", " ", value)
         cleaned.append(value)
     script_data["titles"] = cleaned
+
+
+def _add_editorial_contract(story_data):
+    """Tell the legacy generator what our original contribution must be."""
+    if not isinstance(story_data, dict): return story_data
+    brief = (
+        "EDITORIAL CONTRACT — DO NOT OUTPUT THIS BLOCK.\n"
+        "The Short must add an original editorial contribution rather than paraphrasing the source article. "
+        "Before writing, identify the single useful contribution supported by the supplied facts: an overlooked detail, "
+        "meaningful comparison, cause-and-effect explanation, timeline, number in context, consequence, mechanism, "
+        "or clearly sourced implication. Use only what the supplied facts support. Do not invent analysis, quotes, motives, "
+        "predictions, or facts. The narration should spend its limited runtime explaining that contribution. "
+        "If the source does not support a distinct contribution, prefer the clearest factual angle instead of manufacturing one.\n\n"
+    )
+    copy = dict(story_data)
+    if "text" in copy:
+        copy["text"] = brief + str(copy.get("text", ""))
+    return copy
 
 
 def clean_script_data(script_data, story_data, format_mode):
@@ -106,7 +123,8 @@ def wrap_write_script(bot):
     current = getattr(bot, "write_script", None)
     if current is None or getattr(current, "_content_dense_bound", False): return current
     def write_script(story_data, language_cfg, genre_key, conn, format_mode):
-        result = current(story_data, language_cfg, genre_key, conn, format_mode)
+        contracted_story = _add_editorial_contract(story_data)
+        result = current(contracted_story, language_cfg, genre_key, conn, format_mode)
         cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
         if diagnostics["changed_scenes"] or diagnostics["removed_scenes"]:
             print("   [Script QC] Removed performative filler: " + f"{diagnostics['changed_scenes']} scene(s) edited, {diagnostics['removed_scenes']} scene(s) removed.", flush=True)
