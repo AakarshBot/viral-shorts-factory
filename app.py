@@ -11,26 +11,15 @@ from story_ranker import patch_story_selection
 from learning_runtime import sync_factory_analytics
 from quality_runtime import patch_quality_control
 from visual_runtime import patch_visual_pipeline
+import visual_runtime
+from visual_qa_runtime import install_visual_qa_bridge
 from semantic_runtime import patch_semantic_dedup
 from audio_runtime import patch_audio_pipeline
 
-# Streamlit requires page configuration before any other Streamlit command,
-# including warnings emitted by startup/database checks.
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 
-# Streamlit Cloud exposes secrets through st.secrets rather than necessarily
-# exporting them into os.environ. ultimate_bot reads several provider keys at
-# import time, so bridge the supported factory secrets into both locations
-# before installing the runtime patches.
 def load_streamlit_secrets_into_runtime():
-    secret_names = (
-        "GEMINI_API_KEY",
-        "GROQ_API_KEY",
-        "GNEWS_API_KEY",
-        "UNSPLASH_ACCESS_KEY",
-        "HF_TOKEN",
-        "PEXELS_API_KEY",
-    )
+    secret_names = ("GEMINI_API_KEY", "GROQ_API_KEY", "GNEWS_API_KEY", "UNSPLASH_ACCESS_KEY", "HF_TOKEN", "PEXELS_API_KEY")
     loaded = []
     for name in secret_names:
         value = os.getenv(name)
@@ -44,24 +33,15 @@ def load_streamlit_secrets_into_runtime():
             os.environ[name] = value
             setattr(ultimate_bot, name, value)
             loaded.append(name)
-    print(
-        "[Dashboard] Provider secrets loaded: "
-        + ", ".join(loaded)
-        if loaded
-        else "[Dashboard] WARNING: No provider secrets were found in environment or Streamlit secrets.",
-        flush=True,
-    )
+    print("[Dashboard] Provider secrets loaded: " + ", ".join(loaded) if loaded else "[Dashboard] WARNING: No provider secrets were found in environment or Streamlit secrets.", flush=True)
     return set(loaded)
 
 _runtime_secrets = load_streamlit_secrets_into_runtime()
-
 install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_semantic_dedup()
 patch_story_selection(ultimate_bot)
 
-# Keep hook generation aligned with QC: the registry must not intentionally
-# generate the same generic openers that QC is designed to reject.
 ultimate_bot.HOOK_STYLES_REGISTRY["Urgent Warning"] = [
     "Watch what happens next as this update changes the picture.",
     "A new development just changed the situation in a measurable way.",
@@ -74,19 +54,13 @@ ultimate_bot.HOOK_STYLES_REGISTRY["Absurd Reality"] = [
 ]
 
 patch_quality_control(ultimate_bot)
+install_visual_qa_bridge(visual_runtime)
 patch_visual_pipeline(ultimate_bot)
-# run_robot() resolves process_visuals_async in ultimate_bot's module globals,
-# not as an attribute lookup on the bot object. The visual patch intentionally
-# installs the replacement on the bot object, so bind that patched callable
-# into the module namespace as well. Without this bridge the legacy visual
-# pipeline remains active even though patch_visual_pipeline() ran successfully.
 ultimate_bot.process_visuals_async = ultimate_bot.process_visuals_async
 print("[Dashboard] Visual pipeline patch installed and bound to run_robot globals.", flush=True)
+print("[Dashboard] Gemini visual QA bridge installed.", flush=True)
 patch_audio_pipeline(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
-
-# Replace the legacy topic-based/channel-wide analytics sweep with the exact
-# video-ID learning sync. run_robot() resolves this global by name at runtime.
 ultimate_bot.run_analytics_sweep = lambda conn: sync_factory_analytics(ultimate_bot, conn)
 
 try:
@@ -98,12 +72,9 @@ except Exception as e:
 
 st.title("🎬 Viral Shorts Factory")
 st.write("Configure and launch your YouTube Shorts automation.")
-
 pipeline_choice = st.radio("Select Factory Pipeline:", ["Manual Mode", "Auto-Pilot Mode (AI Selection)", "Cricket Focus Pipeline"])
 web_config = {}
 
-# Analytics controls are deliberately separate from production. Syncing is
-# explicit so a Streamlit page refresh can never unexpectedly trigger OAuth.
 if st.button("📊 Sync YouTube Performance"):
     try:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
@@ -113,10 +84,7 @@ if st.button("📊 Sync YouTube Performance"):
                 result = sync_factory_analytics(ultimate_bot, conn)
         finally:
             conn.close()
-        st.success(
-            f"Analytics sync complete: {result['updated']} videos refreshed; "
-            f"{result['retention_ready']} now have retention data."
-        )
+        st.success(f"Analytics sync complete: {result['updated']} videos refreshed; {result['retention_ready']} now have retention data.")
     except Exception as e:
         st.error(f"❌ Analytics sync failed: {e}")
 
@@ -180,7 +148,6 @@ if st.button("🚀 Start The Factory", type="primary"):
     ultimate_bot._active_web_config = dict(web_config)
     video_path = os.path.join(ultimate_bot.ASSETS_DIR, "final_video_output.mp4")
     run_started_at = time.time()
-
     print("\n[Dashboard] START FACTORY BUTTON RECEIVED", flush=True)
     print(f"[Dashboard] web_config={web_config}", flush=True)
     print(f"[Dashboard] DB_PATH={ultimate_bot.DB_PATH}", flush=True)
@@ -188,13 +155,11 @@ if st.button("🚀 Start The Factory", type="primary"):
     print(f"[Dashboard] GEMINI_API_KEY configured={bool(os.getenv('GEMINI_API_KEY'))}", flush=True)
     print(f"[Dashboard] GROQ_API_KEY configured={bool(os.getenv('GROQ_API_KEY'))}", flush=True)
     print("[Dashboard] Calling run_robot_with_exact_identity()...", flush=True)
-
     try:
         if os.path.exists(video_path):
             os.remove(video_path)
     except Exception as e:
         st.warning(f"Could not clear the previous output file: {e}")
-
     st.info("⚙️ Factory is running! Check the Streamlit Cloud logs (bottom right corner '>_ Manage app') for detailed progress.")
     try:
         with st.spinner("Executing script generation, visual sourcing, and rendering. This will take a few minutes..."):
