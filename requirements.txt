@@ -6,6 +6,7 @@ ddgs
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
+google-genai>=2.23.0
 python-dotenv
 tqdm
 moviepy
