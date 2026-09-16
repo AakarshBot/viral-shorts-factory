@@ -58,6 +58,15 @@ def _wrap_content_dense_script(bot):
         return getattr(bot, "write_script", None)
 
 
+def _wrap_content_first_visuals(bot):
+    try:
+        from visual_content_runtime import patch_content_first_visuals
+        return patch_content_first_visuals(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Content-first visual runtime unavailable: {exc}", flush=True)
+        return getattr(bot, "process_visuals_async", None)
+
+
 def bind_dashboard_patches(bot):
     """Bind patched callables into the actual globals used by run_robot."""
     run_robot = getattr(bot, "run_robot", None)
@@ -76,6 +85,8 @@ def bind_dashboard_patches(bot):
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
     _wrap_content_dense_script(bot)
+    _wrap_content_first_visuals(bot)
+
     namespace = run_robot.__globals__
     names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio")
     bound = []
@@ -131,8 +142,6 @@ def harden_editorial_defaults(bot):
         "This sounds unlikely, but the documented sequence is real.",
         "One overlooked detail makes this story more surprising.",
     ]
-    # Persona catchphrases are deliberately disabled. The topic itself should
-    # supply every spoken second; a catchphrase is not a substitute for reporting.
     for persona in getattr(bot, "PERSONA_PROFILES", {}).values():
         persona["catchphrases"] = []
     return bot
