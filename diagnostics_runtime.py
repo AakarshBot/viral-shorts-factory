@@ -20,7 +20,7 @@ def _run(name, fn):
 def _test_imports():
     modules = [
         "ultimate_bot", "factory_runtime", "db_architecture", "db_runtime",
-        "diagnostics_runtime", "editorial_runtime", "script_runtime",
+        "diagnostics_runtime", "editorial_runtime", "script_runtime", "research_runtime",
         "audio_runtime", "audio_direction_runtime", "visual_runtime", "visual_qa_runtime",
         "visual_strategy_runtime", "visual_content_runtime", "provider_runtime",
         "quality_runtime", "runtime_bindings", "workflow_runtime", "subtitle_runtime",
@@ -127,15 +127,11 @@ def _test_scene_branding():
 
     source_px = source.load()
     rendered_px = rendered.load()
-
-    # Branding must affect its intended safe-area elements.
     top_rail_changed = any(rendered_px[x, 30] != source_px[x, 30] for x in (40, 180, 540, 900))
     marker_changed = rendered_px[80, 85] != source_px[80, 85]
     type_badge_changed = rendered_px[80, 1830] != source_px[80, 1830]
     if not (top_rail_changed or marker_changed or type_badge_changed):
         raise AssertionError("scene branding did not alter any intended safe-area element")
-
-    # The centre must remain untouched so the verified visual stays dominant.
     if rendered_px[540, 500] != source_px[540, 500]:
         raise AssertionError("scene branding obscured the central visual area")
     if rendered_px[540, 960] != source_px[540, 960]:
@@ -175,6 +171,25 @@ def _test_script_guards():
     compact_ok, compact_reason = validate_content_density(compact_cleaned, compact_story, "regular")
     if not compact_ok: raise AssertionError(f"compact information-dense script was rejected: {compact_reason}")
     return "Filler removal, title cleanup, story structure and no-arbitrary-length gate passed"
+
+
+def _test_research_binding():
+    import factory_runtime
+    import runtime_bindings
+    import ultimate_bot
+
+    factory_runtime.patch_dashboard_runtime(ultimate_bot)
+    runtime_bindings.bind_dashboard_patches(ultimate_bot)
+    writer = getattr(ultimate_bot, "write_script", None)
+    if writer is None or not getattr(writer, "_content_dense_bound", False):
+        raise AssertionError("content-density writer wrapper is not live")
+    research_layer = getattr(writer, "__wrapped__", None)
+    if research_layer is None or not getattr(research_layer, "_research_wrapped", False):
+        raise AssertionError("multi-source research wrapper is not directly beneath the script guard")
+    namespace_writer = ultimate_bot.run_robot.__globals__.get("write_script")
+    if namespace_writer is not writer:
+        raise AssertionError("run_robot is not using the active research + script writer")
+    return "Live write_script binding order is research synthesis -> content-density/anti-filler guard (no network call made)"
 
 
 def _test_audio_timing():
@@ -250,6 +265,7 @@ def run_offline_diagnostics():
         ("Visual strategy", _test_visual_strategy),
         ("Scene branding", _test_scene_branding),
         ("Script safeguards", _test_script_guards),
+        ("Research binding", _test_research_binding),
         ("Audio timing", _test_audio_timing),
         ("Search deeper simulation", _test_search_deeper),
         ("Runtime bindings", _test_runtime_bindings),
