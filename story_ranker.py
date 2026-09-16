@@ -137,7 +137,6 @@ def rank_story_candidates(
             story, rows, target_category, target_format, target_language
         )
 
-        # Historical evidence is a modest booster, capped at +8 points.
         history_boost = min(8.0, historical * 0.08)
         final_score = live_score + history_boost
 
@@ -152,6 +151,9 @@ def rank_story_candidates(
 
 def patch_story_selection(bot):
     """Insert story ranking after collection/dedup and before editorial scoring."""
+    if getattr(bot, "_story_selection_patch_installed", False):
+        return bot
+
     original = bot.gather_and_filter_stories
 
     def gather(conn, genre_key, genre_cfg, trend_keyword=None,
@@ -182,5 +184,7 @@ def patch_story_selection(bot):
             )
         return ranked
 
+    gather._story_selection_patch = True
     bot.gather_and_filter_stories = gather
+    bot._story_selection_patch_installed = True
     return bot
