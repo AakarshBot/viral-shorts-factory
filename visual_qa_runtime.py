@@ -9,6 +9,7 @@ import time
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.8-flash")
 GEMINI_VISUAL_TIMEOUT_SECONDS = 20
 GEMINI_VISUAL_RETRIES = 2
+_GEMINI_QUOTA_EXHAUSTED = False
 
 
 def _clean_api_key(value):
@@ -48,7 +49,6 @@ def _extract_verdict(response):
 
 
 def _response_diagnostic(response):
-    """Return safe response metadata for diagnosing empty Gemini output."""
     candidates = getattr(response, "candidates", None) or []
     if not candidates:
         return "candidates=0"
@@ -68,7 +68,6 @@ def _response_diagnostic(response):
 
 
 def _is_institutional_entity(entity):
-    """Institutions are not literal objects; verify their concrete visual context instead."""
     text = str(entity or "").lower()
     markers = (
         "government", "ministry", "department", "administration", "authority",
@@ -113,9 +112,13 @@ def _build_instruction(entity, intent, prompt, voice, video_title):
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
+    global _GEMINI_QUOTA_EXHAUSTED
     api_key = _clean_api_key(api_key)
     if not api_key:
         print("   [Visual QA] Gemini verifier unavailable: GEMINI_API_KEY is missing.", flush=True)
+        return None
+    if _GEMINI_QUOTA_EXHAUSTED:
+        print("   [Visual QA] Gemini quota circuit breaker is open; skipping request.", flush=True)
         return None
 
     try:
@@ -163,8 +166,16 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
                 )
                 return None
             except Exception as exc:
-                message = str(exc)
-                transient = any(code in message for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+                message = str(exc).upper()
+                if "429" in message or "RESOURCE_EXHAUSTED" in message or "QUOTA" in message:
+                    _GEMINI_QUOTA_EXHAUSTED = True
+                    print(
+                        "   [Visual QA] Gemini quota exhausted; opening circuit breaker "
+                        "and skipping further Gemini visual requests for this process.",
+                        flush=True,
+                    )
+                    return None
+                transient = any(code in message for code in ("503", "UNAVAILABLE", "DEADLINE_EXCEEDED"))
                 if transient and attempt < GEMINI_VISUAL_RETRIES:
                     delay = 2 ** attempt
                     print(
@@ -184,7 +195,6 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
 
 
 def _install_render_safety_patch():
-    """Patch the existing renderer's negative-base fractional-power bug."""
     try:
         import factory_runtime
         from PIL import Image
@@ -211,7 +221,6 @@ def _install_render_safety_patch():
 
 
 def install_visual_qa_bridge(visual_runtime_module):
-    """Replace the Gemini verifier and harden the renderer without weakening visual QA."""
     visual_runtime_module._strict_gemini_check = strict_gemini_check
     _install_render_safety_patch()
     return visual_runtime_module
