@@ -47,6 +47,7 @@ jobs:
           import db_runtime
           import factory_runtime
           import learning_runtime
+          import provider_runtime
           import quality_runtime
           import runtime_bindings
           import semantic_runtime
@@ -60,20 +61,24 @@ jobs:
       - name: Run offline runtime smoke checks
         run: |
           python - <<'PY'
+          import inspect
+          import edge_tts
           import factory_runtime
+          import provider_runtime
           import runtime_bindings
           import ultimate_bot
           import visual_qa_runtime
           import visual_runtime
 
-          # This used to fail with a complex-number TypeError for pixels inside
-          # the vignette's inner radius. The visual-QA install is intentionally
-          # invoked here so the production safety patch is exercised offline.
+          signature = inspect.signature(edge_tts.Communicate)
+          assert 'boundary' in signature.parameters, signature
+
           visual_qa_runtime.install_visual_qa_bridge(visual_runtime)
           vignette = factory_runtime._vignette((1080, 1920))
           assert vignette.size == (1080, 1920)
 
           factory_runtime.patch_dashboard_runtime(ultimate_bot)
+          provider_runtime.patch_provider_adapters(ultimate_bot)
           runtime_bindings.harden_editorial_defaults(ultimate_bot)
           runtime_bindings.bind_dashboard_patches(ultimate_bot)
           namespace = ultimate_bot.run_robot.__globals__
@@ -85,9 +90,18 @@ jobs:
           ):
               assert namespace[name] is getattr(ultimate_bot, name), name
 
+          assert getattr(ultimate_bot.get_trend_signal_bonus, '_cached_trend_signal', False)
+          rejected = [
+              {'hard_reject': True, 'monetization_risk': 9},
+          ]
+          batch = [{'title': 'Rejected story', 'genre': 'technology'}]
+          result = ultimate_bot.process_scored_candidates(
+              rejected, batch, {}, None, 'regular'
+          )
+          assert result == [], result
+          assert getattr(ultimate_bot.fetch_hf_ai_image, '__name__', '') == 'hf_text_to_image'
+
           sample = {'recommended_title_index': 0}
-          # Rebind after the quality layer in production; this assertion checks
-          # the normalization wrapper itself when present.
           print('Offline runtime smoke checks passed.')
           PY
 
@@ -110,6 +124,7 @@ jobs:
               'story_ranker.py',
               'semantic_runtime.py',
               'runtime_bindings.py',
+              'provider_runtime.py',
               'requirements.txt',
           ]
           missing = [path for path in required if not Path(path).is_file()]
