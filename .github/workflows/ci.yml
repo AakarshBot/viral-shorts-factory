@@ -53,6 +53,7 @@ jobs:
           import diagnostics_runtime
           import editorial_runtime
           import factory_runtime
+          import final_qc_runtime
           import learning_runtime
           import provider_runtime
           import quality_runtime
@@ -78,6 +79,7 @@ jobs:
           import inspect
           import edge_tts
           import factory_runtime
+          import final_qc_runtime
           import provider_runtime
           import runtime_bindings
           import ultimate_bot
@@ -132,6 +134,31 @@ jobs:
               'generate_karaoke_clip', 'compile_video', 'write_script'
           ):
               assert namespace[name] is getattr(ultimate_bot, name), name
+
+          uploader_signature = inspect.signature(ultimate_bot.upload_to_youtube)
+          for name in ('title_override', 'description_override', 'comment_override'):
+              assert name in uploader_signature.parameters, uploader_signature
+
+          assert callable(final_qc_runtime.validate_final_video)
+          assert callable(final_qc_runtime.validate_final_upload_metadata)
+          clean_title, clean_description, clean_comment = final_qc_runtime.validate_final_upload_metadata(
+              'Example story title',
+              'This is a factual description with enough words to satisfy final upload quality control checks.',
+              'What do you think about this story?'
+          )
+          assert clean_title == 'Example story title'
+          assert clean_description.startswith('This is a factual description')
+          assert clean_comment.startswith('What do you think')
+          try:
+              final_qc_runtime.validate_final_upload_metadata(
+                  'Example story title #shorts',
+                  'This is a factual description with enough words to satisfy final upload quality control checks.',
+                  ''
+              )
+          except ValueError as exc:
+              assert '#shorts' in str(exc).lower()
+          else:
+              raise AssertionError('Final QC accepted #shorts in the title.')
 
           # The new newsroom modules must remain importable and must not perform
           # network/API work just by being imported.
@@ -205,6 +232,7 @@ jobs:
               'script_runtime.py',
               'workflow_runtime.py',
               'youtube_comment_runtime.py',
+              'final_qc_runtime.py',
               'requirements.txt',
           ]
           missing = [path for path in required if not Path(path).is_file()]
