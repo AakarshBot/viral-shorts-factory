@@ -76,6 +76,15 @@ def _wrap_content_first_visuals(bot):
         return getattr(bot, "process_visuals_async", None)
 
 
+def _patch_youtube_creator_comments(bot):
+    try:
+        from youtube_comment_runtime import patch_youtube_upload
+        return patch_youtube_upload(bot)
+    except Exception as exc:
+        print(f"   [Bindings] YouTube creator comment patch unavailable: {exc}", flush=True)
+        return getattr(bot, "upload_to_youtube", None)
+
+
 def bind_dashboard_patches(bot):
     """Bind patched callables into the actual globals used by run_robot."""
     run_robot = getattr(bot, "run_robot", None)
@@ -96,9 +105,10 @@ def bind_dashboard_patches(bot):
     _wrap_editorial_provider_usage(bot)
     _wrap_content_dense_script(bot)
     _wrap_content_first_visuals(bot)
+    _patch_youtube_creator_comments(bot)
 
     namespace = run_robot.__globals__
-    names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio")
+    names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio", "upload_to_youtube")
     bound = []
     for name in names:
         value = getattr(bot, name, None)
