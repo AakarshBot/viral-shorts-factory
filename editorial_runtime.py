@@ -18,6 +18,22 @@ def _num(value, default=0.0):
         return default
 
 
+def _bool(value, default=False):
+    """Safely coerce AI-returned boolean values such as string 'false'."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off", ""}:
+        return False
+    return default
+
+
 def _tokens(value):
     stop = {
         "the", "and", "for", "with", "from", "this", "that", "into",
@@ -77,7 +93,7 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         story = batch_stories[idx]
         if not isinstance(story, dict):
             continue
-        if scores.get("hard_reject", False):
+        if _bool(scores.get("hard_reject"), False):
             continue
 
         hs = max(0.0, min(10.0, _num(scores.get("hook_strength"), 5.0)))
