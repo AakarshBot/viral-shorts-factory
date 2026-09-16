@@ -29,6 +29,22 @@ def classify_scene(seg, category=""):
         str(category),
     ])).lower()
     entity = _clean(seg.get("primary_entity", "")).lower()
+    intent = _clean(seg.get("visual_intent", "")).lower()
+
+    # Intent is stronger evidence than incidental words in the narration.
+    # For example, a person can "score in the final" without needing an
+    # EVENT visual. This prevents event/statistic keywords from swallowing
+    # explicit person-focused visual requests.
+    if any(x in intent for x in ("person", "portrait", "player", "president", "ceo", "scientist", "actor", "coach", "founder", "minister", "speaker")):
+        return "PERSON"
+    if any(x in intent for x in ("product", "device", "phone", "car", "chip", "console")):
+        return "PRODUCT"
+    if any(x in intent for x in ("map", "location", "landmark", "geography")):
+        return "LOCATION"
+    if any(x in intent for x in ("process", "mechanism", "how it works", "diagram", "technical")):
+        return "PROCESS"
+    if any(x in intent for x in ("quote", "statement", "speaker statement")):
+        return "QUOTE"
 
     if any(x in text for x in ("timeline", "history", "in ", "years ago", "year-by-year")):
         if re.search(r"\b(19|20)\d{2}\b", text) and any(x in text for x in ("then", "before", "after", "later", "since")):
@@ -99,8 +115,6 @@ def build_deep_queries(seg, video_title="", visual_type=None):
             if q and q not in queries:
                 queries.append(q)
 
-    # A few deliberately broader searches are useful when the LLM's first
-    # visual prompt is too specific to match a provider's index.
     for q in (
         f"{entity} {category} real photo",
         f"{entity} {title} news photo",
