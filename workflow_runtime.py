@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from youtube_comment_runtime import _build_clean_metadata, build_pinned_comment
+from db_runtime import run_robot_with_exact_identity
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
 
@@ -383,7 +384,7 @@ class WorkflowController:
                     globals_dict["gather_and_filter_stories"] = selected_gather
                 try:
                     self._reporter("research", 18, "Selected story locked. Preparing the production pipeline…")
-                    run_robot(web_config=config)
+                    run_robot_with_exact_identity(self.bot, web_config=config)
                 finally:
                     if original_gather is not None:
                         globals_dict["gather_and_filter_stories"] = original_gather

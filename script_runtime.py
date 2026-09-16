@@ -178,8 +178,8 @@ def validate_content_density(script_data, story_data, format_mode):
             filler_hits.append(index)
     if filler_hits:
         return False, "Performative filler remains in scene(s): " + ", ".join(map(str, filler_hits))
-    # if topic_terms and len(set(all_words) & topic_terms) < min(2, len(topic_terms)):
-    #     return False, "Narration is not sufficiently grounded in the selected topic."
+    if topic_terms and len(set(all_words) & topic_terms) < min(2, len(topic_terms)):
+        return False, "Narration is not sufficiently grounded in the selected topic."
     return True, "Passed story-specific content-density and anti-filler checks"
 
 
