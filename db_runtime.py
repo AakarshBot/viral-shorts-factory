@@ -132,6 +132,9 @@ def run_robot_with_exact_identity(bot, web_config=None):
     """Run the factory and guarantee that a created run cannot remain pending."""
     original_connect = bot.sqlite3.connect
     state = _IdentityState()
+    bot._last_run_identity = state
+    bot._last_run_row_id = None
+    bot._last_run_run_id = state.run_id
 
     def connect(*args, **kwargs):
         conn = original_connect(*args, **kwargs)
@@ -166,6 +169,9 @@ def run_robot_with_exact_identity(bot, web_config=None):
         raise
     finally:
         bot.sqlite3.connect = original_connect
+
+    bot._last_run_row_id = state.row_id
+    bot._last_run_run_id = state.run_id
 
     # A normal return can still mean the legacy pipeline stopped early.
     # Dashboard/headless runs never use the interactive QC rejection gate.
