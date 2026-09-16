@@ -1,7 +1,8 @@
 """Polished Shorts subtitle and channel-branding renderer.
 
 Keeps captions readable, compact, and inside a predictable 1-2 line safe area.
-Also supplies the channel-logo badge used by the legacy video compositor.
+Also supplies the channel-logo badge used by the legacy video compositor and
+softens the legacy full-width frame bars into a quieter branded edge treatment.
 """
 from __future__ import annotations
 
@@ -235,6 +236,69 @@ def create_glossy_logo_watermark(logo_path, size=112):
         return None
 
 
+def _soften_frame_bars(image_path: str) -> bool:
+    """Replace the legacy solid 40px top/bottom bars with a restrained edge treatment."""
+    if not image_path or not os.path.isfile(image_path):
+        return False
+    try:
+        image = Image.open(image_path).convert("RGB")
+        width, height = image.size
+        band = min(40, max(8, height // 48))
+        if height < band * 3:
+            return False
+
+        top_source = image.crop((0, band, width, band * 2)).resize((width, band), Image.Resampling.BICUBIC)
+        bottom_source = image.crop((0, height - band * 2, width, height - band)).resize((width, band), Image.Resampling.BICUBIC)
+        edge = Image.new("RGB", (width, height), (0, 0, 0))
+        edge.paste(top_source, (0, 0))
+        edge.paste(bottom_source, (0, height - band))
+        middle = image.crop((0, band, width, height - band))
+        edge.paste(middle, (0, band))
+
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        draw.rectangle((0, 0, width, band - 1), fill=(8, 14, 24, 42))
+        draw.rectangle((0, height - band, width, height - 1), fill=(8, 14, 24, 50))
+        draw.rectangle((0, band - 2, width, band), fill=(255, 194, 78, 165))
+        draw.rectangle((0, height - band - 1, width, height - band + 1), fill=(64, 196, 255, 145))
+        image = Image.alpha_composite(edge.convert("RGBA"), overlay).convert("RGB")
+        image.save(image_path, "JPEG", quality=95)
+        return True
+    except Exception:
+        return False
+
+
+def _patch_scene_overlay(bot):
+    """Post-process scene images after legacy composition and before MoviePy rendering."""
+    run_robot = getattr(bot, "run_robot", None)
+    if run_robot is None or not hasattr(run_robot, "__globals__"):
+        return False
+    namespace = run_robot.__globals__
+    current = namespace.get("process_visuals_async")
+    if current is None or getattr(current, "_soft_frame_overlay_bound", False):
+        return bool(current)
+
+    async def polished_process_visuals(*args, **kwargs):
+        packages = await current(*args, **kwargs)
+        changed = 0
+        try:
+            for package in packages or []:
+                for layer in package or []:
+                    path = layer.get("image") if isinstance(layer, dict) else None
+                    if path and _soften_frame_bars(path):
+                        changed += 1
+        except Exception:
+            pass
+        if changed:
+            print(f"   [Overlay Patch] Refined {changed} scene frame edge(s).", flush=True)
+        return packages
+
+    polished_process_visuals._soft_frame_overlay_bound = True
+    namespace["process_visuals_async"] = polished_process_visuals
+    bot.process_visuals_async = polished_process_visuals
+    return True
+
+
 def patch_subtitle_pipeline(bot):
     if getattr(bot, "_subtitle_pipeline_patch_installed", False):
         return bot
@@ -245,6 +309,7 @@ def patch_subtitle_pipeline(bot):
         namespace["create_glossy_logo_watermark"] = create_glossy_logo_watermark
     bot.generate_karaoke_clip = generate_readable_karaoke_clip
     bot.create_glossy_logo_watermark = create_glossy_logo_watermark
+    _patch_scene_overlay(bot)
     bot._subtitle_pipeline_patch_installed = True
-    print("   [Subtitle Patch] Premium 1–2 line karaoke + compact channel badge installed.", flush=True)
+    print("   [Subtitle Patch] Premium 1–2 line karaoke + compact channel badge + refined frame overlay installed.", flush=True)
     return bot
