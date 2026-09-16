@@ -57,6 +57,8 @@ jobs:
           import ultimate_bot
           import visual_runtime
           import visual_qa_runtime
+          import visual_strategy_runtime
+          import visual_content_runtime
           import youtube_comment_runtime
           print('Core runtime imports passed.')
           PY
@@ -72,6 +74,7 @@ jobs:
           import ultimate_bot
           import visual_qa_runtime
           import visual_runtime
+          import visual_strategy_runtime
           import youtube_comment_runtime
 
           signature = inspect.signature(edge_tts.Communicate)
@@ -80,6 +83,17 @@ jobs:
           visual_qa_runtime.install_visual_qa_bridge(visual_runtime)
           vignette = factory_runtime._vignette((1080, 1920))
           assert vignette.size == (1080, 1920)
+
+          person = {'primary_entity': 'Lionel Messi', 'visual_intent': 'person portrait', 'voiceover': 'Lionel Messi scored in the final.', 'sport_or_topic_category': 'football'}
+          event = {'primary_entity': 'FIFA World Cup final', 'visual_intent': 'actual match event', 'voiceover': 'The final decided the champion.', 'sport_or_topic_category': 'football'}
+          concept = {'primary_entity': 'quantum computing', 'visual_intent': 'technical process', 'voiceover': 'Quantum computers use quantum states to process information.', 'sport_or_topic_category': 'technology'}
+          assert visual_strategy_runtime.classify_scene(person) == 'PERSON'
+          assert visual_strategy_runtime.classify_scene(event) == 'EVENT'
+          assert visual_strategy_runtime.classify_scene(concept) in {'PROCESS', 'CONCEPT'}
+          queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
+          assert visual_type == 'PERSON'
+          assert len(queries) >= 10
+          assert any('official portrait' in q for q in queries)
 
           factory_runtime.patch_dashboard_runtime(ultimate_bot)
           provider_runtime.patch_provider_adapters(ultimate_bot)
@@ -95,13 +109,9 @@ jobs:
               assert namespace[name] is getattr(ultimate_bot, name), name
 
           assert getattr(ultimate_bot.get_trend_signal_bonus, '_cached_trend_signal', False)
-          rejected = [
-              {'hard_reject': True, 'monetization_risk': 9},
-          ]
+          rejected = [{'hard_reject': True, 'monetization_risk': 9}]
           batch = [{'title': 'Rejected story', 'genre': 'technology'}]
-          result = ultimate_bot.process_scored_candidates(
-              rejected, batch, {}, None, 'regular'
-          )
+          result = ultimate_bot.process_scored_candidates(rejected, batch, {}, None, 'regular')
           assert result == [], result
 
           cleaned_title, description, tags = youtube_comment_runtime._build_clean_metadata(
@@ -118,7 +128,6 @@ jobs:
           assert 'subscribe' in comment.lower()
           assert getattr(ultimate_bot.fetch_hf_ai_image, '__name__', '') == 'hf_text_to_image'
 
-          sample = {'recommended_title_index': 0}
           print('Offline runtime smoke checks passed.')
           PY
 
@@ -132,6 +141,8 @@ jobs:
               'audio_runtime.py',
               'visual_runtime.py',
               'visual_qa_runtime.py',
+              'visual_strategy_runtime.py',
+              'visual_content_runtime.py',
               'quality_runtime.py',
               'factory_runtime.py',
               'db_architecture.py',
