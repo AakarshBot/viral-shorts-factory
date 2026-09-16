@@ -104,13 +104,14 @@ def generate_readable_karaoke_clip(
         canvas.save(output_path)
         return output_path
 
-    max_text_width = int(width * 0.82)
+    # Keep the card visually compact while retaining readable two-line wrapping.
+    max_text_width = int(width * 0.76)
     base_font_size = max(48, min(64, int(width * 0.056)))
     font, lines = _fit_layout(words, base_font_size, font_path, max_text_width, max_lines=2)
     font_size = getattr(font, "size", base_font_size)
     line_height = int(font_size * 1.12)
     line_gap = max(5, int(font_size * 0.10))
-    pad_x = max(24, int(width * 0.028))
+    pad_x = max(22, int(width * 0.026))
     pad_y = max(17, int(width * 0.016))
 
     text_block_h = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
