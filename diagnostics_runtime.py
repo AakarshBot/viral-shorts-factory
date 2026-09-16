@@ -124,12 +124,23 @@ def _test_scene_branding():
         raise AssertionError(f"scene branding changed geometry: {source.size} -> {rendered.size}")
     if rendered.mode != "RGBA":
         raise AssertionError(f"scene branding returned unexpected mode: {rendered.mode}")
-    pixels = rendered.load()
-    if pixels[540, 960] == source.load()[540, 960]:
-        raise AssertionError("scene branding did not alter the expected frame area")
-    if pixels[540, 500] != source.load()[540, 500]:
+
+    source_px = source.load()
+    rendered_px = rendered.load()
+
+    # Branding must affect its intended safe-area elements.
+    top_rail_changed = any(rendered_px[x, 30] != source_px[x, 30] for x in (40, 180, 540, 900))
+    marker_changed = rendered_px[80, 85] != source_px[80, 85]
+    type_badge_changed = rendered_px[80, 1830] != source_px[80, 1830]
+    if not (top_rail_changed or marker_changed or type_badge_changed):
+        raise AssertionError("scene branding did not alter any intended safe-area element")
+
+    # The centre must remain untouched so the verified visual stays dominant.
+    if rendered_px[540, 500] != source_px[540, 500]:
         raise AssertionError("scene branding obscured the central visual area")
-    return "Story-aware scene framing preserves 1080x1920 geometry and keeps central visual content unobscured"
+    if rendered_px[540, 960] != source_px[540, 960]:
+        raise AssertionError("scene branding altered the centre of the verified visual")
+    return "Story-aware scene framing changes only intended safe-area elements and preserves the central visual"
 
 
 def _test_script_guards():
