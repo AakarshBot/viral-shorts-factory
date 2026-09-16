@@ -64,6 +64,21 @@ def validate_audio_timing(text: str, timings: list[dict[str, Any]]) -> tuple[boo
     return True, "Valid word-level audio timing"
 
 
+def validate_timing_against_duration(timings: list[dict[str, Any]], duration: float, tolerance: float = 0.35) -> tuple[bool, str]:
+    """Ensure the word-boundary timeline fits inside the encoded media duration."""
+    if not timings:
+        return False, "No word timings are available for duration alignment."
+    if duration <= 0:
+        return False, "Encoded audio duration is not positive."
+    first_start = max(0.0, float(timings[0]["start"]))
+    last_end = max(0.0, float(timings[-1]["end"]))
+    if first_start > duration + tolerance:
+        return False, f"First word timing begins after encoded audio ends ({first_start:.2f}s > {duration:.2f}s)."
+    if last_end > duration + tolerance:
+        return False, f"Word timing extends beyond encoded audio ({last_end:.2f}s > {duration:.2f}s)."
+    return True, "Word timings fit encoded audio duration"
+
+
 def get_audio_duration(path: str) -> float:
     """Read the real encoded media duration without importing another Python dependency."""
     try:
@@ -164,10 +179,13 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                     profile["pitch"], path, timeout_seconds=45,
                 )
                 actual_duration = get_audio_duration(path)
+                if actual_duration <= 0:
+                    raise RuntimeError("Unable to determine encoded audio duration.")
+                aligned, alignment_reason = validate_timing_against_duration(timings, actual_duration)
+                if not aligned:
+                    raise RuntimeError(alignment_reason)
                 timing_duration = (timings[-1]["end"] + 0.15) if timings else 0.0
                 duration = max(actual_duration, timing_duration)
-                if duration <= 0:
-                    raise RuntimeError("Unable to determine encoded audio duration.")
                 audio_paths.append(path)
                 word_timings.append(timings)
                 scene_durations.append(duration)
@@ -175,7 +193,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                 print(
                     f"   [Audio] Scene {idx + 1}/{len(scenes)} complete: "
                     f"{os.path.getsize(path) / 1024:.1f} KB, {len(timings)} word timings, "
-                    f"{duration:.2f}s audio duration.",
+                    f"{duration:.2f}s audio duration, timing aligned.",
                     flush=True,
                 )
                 break
@@ -192,7 +210,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
 
     script_data["audio_scene_durations"] = scene_durations
     script_data["audio_total_duration"] = round(sum(scene_durations), 3)
-    script_data["word_timing_version"] = 2
+    script_data["word_timing_version"] = 3
     script_data["word_timing_counts"] = [len(items) for items in word_timings]
 
     gc.collect()
