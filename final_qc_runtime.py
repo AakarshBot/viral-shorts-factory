@@ -35,6 +35,24 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
     return True, "metadata checks passed"
 
 
+def validate_final_video(path: str) -> None:
+    """Raise when the actual final MP4 fails artifact QC."""
+    ok, reason = _validate_final_artifact(path)
+    if not ok:
+        raise RuntimeError(reason)
+
+
+def validate_final_upload_metadata(title: str, description: str, comment: str = "") -> tuple[str, str, str]:
+    """Validate editable final metadata and return cleaned values unchanged."""
+    cleaned_title = str(title or "").strip()
+    cleaned_description = str(description or "").strip()
+    cleaned_comment = str(comment or "").strip()
+    ok, reason = _validate_metadata(cleaned_title, cleaned_description, cleaned_comment)
+    if not ok:
+        raise ValueError(reason)
+    return cleaned_title, cleaned_description, cleaned_comment
+
+
 def patch_workflow_qc(bot) -> bool:
     """Require final artifact + metadata QC before READY_FOR_UPLOAD and upload."""
     try:
@@ -52,9 +70,7 @@ def patch_workflow_qc(bot) -> bool:
 
     def guarded_ready(self, topic):
         video_path = str(getattr(getattr(self, "state", None), "video_path", "") or "")
-        ok, reason = _validate_final_artifact(video_path)
-        if not ok:
-            raise RuntimeError(f"Final artifact QC failed before READY_FOR_UPLOAD: {reason}")
+        validate_final_video(video_path)
 
         script_data = dict(getattr(getattr(self, "state", None), "script_data", {}) or {})
         try:
@@ -70,21 +86,14 @@ def patch_workflow_qc(bot) -> bool:
         except Exception as exc:
             raise RuntimeError(f"Final metadata QC could not run before READY_FOR_UPLOAD: {type(exc).__name__}: {exc}") from exc
 
-        metadata_ok, metadata_reason = _validate_metadata(title, description, comment)
-        if not metadata_ok:
-            raise RuntimeError(f"Final metadata QC failed before READY_FOR_UPLOAD: {metadata_reason}")
-
-        print(f"   [Final QC] READY_FOR_UPLOAD gate passed: {reason}; {metadata_reason}.", flush=True)
+        validate_final_upload_metadata(title, description, comment)
+        print("   [Final QC] READY_FOR_UPLOAD gate passed.", flush=True)
         return original_ready(self, topic)
 
     def guarded_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword=""):
-        ok, reason = _validate_final_artifact(video_path)
-        if not ok:
-            raise RuntimeError(f"Final artifact QC failed before manual upload: {reason}")
-        metadata_ok, metadata_reason = _validate_metadata(title, description, comment)
-        if not metadata_ok:
-            raise RuntimeError(f"Final metadata QC failed before manual upload: {metadata_reason}")
-        print(f"   [Final QC] Manual-upload gate passed: {reason}; {metadata_reason}.", flush=True)
+        validate_final_video(video_path)
+        validate_final_upload_metadata(title, description, comment)
+        print("   [Final QC] Manual-upload gate passed.", flush=True)
         return original_upload(
             self,
             video_path,
