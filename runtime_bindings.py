@@ -1,13 +1,58 @@
-"""Bind runtime patches to the actual globals used by the legacy factory.
+"""Bind runtime patches to the actual globals used by the legacy factory."""
 
-The production bot keeps several functions as module-level globals inside
-run_robot()/write_script(). Assigning only attributes on the imported module
-object is not enough when those functions resolve names from __globals__.
-This bridge makes the dashboard patches authoritative without rewriting the
-large legacy pipeline.
-"""
-
+import functools
 import traceback
+
+
+def _wrap_trend_signal(bot):
+    current = getattr(bot, "get_trend_signal_bonus", None)
+    if current is None or getattr(current, "_cached_trend_signal", False):
+        return current
+
+    @functools.lru_cache(maxsize=128)
+    def cached(keyword):
+        return current(keyword)
+
+    cached._cached_trend_signal = True
+    bot.get_trend_signal_bonus = cached
+    return cached
+
+
+def _wrap_scored_candidates(bot):
+    current = getattr(bot, "process_scored_candidates", None)
+    if current is None or getattr(current, "_hard_reject_safe", False):
+        return current
+
+    def safe_process(scored_data, batch_stories, bonuses, last_genre, format_mode):
+        result = current(scored_data, batch_stories, bonuses, last_genre, format_mode)
+        if not result:
+            return []
+
+        # The dashboard scorer historically returned the entire batch when all
+        # candidates were rejected. That silently bypassed hard-reject logic.
+        # Filter the returned candidates against the original model decisions.
+        allowed = []
+        for index, story in enumerate(batch_stories):
+            if index >= len(scored_data) or not isinstance(story, dict):
+                continue
+            scores = scored_data[index]
+            if not isinstance(scores, dict):
+                continue
+            try:
+                risk = float(scores.get("monetization_risk", 5))
+            except (TypeError, ValueError):
+                continue
+            if scores.get("hard_reject", False) or risk >= 8:
+                continue
+            allowed.append(story)
+
+        allowed_ids = {id(item) for item in allowed}
+        filtered = [item for item in result if id(item) in allowed_ids]
+        return filtered
+
+    safe_process._hard_reject_safe = True
+    bot.process_scored_candidates = safe_process
+    return safe_process
 
 
 def bind_dashboard_patches(bot):
@@ -25,6 +70,9 @@ def bind_dashboard_patches(bot):
             return current_validate(script_data, source_text, format_mode)
         validate._index_normalized = True
         bot.validate_script = validate
+
+    _wrap_trend_signal(bot)
+    _wrap_scored_candidates(bot)
 
     namespace = run_robot.__globals__
     names = (
@@ -48,10 +96,6 @@ def bind_dashboard_patches(bot):
             namespace[name] = value
             bound.append(name)
 
-    # The legacy run_robot() catches render exceptions and historically printed
-    # only "TypeError: ...", which hides the actual source line. Wrap both the
-    # visual stage and compile stage so the complete traceback is emitted before
-    # the legacy handler catches and returns. Each wrapper re-raises unchanged.
     original_process_visuals = getattr(bot, "process_visuals_async", None)
     if original_process_visuals is not None and not getattr(original_process_visuals, "_traceback_bound", False):
         async def process_visuals_with_traceback(*args, **kwargs):
@@ -80,9 +124,6 @@ def bind_dashboard_patches(bot):
         namespace["compile_video"] = compile_video_with_traceback
         bound.append("compile_video(traceback)")
 
-    # Some legacy render callables may have been imported into ultimate_bot's
-    # globals. If so, make their vignette dependency point at the guarded
-    # factory implementation as well as patching factory_runtime itself.
     try:
         import factory_runtime
         if hasattr(factory_runtime, "_vignette"):
