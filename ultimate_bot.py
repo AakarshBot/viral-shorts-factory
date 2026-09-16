@@ -1644,39 +1644,47 @@ def render_hook_card(bg_img, hook_text, width=1080, height=1920, font_choice=Non
         y_text += (bbox[3] - bbox[1]) + 20
     return base
 
-def create_glossy_logo_watermark(logo_path, size=120):
+def create_glossy_logo_watermark(logo_path, size=140):
     if not os.path.exists(logo_path): return None
     try:
-        logo = Image.open(logo_path).convert("RGBA").resize((size - 24, size - 24), Image.Resampling.LANCZOS)
-        container_size = size + 16
-        base = Image.new("RGBA", (container_size, container_size), (0,0,0,0))
-        draw = ImageDraw.Draw(base)
+        # Resize logo to perfectly fit 100% of the container size
+        logo = Image.open(logo_path).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
+        base = Image.new("RGBA", (size, size), (0,0,0,0))
         
-        draw.rounded_rectangle([0, 0, container_size, container_size], radius=24, fill=(15, 20, 35, 180), outline=(255, 255, 255, 90), width=2)
-        highlight = Image.new("RGBA", (container_size, container_size), (0,0,0,0))
+        # Create a perfectly fitted rounded mask (like a clean TV channel bug)
+        mask = Image.new("L", (size, size), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.rounded_rectangle([0, 0, size, size], radius=24, fill=255)
+        
+        # Paste logo using the mask so there is no awkward background gap
+        base.paste(logo, (0, 0), mask)
+        
+        # Subtle glossy overlay
+        highlight = Image.new("RGBA", (size, size), (0,0,0,0))
         h_draw = ImageDraw.Draw(highlight)
-        h_draw.ellipse([-20, -20, container_size + 20, container_size // 2], fill=(255, 255, 255, 60))
+        h_draw.ellipse([-20, -20, size + 20, size // 2], fill=(255, 255, 255, 45))
         base = Image.alpha_composite(base, highlight)
-        base.paste(logo, (8, 8), logo)
+        
         return base
     except Exception:
         pass
 
 def generate_karaoke_clip(chunk, active_index, font_path, video_width, output_path, bg_img_path=None, source_type="bg"):
-    canvas_w, canvas_h = int(video_width * 0.95), 350
+    # Made canvas taller to support massive text
+    canvas_w, canvas_h = int(video_width * 0.95), 450
     img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
     draw = ImageDraw.Draw(img)
 
     text_color = (255, 255, 255) 
-    active_color = (255, 215, 0) # Viral Yellow
+    active_color = (0, 255, 255) # High-contrast Viral Cyan
     
-    font_size = 90
+    font_size = 130 # Massive subtitles
     font = get_bold_font(font_size, font_path)
     
-    while font_size > 40:
+    while font_size > 50:
         total_w = 0
         for i, wt in enumerate(chunk):
-            f = get_bold_font(int(font_size * 1.25) if i == active_index else font_size, font_path)
+            f = get_bold_font(int(font_size * 1.15) if i == active_index else font_size, font_path)
             total_w += draw.textlength(wt['word'], font=f)
         total_w += draw.textlength(" ", font=font) * (len(chunk) - 1)
         
@@ -1686,34 +1694,35 @@ def generate_karaoke_clip(chunk, active_index, font_path, video_width, output_pa
         font = get_bold_font(font_size, font_path)
 
     space_w = draw.textlength(" ", font=get_bold_font(font_size, font_path))
-    word_widths = [draw.textlength(wt['word'], font=get_bold_font(int(font_size * 1.25) if i == active_index else font_size, font_path)) for i, wt in enumerate(chunk)]
+    word_widths = [draw.textlength(wt['word'], font=get_bold_font(int(font_size * 1.15) if i == active_index else font_size, font_path)) for i, wt in enumerate(chunk)]
     total_text_w = sum(word_widths) + space_w * (len(chunk) - 1)
     
     x = (canvas_w - total_text_w) / 2
-    y = (canvas_h - (font_size * 1.25)) / 2
+    y = (canvas_h - (font_size * 1.15)) / 2
 
-    stroke_w = max(4, int(font_size * 0.09))
+    # Ultra-thick stroke for supreme legibility without a background box
+    stroke_w = max(6, int(font_size * 0.12))
 
     for i, wt in enumerate(chunk):
         w_str = wt['word']
         is_active = (i == active_index)
         color = active_color if is_active else text_color
         
-        current_fs = int(font_size * 1.25) if is_active else font_size
+        current_fs = int(font_size * 1.15) if is_active else font_size
         current_font = get_bold_font(current_fs, font_path)
         
-        y_offset = (font_size * 1.25) - current_fs 
+        y_offset = (font_size * 1.15) - current_fs 
 
-        # Heavy Drop Shadow
-        draw.text((x + 8, y + y_offset + 8), w_str, font=current_font, fill=(0,0,0,180))
-        # Main text with thick stroke
+        # Heavy Double Drop-Shadow
+        draw.text((x + 10, y + y_offset + 10), w_str, font=current_font, fill=(0,0,0,200))
+        
+        # Main text with thick black stroke
         draw.text((x, y + y_offset), w_str, font=current_font, fill=color, stroke_width=stroke_w, stroke_fill=(0,0,0,255))
         
         x += word_widths[i] + space_w
 
     img.save(output_path, "PNG")
     return output_path
-
 def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
     print("\n🎬 Rendering Kinetic Final Video (MoviePy v2+ Standards & Glossy Branding)...")
     if not scene_visual_packages:

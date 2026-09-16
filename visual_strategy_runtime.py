@@ -114,11 +114,11 @@ def build_deep_queries(seg, video_title="", visual_type=None):
         # name and do not constrain the visual with pose/event adjectives.
         _add_unique(queries, entity, "Wikimedia Commons")
         _add_unique(queries, entity, "official")
-        # Only after broad identity discovery do we use story-specific context.
-        _add_unique(queries, prompt)
-        _add_unique(queries, entity, title)
-        _add_unique(queries, entity, category)
-        return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
+        # PUNCHY SEARCHES ONLY: No long titles or prompts
+   	_add_unique(queries, entity, "2024")
+    	_add_unique(queries, entity, category)
+    	return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
+
 
     modifier_map = {
         "EVENT": ["official event photo", "editorial photo", "press photo", "actual event photo"],
@@ -135,10 +135,10 @@ def build_deep_queries(seg, video_title="", visual_type=None):
     }
     modifiers = modifier_map.get(visual_type, modifier_map["GENERAL_CONTEXT"])
 
-    _add_unique(queries, prompt, modifiers[0])
-    _add_unique(queries, entity, title, modifiers[1])
-    _add_unique(queries, entity, intent, modifiers[2])
-    _add_unique(queries, entity, category, modifiers[3])
+    # PUNCHY 2-4 WORD SEARCHES ONLY
+    _add_unique(queries, entity, modifiers[0])
+    _add_unique(queries, entity, modifiers[1])
+    _add_unique(queries, entity, category)
+    _add_unique(queries, entity, "2024", modifiers[2])
     _add_unique(queries, entity, "Wikimedia Commons")
-    _add_unique(queries, entity, title, "news photo")
-    return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
+    _add_unique(queries, entity, "news photo")
