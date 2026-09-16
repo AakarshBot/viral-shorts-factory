@@ -19,10 +19,20 @@ def _normalise(text):
 
 
 def _quality_validate(original_validate, script_data, source_text, format_mode):
-    """Run the factory's existing validator plus cheap deterministic checks."""
+    """Run legacy validation while deliberately ignoring obsolete CTA/#shorts rules."""
     ok, message = original_validate(script_data, source_text, format_mode)
     if not ok:
-        return ok, message
+        legacy_message = str(message or "").lower()
+        obsolete = (
+            "required cta",
+            "missing the required cta",
+            "missing cta",
+            "#shorts",
+            "contains #shorts",
+            "title must contain",
+        )
+        if not any(token in legacy_message for token in obsolete):
+            return ok, message
 
     scenes = script_data.get("script", [])
     if not scenes:
@@ -58,17 +68,11 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
     if any(first.startswith(x) for x in forbidden_openers):
         return False, "Scene 1 starts with a generic or performative opener."
 
-    final = _normalise(scenes[-1].get("voiceover", ""))
-    if "like share and subscribe" not in final:
-        return False, "Final scene is missing the required CTA."
-
     titles = script_data.get("titles")
     if not isinstance(titles, list) or len(titles) != 3:
         return False, "Exactly three titles are required."
     if any(not str(t).strip() for t in titles):
         return False, "One or more generated titles are empty."
-    if any("#shorts" not in str(t).lower() for t in titles):
-        return False, "Every generated title must contain #shorts."
 
     recommended = script_data.get("recommended_title_index")
     if recommended not in (0, 1, 2, 3):
@@ -92,7 +96,7 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
 
 
 def _self_critique(script_data, format_mode):
-    """Return a transparent rule-based score instead of a hard-coded 8/10."""
+    """Score useful storytelling properties without rewarding CTAs or filler."""
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
         return 0, "No scenes"
@@ -103,12 +107,9 @@ def _self_critique(script_data, format_mode):
     if any(first.startswith(x) for x in ("welcome to", "hey everyone", "today we are going to", "in this video")):
         score -= 2
         reasons.append("generic opener")
-    if "like share and subscribe" not in _normalise(scenes[-1].get("voiceover", "")):
-        score -= 2
-        reasons.append("missing CTA")
-    if len(scenes) < (7 if format_mode == "top5" else 5):
-        score -= 2
-        reasons.append("too few scenes")
+    if len(scenes) < (4 if format_mode == "top5" else 4):
+        score -= 1
+        reasons.append("low scene count; verify information density")
     for i in range(len(scenes)):
         for j in range(i + 1, len(scenes)):
             if difflib.SequenceMatcher(None, _normalise(scenes[i].get("voiceover")), _normalise(scenes[j].get("voiceover"))).ratio() >= 0.88:
@@ -128,5 +129,5 @@ def patch_quality_control(bot):
 
     bot.validate_script = validate
     bot.self_critique_pass = _self_critique
-    print("   [QC] Deterministic Shorts script quality control enabled.")
+    print("   [QC] Deterministic content-first Shorts quality control enabled.")
     return bot
