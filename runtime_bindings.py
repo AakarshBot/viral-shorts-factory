@@ -14,6 +14,15 @@ def _wrap_trend_signal(bot):
     return cached
 
 
+def _patch_editorial_scoring(bot):
+    try:
+        from editorial_runtime import patch_editorial_scoring
+        return patch_editorial_scoring(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Corrected editorial scoring unavailable: {exc}", flush=True)
+        return bot
+
+
 def _wrap_scored_candidates(bot):
     current = getattr(bot, "process_scored_candidates", None)
     if current is None or getattr(current, "_hard_reject_safe", False): return current
@@ -82,6 +91,7 @@ def bind_dashboard_patches(bot):
         validate._index_normalized = True
         bot.validate_script = validate
     _wrap_trend_signal(bot)
+    _patch_editorial_scoring(bot)
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
     _wrap_content_dense_script(bot)
