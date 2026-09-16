@@ -48,6 +48,7 @@ jobs:
           import factory_runtime
           import learning_runtime
           import quality_runtime
+          import runtime_bindings
           import semantic_runtime
           import story_ranker
           import ultimate_bot
@@ -74,6 +75,7 @@ jobs:
               'autopilot_runtime.py',
               'story_ranker.py',
               'semantic_runtime.py',
+              'runtime_bindings.py',
               'requirements.txt',
           ]
           missing = [path for path in required if not Path(path).is_file()]
