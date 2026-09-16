@@ -10,7 +10,9 @@ import threading
 from PIL import Image, ImageDraw
 
 VISUAL_FETCH_TIMEOUT_SECONDS = int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "15"))
-VISUAL_MAX_SEARCH_QUERIES = int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "28"))
+# Hard ceiling: visual strategy may request fewer searches, but deployment
+# configuration can never increase this runtime safety limit above 6.
+VISUAL_MAX_SEARCH_QUERIES = min(6, max(1, int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "6"))))
 VISUAL_MAX_VERIFICATION_ATTEMPTS = max(1, int(os.getenv("VISUAL_MAX_VERIFICATION_ATTEMPTS", "4")))
 VISUAL_CACHE_MAX_AGE_SECONDS = int(os.getenv("VISUAL_CACHE_MAX_AGE_SECONDS", str(7 * 86400)))
 
@@ -238,9 +240,7 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             h = bot.get_image_hash(data)
             if h in used_hashes:
                 return None
-            source_l = str(source).lower()
             tier = _verification_tier(seg, visual_type, source)
-            # Curated people and conceptual scenes do not consume Gemini attempts.
             needs_semantic = tier not in {"STRICT(person)", "SKIPPED(conceptual)"}
             if needs_semantic and verification_attempts >= VISUAL_MAX_VERIFICATION_ATTEMPTS:
                 return None
@@ -279,9 +279,6 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             if result:
                 return result
 
-    # Bounded best-available exit: only use a soft-rejected candidate when it
-    # was never explicitly judged irrelevant. Explicit Gemini NO remains a hard
-    # rejection for strict/event tiers.
     if best is not None:
         score, data, source = best
         try:
@@ -293,7 +290,7 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
             cache_path = save_to_cache(bot, data, entity, visual_type, source, context)
             print(f"   [Visual QA] ACCEPT-BEST | tier={_verification_tier(seg, visual_type, source)} | score={score} | verification_attempts={verification_attempts}/{VISUAL_MAX_VERIFICATION_ATTEMPTS}", flush=True)
             if cache_path:
-                print(f"   [Visual Cache] Saved best-available context-specific asset for entity='{entity}' type={visual_type}.", flush=True)
+                print(f"   [Visual Cache] Saved best-available context-specific asset for entity='{entity}' type={visual_type} context={context}.", flush=True)
             return Image.open(io.BytesIO(data)).convert("RGB"), False, source
 
     if visual_type in AI_ALLOWED_TYPES:
