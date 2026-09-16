@@ -8,7 +8,6 @@ import traceback
 
 from dashboard_theme import apply_dashboard_theme
 
-
 _VISUAL_CACHE_STATE = threading.local()
 
 
@@ -21,14 +20,11 @@ def _install_moviepy_compatibility():
         from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip, concatenate_videoclips
         from moviepy.audio.io.AudioFileClip import AudioFileClip
         from moviepy.audio.AudioClip import CompositeAudioClip
-
         exports = {
-            "ImageClip": ImageClip,
-            "VideoFileClip": VideoFileClip,
+            "ImageClip": ImageClip, "VideoFileClip": VideoFileClip,
             "CompositeVideoClip": CompositeVideoClip,
             "concatenate_videoclips": concatenate_videoclips,
-            "AudioFileClip": AudioFileClip,
-            "CompositeAudioClip": CompositeAudioClip,
+            "AudioFileClip": AudioFileClip, "CompositeAudioClip": CompositeAudioClip,
         }
         installed = []
         for name, value in exports.items():
@@ -66,7 +62,6 @@ def _install_visual_cache_safety():
         import visual_runtime
         if getattr(visual_runtime, "_verified_cache_safety_bound", False):
             return True
-
         original_gate = getattr(visual_runtime, "_strict_gate", None)
         original_save = getattr(visual_runtime, "save_to_cache", None)
         original_get = getattr(visual_runtime, "get_cached_asset", None)
@@ -153,16 +148,13 @@ def _patch_editorial_scoring(bot):
 def _wrap_scored_candidates(bot):
     current = getattr(bot, "process_scored_candidates", None)
     if current is None or getattr(current, "_hard_reject_safe", False): return current
-
     def safe_process(scored_data, batch_stories, bonuses, last_genre, format_mode):
         scored_count = len(scored_data) if isinstance(scored_data, list) else 0
         story_count = len(batch_stories) if isinstance(batch_stories, list) else 0
         print(f"   [Editorial Diagnostics] Received {story_count} stories and {scored_count} Groq score records.", flush=True)
-
         if not isinstance(scored_data, list) or not scored_data:
             print("   [Editorial Diagnostics] STOP: Groq returned no usable score records.", flush=True)
             return []
-
         hard_reject_count = 0
         risk_reject_count = 0
         malformed_count = 0
@@ -172,50 +164,31 @@ def _wrap_scored_candidates(bot):
                 malformed_count += 1
                 continue
             scores = scored_data[index]
-            try:
-                risk = float(scores.get("monetization_risk", 5))
-            except (TypeError, ValueError):
-                risk = 5.0
+            try: risk = float(scores.get("monetization_risk", 5))
+            except (TypeError, ValueError): risk = 5.0
             risk_values.append(risk)
-            if scores.get("hard_reject", False):
-                hard_reject_count += 1
-            if risk >= 8:
-                risk_reject_count += 1
-
-        print(
-            "   [Editorial Diagnostics] Rejection inputs: "
-            f"hard_reject={hard_reject_count}, monetization_risk>=8={risk_reject_count}, "
-            f"malformed/missing={malformed_count}, risks={risk_values}",
-            flush=True,
-        )
-
+            if scores.get("hard_reject", False): hard_reject_count += 1
+            if risk >= 8: risk_reject_count += 1
+        print("   [Editorial Diagnostics] Rejection inputs: " + f"hard_reject={hard_reject_count}, monetization_risk>=8={risk_reject_count}, malformed/missing={malformed_count}, risks={risk_values}", flush=True)
         result = current(scored_data, batch_stories, bonuses, last_genre, format_mode)
         if not result:
             print("   [Editorial Diagnostics] Corrected scorer returned 0 candidates.", flush=True)
             return []
-
         allowed = []
         for index, story in enumerate(batch_stories):
-            if index >= len(scored_data) or not isinstance(story, dict):
-                continue
+            if index >= len(scored_data) or not isinstance(story, dict): continue
             scores = scored_data[index]
-            if not isinstance(scores, dict):
-                continue
-            try:
-                risk = float(scores.get("monetization_risk", 5))
-            except (TypeError, ValueError):
-                continue
-            if scores.get("hard_reject", False) or risk >= 8:
-                continue
+            if not isinstance(scores, dict): continue
+            try: risk = float(scores.get("monetization_risk", 5))
+            except (TypeError, ValueError): continue
+            if scores.get("hard_reject", False) or risk >= 8: continue
             allowed.append(story)
-
         allowed_ids = {id(item) for item in allowed}
         filtered = [item for item in result if id(item) in allowed_ids]
         print(f"   [Editorial Diagnostics] Corrected scorer candidates={len(result)}; after hard/risk gate={len(filtered)}.", flush=True)
         if not filtered and result:
             print("   [Editorial Diagnostics] WARNING: all scored candidates were removed by the final safety gate.", flush=True)
         return filtered
-
     safe_process._hard_reject_safe = True
     bot.process_scored_candidates = safe_process
     return safe_process
@@ -252,6 +225,24 @@ def _wrap_content_first_visuals(bot):
         return getattr(bot, "process_visuals_async", None)
 
 
+def _patch_audio_direction(bot):
+    try:
+        from audio_direction_runtime import patch_audio_direction
+        return patch_audio_direction(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Audio direction patch unavailable: {exc}", flush=True)
+        return getattr(bot, "generate_voiceover_and_timestamps", None)
+
+
+def _patch_subtitles(bot):
+    try:
+        from subtitle_runtime import patch_subtitle_pipeline
+        return patch_subtitle_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Subtitle runtime unavailable: {exc}", flush=True)
+        return getattr(bot, "generate_karaoke_clip", None)
+
+
 def _patch_youtube_creator_comments(bot):
     try:
         from youtube_comment_runtime import patch_youtube_upload
@@ -263,8 +254,6 @@ def _patch_youtube_creator_comments(bot):
 
 def bind_dashboard_patches(bot):
     """Bind patched callables into the actual globals used by run_robot."""
-    # This hook runs after Streamlit page configuration, so it is safe for the theme
-    # module to inject the dashboard CSS here rather than touching app.py startup.
     try:
         apply_dashboard_theme()
     except Exception as exc:
@@ -287,13 +276,15 @@ def bind_dashboard_patches(bot):
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
     _wrap_content_dense_script(bot)
-    _wrap_content_first_visuals(bot)
+    _patch_content_first_visuals(bot)
+    _patch_audio_direction(bot)
+    _patch_subtitles(bot)
     _patch_youtube_creator_comments(bot)
     _install_authoritative_person_sources(bot)
     _install_visual_cache_safety()
 
     namespace = run_robot.__globals__
-    names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio", "upload_to_youtube")
+    names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip")
     bound = []
     for name in names:
         value = getattr(bot, name, None)
