@@ -1,23 +1,39 @@
 """Production Gemini visual-QA bridge.
 
-Keeps visual QA fail-closed while adding caching and a per-process request
-budget so deep visual search cannot accidentally burn unlimited Gemini calls.
-
-Important quota rule: one candidate image gets at most one Gemini API request.
-Transient verifier failures are rejected and the visual search moves on to the
-next candidate instead of retrying the same image.
+Keeps visual QA fail-closed while adding caching and bounded request budgets.
+One candidate image gets at most one Gemini API request; transient failures do
+not retry. Each scene also has a hard Gemini request budget.
 """
 import hashlib
 import os
-import time
 
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.8-flash")
 GEMINI_VISUAL_TIMEOUT_SECONDS = 20
-GEMINI_VISUAL_RETRIES = 0  # Deliberately disabled: one candidate = one API call.
+GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MAX_REQUESTS = int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS", "24"))
+GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "3"))
 _GEMINI_QUOTA_EXHAUSTED = False
 _GEMINI_REQUESTS = 0
+_GEMINI_SCENE_REQUESTS = 0
 _GEMINI_CACHE = {}
+
+
+def reset_visual_qa_video_budget():
+    """Reset all bounded QA counters at the beginning of a video."""
+    global _GEMINI_QUOTA_EXHAUSTED, _GEMINI_REQUESTS, _GEMINI_SCENE_REQUESTS
+    _GEMINI_QUOTA_EXHAUSTED = False
+    _GEMINI_REQUESTS = 0
+    _GEMINI_SCENE_REQUESTS = 0
+
+
+def start_visual_qa_scene():
+    """Reset the hard Gemini request budget for the next scene."""
+    global _GEMINI_SCENE_REQUESTS
+    _GEMINI_SCENE_REQUESTS = 0
+
+
+def get_visual_qa_calls_used():
+    return _GEMINI_REQUESTS
 
 
 def _clean_api_key(value):
@@ -96,7 +112,7 @@ def _build_instruction(entity, intent, prompt, voice, video_title):
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
-    global _GEMINI_QUOTA_EXHAUSTED, _GEMINI_REQUESTS
+    global _GEMINI_QUOTA_EXHAUSTED, _GEMINI_REQUESTS, _GEMINI_SCENE_REQUESTS
     api_key = _clean_api_key(api_key)
     if not api_key:
         print("   [Visual QA] Gemini verifier unavailable: GEMINI_API_KEY is missing.", flush=True)
@@ -112,10 +128,17 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
             print("   [Visual QA] Cache hit; no Gemini request used.", flush=True)
             return _GEMINI_CACHE[cache_key]
 
+        if _GEMINI_SCENE_REQUESTS >= GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE:
+            print(
+                f"   [Visual QA] Per-scene Gemini budget reached ({GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}); "
+                "remaining candidates will not trigger Gemini.",
+                flush=True,
+            )
+            return None
         if _GEMINI_REQUESTS >= GEMINI_VISUAL_MAX_REQUESTS:
             print(
-                f"   [Visual QA] Per-run Gemini budget reached ({GEMINI_VISUAL_MAX_REQUESTS}); "
-                "continuing deeper image search without accepting unverified candidates.",
+                f"   [Visual QA] Per-video Gemini budget reached ({GEMINI_VISUAL_MAX_REQUESTS}); "
+                "remaining candidates will not trigger Gemini.",
                 flush=True,
             )
             return None
@@ -123,20 +146,17 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         from google import genai
         from google.genai import types
         instruction = _build_instruction(entity, intent, prompt, voice, video_title)
-
-        # Count the API request before making it. There is intentionally no
-        # retry loop: a candidate can consume exactly one Gemini request.
         _GEMINI_REQUESTS += 1
+        _GEMINI_SCENE_REQUESTS += 1
         request_number = _GEMINI_REQUESTS
         print(
             f"   [Visual QA] Gemini request {request_number}/{GEMINI_VISUAL_MAX_REQUESTS} "
+            f"scene={_GEMINI_SCENE_REQUESTS}/{GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE} "
             f"(1 attempt only) model={GEMINI_VISUAL_MODEL} auth={_key_diagnostic(api_key)}",
             flush=True,
         )
-
         client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=GEMINI_VISUAL_TIMEOUT_SECONDS * 1000))
         image_part = types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
-
         try:
             response = client.models.generate_content(
                 model=GEMINI_VISUAL_MODEL,
