@@ -141,7 +141,7 @@ def _test_script_guards():
 
 
 def _test_audio_timing():
-    from audio_runtime import clean_audio_text, normalise_word_timings, validate_audio_timing
+    from audio_runtime import clean_audio_text, normalise_word_timings, validate_audio_timing, validate_timing_against_duration
     from subtitle_runtime import _fit_layout, _measure_line
 
     cleaned = clean_audio_text("**A new product** launches today — with a lower price.")
@@ -159,12 +159,16 @@ def _test_audio_timing():
     if not ok: raise AssertionError(reason)
     ok, _ = validate_audio_timing("A new product launches", [{"word": "A", "start": 0, "end": 0.1}])
     if ok: raise AssertionError("low-coverage timings were accepted")
+    ok, _ = validate_timing_against_duration(timings, 1.00)
+    if not ok: raise AssertionError("valid timing/duration alignment was rejected")
+    ok, _ = validate_timing_against_duration(timings, 0.50)
+    if ok: raise AssertionError("word timings beyond encoded duration were accepted")
 
     words = "This is a deliberately long subtitle sentence with enough words to test safe two line wrapping".split()
     font, lines = _fit_layout(words, 66, None, 900, max_lines=2)
     if len(lines) > 2: raise AssertionError(f"subtitle layout produced {len(lines)} lines")
     if any(_measure_line(line, font) > 901 for line in lines): raise AssertionError("subtitle line exceeds safe width")
-    return "Audio timing validation + subtitle two-line safe-layout checks passed"
+    return "Audio timing validation + encoded-duration alignment + subtitle two-line safe-layout checks passed"
 
 
 def _test_search_deeper():
