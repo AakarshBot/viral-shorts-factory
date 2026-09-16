@@ -17,6 +17,7 @@ from semantic_runtime import patch_semantic_dedup
 from audio_runtime import patch_audio_pipeline
 from provider_runtime import patch_provider_adapters
 from runtime_bindings import bind_dashboard_patches, harden_editorial_defaults
+from diagnostics_runtime import run_offline_diagnostics
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 
@@ -75,21 +76,24 @@ except Exception as e:
 
 st.title("🎬 Viral Shorts Factory")
 st.write("Configure and launch your YouTube Shorts automation.")
+
+with st.expander("🧪 Factory Diagnostics — No API Calls", expanded=False):
+    st.write("Run a local health check while Groq/Gemini quotas are exhausted. This test makes **zero API/network calls** and does not publish anything.")
+    if st.button("🔍 Run Full Offline Test"):
+        with st.spinner("Checking local factory components..."):
+            diagnostic = run_offline_diagnostics()
+        if diagnostic["all_passed"]:
+            st.success(f"✅ Offline test passed: {diagnostic['passed']}/{diagnostic['total']} checks. API calls made: 0.")
+        else:
+            st.error(f"❌ Offline test found {diagnostic['failed']} issue(s). API calls made: 0.")
+        for item in diagnostic["results"]:
+            icon = "✅" if item["status"] == "PASS" else "❌"
+            st.write(f"{icon} **{item['name']}** — {item['detail']}")
+            if item["status"] == "FAIL" and st.checkbox(f"Show technical detail: {item['name']}", key=f"diag_{item['name']}"):
+                st.code(item.get("traceback", "No traceback available."))
+
 pipeline_choice = st.radio("Select Factory Pipeline:", ["Manual Mode", "Auto-Pilot Mode (AI Selection)", "Cricket Focus Pipeline"])
 web_config = {}
-
-if st.button("📊 Sync YouTube Performance"):
-    try:
-        conn = sqlite3.connect(ultimate_bot.DB_PATH)
-        try:
-            migrate_vault(conn)
-            with st.spinner("Refreshing YouTube performance for factory-created Shorts..."):
-                result = sync_factory_analytics(ultimate_bot, conn)
-        finally:
-            conn.close()
-        st.success(f"Analytics sync complete: {result['updated']} videos refreshed; {result['retention_ready']} now have retention data.")
-    except Exception as e:
-        st.error(f"❌ Analytics sync failed: {e}")
 
 if pipeline_choice == "Manual Mode":
     format_choice = st.selectbox("Format:", ["Regular Deep-Dive", "Top 5 Countdown", "Trending Now"])
@@ -136,7 +140,7 @@ elif pipeline_choice == "Cricket Focus Pipeline":
         web_config["custom_rss"] = "https://news.google.com/rss/search?q=Test+Cricket+OR+ICC+OR+Ashes&hl=en-IN&gl=IN&ceid=IN:en"
     else:
         try:
-            trends = ultimate_bot.fetch_trending_topics(target="india", query_filter="Cricket OR BCCI OR IPL OR ICC OR T20")
+            trends = ultimate_bot.fetch_trending_topics(target="india", query_filter="Cricket OR BCCI OR IPL OR ICC T20")
             web_config["trend_keyword"] = trends[0] if trends else "Cricket"
             st.caption(f"⚡ Auto-detected cricket trend: **{web_config['trend_keyword']}**")
         except Exception as e:
