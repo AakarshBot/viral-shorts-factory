@@ -12,6 +12,19 @@ from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, WorkflowControl
 from youtube_comment_runtime import _build_clean_metadata, build_pinned_comment
 
 
+PIPELINE_STAGES = [
+    ("setup", "Setup"),
+    ("discovery", "Discovery"),
+    ("story", "Story"),
+    ("script", "Script"),
+    ("visuals", "Visuals"),
+    ("metadata", "Metadata"),
+    ("audio", "Audio"),
+    ("render", "Render"),
+    ("upload", "Upload"),
+]
+
+
 def _category_options(bot, format_mode: str) -> Dict[str, str]:
     output: Dict[str, str] = {}
     for key, cfg in bot.CONTENT_CATEGORIES.items():
@@ -124,6 +137,7 @@ def _init_state() -> None:
         "nr_ai_snapshot": {},
         "nr_visibility": "Private",
         "nr_upload_result": "",
+        "nr_approved_metadata": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -135,11 +149,134 @@ def _reset_run() -> None:
     for key in (
         "nr_config", "nr_candidates", "nr_story", "nr_script", "nr_visuals", "nr_metadata",
         "nr_approvals", "nr_audio", "nr_rendered", "nr_ai_controller", "nr_ai_started",
-        "nr_ai_snapshot", "nr_upload_result",
+        "nr_ai_snapshot", "nr_upload_result", "nr_approved_metadata",
     ):
-        st.session_state[key] = {} if key in {"nr_config", "nr_metadata", "nr_approvals", "nr_ai_snapshot"} else [] if key in {"nr_candidates", "nr_visuals"} else None if key in {"nr_story", "nr_script", "nr_audio", "nr_ai_controller"} else ""
+        st.session_state[key] = {} if key in {"nr_config", "nr_metadata", "nr_approvals", "nr_ai_snapshot", "nr_approved_metadata"} else [] if key in {"nr_candidates", "nr_visuals"} else None if key in {"nr_story", "nr_script", "nr_audio", "nr_ai_controller"} else ""
     st.session_state.nr_mode = keep_mode
     st.session_state.nr_stage = "setup"
+
+
+def _manual_stage_state(stage: str) -> tuple[str, float, str]:
+    approvals = st.session_state.get("nr_approvals", {})
+    story = bool(st.session_state.get("nr_story"))
+    script = bool(st.session_state.get("nr_script"))
+    visuals = bool(st.session_state.get("nr_visuals"))
+    metadata = bool(st.session_state.get("nr_metadata"))
+    audio = st.session_state.get("nr_audio") is not None
+    rendered = bool(st.session_state.get("nr_rendered"))
+    uploaded = bool(st.session_state.get("nr_upload_result"))
+
+    if stage == "setup":
+        return ("complete", 1.0, "Configuration ready") if st.session_state.get("nr_config") else ("active", 0.0, "Choose format, language and category")
+    if stage == "discovery":
+        return ("complete", 1.0, "3 stories available") if st.session_state.get("nr_candidates") else ("locked", 0.0, "Waiting for discovery")
+    if stage == "story":
+        return ("complete", 1.0, "Story approved") if story else ("locked", 0.0, "Choose and approve a story")
+    if stage == "script":
+        if script:
+            return "complete", 1.0, "Script ready"
+        return ("active", 0.0, "Generate the script") if story else ("locked", 0.0, "Waiting for story approval")
+    if stage == "visuals":
+        if approvals.get("visuals"):
+            return "complete", 1.0, "Visuals approved"
+        if visuals:
+            return "waiting", 1.0, "Waiting for your visual approval"
+        return ("active", 0.0, "Source and verify visuals") if script else ("locked", 0.0, "Waiting for script")
+    if stage == "metadata":
+        meta_fields = ("title", "description", "pinned_comment")
+        approved = sum(1 for field in meta_fields if approvals.get(field))
+        if approved == 3:
+            return "complete", 1.0, "All metadata approved"
+        if metadata:
+            return "waiting", approved / 3.0, f"{approved}/3 metadata approvals"
+        return ("active", 0.0, "Generate and choose metadata") if approvals.get("visuals") else ("locked", 0.0, "Waiting for visual approval")
+    if stage == "audio":
+        if audio:
+            return "complete", 1.0, "Audio ready"
+        return ("active", 0.0, "Generate narration and timings") if all(approvals.get(f) for f in ("visuals", "title", "description", "pinned_comment")) else ("locked", 0.0, "Waiting for metadata approval")
+    if stage == "render":
+        if rendered:
+            return "complete", 1.0, "Final video rendered"
+        return ("active", 0.0, "Render the final video") if audio else ("locked", 0.0, "Waiting for audio")
+    if stage == "upload":
+        if uploaded:
+            return "complete", 1.0, "Uploaded"
+        return ("active", 0.0, "Waiting for final visibility and upload") if rendered else ("locked", 0.0, "Waiting for rendered video")
+    return "locked", 0.0, ""
+
+
+def _ai_stage_state(stage: str, snap: Dict[str, Any]) -> tuple[str, float, str]:
+    current = str(snap.get("stage") or "idle")
+    percent = max(0, min(100, int(snap.get("percent", 0) or 0)))
+    completed = bool(snap.get("completed"))
+    stage_ranges = {
+        "setup": (0, 15),
+        "discovery": (15, 23),
+        "story": (23, 27),
+        "script": (27, 40),
+        "visuals": (55, 76),
+        "audio": (41, 54),
+        "render": (77, 95),
+        "upload": (96, 100),
+    }
+    metadata_done = bool(snap.get("final_metadata"))
+    if stage == "metadata":
+        if completed or metadata_done:
+            return "complete", 1.0, "Metadata generated and QC checked"
+        if current in {"metadata", "qc"}:
+            return "active", 0.7, str(snap.get("message") or "Checking metadata")
+        return ("complete", 1.0, "Passed in automated QC") if percent > 76 else ("locked", 0.0, "Waiting for automated production")
+    if stage == "story":
+        return ("complete", 1.0, "Story selected") if snap.get("selected_story") else ("locked", 0.0, "Waiting for story selection")
+    if completed and stage != "upload":
+        return "complete", 1.0, "Complete"
+    if stage == current:
+        lo, hi = stage_ranges.get(stage, (0, 100))
+        local = 0.0 if hi <= lo else max(0.0, min(1.0, (percent - lo) / (hi - lo)))
+        return "active", local, str(snap.get("message") or "Working")
+    if current == "upload" and stage in {"script", "visuals", "audio", "render", "metadata"}:
+        return "complete", 1.0, "Complete"
+    order = {key: i for i, (key, _) in enumerate(PIPELINE_STAGES)}
+    if order.get(stage, 0) < order.get(current, 0):
+        return "complete", 1.0, "Complete"
+    return "locked", 0.0, "Waiting"
+
+
+def _render_pipeline(bot) -> None:
+    mode = st.session_state.get("nr_mode", "Manual Run")
+    snap = st.session_state.get("nr_ai_snapshot", {}) if mode == "AI Run" else {}
+    if mode == "Manual Run":
+        states = {stage: _manual_stage_state(stage) for stage, _ in PIPELINE_STAGES}
+    else:
+        states = {stage: _ai_stage_state(stage, snap) for stage, _ in PIPELINE_STAGES}
+
+    complete_count = sum(1 for status, _, _ in states.values() if status == "complete")
+    active = next(((stage, label, states[stage]) for stage, label in PIPELINE_STAGES if states[stage][0] in {"active", "waiting"}), None)
+    overall = complete_count / len(PIPELINE_STAGES)
+    if active:
+        overall = min(1.0, overall + (active[2][1] / len(PIPELINE_STAGES)))
+
+    current_label = active[1] if active else "Ready"
+    st.progress(overall, text=f"Pipeline: {complete_count}/{len(PIPELINE_STAGES)} stages complete · {current_label}")
+
+    for stage, label in PIPELINE_STAGES:
+        status, value, detail = states[stage]
+        if status == "complete":
+            icon, state_text = "✅", "Complete"
+        elif status == "active":
+            icon, state_text = "🔄", "Working"
+        elif status == "waiting":
+            icon, state_text = "⏸️", "Waiting for approval"
+        else:
+            icon, state_text = "○", "Locked"
+        left, right = st.columns([1.1, 4.9])
+        left.markdown(f"**{icon} {label}**")
+        with right:
+            st.caption(f"{state_text} · {detail}")
+            if status == "active":
+                st.progress(value, text=f"{label}: {int(value * 100)}%")
+            elif status == "waiting":
+                st.progress(value, text=f"{label}: approval gate")
 
 
 def render_dashboard(bot) -> None:
@@ -170,27 +307,16 @@ def render_dashboard(bot) -> None:
             _reset_run()
             st.rerun()
 
-    stages = [
-        ("setup", "Setup"), ("discovery", "Discovery"), ("story", "Story"),
-        ("script", "Script"), ("visuals", "Visuals"), ("metadata", "Metadata"),
-        ("audio", "Audio"), ("render", "Render"), ("upload", "Upload"),
-    ]
-    current_idx = next((i for i, (key, _) in enumerate(stages) if key == st.session_state.nr_stage), 0)
-    progress = 0 if current_idx == 0 else current_idx / (len(stages) - 1)
-    st.progress(progress, text=f"Current stage: {stages[current_idx][1]}")
-    stage_cols = st.columns(len(stages))
-    for i, (_, label) in enumerate(stages):
-        icon = "✅" if i < current_idx else "⚙️" if i == current_idx else "○"
-        stage_cols[i].markdown(f"**{icon}**\n{label}")
+    _render_pipeline(bot)
 
     if code_view != "None":
         with st.expander("Code / pipeline", expanded=True):
             _code_view(bot, code_view)
 
     if st.session_state.nr_mode == "AI Run":
-        _render_ai_run(bot, stages)
+        _render_ai_run(bot, PIPELINE_STAGES)
     else:
-        _render_manual_run(bot, stages)
+        _render_manual_run(bot, PIPELINE_STAGES)
 
 
 def _render_setup_and_discovery(bot) -> None:
@@ -240,6 +366,10 @@ def _render_setup_and_discovery(bot) -> None:
             st.session_state.nr_visuals = []
             st.session_state.nr_metadata = {}
             st.session_state.nr_approvals = {}
+            st.session_state.nr_audio = None
+            st.session_state.nr_rendered = ""
+            st.session_state.nr_approved_metadata = {}
+            st.session_state.nr_upload_result = ""
             st.session_state.nr_stage = "discovery"
 
     if st.session_state.nr_candidates:
@@ -252,7 +382,7 @@ def _render_setup_and_discovery(bot) -> None:
             st.link_button("Open source article", item["story_url"])
         if st.button("✅ Approve this story", type="primary", use_container_width=True):
             st.session_state.nr_story = dict(item)
-            st.session_state.nr_stage = "story"
+            st.session_state.nr_stage = "script"
 
 
 def _render_ai_run(bot, stages) -> None:
@@ -277,8 +407,7 @@ def _render_ai_run(bot, stages) -> None:
     st.session_state.nr_ai_snapshot = snap
     if snap.get("thread_alive"):
         st.info(f"**{snap.get('stage', 'working').title()}** — {snap.get('message', '')}")
-        st.progress(max(0.01, int(snap.get("percent", 0)) / 100.0), text=f"{snap.get('percent', 0)}%")
-        st.rerun()
+        return
 
     if snap.get("error"):
         st.error(snap["error"])
