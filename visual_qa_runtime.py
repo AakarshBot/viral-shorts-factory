@@ -1,23 +1,43 @@
 """Production Gemini visual-QA bridge.
 
-Keeps the strict visual gate fail-closed while using the documented Gemini REST
-JSON field names and emitting actionable diagnostics when verification fails.
+Keeps the strict visual gate fail-closed while using the supported Gemini SDK
+for current API-key authentication and multimodal image understanding.
 """
-import base64
 import os
-import requests
 
-GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.6-flash")
-GEMINI_VISUAL_TIMEOUT_SECONDS = 15
+GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.8-flash")
+GEMINI_VISUAL_TIMEOUT_SECONDS = 20
+
+
+def _clean_api_key(value):
+    """Remove accidental whitespace/JSON quoting without logging the secret."""
+    key = str(value or "").strip()
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in {"\"", "'"}:
+        key = key[1:-1].strip()
+    return key
+
+
+def _key_diagnostic(api_key):
+    key = _clean_api_key(api_key)
+    if not key:
+        return "missing"
+    if key.startswith("AQ."):
+        return f"AQ authorization key (length={len(key)})"
+    if key.startswith("AIza"):
+        return f"standard API key (length={len(key)})"
+    return f"unrecognized key format (length={len(key)})"
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key):
+    api_key = _clean_api_key(api_key)
     if not api_key:
         print("   [Visual QA] Gemini verifier unavailable: GEMINI_API_KEY is missing.", flush=True)
         return None
 
     try:
-        encoded = base64.b64encode(img_bytes).decode("utf-8")
+        from google import genai
+        from google.genai import types
+
         instruction = (
             "You are a strict visual editor for a factual YouTube Short. "
             "Inspect the supplied image itself. Return PASS only if the image clearly depicts "
@@ -32,73 +52,53 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
             f"Search prompt: {prompt}\n"
             f"Scene narration: {voice}"
         )
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/"
-            f"models/{GEMINI_VISUAL_MODEL}:generateContent"
-        )
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": instruction},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": encoded,
-                        }
-                    },
-                ]
-            }],
-            "generation_config": {
-                "temperature": 0.0,
-                "max_output_tokens": 8,
-            },
-        }
-        response = requests.post(
-            url,
-            headers={
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=GEMINI_VISUAL_TIMEOUT_SECONDS,
-        )
-        if response.status_code != 200:
-            detail = response.text[:500].replace("\n", " ")
-            print(
-                f"   [Visual QA] Gemini HTTP {response.status_code} "
-                f"using {GEMINI_VISUAL_MODEL}: {detail}",
-                flush=True,
-            )
-            return None
 
-        body = response.json()
-        candidates = body.get("candidates") or []
-        if not candidates:
-            print(
-                f"   [Visual QA] Gemini returned no candidates: {str(body)[:500]}",
-                flush=True,
-            )
-            return None
+        print(
+            f"   [Visual QA] Gemini request model={GEMINI_VISUAL_MODEL} "
+            f"auth={_key_diagnostic(api_key)}",
+            flush=True,
+        )
 
-        parts = (candidates[0].get("content") or {}).get("parts") or []
-        text = " ".join(str(part.get("text", "")) for part in parts).strip().upper()
-        finish_reason = candidates[0].get("finishReason", "unknown")
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=GEMINI_VISUAL_TIMEOUT_SECONDS * 1000),
+        )
+        image_part = types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
+        response = client.models.generate_content(
+            model=GEMINI_VISUAL_MODEL,
+            contents=[instruction, image_part],
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=8,
+                candidate_count=1,
+            ),
+        )
+
+        text = str(getattr(response, "text", "") or "").strip().upper()
         print(
             f"   [Visual QA] Gemini verdict={text[:40] or '<empty>'} "
-            f"finish={finish_reason} model={GEMINI_VISUAL_MODEL}",
+            f"model={GEMINI_VISUAL_MODEL}",
             flush=True,
         )
         if text.startswith("PASS"):
             return True
         if text.startswith("FAIL"):
             return False
+
+        print(
+            f"   [Visual QA] Gemini returned an unusable verdict: {text[:120] or '<empty>'}",
+            flush=True,
+        )
         return None
     except Exception as exc:
-        print(f"   [Visual QA] Gemini verifier exception: {type(exc).__name__}: {exc}", flush=True)
+        print(
+            f"   [Visual QA] Gemini verifier exception: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
         return None
 
 
 def install_visual_qa_bridge(visual_runtime_module):
-    """Replace only the Gemini verifier; keep the strict asset-selection logic intact."""
+    """Replace only the Gemini verifier; keep strict asset-selection logic intact."""
     visual_runtime_module._strict_gemini_check = strict_gemini_check
     return visual_runtime_module
