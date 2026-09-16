@@ -6,13 +6,9 @@ import traceback
 
 def _wrap_trend_signal(bot):
     current = getattr(bot, "get_trend_signal_bonus", None)
-    if current is None or getattr(current, "_cached_trend_signal", False):
-        return current
-
+    if current is None or getattr(current, "_cached_trend_signal", False): return current
     @functools.lru_cache(maxsize=128)
-    def cached(keyword):
-        return current(keyword)
-
+    def cached(keyword): return current(keyword)
     cached._cached_trend_signal = True
     bot.get_trend_signal_bonus = cached
     return cached
@@ -20,64 +16,51 @@ def _wrap_trend_signal(bot):
 
 def _wrap_scored_candidates(bot):
     current = getattr(bot, "process_scored_candidates", None)
-    if current is None or getattr(current, "_hard_reject_safe", False):
-        return current
-
+    if current is None or getattr(current, "_hard_reject_safe", False): return current
     def safe_process(scored_data, batch_stories, bonuses, last_genre, format_mode):
         result = current(scored_data, batch_stories, bonuses, last_genre, format_mode)
-        if not result:
-            return []
-
+        if not result: return []
         allowed = []
         for index, story in enumerate(batch_stories):
-            if index >= len(scored_data) or not isinstance(story, dict):
-                continue
+            if index >= len(scored_data) or not isinstance(story, dict): continue
             scores = scored_data[index]
-            if not isinstance(scores, dict):
-                continue
-            try:
-                risk = float(scores.get("monetization_risk", 5))
-            except (TypeError, ValueError):
-                continue
-            if scores.get("hard_reject", False) or risk >= 8:
-                continue
+            if not isinstance(scores, dict): continue
+            try: risk = float(scores.get("monetization_risk", 5))
+            except (TypeError, ValueError): continue
+            if scores.get("hard_reject", False) or risk >= 8: continue
             allowed.append(story)
-
         allowed_ids = {id(item) for item in allowed}
-        filtered = [item for item in result if id(item) in allowed_ids]
-        return filtered
-
+        return [item for item in result if id(item) in allowed_ids]
     safe_process._hard_reject_safe = True
     bot.process_scored_candidates = safe_process
     return safe_process
 
 
 def _wrap_editorial_provider_usage(bot):
-    """Avoid spending Gemini visual-QA quota on the legacy editorial fallback."""
     current = getattr(bot, "editorial_gate_batch", None)
-    if current is None or getattr(current, "_gemini_editorial_guarded", False):
-        return current
-
+    if current is None or getattr(current, "_gemini_editorial_guarded", False): return current
     def guarded(stories, bonuses, last_genre, format_mode):
-        # The legacy implementation falls back to direct Gemini REST calls when
-        # Groq is exhausted. That path uses a different model/auth transport and
-        # also consumes the same Gemini project quota needed for visual QA.
-        # Disable it by temporarily clearing the legacy module-level key. The
-        # existing rule-filtered fallback remains available and deterministic.
         original_key = getattr(bot, "GEMINI_API_KEY", None)
         bot.GEMINI_API_KEY = None
-        try:
-            return current(stories, bonuses, last_genre, format_mode)
-        finally:
-            bot.GEMINI_API_KEY = original_key
-
+        try: return current(stories, bonuses, last_genre, format_mode)
+        finally: bot.GEMINI_API_KEY = original_key
     guarded._gemini_editorial_guarded = True
     bot.editorial_gate_batch = guarded
     return guarded
 
 
+def _wrap_content_dense_script(bot):
+    """Bind post-generation content-density and anti-filler safeguards."""
+    try:
+        from script_runtime import wrap_write_script
+        return wrap_write_script(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Script runtime unavailable: {exc}", flush=True)
+        return getattr(bot, "write_script", None)
+
+
 def bind_dashboard_patches(bot):
-    """Bind patched callables into ultimate_bot's compiled function globals."""
+    """Bind patched callables into the actual globals used by run_robot."""
     run_robot = getattr(bot, "run_robot", None)
     if run_robot is None or not hasattr(run_robot, "__globals__"):
         print("   [Bindings] WARNING: run_robot globals unavailable.", flush=True)
@@ -95,21 +78,14 @@ def bind_dashboard_patches(bot):
     _wrap_trend_signal(bot)
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
+    _wrap_content_dense_script(bot)
 
     namespace = run_robot.__globals__
     names = (
-        "gather_and_filter_stories",
-        "editorial_gate_batch",
-        "process_scored_candidates",
-        "validate_script",
-        "self_critique_pass",
-        "generate_voiceover_and_timestamps",
-        "process_visuals_async",
-        "fetch_scene_asset",
-        "get_trend_signal_bonus",
-        "auto_pilot_selection",
-        "run_analytics_sweep",
-        "token_overlap_ratio",
+        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates",
+        "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps",
+        "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection",
+        "run_analytics_sweep", "token_overlap_ratio",
     )
     bound = []
     for name in names:
@@ -121,8 +97,7 @@ def bind_dashboard_patches(bot):
     original_process_visuals = getattr(bot, "process_visuals_async", None)
     if original_process_visuals is not None and not getattr(original_process_visuals, "_traceback_bound", False):
         async def process_visuals_with_traceback(*args, **kwargs):
-            try:
-                return await original_process_visuals(*args, **kwargs)
+            try: return await original_process_visuals(*args, **kwargs)
             except BaseException:
                 print("   [Bindings] FULL TRACEBACK FROM process_visuals_async:", flush=True)
                 traceback.print_exc()
@@ -135,8 +110,7 @@ def bind_dashboard_patches(bot):
     original_compile_video = getattr(bot, "compile_video", None)
     if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
         def compile_video_with_traceback(*args, **kwargs):
-            try:
-                return original_compile_video(*args, **kwargs)
+            try: return original_compile_video(*args, **kwargs)
             except BaseException:
                 print("   [Bindings] FULL TRACEBACK FROM compile_video:", flush=True)
                 traceback.print_exc()
@@ -154,11 +128,7 @@ def bind_dashboard_patches(bot):
     except Exception as exc:
         print(f"   [Bindings] Render dependency binding skipped: {exc}", flush=True)
 
-    print(
-        "   [Bindings] Legacy factory globals bound to active runtime patches: "
-        + ", ".join(dict.fromkeys(bound)),
-        flush=True,
-    )
+    print("   [Bindings] Legacy factory globals bound to active runtime patches: " + ", ".join(dict.fromkeys(bound)), flush=True)
     return bot
 
 
@@ -174,7 +144,6 @@ def harden_editorial_defaults(bot):
         "This sounds unlikely, but the documented sequence is real.",
         "One overlooked detail makes this story more surprising.",
     ]
-
     hype = bot.PERSONA_PROFILES.get("HYPE COMMENTATOR")
     if hype:
         hype["catchphrases"] = [
