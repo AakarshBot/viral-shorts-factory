@@ -15,7 +15,17 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
     timings = []
 
     async def consume():
-        communicate = bot.edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+        try:
+            communicate = bot.edge_tts.Communicate(
+                text,
+                voice,
+                rate=rate,
+                pitch=pitch,
+                boundary="WordBoundary",
+            )
+        except TypeError:
+            communicate = bot.edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+
         fd, temp_path = tempfile.mkstemp(
             prefix="voiceover_", suffix=".mp3", dir=bot.ASSETS_DIR
         )
@@ -23,14 +33,19 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
         try:
             with open(temp_path, "wb") as f:
                 async for chunk in communicate.stream():
-                    if chunk.get("type") == "audio":
+                    chunk_type = chunk.get("type")
+                    if chunk_type == "audio":
                         f.write(chunk["data"])
-                    elif chunk.get("type") == "WordBoundary":
-                        timings.append({
-                            "word": chunk["text"],
-                            "start": chunk["offset"] / 10000000.0,
-                            "end": (chunk["offset"] + chunk["duration"]) / 10000000.0,
-                        })
+                    elif chunk_type == "WordBoundary":
+                        word = str(chunk.get("text", "")).strip()
+                        if word:
+                            offset = max(0.0, float(chunk.get("offset", 0)) / 10000000.0)
+                            duration = max(0.0, float(chunk.get("duration", 0)) / 10000000.0)
+                            timings.append({
+                                "word": word,
+                                "start": offset,
+                                "end": max(offset, offset + duration),
+                            })
             if not os.path.exists(temp_path) or os.path.getsize(temp_path) <= 500:
                 raise RuntimeError("Edge TTS returned an empty or invalid audio file.")
             os.replace(temp_path, final_path)
@@ -127,13 +142,15 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
 
 def patch_audio_pipeline(bot):
     """Patch both the module attribute and run_robot's actual global lookup."""
+    if getattr(bot, "_audio_pipeline_patch_installed", False):
+        return bot
+
     async def process(script_data, language_cfg):
         return await generate_voiceover_and_timestamps(bot, script_data, language_cfg)
 
-    # Normal module-level lookup.
     bot.generate_voiceover_and_timestamps = process
+    bot._audio_pipeline_patch_installed = True
 
-    # Definitive lookup used by the compiled run_robot function.
     run_robot = getattr(bot, "run_robot", None)
     if run_robot is not None and hasattr(run_robot, "__globals__"):
         run_robot.__globals__["generate_voiceover_and_timestamps"] = process
