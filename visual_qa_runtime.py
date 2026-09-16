@@ -19,7 +19,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-16-v5"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-16-v6"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -47,9 +47,17 @@ def get_visual_qa_calls_used():
         return _VIDEO_CALLS
 
 
-def _cache_key(img_bytes, entity, intent, prompt, video_title, tier):
+def _cache_key(img_bytes, entity, intent, prompt, video_title, tier, visual_type=""):
     h = hashlib.sha256(img_bytes).hexdigest()
-    return (h, str(entity).strip().lower(), str(intent).strip().lower(), str(prompt).strip().lower(), str(video_title).strip().lower(), str(tier).strip().lower())
+    return (
+        h,
+        str(entity).strip().lower(),
+        str(intent).strip().lower(),
+        str(prompt).strip().lower(),
+        str(video_title).strip().lower(),
+        str(tier).strip().lower(),
+        str(visual_type).strip().upper(),
+    )
 
 
 def _is_event_genre(intent, visual_type=""):
@@ -82,17 +90,23 @@ Visual intent: {intent}
 Search prompt: {prompt}
 Voiceover: {voice}
 Video title: {video_title}
-Return only YES or NO."""
+Return YES or NO followed by one short reason."""
 
 
-def _strict_prompt(entity, intent, prompt, voice, video_title):
+def _strict_prompt(entity, intent, prompt, voice, video_title, visual_type=""):
+    if str(visual_type).upper() == "PERSON":
+        return f"""Look at this image.
+Does this image show {entity}?
+Judge identity only.
+Do not use the news story, headline, search query, voiceover, or video title to identify the person.
+Return YES or NO followed by one short identity-based reason."""
     return f"""Check whether this image clearly and reasonably matches the named real-world entity and scene.
 Entity: {entity}
 Visual intent: {intent}
 Specific search prompt: {prompt}
 Voiceover: {voice}
 Video title: {video_title}
-Return only YES if the image clearly shows the named entity or is a strong, direct visual match to the scene; otherwise return NO."""
+Return YES or NO followed by one short reason."""
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="STRICT", visual_type=""):
@@ -108,9 +122,11 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
     if not api_key:
         print(f"   [Visual QA] Tier={tier} | No Gemini API key; semantic verification unavailable.", flush=True)
         return None
-    key = _cache_key(img_bytes, entity, intent, prompt, video_title, tier)
+    key = _cache_key(img_bytes, entity, intent, prompt, video_title, tier, visual_type)
     if key in _CACHE:
-        return _CACHE[key]
+        cached = _CACHE[key]
+        print(f"   [Visual QA] Tier={tier} | cached verdict={'YES' if cached is True else 'NO' if cached is False else 'UNCERTAIN'}", flush=True)
+        return cached
     with _LOCK:
         if _CIRCUIT_OPEN:
             print("   [Visual QA] Circuit breaker open; NO Gemini API call attempted.", flush=True)
@@ -128,10 +144,16 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
-        prompt_text = _event_prompt(entity, intent, prompt, voice, video_title) if tier == "GENRE_PLAUSIBLE_EVENT" else _strict_prompt(entity, intent, prompt, voice, video_title)
+        if tier == "GENRE_PLAUSIBLE_EVENT":
+            prompt_text = _event_prompt(entity, intent, prompt, voice, video_title)
+        else:
+            prompt_text = _strict_prompt(entity, intent, prompt, voice, video_title, visual_type=visual_type)
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         response = client.models.generate_content(model=GEMINI_VISUAL_MODEL, contents=[prompt_text, image])
-        text = str(getattr(response, "text", "") or "").strip().upper()
+        raw_text = str(getattr(response, "text", "") or "").strip()
+        display_text = raw_text if len(raw_text) <= 1000 else raw_text[:1000] + "...[truncated]"
+        print(f"   [Visual QA] {tier} | Gemini raw verdict: {display_text!r}", flush=True)
+        text = raw_text.upper()
         result = True if text.startswith("YES") else False if text.startswith("NO") else None
         if result is None:
             print("   [Visual QA] Gemini returned an uncertain answer.", flush=True)
