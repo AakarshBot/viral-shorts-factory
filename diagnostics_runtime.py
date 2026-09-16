@@ -106,6 +106,32 @@ def _test_visual_strategy():
     return f"Scene classification + recall-first bounded queries + visual QA tiers + context-aware cache passed ({len(queries)} person, {len(event_queries)} event)"
 
 
+def _test_scene_branding():
+    from PIL import Image
+    from visual_content_runtime import _render_scene_overlay
+
+    class StubBot:
+        PALETTE = {
+            "accent_primary": (0, 191, 255),
+            "accent_secondary": (255, 140, 0),
+        }
+
+    source = Image.new("RGBA", (1080, 1920), (18, 24, 34, 255))
+    rendered = _render_scene_overlay(
+        StubBot(), source, 2, 5, "STATISTIC", "Wikipedia", "The price fell by 25 percent."
+    )
+    if rendered.size != source.size:
+        raise AssertionError(f"scene branding changed geometry: {source.size} -> {rendered.size}")
+    if rendered.mode != "RGBA":
+        raise AssertionError(f"scene branding returned unexpected mode: {rendered.mode}")
+    pixels = rendered.load()
+    if pixels[540, 960] == source.load()[540, 960]:
+        raise AssertionError("scene branding did not alter the expected frame area")
+    if pixels[540, 500] != source.load()[540, 500]:
+        raise AssertionError("scene branding obscured the central visual area")
+    return "Story-aware scene framing preserves 1080x1920 geometry and keeps central visual content unobscured"
+
+
 def _test_script_guards():
     from script_runtime import clean_script_data, validate_content_density, _story_structure
     story = {"title": "Example company market launch", "topic": "Example company market launch", "summary": "A factual example company market launch includes a product release, pricing change and market impact."}
@@ -211,6 +237,7 @@ def run_offline_diagnostics():
         ("Environment", _test_environment),
         ("Database", _test_database),
         ("Visual strategy", _test_visual_strategy),
+        ("Scene branding", _test_scene_branding),
         ("Script safeguards", _test_script_guards),
         ("Audio timing", _test_audio_timing),
         ("Search deeper simulation", _test_search_deeper),
