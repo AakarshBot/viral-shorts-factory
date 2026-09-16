@@ -144,8 +144,18 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
 
 
 def patch_editorial_scoring(bot):
-    """Replace the legacy scorer and bind it into the legacy runtime namespace."""
+    """Replace the legacy scorer and keep the legacy namespace bound to the active scorer."""
     if getattr(bot, "_editorial_scoring_patch_installed", False):
+        # The legacy module can rebind its global function during dashboard
+        # startup. Re-assert the active safe target every time this patch is
+        # requested instead of assuming the first binding still exists.
+        run_robot = getattr(bot, "run_robot", None)
+        namespace = getattr(run_robot, "__globals__", None)
+        active = getattr(bot, "process_scored_candidates", None)
+        corrected = getattr(bot, "_editorial_scoring_corrected_process", None)
+        target = active if getattr(active, "_hard_reject_safe", False) else corrected
+        if isinstance(namespace, dict) and callable(target):
+            namespace["process_scored_candidates"] = target
         return bot
 
     def process(scored_data, batch_stories, bonuses, last_genre, format_mode):
@@ -161,6 +171,7 @@ def patch_editorial_scoring(bot):
         )
 
     process._editorial_scoring_corrected = True
+    bot._editorial_scoring_corrected_process = process
     bot.process_scored_candidates = process
 
     # The factory's legacy run_robot() resolves this name from its module
