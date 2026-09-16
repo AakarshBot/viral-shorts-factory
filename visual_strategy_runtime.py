@@ -6,8 +6,9 @@ whether a returned image is actually relevant.
 """
 import re
 
-VISUAL_STRATEGY_RUNTIME_VERSION = "2026-09-17-v6"
+VISUAL_STRATEGY_RUNTIME_VERSION = "2026-09-17-v7"
 MAX_VISUAL_SEARCH_QUERIES = 6
+MAX_SCENE_BRIEF_WORDS = 18
 
 VISUAL_TYPES = {
     "PERSON", "ORGANIZATION", "EVENT", "PRODUCT", "LOCATION", "STATISTIC", "COMPARISON",
@@ -19,7 +20,7 @@ VISUAL_TYPES = {
 # organization or location.
 ORGANIZATION_ACRONYMS = {
     "BCCI", "ICC", "PCB", "SLC", "BCB", "ACB", "FIFA", "UEFA", "NBA", "NFL", "ATP", "WTA",
-    "BCCI", "ISRO", "NASA", "ESA", "WHO", "UN", "UNESCO", "IMF", "WTO", "SEBI", "RBI",
+    "ISRO", "NASA", "ESA", "WHO", "UN", "UNESCO", "IMF", "WTO", "SEBI", "RBI",
     "DRDO", "NITI", "BSE", "NSE", "TCS", "IBM", "AMD", "HP", "LG", "BMW", "GOVERNMENT",
 }
 ORGANIZATION_SUFFIXES = (
@@ -162,62 +163,114 @@ def classify_scene(seg, category=""):
 
 
 def _scene_phrase(seg):
-    """Extract a compact scene proposition from the narration for search."""
+    """Extract a compact narration phrase for image search.
+
+    Prefer content words that describe what is visibly happening. This keeps
+    search terms tied to the exact scene instead of broad story-level keywords.
+    """
     text = _clean(seg.get("voiceover", ""))
     if not text:
         return ""
-    # Keep a concise phrase; full narration is too noisy for image search.
     words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", text)
     stop = {
         "the", "and", "for", "with", "this", "that", "from", "into", "after", "before", "about", "they",
         "their", "there", "here", "when", "what", "which", "where", "while", "have", "has", "had", "will",
         "would", "could", "should", "just", "been", "were", "was", "are", "our", "you", "your", "today",
+        "is", "a", "an", "to", "of", "in", "on", "as", "it", "its", "this", "these", "those",
     }
     meaningful = [w for w in words if w.lower() not in stop]
     return " ".join(meaningful[:12])
 
 
+def build_scene_visual_brief(seg, video_title="", category=""):
+    """Turn one exact narration segment into a compact visual proposition.
+
+    The brief intentionally separates subject identity from scene context so the
+    downstream search layer does not confuse a place/organization with a person.
+    It is deterministic and cheap: no extra model/API call is required here.
+    """
+    entity = _clean(seg.get("primary_entity", ""))
+    visual_type = classify_scene(seg, category)
+    prompt = _normalise_query(seg.get("specific_search_prompt", ""))
+    intent = _normalise_query(seg.get("visual_intent", ""))
+    phrase = _scene_phrase(seg)
+    scene_index = _clean(seg.get("scene_index", seg.get("scene_number", "")))
+
+    # The most useful scene proposition is the model's specific prompt first,
+    # then the narration-derived phrase. Avoid dumping the whole voiceover into search.
+    action_context = prompt or phrase
+    if phrase and prompt and phrase.lower() not in prompt.lower():
+        action_context = f"{prompt} {phrase}"
+
+    context_parts = [intent, category, _clean(video_title)]
+    context = _clean(" ".join(x for x in context_parts if x))
+    action_context = re.sub(r"\s+", " ", action_context).strip()
+    action_words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", action_context)[:MAX_SCENE_BRIEF_WORDS]
+    action_context = " ".join(action_words)
+
+    return {
+        "subject": entity,
+        "visual_type": visual_type,
+        "scene_action": action_context,
+        "scene_context": context,
+        "scene_index": scene_index,
+    }
+
+
 def build_deep_queries(seg, video_title="", visual_type=None):
     """Build scene-specific, entity-aware search queries.
 
-    Query order is deliberately recall-first, then context-specific. The search
-    query describes the exact scene rather than the entire story, while semantic
-    QA remains responsible for rejecting wrong images.
+    Query order is deliberately recall-first, then context-specific. Each query
+    is tied to the exact scene proposition, while semantic QA remains responsible
+    for rejecting wrong images.
     """
-    entity = _clean(seg.get("primary_entity", ""))
+    category = _clean(seg.get("sport_or_topic_category", ""))
+    brief = build_scene_visual_brief(seg, video_title, category)
+    entity = brief["subject"]
     intent = _normalise_query(seg.get("visual_intent", ""))
     prompt = _normalise_query(seg.get("specific_search_prompt", ""))
     title = _clean(video_title)
-    category = _clean(seg.get("sport_or_topic_category", ""))
     scene_phrase = _scene_phrase(seg)
-    visual_type = visual_type or classify_scene(seg, category)
+    visual_type = visual_type or brief["visual_type"]
+    action = brief["scene_action"]
+    context = brief["scene_context"]
+    scene_index = brief["scene_index"]
 
     queries = []
 
+    def with_scene(*parts):
+        _add_unique(queries, *parts)
+        if len(queries) >= MAX_VISUAL_SEARCH_QUERIES:
+            return
+        if scene_index:
+            _add_unique(queries, *parts, f"scene {scene_index}")
+
     if visual_type == "PERSON":
-        _add_unique(queries, entity, prompt)
-        _add_unique(queries, entity, scene_phrase)
-        _add_unique(queries, entity, title)
-        _add_unique(queries, entity, category)
-        _add_unique(queries, entity, "official photo")
+        with_scene(entity, action, "photo")
+        with_scene(entity, scene_phrase, intent)
+        with_scene(entity, title, "editorial photo")
+        with_scene(entity, category, "official photo")
+        with_scene(entity, "press photo")
         return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
 
     if visual_type == "ORGANIZATION":
-        _add_unique(queries, entity, prompt)
-        _add_unique(queries, entity, scene_phrase)
-        _add_unique(queries, entity, title)
-        _add_unique(queries, entity, category)
-        _add_unique(queries, entity, "official")
-        _add_unique(queries, entity, "press conference")
+        # Organizations are searched as organizations, with the scene action kept
+        # separate so terms like "president" do not reclassify the entity as PERSON.
+        with_scene(entity, action)
+        with_scene(entity, scene_phrase, "official")
+        with_scene(entity, intent, title)
+        with_scene(entity, category, "press")
+        with_scene(entity, "official")
+        with_scene(entity, "press conference")
         return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
 
     if visual_type == "LOCATION":
-        _add_unique(queries, entity, scene_phrase)
-        _add_unique(queries, entity, prompt)
-        _add_unique(queries, entity, title)
-        _add_unique(queries, entity, category)
-        _add_unique(queries, entity, "cityscape")
-        _add_unique(queries, entity, "landmark")
+        with_scene(entity, action)
+        with_scene(entity, scene_phrase, "real photo")
+        with_scene(entity, context, "landmark")
+        with_scene(entity, title, "editorial photo")
+        with_scene(entity, category, "cityscape")
+        with_scene(entity, "street view")
         return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
 
     modifier_map = {
@@ -234,12 +287,12 @@ def build_deep_queries(seg, video_title="", visual_type=None):
     }
     modifiers = modifier_map.get(visual_type, modifier_map["GENERAL_CONTEXT"])
 
-    _add_unique(queries, prompt, modifiers[0])
-    _add_unique(queries, entity, scene_phrase, modifiers[1])
-    _add_unique(queries, entity, intent, modifiers[2])
-    _add_unique(queries, entity, category, modifiers[3])
-    _add_unique(queries, entity, title, "news photo")
-    _add_unique(queries, entity, title)
+    with_scene(action, modifiers[0])
+    with_scene(entity, scene_phrase, modifiers[1])
+    with_scene(entity, intent, modifiers[2])
+    with_scene(entity, category, modifiers[3])
+    with_scene(entity, title, "news photo")
+    with_scene(entity, context)
     return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
 
 
