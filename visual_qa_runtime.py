@@ -97,6 +97,7 @@ Return only YES if the image clearly shows the named entity or is a strong, dire
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="STRICT", visual_type=""):
     """Return True/False/None. Gemini is never called for cheap-pass tiers."""
+    global _CIRCUIT_OPEN
     tier = tier or _tier_for(intent, visual_type, "")
     if tier == "CURATED_PERSON":
         print("   [Visual QA] Tier=STRICT(person) source=curated | Gemini=SKIPPED", flush=True)
