@@ -52,6 +52,7 @@ jobs:
           import story_ranker
           import ultimate_bot
           import visual_runtime
+          import visual_qa_runtime
           print('Core runtime imports passed.')
           PY
 
@@ -64,6 +65,7 @@ jobs:
               'ultimate_bot.py',
               'audio_runtime.py',
               'visual_runtime.py',
+              'visual_qa_runtime.py',
               'quality_runtime.py',
               'factory_runtime.py',
               'db_architecture.py',
