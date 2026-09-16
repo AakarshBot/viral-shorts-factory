@@ -140,9 +140,10 @@ def _test_script_guards():
         "title": "Example story #shorts",
         "titles": ["Example story #shorts", "Another title #Shorts"],
         "script": [
-            {"voiceover": "Here is the key point. The example story contains several factual details."},
+            {"voiceover": "Here is the key point. The example story contains several factual details about the company, product and market."},
             {"voiceover": "Stay with us until the end."},
-            {"voiceover": "The example story adds context about what happened and why it matters."},
+            {"voiceover": "The example story adds context about what happened and why it matters, including the timeline and broader impact."},
+            {"voiceover": "The facts also explain how the change affects users and why the result is relevant now."},
         ],
     }
     cleaned, diagnostics = clean_script_data(script, story, "regular")
