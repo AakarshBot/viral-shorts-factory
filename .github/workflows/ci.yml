@@ -41,8 +41,10 @@ jobs:
       - name: Import core runtime modules
         run: |
           python - <<'PY'
+          import audio_direction_runtime
           import audio_runtime
           import autopilot_runtime
+          import branding_runtime
           import db_architecture
           import db_runtime
           import diagnostics_runtime
@@ -51,15 +53,18 @@ jobs:
           import learning_runtime
           import provider_runtime
           import quality_runtime
+          import research_runtime
           import runtime_bindings
           import script_runtime
           import semantic_runtime
           import story_ranker
+          import subtitle_runtime
           import ultimate_bot
           import visual_runtime
           import visual_qa_runtime
           import visual_strategy_runtime
           import visual_content_runtime
+          import workflow_runtime
           import youtube_comment_runtime
           print('Core runtime imports passed.')
           PY
@@ -76,6 +81,7 @@ jobs:
           import visual_qa_runtime
           import visual_runtime
           import visual_strategy_runtime
+          import workflow_runtime
           import youtube_comment_runtime
 
           signature = inspect.signature(edge_tts.Communicate)
@@ -117,9 +123,16 @@ jobs:
               'gather_and_filter_stories', 'editorial_gate_batch',
               'process_scored_candidates', 'validate_script',
               'generate_voiceover_and_timestamps', 'process_visuals_async',
-              'fetch_scene_asset', 'token_overlap_ratio', 'upload_to_youtube'
+              'fetch_scene_asset', 'token_overlap_ratio', 'upload_to_youtube',
+              'generate_karaoke_clip', 'compile_video', 'write_script'
           ):
               assert namespace[name] is getattr(ultimate_bot, name), name
+
+          # The new newsroom modules must remain importable and must not perform
+          # network/API work just by being imported.
+          assert workflow_runtime.WORKFLOW_VERSION.startswith('2026-09-16-newsroom-')
+          assert set(workflow_runtime.FORMAT_OPTIONS) == {'Deep Dive', 'Top-5', 'Cricket'}
+          assert set(workflow_runtime.CRICKET_CATEGORIES) == {'India / Asia', 'Global', 'AI-assisted top story in cricket'}
 
           assert getattr(ultimate_bot.get_trend_signal_bonus, '_cached_trend_signal', False)
           rejected = [{'hard_reject': True, 'monetization_risk': 9}]
@@ -164,10 +177,13 @@ jobs:
               'app.py',
               'ultimate_bot.py',
               'audio_runtime.py',
+              'audio_direction_runtime.py',
               'visual_runtime.py',
               'visual_qa_runtime.py',
               'visual_strategy_runtime.py',
               'visual_content_runtime.py',
+              'subtitle_runtime.py',
+              'branding_runtime.py',
               'quality_runtime.py',
               'factory_runtime.py',
               'db_architecture.py',
@@ -180,7 +196,9 @@ jobs:
               'runtime_bindings.py',
               'provider_runtime.py',
               'editorial_runtime.py',
+              'research_runtime.py',
               'script_runtime.py',
+              'workflow_runtime.py',
               'youtube_comment_runtime.py',
               'requirements.txt',
           ]
