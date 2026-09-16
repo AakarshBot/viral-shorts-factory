@@ -7,6 +7,8 @@ This bridge makes the dashboard patches authoritative without rewriting the
 large legacy pipeline.
 """
 
+import traceback
+
 
 def bind_dashboard_patches(bot):
     """Bind patched callables into ultimate_bot's compiled function globals."""
@@ -45,6 +47,24 @@ def bind_dashboard_patches(bot):
         if value is not None:
             namespace[name] = value
             bound.append(name)
+
+    # The legacy run_robot() catches render exceptions and historically printed
+    # only "TypeError: ...", which hides the actual source line. Wrap the
+    # compile stage so the complete traceback is emitted before that handler
+    # catches and returns. The wrapper re-raises unchanged.
+    original_compile_video = getattr(bot, "compile_video", None)
+    if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
+        def compile_video_with_traceback(*args, **kwargs):
+            try:
+                return original_compile_video(*args, **kwargs)
+            except BaseException:
+                print("   [Bindings] FULL TRACEBACK FROM compile_video:", flush=True)
+                traceback.print_exc()
+                raise
+        compile_video_with_traceback._traceback_bound = True
+        bot.compile_video = compile_video_with_traceback
+        namespace["compile_video"] = compile_video_with_traceback
+        bound.append("compile_video(traceback)")
 
     # Some legacy render callables may have been imported into ultimate_bot's
     # globals. If so, make their vignette dependency point at the guarded
