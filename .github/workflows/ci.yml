@@ -45,6 +45,7 @@ jobs:
           import autopilot_runtime
           import db_architecture
           import db_runtime
+          import diagnostics_runtime
           import editorial_runtime
           import factory_runtime
           import learning_runtime
@@ -131,6 +132,18 @@ jobs:
           print('Offline runtime smoke checks passed.')
           PY
 
+      - name: Run full no-API diagnostics
+        run: |
+          python - <<'PY'
+          from diagnostics_runtime import run_offline_diagnostics
+          report = run_offline_diagnostics()
+          for item in report['results']:
+              print(f"[{item['status']}] {item['name']}: {item['detail']}")
+          assert report['api_calls'] == 0
+          assert report['all_passed'], report
+          print(f"Full no-API diagnostics passed: {report['passed']}/{report['total']}")
+          PY
+
       - name: Validate required factory files
         run: |
           python - <<'PY'
@@ -147,6 +160,7 @@ jobs:
               'factory_runtime.py',
               'db_architecture.py',
               'db_runtime.py',
+              'diagnostics_runtime.py',
               'learning_runtime.py',
               'autopilot_runtime.py',
               'story_ranker.py',
