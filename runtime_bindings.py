@@ -1,7 +1,13 @@
 """Bind runtime patches to the actual globals used by the legacy factory."""
 
 import functools
+import json
+import os
+import threading
 import traceback
+
+
+_VISUAL_CACHE_STATE = threading.local()
 
 
 def _install_moviepy_compatibility():
@@ -40,6 +46,85 @@ def _install_moviepy_compatibility():
         return True
     except Exception as exc:
         print(f"   [Bindings] MoviePy compatibility bridge unavailable: {type(exc).__name__}: {exc}", flush=True)
+        return False
+
+
+def _install_visual_cache_safety():
+    """Cache only assets that actually passed the visual verification gate.
+
+    The legacy visual runtime calls save_to_cache() both for genuinely accepted
+    assets and for the best-available soft fallback. The old implementation
+    marked both as verified. This wrapper records the result of _strict_gate()
+    and permits a cache write only after an accepted result. A version marker
+    also invalidates older cache entries that may have been created by the
+    unsafe implementation.
+    """
+    try:
+        import visual_runtime
+        if getattr(visual_runtime, "_verified_cache_safety_bound", False):
+            return True
+
+        original_gate = getattr(visual_runtime, "_strict_gate", None)
+        original_save = getattr(visual_runtime, "save_to_cache", None)
+        original_get = getattr(visual_runtime, "get_cached_asset", None)
+        if not original_gate or not original_save or not original_get:
+            return False
+
+        def strict_gate_with_cache_state(*args, **kwargs):
+            result = original_gate(*args, **kwargs)
+            try:
+                _VISUAL_CACHE_STATE.allow_write = bool(result[0])
+            except Exception:
+                _VISUAL_CACHE_STATE.allow_write = False
+            return result
+
+        def verified_only_save(bot, img_bytes, entity, visual_type, source_type, context=""):
+            allowed = bool(getattr(_VISUAL_CACHE_STATE, "allow_write", False))
+            _VISUAL_CACHE_STATE.allow_write = False
+            if not allowed:
+                print("   [Visual Cache] Skipping cache write: asset was not semantically verified.", flush=True)
+                return None
+            path = original_save(bot, img_bytes, entity, visual_type, source_type, context)
+            if path:
+                try:
+                    meta_path = os.path.splitext(path)[0] + ".json"
+                    with open(meta_path, "r", encoding="utf-8") as fh:
+                        meta = json.load(fh)
+                    meta["verified"] = True
+                    meta["verification_version"] = 2
+                    with open(meta_path, "w", encoding="utf-8") as fh:
+                        json.dump(meta, fh, ensure_ascii=False, indent=2)
+                except Exception as exc:
+                    print(f"   [Visual Cache] Verification metadata update failed: {type(exc).__name__}: {exc}", flush=True)
+            return path
+
+        def verified_only_get(bot, entity, visual_type, context=""):
+            result = original_get(bot, entity, visual_type, context)
+            if result == (None, None):
+                return result
+            image, path = result
+            try:
+                meta_path = os.path.splitext(path)[0] + ".json"
+                with open(meta_path, "r", encoding="utf-8") as fh:
+                    meta = json.load(fh)
+                if meta.get("verification_version") != 2 or meta.get("verified") is not True:
+                    print("   [Visual Cache] Ignoring legacy/unverified cache entry.", flush=True)
+                    return None, None
+            except Exception:
+                return None, None
+            return image, path
+
+        strict_gate_with_cache_state._verified_cache_safety_bound = True
+        verified_only_save._verified_cache_safety_bound = True
+        verified_only_get._verified_cache_safety_bound = True
+        visual_runtime._strict_gate = strict_gate_with_cache_state
+        visual_runtime.save_to_cache = verified_only_save
+        visual_runtime.get_cached_asset = verified_only_get
+        visual_runtime._verified_cache_safety_bound = True
+        print("   [Bindings] Visual cache safety guard installed.", flush=True)
+        return True
+    except Exception as exc:
+        print(f"   [Bindings] Visual cache safety guard unavailable: {type(exc).__name__}: {exc}", flush=True)
         return False
 
 
@@ -145,6 +230,7 @@ def bind_dashboard_patches(bot):
     _wrap_content_dense_script(bot)
     _wrap_content_first_visuals(bot)
     _patch_youtube_creator_comments(bot)
+    _install_visual_cache_safety()
 
     namespace = run_robot.__globals__
     names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio", "upload_to_youtube")
