@@ -2207,14 +2207,24 @@ def run_robot(web_config=None):
         genre_cfg = CONTENT_CATEGORIES[cat_choice]
         bonuses, last_genre = get_genre_bonuses(conn)
 
-        pool = gather_and_filter_stories(
-            conn,
-            cat_choice,
-            genre_cfg,
-            trend_keyword=trend_keyword,
-            custom_gnews_q=custom_q,
-            custom_rss_url=custom_rss,
-        )
+        selected_story = web_config.get("selected_story") if isinstance(web_config, dict) else None
+        if isinstance(selected_story, dict) and str(selected_story.get("title", "")).strip():
+            # Dashboard production must render the story the user explicitly selected.
+            # Never perform a second broad discovery pass here.
+            pool = [dict(selected_story)]
+            print(
+                f"   [Workflow] Production story locked: {selected_story.get('title')}",
+                flush=True,
+            )
+        else:
+            pool = gather_and_filter_stories(
+                conn,
+                cat_choice,
+                genre_cfg,
+                trend_keyword=trend_keyword,
+                custom_gnews_q=custom_q,
+                custom_rss_url=custom_rss,
+            )
 
         if format_mode == "top5":
             cands = editorial_gate_batch(
