@@ -28,9 +28,6 @@ def _wrap_scored_candidates(bot):
         if not result:
             return []
 
-        # The dashboard scorer historically returned the entire batch when all
-        # candidates were rejected. That silently bypassed hard-reject logic.
-        # Filter the returned candidates against the original model decisions.
         allowed = []
         for index, story in enumerate(batch_stories):
             if index >= len(scored_data) or not isinstance(story, dict):
@@ -55,6 +52,30 @@ def _wrap_scored_candidates(bot):
     return safe_process
 
 
+def _wrap_editorial_provider_usage(bot):
+    """Avoid spending Gemini visual-QA quota on the legacy editorial fallback."""
+    current = getattr(bot, "editorial_gate_batch", None)
+    if current is None or getattr(current, "_gemini_editorial_guarded", False):
+        return current
+
+    def guarded(stories, bonuses, last_genre, format_mode):
+        # The legacy implementation falls back to direct Gemini REST calls when
+        # Groq is exhausted. That path uses a different model/auth transport and
+        # also consumes the same Gemini project quota needed for visual QA.
+        # Disable it by temporarily clearing the legacy module-level key. The
+        # existing rule-filtered fallback remains available and deterministic.
+        original_key = getattr(bot, "GEMINI_API_KEY", None)
+        bot.GEMINI_API_KEY = None
+        try:
+            return current(stories, bonuses, last_genre, format_mode)
+        finally:
+            bot.GEMINI_API_KEY = original_key
+
+    guarded._gemini_editorial_guarded = True
+    bot.editorial_gate_batch = guarded
+    return guarded
+
+
 def bind_dashboard_patches(bot):
     """Bind patched callables into ultimate_bot's compiled function globals."""
     run_robot = getattr(bot, "run_robot", None)
@@ -73,6 +94,7 @@ def bind_dashboard_patches(bot):
 
     _wrap_trend_signal(bot)
     _wrap_scored_candidates(bot)
+    _wrap_editorial_provider_usage(bot)
 
     namespace = run_robot.__globals__
     names = (
