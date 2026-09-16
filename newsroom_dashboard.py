@@ -41,19 +41,36 @@ def _category_options(bot, format_mode: str) -> Dict[str, str]:
     return output
 
 
-def _collect_paths(value: Any) -> List[str]:
-    found: List[str] = []
+def _collect_visual_items(value: Any, seen: set[str] | None = None) -> List[Dict[str, str]]:
+    """Flatten visual packages into stable preview items without changing source data."""
+    seen = seen or set()
+    found: List[Dict[str, str]] = []
+
     if isinstance(value, str):
         lower = value.lower()
-        if os.path.isfile(value) and lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            found.append(value)
-    elif isinstance(value, dict):
+        if os.path.isfile(value) and lower.endswith((".png", ".jpg", ".jpeg", ".webp")) and value not in seen:
+            seen.add(value)
+            found.append({"path": value, "label": os.path.basename(value)})
+        return found
+
+    if isinstance(value, dict):
+        image_path = value.get("image") or value.get("image_path") or value.get("path")
+        if isinstance(image_path, str) and os.path.isfile(image_path):
+            lower = image_path.lower()
+            if lower.endswith((".png", ".jpg", ".jpeg", ".webp")) and image_path not in seen:
+                seen.add(image_path)
+                source = value.get("source") or value.get("source_name") or value.get("provider") or ""
+                subject = value.get("primary_entity") or value.get("visual_subject") or value.get("query") or ""
+                label = " · ".join(part for part in (str(subject).strip(), str(source).strip()) if part) or os.path.basename(image_path)
+                found.append({"path": image_path, "label": label})
         for item in value.values():
-            found.extend(_collect_paths(item))
-    elif isinstance(value, (list, tuple)):
+            found.extend(_collect_visual_items(item, seen))
+        return found
+
+    if isinstance(value, (list, tuple)):
         for item in value:
-            found.extend(_collect_paths(item))
-    return list(dict.fromkeys(found))
+            found.extend(_collect_visual_items(item, seen))
+    return found
 
 
 def _script_text(script: Any) -> str:
@@ -97,7 +114,7 @@ def _code_view(bot, selection: str) -> None:
         st.code(
             "Discovery → Story approval → Script → Visual approval → Metadata approval → Audio → Render → Upload visibility\n\n"
             "Manual Run: each arrow is an explicit human gate except Script.\n"
-            "AI Run: existing WorkflowController runs the automated self-critique/QC production path, then returns the result to the dashboard for human final approval before upload.\n"
+            "AI Run: automated self-critique/QC production, followed by human approval of the final metadata before upload.\n"
             "Upload is never automatic. Visibility is selected at the final step.",
             language="text",
         )
@@ -128,8 +145,10 @@ def _init_state() -> None:
         "nr_story": None,
         "nr_script": None,
         "nr_visuals": [],
+        "nr_visual_decisions": {},
         "nr_metadata": {},
         "nr_approvals": {},
+        "nr_approved_metadata": {},
         "nr_audio": None,
         "nr_rendered": "",
         "nr_ai_controller": None,
@@ -137,7 +156,6 @@ def _init_state() -> None:
         "nr_ai_snapshot": {},
         "nr_visibility": "Private",
         "nr_upload_result": "",
-        "nr_approved_metadata": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -147,11 +165,11 @@ def _init_state() -> None:
 def _reset_run() -> None:
     keep_mode = st.session_state.get("nr_mode", "Manual Run")
     for key in (
-        "nr_config", "nr_candidates", "nr_story", "nr_script", "nr_visuals", "nr_metadata",
-        "nr_approvals", "nr_audio", "nr_rendered", "nr_ai_controller", "nr_ai_started",
-        "nr_ai_snapshot", "nr_upload_result", "nr_approved_metadata",
+        "nr_config", "nr_candidates", "nr_story", "nr_script", "nr_visuals", "nr_visual_decisions",
+        "nr_metadata", "nr_approvals", "nr_approved_metadata", "nr_audio", "nr_rendered",
+        "nr_ai_controller", "nr_ai_started", "nr_ai_snapshot", "nr_upload_result",
     ):
-        st.session_state[key] = {} if key in {"nr_config", "nr_metadata", "nr_approvals", "nr_ai_snapshot", "nr_approved_metadata"} else [] if key in {"nr_candidates", "nr_visuals"} else None if key in {"nr_story", "nr_script", "nr_audio", "nr_ai_controller"} else ""
+        st.session_state[key] = {} if key in {"nr_config", "nr_metadata", "nr_approvals", "nr_approved_metadata", "nr_ai_snapshot", "nr_visual_decisions"} else [] if key in {"nr_candidates", "nr_visuals"} else None if key in {"nr_story", "nr_script", "nr_audio", "nr_ai_controller"} else ""
     st.session_state.nr_mode = keep_mode
     st.session_state.nr_stage = "setup"
 
@@ -160,7 +178,10 @@ def _manual_stage_state(stage: str) -> tuple[str, float, str]:
     approvals = st.session_state.get("nr_approvals", {})
     story = bool(st.session_state.get("nr_story"))
     script = bool(st.session_state.get("nr_script"))
-    visuals = bool(st.session_state.get("nr_visuals"))
+    visual_items = _collect_visual_items(st.session_state.get("nr_visuals", []))
+    visual_decisions = st.session_state.get("nr_visual_decisions", {})
+    approved_visuals = sum(1 for item in visual_items if visual_decisions.get(item["path"]) == "Approve")
+    rejected_visuals = sum(1 for item in visual_items if visual_decisions.get(item["path"]) == "Reject")
     metadata = bool(st.session_state.get("nr_metadata"))
     audio = st.session_state.get("nr_audio") is not None
     rendered = bool(st.session_state.get("nr_rendered"))
@@ -177,10 +198,12 @@ def _manual_stage_state(stage: str) -> tuple[str, float, str]:
             return "complete", 1.0, "Script ready"
         return ("active", 0.0, "Generate the script") if story else ("locked", 0.0, "Waiting for story approval")
     if stage == "visuals":
-        if approvals.get("visuals"):
-            return "complete", 1.0, "Visuals approved"
-        if visuals:
-            return "waiting", 1.0, "Waiting for your visual approval"
+        if visual_items and rejected_visuals:
+            return "waiting", approved_visuals / len(visual_items), f"{approved_visuals}/{len(visual_items)} approved · {rejected_visuals} rejected"
+        if visual_items and approved_visuals == len(visual_items):
+            return "complete", 1.0, f"All {len(visual_items)} visuals approved"
+        if visual_items:
+            return "waiting", approved_visuals / len(visual_items), f"{approved_visuals}/{len(visual_items)} approved"
         return ("active", 0.0, "Source and verify visuals") if script else ("locked", 0.0, "Waiting for script")
     if stage == "metadata":
         meta_fields = ("title", "description", "pinned_comment")
@@ -364,12 +387,10 @@ def _render_setup_and_discovery(bot) -> None:
             st.session_state.nr_story = None
             st.session_state.nr_script = None
             st.session_state.nr_visuals = []
+            st.session_state.nr_visual_decisions = {}
             st.session_state.nr_metadata = {}
             st.session_state.nr_approvals = {}
-            st.session_state.nr_audio = None
-            st.session_state.nr_rendered = ""
             st.session_state.nr_approved_metadata = {}
-            st.session_state.nr_upload_result = ""
             st.session_state.nr_stage = "discovery"
 
     if st.session_state.nr_candidates:
@@ -382,7 +403,7 @@ def _render_setup_and_discovery(bot) -> None:
             st.link_button("Open source article", item["story_url"])
         if st.button("✅ Approve this story", type="primary", use_container_width=True):
             st.session_state.nr_story = dict(item)
-            st.session_state.nr_stage = "script"
+            st.session_state.nr_stage = "story"
 
 
 def _render_ai_run(bot, stages) -> None:
@@ -407,7 +428,8 @@ def _render_ai_run(bot, stages) -> None:
     st.session_state.nr_ai_snapshot = snap
     if snap.get("thread_alive"):
         st.info(f"**{snap.get('stage', 'working').title()}** — {snap.get('message', '')}")
-        return
+        st.progress(max(0.01, int(snap.get("percent", 0)) / 100.0), text=f"{snap.get('percent', 0)}%")
+        st.rerun()
 
     if snap.get("error"):
         st.error(snap["error"])
@@ -495,34 +517,72 @@ def _render_manual_run(bot, stages) -> None:
                     if inspect.isawaitable(result):
                         result = asyncio.run(result)
                     st.session_state.nr_visuals = result or []
-            paths = _collect_paths(st.session_state.nr_visuals)
-            if paths:
-                cols = st.columns(min(3, len(paths)))
-                for i, path in enumerate(paths):
-                    with cols[i % len(cols)]:
-                        st.image(path, caption=os.path.basename(path), use_container_width=True)
-            if st.session_state.nr_visuals:
-                approved = st.checkbox("✅ I approve these visuals", key="nr_visuals_approved")
-                if approved:
-                    st.session_state.nr_approvals["visuals"] = True
-                    st.session_state.nr_stage = "metadata"
+                    st.session_state.nr_visual_decisions = {}
+            visual_items = _collect_visual_items(st.session_state.nr_visuals)
+            if visual_items:
+                st.caption(f"Review each visual individually. {len(visual_items)} image(s) sourced.")
+                for index, item in enumerate(visual_items, 1):
+                    path = item["path"]
+                    current = st.session_state.nr_visual_decisions.get(path, "Unreviewed")
+                    choice = st.radio(
+                        f"Visual {index}: {item['label']}",
+                        ["Unreviewed", "Approve", "Reject"],
+                        index=["Unreviewed", "Approve", "Reject"].index(current),
+                        key=f"nr_visual_decision_{index}_{hash(path)}",
+                        horizontal=True,
+                    )
+                    st.session_state.nr_visual_decisions[path] = choice
+                    st.image(path, caption=item["label"], use_container_width=True)
+
+                decisions = list(st.session_state.nr_visual_decisions.values())
+                approved = sum(1 for value in decisions if value == "Approve")
+                rejected = sum(1 for value in decisions if value == "Reject")
+                unreviewed = sum(1 for value in decisions if value == "Unreviewed")
+                st.write(f"**Visual QC:** {approved} approved · {rejected} rejected · {unreviewed} unreviewed")
+
+                if rejected:
+                    st.warning("One or more visuals were rejected. Re-source the visual package before continuing.")
+                    if st.button("🔄 Re-source visuals", type="secondary", use_container_width=True):
+                        lang_cfg = bot.LANGUAGES[st.session_state.nr_config["language"]]
+                        result = bot.process_visuals_async(script, lang_cfg, st.session_state.nr_config["format_mode"])
+                        if inspect.isawaitable(result):
+                            result = asyncio.run(result)
+                        st.session_state.nr_visuals = result or []
+                        st.session_state.nr_visual_decisions = {}
+                        st.session_state.nr_approvals.pop("visuals", None)
+                        st.rerun()
+                elif visual_items and approved == len(visual_items):
+                    if st.button("✅ Approve visual package", type="primary", use_container_width=True):
+                        st.session_state.nr_approvals["visuals"] = True
+                        st.session_state.nr_stage = "metadata"
+            else:
+                st.caption("No visual files have been sourced yet.")
 
     if st.session_state.nr_approvals.get("visuals") and st.session_state.nr_stage in {"metadata", "audio", "render", "upload"}:
         with st.container(border=True):
             st.markdown("### 5. Metadata choices")
             if not st.session_state.nr_metadata:
                 st.session_state.nr_metadata = _metadata_variants(bot, script, st.session_state.nr_config["category"])
-            selections = {}
+            selections = dict(st.session_state.get("nr_approved_metadata", {}))
             for field, label in (("title", "Title"), ("description", "Description"), ("pinned_comment", "Pinned comment")):
                 options = st.session_state.nr_metadata.get(field, [])
-                selections[field] = st.radio(f"Choose {label.lower()}", options or ["No option generated"], key=f"nr_pick_{field}")
+                selected = st.radio(f"Choose {label.lower()}", options or ["No option generated"], key=f"nr_pick_{field}")
+                previous = st.session_state.get("nr_selected_metadata", {}).get(field)
+                if previous != selected:
+                    st.session_state.nr_approvals.pop(field, None)
+                st.session_state.setdefault("nr_selected_metadata", {})[field] = selected
+                selections[field] = selected
             st.session_state.nr_approved_metadata = selections
             a1, a2, a3 = st.columns(3)
             for col, field in zip((a1, a2, a3), ("title", "description", "pinned_comment")):
                 with col:
-                    if st.button(f"✅ Approve {field.replace('_', ' ')}", key=f"nr_approve_{field}"):
+                    status = "✅ Approved" if st.session_state.nr_approvals.get(field) else "Approve"
+                    if st.button(status if status == "✅ Approved" else f"✅ {status} {field.replace('_', ' ')}", key=f"nr_approve_{field}"):
                         st.session_state.nr_approvals[field] = True
-            if all(st.session_state.nr_approvals.get(f) for f in ("title", "description", "pinned_comment")):
+                        st.session_state.nr_approved_metadata[field] = st.session_state.nr_selected_metadata[field]
+            approved_count = sum(1 for field in ("title", "description", "pinned_comment") if st.session_state.nr_approvals.get(field))
+            st.caption(f"Metadata QC: {approved_count}/3 approved")
+            if approved_count == 3:
                 st.session_state.nr_stage = "audio"
                 st.success("Metadata approved. Audio is unlocked.")
 
@@ -568,7 +628,10 @@ def _render_manual_run(bot, stages) -> None:
             st.write("**Approved title:**", st.session_state.nr_approved_metadata.get("title", ""))
             st.write("**Approved description:**", st.session_state.nr_approved_metadata.get("description", ""))
             st.write("**Approved pinned comment:**", st.session_state.nr_approved_metadata.get("pinned_comment", ""))
-            if st.button("⬆️ Upload to YouTube", type="primary", use_container_width=True):
+            ready = all(st.session_state.nr_approvals.get(f) for f in ("visuals", "title", "description", "pinned_comment"))
+            if not ready:
+                st.info("Upload remains locked until all visual and metadata approvals are complete.")
+            if ready and st.button("⬆️ Upload to YouTube", type="primary", use_container_width=True):
                 try:
                     genre_cfg = bot.CONTENT_CATEGORIES.get(st.session_state.nr_config.get("category", "national_global_affairs"), bot.CONTENT_CATEGORIES["national_global_affairs"])
                     uploader = WorkflowController(bot)
