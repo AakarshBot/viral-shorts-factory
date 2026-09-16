@@ -20,7 +20,7 @@ def _run(name, fn):
 def _test_imports():
     modules = [
         "ultimate_bot", "factory_runtime", "db_architecture", "db_runtime",
-        "diagnostics_runtime", "editorial_runtime", "script_runtime", "research_runtime",
+        "diagnostics_runtime", "editorial_runtime", "runtime_hardener", "script_runtime", "research_runtime",
         "audio_runtime", "audio_direction_runtime", "visual_runtime", "visual_qa_runtime",
         "visual_strategy_runtime", "visual_content_runtime", "provider_runtime",
         "quality_runtime", "runtime_bindings", "workflow_runtime", "subtitle_runtime",
@@ -187,8 +187,65 @@ def _test_runtime_bindings():
     return "Legacy run_robot globals are connected to the active runtime patch stack"
 
 
+def _test_binding_lifecycle():
+    """Catch the exact class of bug that caused the duplicate editorial scoring passes."""
+    import factory_runtime
+    import runtime_bindings
+    from runtime_hardener import assert_authoritative_binding, reassert_live_bindings
+    import ultimate_bot
+
+    factory_runtime.patch_dashboard_runtime(ultimate_bot)
+    runtime_bindings.harden_editorial_defaults(ultimate_bot)
+    runtime_bindings.bind_dashboard_patches(ultimate_bot)
+
+    active = getattr(ultimate_bot, "process_scored_candidates", None)
+    if not callable(active):
+        raise AssertionError("editorial scorer is not callable after binding")
+
+    # Simulate a legacy overwrite after startup.
+    legacy = ultimate_bot.run_robot.__globals__.get("process_scored_candidates")
+    ultimate_bot.process_scored_candidates = legacy
+    ultimate_bot.run_robot.__globals__["process_scored_candidates"] = legacy
+
+    runtime_bindings.bind_dashboard_patches(ultimate_bot)
+    active = getattr(ultimate_bot, "process_scored_candidates", None)
+    namespace_active = ultimate_bot.run_robot.__globals__.get("process_scored_candidates")
+    if active is not namespace_active:
+        raise AssertionError("rebinding did not restore bot/global identity")
+
+    stories = [{"title": "A current cricket story", "text": "Current facts about cricket with enough information for scoring.", "velocity_score": 2, "trend_bonus": 1, "genre": "sports_stories_of_day"} for _ in range(3)]
+    scores = [{"hook_strength": 7, "narrative_completeness": 7, "audience_fit": 7, "monetization_risk": 9, "shelf_life": 7, "hard_reject": False} for _ in stories]
+    result = active(scores, stories, {}, "sports_stories_of_day", "regular")
+    if not result:
+        raise AssertionError("rebinding restored a scorer that still drops non-hard-rejected high-risk stories")
+
+    original_autopilot = getattr(ultimate_bot, "auto_pilot_selection", None)
+    ultimate_bot.auto_pilot_selection = lambda conn: ("BROKEN", "BROKEN", None, "BROKEN")
+    ultimate_bot.run_robot.__globals__["auto_pilot_selection"] = ultimate_bot.auto_pilot_selection
+    reassert_live_bindings(ultimate_bot)
+    if not getattr(ultimate_bot.auto_pilot_selection, "_authoritative_autopilot", False):
+        raise AssertionError("authoritative Auto-Pilot was not restored")
+    if not assert_authoritative_binding(ultimate_bot, "auto_pilot_selection"):
+        raise AssertionError("bot/global Auto-Pilot binding is not aligned")
+    if original_autopilot is None:
+        raise AssertionError("original Auto-Pilot binding was unexpectedly absent")
+    return "Live binding lifecycle survived an intentional legacy overwrite and restored authoritative editorial + Auto-Pilot paths"
+
+
 def run_offline_diagnostics():
-    tests = [("Imports", _test_imports), ("Environment", _test_environment), ("Database", _test_database), ("Visual strategy", _test_visual_strategy), ("Scene branding", _test_scene_branding), ("Script safeguards", _test_script_guards), ("Research binding", _test_research_binding), ("Audio timing", _test_audio_timing), ("Search deeper simulation", _test_search_deeper), ("Runtime bindings", _test_runtime_bindings)]
+    tests = [
+        ("Imports", _test_imports),
+        ("Environment", _test_environment),
+        ("Database", _test_database),
+        ("Visual strategy", _test_visual_strategy),
+        ("Scene branding", _test_scene_branding),
+        ("Script safeguards", _test_script_guards),
+        ("Research binding", _test_research_binding),
+        ("Audio timing", _test_audio_timing),
+        ("Search deeper simulation", _test_search_deeper),
+        ("Runtime bindings", _test_runtime_bindings),
+        ("Binding lifecycle", _test_binding_lifecycle),
+    ]
     results = [_run(name, fn) for name, fn in tests]
     passed = sum(1 for item in results if item["status"] == "PASS")
     failed = len(results) - passed
