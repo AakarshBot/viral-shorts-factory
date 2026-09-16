@@ -6,6 +6,9 @@ not decide whether an image is relevant; visual_runtime performs strict QA.
 """
 import re
 
+VISUAL_STRATEGY_RUNTIME_VERSION = "2026-09-16-v4"
+MAX_VISUAL_SEARCH_QUERIES = 6
+
 VISUAL_TYPES = {
     "PERSON", "EVENT", "PRODUCT", "LOCATION", "STATISTIC", "COMPARISON",
     "TIMELINE", "PROCESS", "QUOTE", "DOCUMENT", "CONCEPT", "GENERAL_CONTEXT",
@@ -110,7 +113,7 @@ def build_deep_queries(seg, video_title="", visual_type=None):
         _add_unique(queries, entity, category, "editorial photo")
         _add_unique(queries, entity, "Wikimedia Commons")
         _add_unique(queries, entity, "official photo")
-        return queries[:6], visual_type
+        return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
 
     modifier_map = {
         "EVENT": ["official event photo", "editorial photo", "press photo", "actual event photo"],
@@ -134,4 +137,4 @@ def build_deep_queries(seg, video_title="", visual_type=None):
     _add_unique(queries, entity, category, modifiers[3])
     _add_unique(queries, entity, "Wikimedia Commons")
     _add_unique(queries, entity, title, "news photo")
-    return queries[:6], visual_type
+    return queries[:MAX_VISUAL_SEARCH_QUERIES], visual_type
