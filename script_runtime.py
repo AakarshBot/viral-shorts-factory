@@ -37,8 +37,16 @@ def _topic_terms(story_data):
 
 def _strip_filler(text):
     value = str(text or "").strip()
+    if not value:
+        return ""
+    # A scene whose purpose is to tell the viewer to keep watching is removed
+    # completely. We do not merely delete the phrase and leave its dead air.
+    for pattern in _PERFORMATIVE_PATTERNS:
+        if re.match(r"^\s*" + pattern, value, flags=re.IGNORECASE):
+            return ""
     value = _CTA_RE.sub("", value)
-    for pattern in _PERFORMATIVE_PATTERNS: value = re.sub(pattern, "", value, flags=re.IGNORECASE)
+    for pattern in _PERFORMATIVE_PATTERNS:
+        value = re.sub(pattern, "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+([,.!?])", r"\1", value)
     return re.sub(r"\s{2,}", " ", value).strip(" ,;:-")
 
@@ -46,24 +54,20 @@ def _strip_filler(text):
 def _looks_like_filler(text):
     value = _normalise(text)
     if not value: return True
-    if any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in _PERFORMATIVE_PATTERNS): return True
+    # Run the performative check against the original text as well as the
+    # normalised form, because apostrophes can otherwise hide won't/you're.
+    raw = str(text or "")
+    if any(re.search(pattern, raw, flags=re.IGNORECASE) for pattern in _PERFORMATIVE_PATTERNS): return True
     return any(re.fullmatch(pattern, value, flags=re.IGNORECASE) for pattern in _GENERIC_FILLER)
 
 
 def _clean_titles(script_data):
-    """Titles should win on relevance/CTR, not by carrying a mandatory hashtag."""
     titles = script_data.get("titles")
     if not isinstance(titles, list): return
-    cleaned = []
-    for title in titles:
-        value = re.sub(r"\s*#shorts\b", "", str(title or ""), flags=re.IGNORECASE).strip()
-        value = re.sub(r"\s{2,}", " ", value)
-        cleaned.append(value)
-    script_data["titles"] = cleaned
+    script_data["titles"] = [re.sub(r"\s*#shorts\b", "", str(title or ""), flags=re.IGNORECASE).strip() for title in titles]
 
 
 def _add_editorial_contract(story_data):
-    """Tell the legacy generator what our original contribution must be."""
     if not isinstance(story_data, dict): return story_data
     brief = (
         "EDITORIAL CONTRACT — DO NOT OUTPUT THIS BLOCK.\n"
@@ -75,8 +79,7 @@ def _add_editorial_contract(story_data):
         "If the source does not support a distinct contribution, prefer the clearest factual angle instead of manufacturing one.\n\n"
     )
     copy = dict(story_data)
-    if "text" in copy:
-        copy["text"] = brief + str(copy.get("text", ""))
+    if "text" in copy: copy["text"] = brief + str(copy.get("text", ""))
     return copy
 
 
