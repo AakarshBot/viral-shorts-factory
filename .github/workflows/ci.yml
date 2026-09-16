@@ -45,16 +45,19 @@ jobs:
           import autopilot_runtime
           import db_architecture
           import db_runtime
+          import editorial_runtime
           import factory_runtime
           import learning_runtime
           import provider_runtime
           import quality_runtime
           import runtime_bindings
+          import script_runtime
           import semantic_runtime
           import story_ranker
           import ultimate_bot
           import visual_runtime
           import visual_qa_runtime
+          import youtube_comment_runtime
           print('Core runtime imports passed.')
           PY
 
@@ -69,6 +72,7 @@ jobs:
           import ultimate_bot
           import visual_qa_runtime
           import visual_runtime
+          import youtube_comment_runtime
 
           signature = inspect.signature(edge_tts.Communicate)
           assert 'boundary' in signature.parameters, signature
@@ -86,7 +90,7 @@ jobs:
               'gather_and_filter_stories', 'editorial_gate_batch',
               'process_scored_candidates', 'validate_script',
               'generate_voiceover_and_timestamps', 'process_visuals_async',
-              'fetch_scene_asset', 'token_overlap_ratio'
+              'fetch_scene_asset', 'token_overlap_ratio', 'upload_to_youtube'
           ):
               assert namespace[name] is getattr(ultimate_bot, name), name
 
@@ -99,6 +103,19 @@ jobs:
               rejected, batch, {}, None, 'regular'
           )
           assert result == [], result
+
+          cleaned_title, description, tags = youtube_comment_runtime._build_clean_metadata(
+              {'title': 'Example Story #shorts', 'seo_description': 'A factual summary.', 'tags': ['AI']},
+              {'label': 'Tech', 'hashtags': ['#Tech'], 'category_id': '28'},
+              None,
+          )
+          assert '#shorts' not in cleaned_title.lower(), cleaned_title
+          comment = youtube_comment_runtime.build_pinned_comment(
+              {'pinned_comment': 'What do you think this means for the industry?'},
+              cleaned_title,
+          )
+          assert '?' in comment
+          assert 'subscribe' in comment.lower()
           assert getattr(ultimate_bot.fetch_hf_ai_image, '__name__', '') == 'hf_text_to_image'
 
           sample = {'recommended_title_index': 0}
@@ -125,6 +142,9 @@ jobs:
               'semantic_runtime.py',
               'runtime_bindings.py',
               'provider_runtime.py',
+              'editorial_runtime.py',
+              'script_runtime.py',
+              'youtube_comment_runtime.py',
               'requirements.txt',
           ]
           missing = [path for path in required if not Path(path).is_file()]
