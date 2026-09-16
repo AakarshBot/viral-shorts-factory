@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import re
-import time
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 
 def _clean(value: Any) -> str:
@@ -15,18 +15,53 @@ def _story_query(story: Dict[str, Any]) -> str:
     return title[:220]
 
 
+def _domain(url: Any) -> str:
+    try:
+        return urlparse(_clean(url)).netloc.lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
 def _dedupe(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    seen = set()
+    seen_urls = set()
+    seen_titles = set()
     output = []
     for item in items:
         url = _clean(item.get("url")).lower()
         title = _clean(item.get("title")).lower()
-        key = url or title
-        if not key or key in seen:
+        if not url and not title:
             continue
-        seen.add(key)
+        if url and url in seen_urls:
+            continue
+        if title and title in seen_titles:
+            continue
+        if url:
+            seen_urls.add(url)
+        if title:
+            seen_titles.add(title)
         output.append(item)
     return output
+
+
+def _distinct_domain_pack(items: List[Dict[str, Any]], max_sources: int) -> List[Dict[str, Any]]:
+    """Prefer independent publishers before adding another result from the same domain."""
+    selected: List[Dict[str, Any]] = []
+    seen_domains = set()
+    remainder: List[Dict[str, Any]] = []
+    for item in items:
+        domain = _domain(item.get("url"))
+        if domain and domain not in seen_domains:
+            selected.append(item)
+            seen_domains.add(domain)
+            if len(selected) >= max_sources:
+                return selected
+        else:
+            remainder.append(item)
+    for item in remainder:
+        if len(selected) >= max_sources:
+            break
+        selected.append(item)
+    return selected[:max_sources]
 
 
 def collect_source_bundle(bot, story: Dict[str, Any], max_sources: int = 5) -> List[Dict[str, Any]]:
@@ -38,14 +73,14 @@ def collect_source_bundle(bot, story: Dict[str, Any], max_sources: int = 5) -> L
         sources.append({
             "title": _clean(story.get("title")),
             "url": original_url,
-            "snippet": _clean(story.get("summary") or story.get("description")),
+            "snippet": _clean(story.get("summary") or story.get("description") or story.get("text")),
             "source": _clean(story.get("source") or story.get("publisher") or "Original story source"),
         })
 
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=8))
+            results = list(ddgs.text(query, max_results=10))
         for item in results:
             sources.append({
                 "title": _clean(item.get("title")),
@@ -56,8 +91,8 @@ def collect_source_bundle(bot, story: Dict[str, Any], max_sources: int = 5) -> L
     except Exception as exc:
         print(f"   [Research] DDG source search unavailable: {exc}", flush=True)
 
-    sources = _dedupe(sources)
-    return sources[:max_sources]
+    sources = _distinct_domain_pack(_dedupe(sources), max_sources=max_sources)
+    return sources
 
 
 def format_source_brief(sources: List[Dict[str, Any]]) -> str:
@@ -92,17 +127,25 @@ def patch_research_pipeline(bot):
         print(f"   [Research] Building multi-source evidence pack for: {query[:100]}", flush=True)
         sources = collect_source_bundle(bot, data, max_sources=5)
         data["research_sources"] = sources
+        data["research_source_count"] = len(sources)
+        data["research_distinct_domains"] = len({_domain(item.get("url")) for item in sources if _domain(item.get("url"))})
+        data["research_synthesis_required"] = True
         data["research_bundle"] = format_source_brief(sources)
         instruction = (
-            "\n\nMULTI-SOURCE EVIDENCE PACK — use this only to corroborate and enrich the selected story. "
-            "Prefer facts supported by more than one source. Do not invent facts, quotes, motives or predictions. "
-            "Ignore conflicting or unsupported claims unless the conflict itself is the verified news point.\n\n"
+            "\n\nMULTI-SOURCE EVIDENCE PACK — synthesize the strongest factual Short from the evidence below. "
+            "Treat the selected story as the subject, not as the final script. Cross-check details across independent publishers and prefer details repeated or directly supported by multiple sources. "
+            "Merge the strongest verified facts, useful context, numbers and consequences into one coherent story; do not mechanically paraphrase one article. "
+            "When sources conflict, omit the disputed detail unless the conflict itself is the verified news point. "
+            "Never invent facts, quotes, motives, predictions, statistics or causal links.\n\n"
             + data["research_bundle"]
         )
         data["text"] = _clean(data.get("text")) + instruction
         result = current(data, language_cfg, genre_key, conn, format_mode)
         if isinstance(result, dict):
             result["research_sources"] = sources
+            result["research_source_count"] = len(sources)
+            result["research_distinct_domains"] = data["research_distinct_domains"]
+            result["research_synthesis_required"] = True
         return result
 
     researched_write_script._research_wrapped = True
