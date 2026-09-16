@@ -362,6 +362,8 @@ class WorkflowController:
             self.state.error = ""
 
         config = dict(web_config)
+        if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
+            config["format_mode"] = "cricket"
         config["selected_story"] = dict(selected_story)
         config["publish_mode"] = "private"
         config["manual_qc_required"] = True
@@ -430,27 +432,33 @@ class WorkflowController:
         genre_cfg: Dict[str, Any],
         trend_keyword: str = "",
     ):
-        if not video_path or not os.path.isfile(video_path):
-            raise FileNotFoundError(f"Final video not found: {video_path}")
-        if not callable(self._real_uploader):
+        if self.state.thread_alive:
+            raise RuntimeError("Production is still running. Final upload is locked until QC is ready.")
+        if not os.path.isfile(video_path):
+            raise FileNotFoundError(f"Final video file not found: {video_path}")
+        from final_qc_runtime import validate_final_upload_metadata, validate_final_video
+
+        validate_final_video(video_path)
+        clean_title, clean_description, clean_tags = _build_clean_metadata(
+            {**script_data, "title": title, "seo_description": description},
+            genre_cfg,
+            trend_keyword,
+        )
+        final_title, final_description, final_comment = validate_final_upload_metadata(
+            clean_title,
+            clean_description,
+            comment,
+        )
+        if self._real_uploader is None:
             self._real_uploader = getattr(self.bot, "upload_to_youtube", None)
         if not callable(self._real_uploader):
-            raise RuntimeError("The YouTube uploader is not available.")
-
-        script_data = dict(script_data or {})
-        script_data["title"] = title.strip()
-        script_data["seo_description"] = description.strip()
-        script_data["pinned_comment"] = comment.strip()
-
-        self._reporter("upload", 98, f"Uploading as {publish_mode}…")
-        video_id = self._real_uploader(
+            raise RuntimeError("YouTube uploader is not available.")
+        result = self._real_uploader(
             video_path,
-            script_data,
-            genre_cfg,
-            publish_mode,
-            trend_keyword or None,
+            title=final_title,
+            description=final_description,
+            tags=clean_tags,
+            publish_mode=publish_mode,
+            pinned_comment=final_comment,
         )
-        if not video_id or video_id == "PENDING_MANUAL_UPLOAD":
-            raise RuntimeError("YouTube did not return a video ID.")
-        self._reporter("complete", 100, f"Upload complete. Video ID: {video_id}")
-        return video_id
+        return result
