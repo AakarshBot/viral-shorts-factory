@@ -64,7 +64,9 @@ def validate_audio_timing(text: str, timings: list[dict[str, Any]]) -> tuple[boo
     return True, "Valid word-level audio timing"
 
 
-def validate_timing_against_duration(timings: list[dict[str, Any]], duration: float, tolerance: float = 0.35) -> tuple[bool, str]:
+def validate_timing_against_duration(
+    timings: list[dict[str, Any]], duration: float, tolerance: float = 0.10
+) -> tuple[bool, str]:
     """Ensure the word-boundary timeline fits inside the encoded media duration."""
     if not timings:
         return False, "No word timings are available for duration alignment."
