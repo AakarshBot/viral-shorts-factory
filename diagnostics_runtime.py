@@ -134,7 +134,7 @@ def _test_visual_strategy():
 
 
 def _test_script_guards():
-    from script_runtime import clean_script_data, validate_content_density
+    from script_runtime import clean_script_data, validate_content_density, _story_structure
     story = {"title": "Example story", "topic": "Example story", "summary": "A factual example story with several grounded details."}
     script = {
         "title": "Example story #shorts",
@@ -151,10 +151,28 @@ def _test_script_guards():
         raise AssertionError("#shorts was not removed from titles")
     if diagnostics["removed_scenes"] < 1:
         raise AssertionError("performative scene was not removed")
+    if not cleaned.get("script_structure"):
+        raise AssertionError("story-specific script structure was not recorded")
+    if cleaned["script_structure"] != _story_structure(story, "regular"):
+        raise AssertionError("script structure metadata is inconsistent")
     ok, reason = validate_content_density(cleaned, story, "regular")
     if not ok:
         raise AssertionError(reason)
-    return "Filler removal, title cleanup and content-density gate passed"
+
+    # No arbitrary word-count gate: a compact, grounded script is valid when its
+    # scenes contain actual topic information.
+    compact_story = {"title": "Mars sample", "topic": "Mars sample", "summary": "A compact factual Mars update."}
+    compact_script = {
+        "script": [
+            {"voiceover": "Mars has two tiny moons named Phobos and Deimos."},
+            {"voiceover": "Phobos is slowly moving closer to Mars and may eventually break apart."},
+        ]
+    }
+    compact_cleaned, _ = clean_script_data(compact_script, compact_story, "regular")
+    compact_ok, compact_reason = validate_content_density(compact_cleaned, compact_story, "regular")
+    if not compact_ok:
+        raise AssertionError(f"compact information-dense script was rejected: {compact_reason}")
+    return "Filler removal, title cleanup, story structure and no-arbitrary-length gate passed"
 
 
 def _test_search_deeper():
@@ -165,7 +183,6 @@ def _test_search_deeper():
     for attempts in range(1, 6):
         candidate = b"synthetic-local-test"
         if attempts == 5:
-            # Simulate a verified fifth result without a network call.
             accepted = True
             break
     if not accepted:
