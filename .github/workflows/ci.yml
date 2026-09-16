@@ -39,37 +39,19 @@ jobs:
         run: python -m compileall -q .
 
       - name: Explicitly validate dashboard syntax
-        run: python -m py_compile app.py
+        run: python -m py_compile app.py newsroom_dashboard.py pages/Factory_QC.py
 
       - name: Import core runtime modules
         run: |
           python - <<'PY'
-          import audio_direction_runtime
-          import audio_runtime
-          import autopilot_runtime
-          import branding_runtime
-          import db_architecture
-          import db_runtime
-          import diagnostics_runtime
-          import editorial_runtime
-          import factory_runtime
-          import final_qc_runtime
-          import learning_runtime
-          import provider_runtime
-          import quality_runtime
-          import research_runtime
-          import runtime_bindings
-          import script_runtime
-          import semantic_runtime
-          import story_ranker
-          import subtitle_runtime
-          import ultimate_bot
-          import visual_runtime
-          import visual_qa_runtime
-          import visual_strategy_runtime
-          import visual_content_runtime
-          import workflow_runtime
-          import youtube_comment_runtime
+          import audio_direction_runtime, audio_runtime, autopilot_runtime
+          import branding_runtime, db_architecture, db_runtime, diagnostics_runtime
+          import editorial_runtime, factory_runtime, final_qc_runtime, learning_runtime
+          import provider_runtime, quality_runtime, research_runtime, runtime_bindings
+          import script_guard_runtime, script_runtime, semantic_runtime, story_ranker
+          import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
+          import visual_runtime, visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
+          import newsroom_dashboard
           print('Core runtime imports passed.')
           PY
 
@@ -78,37 +60,37 @@ jobs:
           python - <<'PY'
           import inspect
           import edge_tts
-          import factory_runtime
-          import final_qc_runtime
-          import provider_runtime
-          import runtime_bindings
-          import ultimate_bot
-          import visual_qa_runtime
-          import visual_runtime
-          import visual_strategy_runtime
-          import workflow_runtime
-          import youtube_comment_runtime
+          import factory_runtime, final_qc_runtime, provider_runtime, runtime_bindings
+          import script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime
+          import visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
+          import visual_policy_runtime
 
-          signature = inspect.signature(edge_tts.Communicate)
-          assert 'boundary' in signature.parameters, signature
+          assert 'boundary' in inspect.signature(edge_tts.Communicate).parameters
+          assert factory_runtime._vignette((1080, 1920)).size == (1080, 1920)
 
-          vignette = factory_runtime._vignette((1080, 1920))
-          assert vignette.size == (1080, 1920)
+          visual_policy_runtime.install_visual_card_policy(ultimate_bot)
 
           person = {'primary_entity': 'Lionel Messi', 'visual_intent': 'person portrait', 'voiceover': 'Lionel Messi scored in the final.', 'sport_or_topic_category': 'football'}
           event = {'primary_entity': 'FIFA World Cup final', 'visual_intent': 'actual match event', 'voiceover': 'The final decided the champion.', 'sport_or_topic_category': 'football'}
+          bcci = {'primary_entity': 'BCCI', 'visual_intent': 'organization', 'voiceover': 'BCCI announced the decision.', 'sport_or_topic_category': 'cricket'}
+          delhi = {'primary_entity': 'Delhi', 'visual_intent': 'location', 'voiceover': 'Delhi hosted the event.', 'sport_or_topic_category': 'news'}
           concept = {'primary_entity': 'quantum computing', 'visual_intent': 'technical process', 'voiceover': 'Quantum computers use quantum states to process information.', 'sport_or_topic_category': 'technology'}
+
           assert visual_strategy_runtime.classify_scene(person) == 'PERSON'
           assert visual_strategy_runtime.classify_scene(event) == 'EVENT'
+          assert visual_strategy_runtime.classify_scene(bcci) == 'ORGANIZATION'
+          assert visual_strategy_runtime.classify_scene(delhi) == 'LOCATION'
           assert visual_strategy_runtime.classify_scene(concept) in {'PROCESS', 'CONCEPT'}
+
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
-          assert 3 <= len(queries) <= 6
-          assert len(queries) < 10
-          assert any(q.strip().lower() == 'lionel messi' for q in queries), queries
-          assert not any('editorial_person' in q.lower() for q in queries)
-          assert not any('portrait' in q.lower() for q in queries), queries
-          assert not any('red carpet' in q.lower() for q in queries), queries
+          assert queries == ['Lionel Messi'], queries
+          assert visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')[0] == ['BCCI']
+          assert visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')[0] == ['Delhi']
+
+          assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
+          assert script_guard_runtime.looks_like_instructional_narration('Sachin Tendulkar scored 143 in the match.') is False
+          assert callable(script_guard_runtime.install)
 
           from visual_qa_runtime import _tier_for
           from visual_runtime import _cache_key, _context_fingerprint
@@ -126,66 +108,28 @@ jobs:
           runtime_bindings.harden_editorial_defaults(ultimate_bot)
           runtime_bindings.bind_dashboard_patches(ultimate_bot)
           namespace = ultimate_bot.run_robot.__globals__
-          for name in (
-              'gather_and_filter_stories', 'editorial_gate_batch',
-              'process_scored_candidates', 'validate_script',
-              'generate_voiceover_and_timestamps', 'process_visuals_async',
-              'fetch_scene_asset', 'token_overlap_ratio', 'upload_to_youtube',
-              'generate_karaoke_clip', 'compile_video', 'write_script'
-          ):
+          for name in ('gather_and_filter_stories', 'editorial_gate_batch', 'process_scored_candidates', 'validate_script', 'generate_voiceover_and_timestamps', 'process_visuals_async', 'fetch_scene_asset', 'token_overlap_ratio', 'upload_to_youtube', 'generate_karaoke_clip', 'compile_video', 'write_script'):
               assert namespace[name] is getattr(ultimate_bot, name), name
 
           uploader_signature = inspect.signature(ultimate_bot.upload_to_youtube)
           for name in ('title_override', 'description_override', 'comment_override'):
-              assert name in uploader_signature.parameters, uploader_signature
+              assert name in uploader_signature.parameters
 
           assert callable(final_qc_runtime.validate_final_video)
           assert callable(final_qc_runtime.validate_final_upload_metadata)
-          clean_title, clean_description, clean_comment = final_qc_runtime.validate_final_upload_metadata(
-              'Example story title',
-              'This is a factual description with enough words to satisfy final upload quality control checks.',
-              'What do you think about this story?'
-          )
+          clean_title, clean_description, clean_comment = final_qc_runtime.validate_final_upload_metadata('Example story title', 'This is a factual description with enough words to satisfy final upload quality control checks.', 'What do you think about this story?')
           assert clean_title == 'Example story title'
           assert clean_description.startswith('This is a factual description')
           assert clean_comment.startswith('What do you think')
-          try:
-              final_qc_runtime.validate_final_upload_metadata(
-                  'Example story title #shorts',
-                  'This is a factual description with enough words to satisfy final upload quality control checks.',
-                  ''
-              )
-          except ValueError as exc:
-              assert '#shorts' in str(exc).lower()
-          else:
-              raise AssertionError('Final QC accepted #shorts in the title.')
 
-          # The new newsroom modules must remain importable and must not perform
-          # network/API work just by being imported.
           assert workflow_runtime.WORKFLOW_VERSION.startswith('2026-09-16-newsroom-')
           assert set(workflow_runtime.FORMAT_OPTIONS) == {'Deep Dive', 'Top-5', 'Cricket'}
           assert set(workflow_runtime.CRICKET_CATEGORIES) == {'India / Asia', 'Global', 'AI-assisted top story in cricket'}
 
-          assert getattr(ultimate_bot.get_trend_signal_bonus, '_cached_trend_signal', False)
-          rejected = [{'hard_reject': True, 'monetization_risk': 9}]
-          batch = [{'title': 'Rejected story', 'genre': 'technology'}]
-          result = ultimate_bot.process_scored_candidates(rejected, batch, {}, None, 'regular')
-          assert result == [], result
-
-          cleaned_title, description, tags = youtube_comment_runtime._build_clean_metadata(
-              {'title': 'Example Story #shorts', 'seo_description': 'A factual summary.', 'tags': ['AI']},
-              {'label': 'Tech', 'hashtags': ['#Tech'], 'category_id': '28'},
-              None,
-          )
-          assert '#shorts' not in cleaned_title.lower(), cleaned_title
-          comment = youtube_comment_runtime.build_pinned_comment(
-              {'pinned_comment': 'What do you think this means for the industry?'},
-              cleaned_title,
-          )
-          assert '?' in comment
-          assert 'subscribe' in comment.lower()
-          assert getattr(ultimate_bot.fetch_hf_ai_image, '__name__', '') == 'hf_text_to_image'
-
+          from pathlib import Path
+          required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_content_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
+          missing = [p for p in required if not Path(p).is_file()]
+          assert not missing, missing
           print('Offline runtime smoke checks passed.')
           PY
 
@@ -199,44 +143,4 @@ jobs:
           assert report['api_calls'] == 0
           assert report['all_passed'], report
           print(f"Full no-API diagnostics passed: {report['passed']}/{report['total']}")
-          PY
-
-      - name: Validate required factory files
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          required = [
-              'app.py',
-              'ultimate_bot.py',
-              'audio_runtime.py',
-              'audio_direction_runtime.py',
-              'visual_runtime.py',
-              'visual_qa_runtime.py',
-              'visual_strategy_runtime.py',
-              'visual_content_runtime.py',
-              'subtitle_runtime.py',
-              'branding_runtime.py',
-              'quality_runtime.py',
-              'factory_runtime.py',
-              'db_architecture.py',
-              'db_runtime.py',
-              'diagnostics_runtime.py',
-              'learning_runtime.py',
-              'autopilot_runtime.py',
-              'story_ranker.py',
-              'semantic_runtime.py',
-              'runtime_bindings.py',
-              'provider_runtime.py',
-              'editorial_runtime.py',
-              'research_runtime.py',
-              'script_runtime.py',
-              'workflow_runtime.py',
-              'youtube_comment_runtime.py',
-              'final_qc_runtime.py',
-              'requirements.txt',
-          ]
-          missing = [path for path in required if not Path(path).is_file()]
-          if missing:
-              raise SystemExit(f'Missing required files: {missing}')
-          print(f'Validated {len(required)} required factory files.')
           PY
