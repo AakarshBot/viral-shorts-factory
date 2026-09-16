@@ -149,7 +149,9 @@ def _vignette(size,strength=.5):
     small=Image.new("L",(120,213),0); p=small.load(); cx,cy=60,106.5; md=(cx*cx+cy*cy)**.5
     for y in range(213):
         for x in range(120):
-            d=(((x-cx)**2+(y-cy)**2)**.5)/md; p[x,y]=int(max(0,min(255,((d-.18)/.82)**1.8*255*strength)))
+            d=(((x-cx)**2+(y-cy)**2)**.5)/md
+            normalized=max(0.0,(d-.18)/.82)
+            p[x,y]=int(max(0,min(255,normalized**1.8*255*strength)))
     mask=small.resize(size,Image.Resampling.BILINEAR); out=Image.new("RGBA",size,(0,0,0,0)); out.paste((0,0,0,255),(0,0,*size),mask); return out
 
 def _grain(img,opacity=12):
@@ -162,6 +164,7 @@ def _emphasis(text):
     words=text.split();
     if not words:return set()
     n=min(4,len(words)); return {re.sub(r"\W","",w).lower() for w in words[:n]}
+
 
 def _hierarchy(draw,text,box,bot,font_choice,accent,start=80):
     font,lines=bot.fit_text_in_box(text,font_choice,box[2]-box[0],box[3]-box[1],start_size=start); size=getattr(font,"size",start); normal=bot.get_bold_font(size,font_choice); big=bot.get_bold_font(int(size*1.4),font_choice); emph=_emphasis(text); y=box[1]; center=(box[0]+box[2])/2
@@ -207,12 +210,9 @@ def patch_dashboard_runtime(bot):
             comp=sum(vals[k]*weights[k] for k in weights)+trend+float(story.get("velocity_score",0))-float(story.get("recency_penalty",1))-((vals["monetization_risk"]-1)*.20)
             comp+=float(story.get("corroboration_bonus",0))+(bonuses.get(story.get("genre"),0) if fmt=="regular" else 0)+(2 if fmt=="regular" and story.get("genre")==last_genre else 0)
             story["composite_score"]=round(comp,3); out.append(story)
-        return sorted(out,key=lambda x:x["composite_score"],reverse=True) or batch
+        return sorted(out,key=lambda x:x["composite_score"],reverse=True) or []
     bot.process_scored_candidates=score
 
-    # Replace token-overlap filtering by semantic filtering after source collection.
-    # The legacy collector's exact duplicate check is harmless; the similarity
-    # decision itself is now semantic and catches rewritten headlines.
     original_gather=bot.gather_and_filter_stories
     def gather(conn,genre_key,genre_cfg,trend_keyword=None,custom_gnews_q=None,custom_rss_url=None):
         stories=original_gather(conn,genre_key,genre_cfg,trend_keyword,custom_gnews_q,custom_rss_url)
