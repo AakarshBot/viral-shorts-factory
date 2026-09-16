@@ -18,6 +18,9 @@ def hf_text_to_image(prompt):
     """Generate a PIL image through Hugging Face Inference Providers."""
     token = _clean_token(os.getenv("HF_TOKEN"))
     if not token:
+        print("   [Visual Source] HF Inference Providers unavailable: HF_TOKEN is missing.", flush=True)
+        return None
+    if getattr(hf_text_to_image, "_disabled", False):
         return None
 
     try:
@@ -29,12 +32,24 @@ def hf_text_to_image(prompt):
             model=HF_IMAGE_MODEL,
         )
     except Exception as exc:
-        print(
-            f"   [Visual Source] HF Inference Providers failed: "
-            f"{type(exc).__name__}: {exc}",
-            flush=True,
-        )
+        message = str(exc).lower()
+        if "401" in message or "expired" in message or "unauthorized" in message:
+            hf_text_to_image._disabled = True
+            print(
+                "   [Visual Source] HF Inference Providers disabled for this process: "
+                "HF_TOKEN is expired or unauthorized. Refresh the token in Streamlit secrets.",
+                flush=True,
+            )
+        else:
+            print(
+                f"   [Visual Source] HF Inference Providers failed: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
         return None
+
+
+hf_text_to_image._disabled = False
 
 
 def patch_provider_adapters(bot):
