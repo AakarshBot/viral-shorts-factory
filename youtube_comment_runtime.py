@@ -99,7 +99,16 @@ def patch_youtube_upload(bot):
     if current is None or getattr(current, "_creator_comment_wrapped", False):
         return current
 
-    def upload_with_creator_comment(video_path, script_data, genre_cfg, publish_mode, trend_keyword=None):
+    def upload_with_creator_comment(
+        video_path,
+        script_data,
+        genre_cfg,
+        publish_mode,
+        trend_keyword=None,
+        title_override=None,
+        description_override=None,
+        comment_override=None,
+    ):
         try:
             import googleapiclient.discovery
             from googleapiclient.http import MediaFileUpload
@@ -109,8 +118,15 @@ def patch_youtube_upload(bot):
 
             creds = bot.get_google_credentials()
             youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
-            title, description, tags = _build_clean_metadata(script_data, genre_cfg, trend_keyword)
-            privacy = "private" if str(publish_mode).lower() == "private" else "public"
+            generated_title, generated_description, tags = _build_clean_metadata(
+                script_data, genre_cfg, trend_keyword
+            )
+            title = str(title_override).strip()[:100] if title_override is not None else generated_title
+            description = str(description_override).strip()[:5000] if description_override is not None else generated_description
+            comment_text = _clean_comment(comment_override) if comment_override is not None else build_pinned_comment(
+                script_data, title, genre_cfg.get("label", "")
+            )
+
             body = {
                 "snippet": {
                     "title": title,
@@ -119,7 +135,7 @@ def patch_youtube_upload(bot):
                     "categoryId": str(genre_cfg.get("category_id", "24")),
                 },
                 "status": {
-                    "privacyStatus": privacy,
+                    "privacyStatus": "private" if str(publish_mode).lower() == "private" else "public",
                     "selfDeclaredMadeForKids": False,
                 },
             }
@@ -136,17 +152,17 @@ def patch_youtube_upload(bot):
                 raise RuntimeError("YouTube upload completed without a video ID.")
             print(f"   [+] Successfully uploaded to YouTube! Video ID: {video_id}", flush=True)
 
-            if privacy == "public":
+            if body["status"]["privacyStatus"] == "public":
                 try:
-                    comment_id, comment_text = post_creator_comment(
+                    comment_id, posted_comment = post_creator_comment(
                         youtube,
                         video_id,
-                        script_data,
+                        {**script_data, "pinned_comment": comment_text},
                         title,
                         genre_cfg.get("label", ""),
                     )
                     script_data["creator_comment_id"] = comment_id or ""
-                    script_data["creator_comment"] = comment_text
+                    script_data["creator_comment"] = posted_comment
                 except Exception as exc:
                     print(f"   [!] Creator comment failed, but upload succeeded: {exc}", flush=True)
             else:
