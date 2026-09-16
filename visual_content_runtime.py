@@ -7,7 +7,7 @@ Commons shortcut, so search scope stays broad and identity QA remains consistent
 
 import os
 import re
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
 def _human_label(value, fallback="EDITORIAL"):
@@ -27,7 +27,58 @@ def _source_label(source_type):
     return f"SOURCE · {_human_label(source)}"
 
 
-def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, source_type, voiceover):
+def _load_brand_font(bot, size, custom_font_name=None):
+    """Use the factory's existing bold-font resolver, with a safe local fallback."""
+    try:
+        resolver = getattr(bot, "get_bold_font", None)
+        if callable(resolver):
+            return resolver(int(size), custom_font_name)
+    except Exception:
+        pass
+
+    paths = []
+    if custom_font_name:
+        paths.extend([
+            str(custom_font_name),
+            os.path.join("/usr/share/fonts/truetype", str(custom_font_name)),
+        ])
+    paths.extend([
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        r"C:\Windows\Fonts\segoeprb.ttf",
+        r"C:\Windows\Fonts\arialbd.ttf",
+    ])
+    for path in paths:
+        if os.path.isfile(path):
+            try:
+                return ImageFont.truetype(path, int(size))
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _text_size(draw, text, font):
+    try:
+        left, top, right, bottom = draw.textbbox((0, 0), str(text), font=font)
+        return max(1, right - left), max(1, bottom - top)
+    except Exception:
+        try:
+            return max(1, int(draw.textlength(str(text), font=font))), max(1, getattr(font, "size", 20))
+        except Exception:
+            return max(1, len(str(text)) * 10), max(1, getattr(font, "size", 20))
+
+
+def _fit_font(bot, text, max_width, base_size, min_size=20, custom_font_name=None):
+    """Select the largest readable bold font that fits inside max_width."""
+    for size in range(int(base_size), int(min_size) - 1, -2):
+        font = _load_brand_font(bot, size, custom_font_name)
+        width, _ = _text_size(ImageDraw.Draw(Image.new("RGBA", (1, 1))), text, font)
+        if width <= max_width:
+            return font
+    return _load_brand_font(bot, int(min_size), custom_font_name)
+
+
+def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, source_type, voiceover, font_name=None):
     """Add restrained editorial framing without obscuring the verified visual."""
     canvas = image.convert("RGBA")
     width, height = canvas.size
@@ -41,45 +92,64 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
     draw.rectangle([28, height - 33, width - 28, height - 28], fill=secondary + (150,))
     draw.rectangle([28, 28, 33, height - 28], fill=accent + (105,))
 
+    # Use the same bold-font family as the main renderer so small editorial
+    # labels stay legible on a 1080x1920 canvas.
+    marker_font = _load_brand_font(bot, 30, font_name)
+    type_label = _human_label(visual_type)
+    type_font = _fit_font(bot, type_label, min(430, width - 120), 30, 20, font_name)
+    source_text = _source_label(source_type)
+    source_font = _fit_font(bot, source_text, min(470, width - 160), 28, 18, font_name)
+
     # Small scene marker: useful for consistency while staying visually quiet.
     marker = f"{int(scene_number):02d} / {int(total_scenes):02d}"
-    draw.rounded_rectangle([48, 62, 184, 112], radius=20, fill=(5, 9, 16, 170))
-    draw.text((68, 75), marker, fill=(255, 255, 255, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+    marker_w, marker_h = _text_size(draw, marker, marker_font)
+    marker_box = [48, 62, 48 + marker_w + 40, max(112, 62 + marker_h + 24)]
+    draw.rounded_rectangle(marker_box, radius=18, fill=(5, 9, 16, 175))
+    draw.text((marker_box[0] + 20, marker_box[1] + 10), marker, font=marker_font,
+              fill=(255, 255, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
     # Visual-type label tells the viewer what the image is doing editorially.
-    type_label = _human_label(visual_type)
-    type_box_right = min(width - 48, 48 + max(190, 18 * len(type_label)))
+    type_w, type_h = _text_size(draw, type_label, type_font)
+    type_box = [48, height - 62 - type_h - 24, min(width - 48, 48 + type_w + 40), height - 62]
     draw.rounded_rectangle(
-        [48, height - 112, type_box_right, height - 62],
-        radius=20,
-        fill=(5, 9, 16, 170),
+        type_box,
+        radius=18,
+        fill=(5, 9, 16, 175),
         outline=accent + (150,),
         width=2,
     )
-    draw.text((68, height - 99), type_label, fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+    draw.text((type_box[0] + 20, type_box[1] + 10), type_label, font=type_font,
+              fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
     # Source badge is compact and never competes with the subtitle layer.
-    source_text = _source_label(source_type)
-    source_box_width = min(width - 220, 22 * len(source_text) + 34)
-    sx = width - source_box_width - 48
+    source_w, source_h = _text_size(draw, source_text, source_font)
+    source_box_w = min(width - 96, source_w + 36)
+    source_box_h = source_h + 24
+    sx = width - source_box_w - 48
+    source_box = [sx, 62, width - 48, 62 + source_box_h]
     draw.rounded_rectangle(
-        [sx, 62, width - 48, 112],
-        radius=20,
-        fill=(5, 9, 16, 170),
+        source_box,
+        radius=18,
+        fill=(5, 9, 16, 175),
         outline=(255, 255, 255, 80),
         width=1,
     )
-    draw.text((sx + 18, 75), source_text, fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+    draw.text((sx + 18, 62 + 10), source_text, font=source_font,
+              fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
     # Facts/numbers get one restrained emphasis chip instead of a generic effect.
     fact_match = re.search(r"(?:₹|\$|€|£)?\b\d+(?:[.,]\d+)?%?\b", str(voiceover or ""))
     if fact_match:
         fact = fact_match.group(0)
-        chip_w = max(126, 22 * len(fact) + 42)
+        fact_font = _fit_font(bot, fact, 250, 28, 20, font_name)
+        fact_w, fact_h = _text_size(draw, fact, fact_font)
+        chip_w = max(126, fact_w + 40)
+        chip_h = max(52, fact_h + 22)
         cx = width - chip_w - 48
         cy = height - 178
-        draw.rounded_rectangle([cx, cy, width - 48, cy + 52], radius=22, fill=accent + (215,))
-        draw.text((cx + 20, cy + 10), fact, fill=(255, 255, 255, 250), stroke_width=1, stroke_fill=(0, 0, 0, 80))
+        draw.rounded_rectangle([cx, cy, width - 48, cy + chip_h], radius=20, fill=accent + (215,))
+        draw.text((cx + 20, cy + 10), fact, font=fact_font, fill=(255, 255, 255, 250),
+                  stroke_width=1, stroke_fill=(0, 0, 0, 80))
 
     return Image.alpha_composite(canvas, overlay)
 
@@ -151,6 +221,7 @@ def patch_content_first_visuals(bot):
                     visual_type,
                     source_type,
                     seg.get("voiceover", ""),
+                    font_name=font_choice,
                 )
 
             rendered.convert("RGB").save(img_path, "JPEG", quality=95)
