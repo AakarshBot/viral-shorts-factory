@@ -1,8 +1,6 @@
 """Story-aware free audio direction using the existing Edge-TTS voices."""
 from __future__ import annotations
 
-import re
-
 
 def choose_delivery_profile(bot, script_data):
     title = str(script_data.get("title", "")).lower()
@@ -21,6 +19,14 @@ def choose_delivery_profile(bot, script_data):
 
 
 def patch_audio_direction(bot):
+    # Branding is bound here because this patch is already part of the live
+    # runtime binding stack; it keeps the finish layer explicit and idempotent.
+    try:
+        from branding_runtime import patch_branding_pipeline
+        patch_branding_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     if getattr(bot, "_audio_direction_patch_installed", False):
         return bot
     run_robot = getattr(bot, "run_robot", None)
