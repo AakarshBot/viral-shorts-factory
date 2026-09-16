@@ -1,6 +1,6 @@
 """Polished Shorts subtitle and channel-branding renderer.
 
-Keeps captions readable, compact, and inside a predictable 1-2 line safe area.
+Keeps captions large, readable, and inside a predictable 1-2 line safe area.
 Also supplies the channel-logo badge used by the legacy video compositor and
 softens the legacy full-width frame bars into a quieter branded edge treatment.
 """
@@ -66,13 +66,13 @@ def _split_lines(words, font, max_width):
 def _fit_layout(words, base_font_size, font_path, max_width, max_lines=2):
     """Use the largest font that keeps captions inside the safe width."""
     size = int(base_font_size)
-    while size >= 40:
+    while size >= 44:
         font = _load_font(font_path, size)
         lines = _split_lines(words, font, max_width)
         if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width + 1 for line in lines):
             return font, lines
         size -= 2
-    font = _load_font(font_path, 40)
+    font = _load_font(font_path, 44)
     return font, _split_lines(words, font, max_width)[:max_lines]
 
 
@@ -93,9 +93,9 @@ def generate_readable_karaoke_clip(
     bg_img_path=None,
     source_type="bg",
 ):
-    """Render a compact premium caption card with a single active-word highlight."""
+    """Render large premium captions without a visible subtitle-box border."""
     width = max(1, int(video_width))
-    height = 260
+    height = 300
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
     words = [_clean_word(item.get("word") if isinstance(item, dict) else item) for item in chunk]
@@ -104,56 +104,22 @@ def generate_readable_karaoke_clip(
         canvas.save(output_path)
         return output_path
 
-    # Keep the card visually compact while retaining readable two-line wrapping.
-    max_text_width = int(width * 0.76)
-    base_font_size = max(48, min(64, int(width * 0.056)))
+    max_text_width = int(width * 0.88)
+    base_font_size = max(72, min(92, int(width * 0.080)))
     font, lines = _fit_layout(words, base_font_size, font_path, max_text_width, max_lines=2)
     font_size = getattr(font, "size", base_font_size)
-    line_height = int(font_size * 1.12)
-    line_gap = max(5, int(font_size * 0.10))
-    pad_x = max(22, int(width * 0.026))
-    pad_y = max(17, int(width * 0.016))
-
-    text_block_h = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
-    card_w = min(width - 48, max_text_width + pad_x * 2)
-    card_h = text_block_h + pad_y * 2
-    card_x = (width - card_w) // 2
-    card_y = max(8, height - card_h - int(width * 0.018))
-    radius = min(30, max(18, card_h // 2))
-
-    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow)
-    shadow_draw.rounded_rectangle(
-        (card_x + 5, card_y + 8, card_x + card_w + 5, card_y + card_h + 8),
-        radius=radius,
-        fill=(0, 0, 0, 145),
-    )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(11))
-    canvas = Image.alpha_composite(canvas, shadow)
-
-    draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle(
-        (card_x, card_y, card_x + card_w, card_y + card_h),
-        radius=radius,
-        fill=(8, 14, 24, 214),
-        outline=(255, 255, 255, 62),
-        width=2,
-    )
-    accent_x1 = card_x + int(card_w * 0.18)
-    accent_x2 = card_x + int(card_w * 0.82)
-    draw.rounded_rectangle(
-        (accent_x1, card_y + 2, accent_x2, card_y + 6),
-        radius=2,
-        fill=(255, 190, 70, 235),
-    )
-
-    normal = (250, 252, 255, 255)
-    active = (255, 194, 78, 255)
-    active_glow = (255, 194, 78, 42)
+    line_height = int(font_size * 1.05)
+    line_gap = max(8, int(font_size * 0.10))
     active_index = _validate_active_index(active_index, len(words))
 
+    text_block_h = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
+    y = max(12, (height - text_block_h) // 2)
+
+    normal = (244, 246, 248, 255)
+    active = (229, 181, 92, 255)
+    shadow = (0, 0, 0, 190)
+
     flat_index = 0
-    y = card_y + pad_y
     space = font.getlength(" ")
     for line in lines:
         widths = [font.getlength(word) for word in line]
@@ -161,24 +127,30 @@ def generate_readable_karaoke_clip(
         x = (width - total) / 2
         for word, word_width in zip(line, widths):
             is_active = flat_index == active_index
-            if is_active:
-                draw.rounded_rectangle(
-                    (x - 8, y + max(3, int(font_size * 0.12)), x + word_width + 8, y + font_size + 8),
-                    radius=10,
-                    fill=active_glow,
-                )
+            fill = active if is_active else normal
+
+            # Soft shadow only: no enclosing box, border, or bright glow.
+            draw = ImageDraw.Draw(canvas)
+            draw.text(
+                (x + 4, y + 6),
+                word,
+                font=font,
+                fill=shadow,
+                stroke_width=3,
+                stroke_fill=(0, 0, 0, 130),
+            )
             draw.text(
                 (x, y),
                 word,
                 font=font,
-                fill=active if is_active else normal,
+                fill=fill,
                 stroke_width=2,
-                stroke_fill=(0, 0, 0, 220),
+                stroke_fill=(0, 0, 0, 205),
             )
             if is_active:
-                underline_y = y + font_size + 7
+                underline_y = y + font_size + 6
                 draw.rounded_rectangle(
-                    (x, underline_y, x + word_width, underline_y + 3),
+                    (x, underline_y, x + word_width, underline_y + 4),
                     radius=2,
                     fill=active,
                 )
@@ -260,8 +232,8 @@ def _soften_frame_bars(image_path: str) -> bool:
         draw = ImageDraw.Draw(overlay)
         draw.rectangle((0, 0, width, band - 1), fill=(8, 14, 24, 42))
         draw.rectangle((0, height - band, width, height - 1), fill=(8, 14, 24, 50))
-        draw.rectangle((0, band - 2, width, band), fill=(255, 194, 78, 165))
-        draw.rectangle((0, height - band - 1, width, height - band + 1), fill=(64, 196, 255, 145))
+        draw.rectangle((0, band - 2, width, band), fill=(205, 166, 89, 135))
+        draw.rectangle((0, height - band - 1, width, height - band + 1), fill=(87, 127, 149, 120))
         image = Image.alpha_composite(edge.convert("RGBA"), overlay).convert("RGB")
         image.save(image_path, "JPEG", quality=95)
         return True
@@ -312,5 +284,5 @@ def patch_subtitle_pipeline(bot):
     bot.create_glossy_logo_watermark = create_glossy_logo_watermark
     _patch_scene_overlay(bot)
     bot._subtitle_pipeline_patch_installed = True
-    print("   [Subtitle Patch] Premium 1–2 line karaoke + compact channel badge + refined frame overlay installed.", flush=True)
+    print("   [Subtitle Patch] Large clean subtitles + compact channel badge + refined frame overlay installed.", flush=True)
     return bot
