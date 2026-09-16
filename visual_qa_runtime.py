@@ -183,7 +183,35 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         return None
 
 
+def _install_render_safety_patch():
+    """Patch the existing renderer's negative-base fractional-power bug."""
+    try:
+        import factory_runtime
+        from PIL import Image
+
+        def safe_vignette(size, strength=0.5):
+            small = Image.new("L", (120, 213), 0)
+            pixels = small.load()
+            cx, cy = 60, 106.5
+            max_distance = (cx * cx + cy * cy) ** 0.5
+            for y in range(213):
+                for x in range(120):
+                    distance = (((x - cx) ** 2 + (y - cy) ** 2) ** 0.5) / max_distance
+                    normalized = max(0.0, (distance - 0.18) / 0.82)
+                    pixels[x, y] = int(max(0, min(255, normalized ** 1.8 * 255 * strength)))
+            mask = small.resize(size, Image.Resampling.BILINEAR)
+            output = Image.new("RGBA", size, (0, 0, 0, 0))
+            output.paste((0, 0, 0, 255), (0, 0, *size), mask)
+            return output
+
+        factory_runtime._vignette = safe_vignette
+        print("   [Render Safety] Fractional-power vignette guard installed.", flush=True)
+    except Exception as exc:
+        print(f"   [Render Safety] Patch unavailable: {type(exc).__name__}: {exc}", flush=True)
+
+
 def install_visual_qa_bridge(visual_runtime_module):
-    """Replace only the Gemini verifier; keep strict asset-selection logic intact."""
+    """Replace the Gemini verifier and harden the renderer without weakening visual QA."""
     visual_runtime_module._strict_gemini_check = strict_gemini_check
+    _install_render_safety_patch()
     return visual_runtime_module
