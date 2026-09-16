@@ -19,8 +19,9 @@ def choose_delivery_profile(bot, script_data):
 
 
 def patch_audio_direction(bot):
-    # Branding and final artifact QC are bound here because this patch is part
-    # of the live runtime binding stack; both are explicit and idempotent.
+    # Branding, final artifact QC and channel intelligence are bound here
+    # because this patch is part of the live runtime binding stack; each is
+    # explicit and idempotent.
     try:
         from branding_runtime import patch_branding_pipeline
         patch_branding_pipeline(bot)
@@ -31,6 +32,11 @@ def patch_audio_direction(bot):
         patch_workflow_qc(bot)
     except Exception as exc:
         print(f"   [Bindings] Final QC runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    try:
+        from channel_intelligence_runtime import install_channel_intelligence_dialog
+        install_channel_intelligence_dialog()
+    except Exception as exc:
+        print(f"   [Bindings] Channel intelligence runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
 
     if getattr(bot, "_audio_direction_patch_installed", False):
         return bot
