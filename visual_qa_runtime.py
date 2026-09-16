@@ -10,7 +10,10 @@ import os
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.8-flash")
 GEMINI_VISUAL_TIMEOUT_SECONDS = 20
 GEMINI_VISUAL_RETRIES = 0
-GEMINI_VISUAL_MAX_REQUESTS = int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS", "24"))
+# Keep the real API ceiling deliberately small. A quota/rate-limit failure
+# immediately opens the circuit breaker and prevents every later candidate
+# from making another Gemini request.
+GEMINI_VISUAL_MAX_REQUESTS = int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS", "8"))
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "3"))
 _GEMINI_QUOTA_EXHAUSTED = False
 _GEMINI_REQUESTS = 0
@@ -118,7 +121,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         print("   [Visual QA] Gemini verifier unavailable: GEMINI_API_KEY is missing.", flush=True)
         return None
     if _GEMINI_QUOTA_EXHAUSTED:
-        print("   [Visual QA] Gemini quota circuit breaker is open; continuing source search without unverifiable acceptance.", flush=True)
+        print("   [Visual QA] Circuit breaker open; NO Gemini API call attempted.", flush=True)
         return None
 
     try:
@@ -150,7 +153,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         _GEMINI_SCENE_REQUESTS += 1
         request_number = _GEMINI_REQUESTS
         print(
-            f"   [Visual QA] Gemini request {request_number}/{GEMINI_VISUAL_MAX_REQUESTS} "
+            f"   [Visual QA] Gemini API call {request_number}/{GEMINI_VISUAL_MAX_REQUESTS} "
             f"scene={_GEMINI_SCENE_REQUESTS}/{GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE} "
             f"(1 attempt only) model={GEMINI_VISUAL_MODEL} auth={_key_diagnostic(api_key)}",
             flush=True,
@@ -181,7 +184,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
             message = str(exc).upper()
             if "429" in message or "RESOURCE_EXHAUSTED" in message or "QUOTA" in message:
                 _GEMINI_QUOTA_EXHAUSTED = True
-                print("   [Visual QA] Gemini quota exhausted; circuit breaker opened. No further Gemini calls will be made in this process.", flush=True)
+                print("   [Visual QA] Gemini quota exhausted; circuit breaker opened. No further Gemini API calls will be made in this process.", flush=True)
                 return None
             if any(code in message for code in ("503", "UNAVAILABLE", "DEADLINE_EXCEEDED", "TIMEOUT", "TIMED OUT")):
                 print(f"   [Visual QA] Gemini transient/timeout failure; candidate rejected with no retry: {type(exc).__name__}: {exc}", flush=True)
