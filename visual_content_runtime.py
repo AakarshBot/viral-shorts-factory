@@ -1,20 +1,16 @@
 """Content-first visual rendering for Shorts.
 
 The legacy visual renderer reserved the final scene for a subscription card.
-That assumption conflicts with content-dense scripts: the final scene should be
-another factual scene, not an outro. This module keeps the strict visual-source
-and semantic-QA machinery while making every scene carry story content.
+This version keeps the Top 5 intro, renders every factual entry, and removes the
+mandatory subscription outro.
 """
 
 import os
 import re
-
-import numpy as np
 from PIL import Image, ImageDraw
 
 
 def patch_content_first_visuals(bot):
-    """Replace only the final-scene rendering policy; keep strict asset QA."""
     try:
         import visual_runtime
     except Exception as exc:
@@ -44,16 +40,19 @@ def patch_content_first_visuals(bot):
             bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
-            if format_mode == "top5":
+            if format_mode == "top5" and idx == 0:
+                rendered = visual_runtime._render_image_slide(
+                    bot, bg_img, video_title or seg.get("voiceover", "Top 5"),
+                    "TODAY'S TOP 5", font_choice
+                )
+            elif format_mode == "top5":
                 clean = re.sub(
-                    r"(number\s*\d+|story\s*#?\d+|#\d+)",
-                    "",
-                    str(seg.get("voiceover", "")),
-                    flags=re.IGNORECASE,
+                    r"(number\s*\d+|story\s*#?\d+|#\d+)", "",
+                    str(seg.get("voiceover", "")), flags=re.IGNORECASE
                 ).strip()
                 rendered = bot.render_top5_card(
-                    bg_img, max(1, 5 - idx), 5, clean or seg.get("voiceover", ""),
-                    font_choice=font_choice,
+                    bg_img, max(1, 6 - idx), 5,
+                    clean or seg.get("voiceover", ""), font_choice=font_choice
                 )
             elif idx == 0:
                 rendered = bot.render_hook_card(
