@@ -1,8 +1,9 @@
-"""YouTube upload metadata, creator comment and final brand/subtitle hooks."""
+"""YouTube upload metadata, creator comment and final brand/subtitle/audio hooks."""
 
 import os
 import re
 
+from audio_direction_runtime import patch_audio_direction
 from branding_runtime import patch_branding_pipeline
 from subtitle_runtime import patch_subtitle_pipeline
 
@@ -81,17 +82,16 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
 
 
 def patch_youtube_upload(bot):
-    """Replace legacy upload metadata rules, add creator comments and install finishing hooks."""
-    # These hooks are installed while the runtime is being assembled, before a
-    # production run can be started from the newsroom dashboard.
-    try:
-        patch_subtitle_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Subtitle Patch] Could not install: {exc}", flush=True)
-    try:
-        patch_branding_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Branding Patch] Could not install: {exc}", flush=True)
+    """Replace legacy upload metadata rules and install the finishing hooks."""
+    for label, fn in (
+        ("Audio Direction", patch_audio_direction),
+        ("Subtitle Patch", patch_subtitle_pipeline),
+        ("Branding Patch", patch_branding_pipeline),
+    ):
+        try:
+            fn(bot)
+        except Exception as exc:
+            print(f"   [{label}] Could not install: {exc}", flush=True)
 
     current = getattr(bot, "upload_to_youtube", None)
     if current is None or getattr(current, "_creator_comment_wrapped", False):
