@@ -53,6 +53,72 @@ def validate_final_upload_metadata(title: str, description: str, comment: str = 
     return cleaned_title, cleaned_description, cleaned_comment
 
 
+def _install_exact_run_identity(controller_cls):
+    """Route production execution through the existing exact-row DB bridge."""
+    if getattr(controller_cls, "_exact_run_identity_patched", False):
+        return
+
+    original_install = controller_cls._install_production_wrappers
+
+    def install_with_exact_identity(self):
+        original_install(self)
+        if getattr(self, "_exact_identity_runner_installed", False):
+            return
+
+        original_run_robot = getattr(self.bot, "run_robot", None)
+        if not callable(original_run_robot):
+            return
+
+        def exact_identity_runner(web_config=None):
+            from db_runtime import run_robot_with_exact_identity
+
+            # db_runtime temporarily calls the genuine legacy runner while it
+            # intercepts the production DB connection. Restore it before entry
+            # so the bridge cannot recurse into itself.
+            self.bot.run_robot = original_run_robot
+            try:
+                return run_robot_with_exact_identity(self.bot, web_config=web_config)
+            finally:
+                self.bot.run_robot = exact_identity_runner
+
+        exact_identity_runner._exact_identity_runner = True
+        self.bot.run_robot = exact_identity_runner
+        self._exact_identity_runner_installed = True
+        print("   [Final QC] Exact production run identity bridge installed.", flush=True)
+
+    controller_cls._install_production_wrappers = install_with_exact_identity
+    controller_cls._exact_run_identity_patched = True
+
+
+def _mark_exact_run_ready_for_upload(controller, fallback_ready, topic: str):
+    """Mark the exact DB row created by the current production run READY_FOR_UPLOAD."""
+    row_id = getattr(controller.bot, "_last_run_row_id", None)
+    if row_id is None:
+        return fallback_ready(controller, topic)
+
+    try:
+        import sqlite3
+        import ultimate_bot
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        try:
+            updated = conn.execute(
+                """UPDATE vault
+                   SET video_id='READY_FOR_UPLOAD', status='READY_FOR_UPLOAD', updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (row_id,),
+            ).rowcount
+            conn.commit()
+        finally:
+            conn.close()
+        if updated != 1:
+            raise RuntimeError(f"exact production run row {row_id} was not updated")
+        print(f"   [Final QC] Marked exact production run row {row_id} READY_FOR_UPLOAD.", flush=True)
+        return None
+    except Exception:
+        # Never silently lose the pre-existing fallback behavior.
+        return fallback_ready(controller, topic)
+
+
 def patch_workflow_qc(bot) -> bool:
     """Require final artifact + metadata QC before READY_FOR_UPLOAD and upload."""
     try:
@@ -67,6 +133,7 @@ def patch_workflow_qc(bot) -> bool:
 
     original_ready = controller_cls._mark_latest_run_ready_for_qc
     original_upload = controller_cls.upload_manual
+    _install_exact_run_identity(controller_cls)
 
     def guarded_ready(self, topic):
         video_path = str(getattr(getattr(self, "state", None), "video_path", "") or "")
@@ -88,7 +155,7 @@ def patch_workflow_qc(bot) -> bool:
 
         validate_final_upload_metadata(title, description, comment)
         print("   [Final QC] READY_FOR_UPLOAD gate passed.", flush=True)
-        return original_ready(self, topic)
+        return _mark_exact_run_ready_for_upload(self, original_ready, topic)
 
     def guarded_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword=""):
         validate_final_video(video_path)
