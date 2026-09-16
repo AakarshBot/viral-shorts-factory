@@ -16,7 +16,7 @@ import threading
 from PIL import Image
 
 GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "8")))
-GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "3")))
+GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
 
@@ -53,11 +53,7 @@ def _cache_key(img_bytes, entity, intent, prompt, video_title, tier):
 
 def _is_event_genre(intent, visual_type=""):
     text = f"{intent} {visual_type}".strip().lower()
-    return (
-        str(visual_type).upper() == "EVENT"
-        or text in {"news_event", "stadium_event"}
-        or any(x in text for x in ("news event", "stadium event", "ceremony", "match", "awards ceremony", "red carpet", "press conference"))
-    )
+    return str(visual_type).upper() == "EVENT" or text in {"news_event", "stadium_event"} or any(x in text for x in ("news event", "stadium event", "ceremony", "match", "awards ceremony", "red carpet", "press conference"))
 
 
 def _is_conceptual(intent):
@@ -110,11 +106,9 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
     if not api_key:
         print(f"   [Visual QA] Tier={tier} | No Gemini API key; semantic verification unavailable.", flush=True)
         return None
-
     key = _cache_key(img_bytes, entity, intent, prompt, video_title, tier)
     if key in _CACHE:
         return _CACHE[key]
-
     with _LOCK:
         if _CIRCUIT_OPEN:
             print("   [Visual QA] Circuit breaker open; NO Gemini API call attempted.", flush=True)
@@ -128,7 +122,6 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         _VIDEO_CALLS += 1
         _SCENE_CALLS += 1
         call_no = _VIDEO_CALLS
-
     print(f"   [Visual QA] Tier={tier} | Gemini request {call_no}/{GEMINI_VISUAL_MAX_REQUESTS} (1 attempt only).", flush=True)
     try:
         from google import genai
