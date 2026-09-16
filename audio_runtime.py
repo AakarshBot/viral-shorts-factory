@@ -10,6 +10,7 @@ import asyncio
 import gc
 import os
 import re
+import subprocess
 import tempfile
 from typing import Any
 
@@ -61,6 +62,25 @@ def validate_audio_timing(text: str, timings: list[dict[str, Any]]) -> tuple[boo
             return False, "Word timing contains a negative duration."
         previous_end = item["end"]
     return True, "Valid word-level audio timing"
+
+
+def get_audio_duration(path: str) -> float:
+    """Read the real encoded media duration without importing another Python dependency."""
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        value = float((completed.stdout or "").strip())
+        return value if value > 0 else 0.0
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
 
 
 async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_seconds=45):
@@ -140,32 +160,29 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
             try:
                 print(f"   [Audio] Scene {idx + 1}/{len(scenes)} attempt {attempt}...", flush=True)
                 timings = await _render_scene(
-                    bot,
-                    text,
-                    language_cfg["voices"][profile["gender"]],
-                    profile["rate"],
-                    profile["pitch"],
-                    path,
-                    timeout_seconds=45,
+                    bot, text, language_cfg["voices"][profile["gender"]], profile["rate"],
+                    profile["pitch"], path, timeout_seconds=45,
                 )
+                actual_duration = get_audio_duration(path)
+                timing_duration = (timings[-1]["end"] + 0.15) if timings else 0.0
+                duration = max(actual_duration, timing_duration)
+                if duration <= 0:
+                    raise RuntimeError("Unable to determine encoded audio duration.")
                 audio_paths.append(path)
                 word_timings.append(timings)
-                scene_durations.append(timings[-1]["end"] + 0.15)
+                scene_durations.append(duration)
                 success = True
                 print(
                     f"   [Audio] Scene {idx + 1}/{len(scenes)} complete: "
                     f"{os.path.getsize(path) / 1024:.1f} KB, {len(timings)} word timings, "
-                    f"~{scene_durations[-1]:.2f}s speech span.",
+                    f"{duration:.2f}s audio duration.",
                     flush=True,
                 )
                 break
             except asyncio.TimeoutError:
                 print(f"   [Audio] Scene {idx + 1} timed out after 45s on attempt {attempt}.", flush=True)
             except Exception as exc:
-                print(
-                    f"   [Audio] Scene {idx + 1} failed on attempt {attempt}: "
-                    f"{type(exc).__name__}: {exc}", flush=True,
-                )
+                print(f"   [Audio] Scene {idx + 1} failed on attempt {attempt}: {type(exc).__name__}: {exc}", flush=True)
             await asyncio.sleep(min(3 * attempt, 9))
             gc.collect()
 
@@ -181,7 +198,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
     gc.collect()
     print(
         f"   [+] Audio generation complete: {len(audio_paths)}/{len(scenes)} scenes. "
-        f"Estimated speech duration: {script_data['audio_total_duration']:.2f}s. "
+        f"Actual audio duration: {script_data['audio_total_duration']:.2f}s. "
         "Transitioning to visual sourcing...",
         flush=True,
     )
