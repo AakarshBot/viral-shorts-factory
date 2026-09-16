@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   repair:
-    if: github.sha == '2681420b311e784f6eaeee9f48ccd3c3a3f0e2ef'
+    if: github.sha == '0b03d63bba0eef5c2a0fc966581b31d4d8ec48e0'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
