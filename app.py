@@ -15,6 +15,7 @@ import visual_runtime
 from visual_qa_runtime import install_visual_qa_bridge
 from semantic_runtime import patch_semantic_dedup
 from audio_runtime import patch_audio_pipeline
+from runtime_bindings import bind_dashboard_patches, harden_editorial_defaults
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬")
 
@@ -41,17 +42,7 @@ install_safe_exception_hook()
 patch_dashboard_runtime(ultimate_bot)
 patch_semantic_dedup()
 patch_story_selection(ultimate_bot)
-
-ultimate_bot.HOOK_STYLES_REGISTRY["Urgent Warning"] = [
-    "Watch what happens next as this update changes the picture.",
-    "A new development just changed the situation in a measurable way.",
-    "Here is the detail that makes this update worth watching."
-]
-ultimate_bot.HOOK_STYLES_REGISTRY["Absurd Reality"] = [
-    "The facts behind this development are stranger than they first appear.",
-    "This sounds unlikely, but the documented sequence is real.",
-    "One overlooked detail makes this story far more surprising."
-]
+harden_editorial_defaults(ultimate_bot)
 
 patch_quality_control(ultimate_bot)
 install_visual_qa_bridge(visual_runtime)
@@ -62,6 +53,8 @@ print("[Dashboard] Gemini visual QA bridge installed.", flush=True)
 patch_audio_pipeline(ultimate_bot)
 ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
 ultimate_bot.run_analytics_sweep = lambda conn: sync_factory_analytics(ultimate_bot, conn)
+bind_dashboard_patches(ultimate_bot)
+print("[Dashboard] All patched functions rebound to legacy run_robot globals.", flush=True)
 
 try:
     _db = sqlite3.connect(ultimate_bot.DB_PATH)
