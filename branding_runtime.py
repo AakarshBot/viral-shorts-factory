@@ -9,7 +9,7 @@ from pathlib import Path
 
 ACCENT = "0x40C4FF"
 ACCENT_SOFT = "0x40C4FF@0.72"
-BRANDING_VERSION = "2026-09-16-v2"
+BRANDING_VERSION = "2026-09-16-v3"
 
 
 def _assets(bot):
@@ -22,25 +22,34 @@ def _assets(bot):
     return logo, overlay
 
 
-def _probe(path: str) -> tuple[int, int, float]:
-    """Return width, height and duration for a rendered video."""
+def _probe(path: str) -> tuple[int, int, float, int]:
+    """Return width, height, duration and audio-stream count for a video."""
     try:
         completed = subprocess.run(
             [
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height", "-show_entries", "format=duration",
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=index,codec_type,width,height",
+                "-show_entries", "format=duration",
                 "-of", "json", path,
             ], capture_output=True, text=True, timeout=10, check=False,
         )
         data = json.loads(completed.stdout or "{}")
-        stream = (data.get("streams") or [{}])[0]
-        return int(stream.get("width") or 0), int(stream.get("height") or 0), float((data.get("format") or {}).get("duration") or 0.0)
+        streams = data.get("streams") or []
+        video = next((item for item in streams if item.get("codec_type") == "video"), {})
+        audio_count = sum(1 for item in streams if item.get("codec_type") == "audio")
+        duration = float((data.get("format") or {}).get("duration") or 0.0)
+        return (
+            int(video.get("width") or 0),
+            int(video.get("height") or 0),
+            duration,
+            audio_count,
+        )
     except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.SubprocessError):
-        return 0, 0, 0.0
+        return 0, 0, 0.0, 0
 
 
 def apply_branded_finish(bot, video_path: str) -> str:
-    """Add restrained branding while preserving the rendered video's geometry and timing."""
+    """Add restrained branding while preserving the rendered video's geometry, timing and audio."""
     if not video_path or not os.path.isfile(video_path):
         return video_path
     logo, overlay = _assets(bot)
@@ -48,7 +57,7 @@ def apply_branded_finish(bot, video_path: str) -> str:
         print("   [Branding] No logo/overlay asset found; leaving video unchanged.", flush=True)
         return video_path
 
-    source_w, source_h, source_duration = _probe(video_path)
+    source_w, source_h, source_duration, source_audio_count = _probe(video_path)
     if source_w <= 0 or source_h <= 0 or source_duration <= 0:
         print("   [Branding] Source video metadata could not be verified; leaving video unchanged.", flush=True)
         return video_path
@@ -84,7 +93,7 @@ def apply_branded_finish(bot, video_path: str) -> str:
         if completed.returncode != 0 or not os.path.isfile(output):
             print(f"   [Branding] FFmpeg finish failed: {completed.stderr[-800:]}", flush=True)
             return video_path
-        out_w, out_h, out_duration = _probe(output)
+        out_w, out_h, out_duration, out_audio_count = _probe(output)
         if (out_w, out_h) != (source_w, source_h):
             print(f"   [Branding] QC failed: geometry changed {source_w}x{source_h} -> {out_w}x{out_h}.", flush=True)
             os.remove(output)
@@ -93,8 +102,16 @@ def apply_branded_finish(bot, video_path: str) -> str:
             print(f"   [Branding] QC failed: duration changed {source_duration:.2f}s -> {out_duration:.2f}s.", flush=True)
             os.remove(output)
             return video_path
+        if out_audio_count != source_audio_count:
+            print(f"   [Branding] QC failed: audio stream count changed {source_audio_count} -> {out_audio_count}.", flush=True)
+            os.remove(output)
+            return video_path
         os.replace(output, video_path)
-        print(f"   [Branding] Finishing applied: border + {'overlay' if overlay.exists() else 'logo'}; {source_w}x{source_h}, {source_duration:.2f}s, version={BRANDING_VERSION}.", flush=True)
+        print(
+            f"   [Branding] Finishing applied: border + {'overlay' if overlay.exists() else 'logo'}; "
+            f"{source_w}x{source_h}, {source_duration:.2f}s, audio_streams={source_audio_count}, version={BRANDING_VERSION}.",
+            flush=True,
+        )
         return video_path
     except Exception as exc:
         print(f"   [Branding] Finish failed: {type(exc).__name__}: {exc}", flush=True)
