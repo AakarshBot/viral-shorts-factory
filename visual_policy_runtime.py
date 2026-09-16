@@ -4,8 +4,7 @@ Keeps the existing visual sourcing/render pipeline intact while:
 - removing opaque hook/outro cards from non-Top-5 formats;
 - limiting the same visual subject/search term to two scene uses per run;
 - simplifying image search to the clean primary visual subject, with a
-  headline-derived fallback only when the primary subject is missing or has
-  already been used twice.
+  headline-derived fallback only when the primary subject yields nothing.
 """
 from __future__ import annotations
 
@@ -55,35 +54,27 @@ def _clean_search_subject(value):
     text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-:;|\"'")
     if not text:
         return ""
-
     text = re.sub(
         r"^(?:primary\s+entity|visual\s+subject|subject|search\s+term|keyword)\s*[:=-]\s*",
         "",
         text,
         flags=re.I,
     ).strip()
-
-    # Possessive scene descriptions are noise for image search:
-    # "Sachin Tendulkar's best innings" -> "Sachin Tendulkar".
-    text = re.split(r"(?:'s|’s)\s+", text, maxsplit=1, flags=re.I)[0].strip()
-
+    text = re.split(r"(?:'s|’s)\s+", text, maxsplit=1)[0].strip()
     text = re.sub(
-        r"\s+(?:official|official\s+photo|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|best\s+innings|latest\s+update|latest\s+news|breaking\s+news|photo|image)\s*$",
+        r"\s+(?:official(?:\s+photo)?|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|best\s+innings|latest\s+update|latest\s+news|breaking\s+news|photo|image)\s*$",
         "",
         text,
         flags=re.I,
     ).strip(" ,.-:;|\"'")
-
     return text
 
 
-def _headline_fallback(video_title, exclude=""):
-    """Pick one compact headline subject, avoiding the already-used entity when possible."""
+def _headline_fallback(video_title):
+    """Pick one compact subject from a headline when a scene has no usable entity."""
     text = _clean_search_subject(video_title)
     if not text:
         return ""
-
-    excluded = _clean_search_subject(exclude).lower()
     stop = {
         "the", "a", "an", "and", "or", "but", "for", "with", "from", "into", "after", "before",
         "over", "under", "this", "that", "these", "those", "here", "there", "why", "how", "what",
@@ -93,28 +84,14 @@ def _headline_fallback(video_title, exclude=""):
     words = [w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9&./'-]*", text) if w.lower() not in stop]
     if not words:
         return ""
-
-    candidates = []
-    for length in (3, 2, 1):
-        for i in range(max(1, len(words) - length + 1)):
-            chunk = " ".join(words[i:i + length]).strip()
-            if chunk:
-                candidates.append(chunk)
-
-    for chunk in candidates:
-        cleaned = _clean_search_subject(chunk)
-        if cleaned and cleaned.lower() != excluded:
-            return cleaned
+    proper = [w.strip("'\"") for w in words if any(c.isupper() for c in w if c.isalpha())]
+    if proper:
+        return _clean_search_subject(" ".join(proper[:3]))
     return _clean_search_subject(words[0])
 
 
 def _simple_build_deep_queries(seg, video_title="", visual_type=None):
-    """Build intentionally simple search queries.
-
-    The search subject is the script's primary_entity and nothing else. If a
-    scene has no usable entity, the headline supplies one fallback keyword.
-    There is no scene-action, intent, category, or title-stacking query here.
-    """
+    """Return at most one clean subject query for a scene."""
     entity = _clean_search_subject(seg.get("primary_entity", ""))
     try:
         from visual_strategy_runtime import classify_scene, VISUAL_TYPES
@@ -124,18 +101,8 @@ def _simple_build_deep_queries(seg, video_title="", visual_type=None):
             resolved_type = "GENERAL_CONTEXT"
     except Exception:
         resolved_type = visual_type or "GENERAL_CONTEXT"
-
-    queries = []
-    if entity and entity.lower() not in {"none", "unknown", "n/a"}:
-        queries.append(entity)
-    else:
-        fallback = _headline_fallback(video_title)
-        if fallback:
-            queries.append(fallback)
-
-    # Keep every scene search deliberately simple: one subject, one search term.
-    # The subject-repeat wrapper below controls reuse across scenes.
-    return queries[:1], resolved_type
+    query = entity if entity and entity.lower() not in {"none", "unknown", "n/a"} else _headline_fallback(video_title)
+    return ([query] if query else []), resolved_type
 
 
 def _install_simple_search_policy():
@@ -172,21 +139,18 @@ def _subject_limit_wrapper(original):
                 if count < 2:
                     run_counts[key] += 1
                 else:
-                    # After two uses of a subject, switch to a simple headline
-                    # keyword rather than building a more elaborate scene query.
-                    fallback = _headline_fallback(video_title, exclude=entity)
+                    fallback = _headline_fallback(video_title)
                     if fallback and fallback.lower() != key:
                         chosen_seg = dict(seg)
                         chosen_seg["primary_entity"] = fallback
                         chosen_seg["visual_type"] = "GENERAL_CONTEXT"
                         chosen_seg["visual_intent"] = "documentary context"
                         chosen_seg["specific_search_prompt"] = fallback
-                        print(
-                            f"   [Visual Policy] Subject '{entity}' already used twice; using headline fallback '{fallback}'.",
-                            flush=True,
-                        )
-                    # If no alternate headline keyword exists, retain the original
-                    # subject. The image-hash gate still prevents the same image.
+                    else:
+                        chosen_seg = dict(seg)
+                        chosen_seg["primary_entity"] = ""
+                        chosen_seg["visual_type"] = "GENERAL_CONTEXT"
+                        chosen_seg["specific_search_prompt"] = ""
 
         try:
             return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
@@ -217,11 +181,10 @@ def _install_subject_limit():
 def install_visual_card_policy(bot=None):
     """Patch the legacy card renderers and visual search policy once."""
     global _INSTALLED
-    _install_simple_search_policy()
     if _INSTALLED:
+        _install_simple_search_policy()
         _install_subject_limit()
         return True
-
     try:
         import ultimate_bot as default_bot
         bot = bot or default_bot
@@ -239,27 +202,9 @@ def install_visual_card_policy(bot=None):
 
         original_slide = namespace.get("create_branded_slide")
         if callable(original_slide) and not getattr(original_slide, "_qc_non_top5_slide", False):
-            def create_branded_slide_policy(
-                title_text,
-                subtitle_text,
-                is_outro=False,
-                width=1080,
-                height=1920,
-                font_choice=None,
-            ):
-                # Top-5 keeps the existing title/outro cards exactly as designed.
+            def create_branded_slide_policy(title_text, subtitle_text, is_outro=False, width=1080, height=1920, font_choice=None):
                 if str(subtitle_text or "").strip().upper() in {"TODAY'S SPECIAL", "SUBSCRIBE!"}:
-                    return original_slide(
-                        title_text,
-                        subtitle_text,
-                        is_outro=is_outro,
-                        width=width,
-                        height=height,
-                        font_choice=font_choice,
-                    )
-
-                # Regular/trending/tech-review outros keep only a clean CTA on a
-                # simple branded background; the opaque rounded card is removed.
+                    return original_slide(title_text, subtitle_text, is_outro=is_outro, width=width, height=height, font_choice=font_choice)
                 bg = Image.new("RGBA", (width, height), _bg_color(bot) + (255,))
                 draw = ImageDraw.Draw(bg)
                 palette = getattr(bot, "PALETTE", {})
@@ -267,30 +212,27 @@ def install_visual_card_policy(bot=None):
                 secondary = tuple(palette.get("accent_secondary", (255, 140, 0)))
                 draw.rectangle((0, 0, width, 36), fill=primary + (180,))
                 draw.rectangle((0, height - 36, width, height), fill=secondary + (150,))
-
                 title_font = _font(bot, 86, font_choice)
                 cta_font = _font(bot, 60, font_choice)
                 title = str(title_text or "").strip()
                 cta = str(subtitle_text or "").strip()
-
                 def centered(text, font, y, fill):
                     bbox = draw.textbbox((0, 0), text, font=font)
                     w = bbox[2] - bbox[0]
                     draw.text(((width - w) / 2, y), text, font=font, fill=fill)
-
                 if title:
                     centered(title, title_font, int(height * 0.42), (242, 244, 246, 255))
                 if cta:
                     centered(cta, cta_font, int(height * 0.52), secondary + (255,))
                 return bg
-
             create_branded_slide_policy._qc_non_top5_slide = True
             namespace["create_branded_slide"] = create_branded_slide_policy
 
         _INSTALLED = True
+        _install_simple_search_policy()
         _install_subject_limit()
         print("   [Visual Policy] Non-Top-5 hook/outro cards disabled; Top-5 cards preserved.", flush=True)
         return True
     except Exception as exc:
-        print(f"   [Visual Policy] Card policy unavailable: {type(exc).__name__}: {exc}", flush=True)
+        print(f"   [Visual Policy] Card/search policy unavailable: {type(exc).__name__}: {exc}", flush=True)
         return False
