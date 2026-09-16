@@ -161,7 +161,7 @@ def _test_script_guards():
 
     # No arbitrary word-count gate: a compact, grounded script is valid when its
     # scenes contain actual topic information.
-    compact_story = {"title": "Mars sample", "topic": "Mars sample", "summary": "A compact factual Mars update."}
+    compact_story = {"title": "Mars moons", "topic": "Mars moons", "summary": "A compact factual Mars moons update about Phobos and Deimos."}
     compact_script = {
         "script": [
             {"voiceover": "Mars has two tiny moons named Phobos and Deimos."},
