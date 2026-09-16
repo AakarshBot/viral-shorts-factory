@@ -11,7 +11,8 @@ from PIL import Image
 
 ACCENT = "0x40C4FF"
 ACCENT_SOFT = "0x40C4FF@0.72"
-BRANDING_VERSION = "2026-09-16-v5"
+HIGHLIGHT = "white@0.20"
+BRANDING_VERSION = "2026-09-16-v6"
 
 
 def _assets(bot):
@@ -162,7 +163,10 @@ def apply_branded_finish(bot, video_path: str) -> str:
 
     brand_asset = overlay if use_overlay else (logo if logo.exists() else None)
     output = str(Path(video_path).with_name(Path(video_path).stem + "_branded.mp4"))
-    filters = [f"[0:v]drawbox=x=10:y=10:w=iw-20:h=ih-20:color={ACCENT_SOFT}:t=5[framed]"]
+    filters = [
+        f"[0:v]drawbox=x=10:y=10:w=iw-20:h=ih-20:color={ACCENT_SOFT}:t=5[frame_outer]",
+        f"[frame_outer]drawbox=x=16:y=16:w=iw-32:h=ih-32:color={HIGHLIGHT}:t=2[framed]",
+    ]
     last = "[framed]"
 
     if brand_asset is not None and use_overlay:
@@ -174,10 +178,13 @@ def apply_branded_finish(bot, video_path: str) -> str:
     elif brand_asset is not None:
         filters.extend([
             "[1:v]scale=132:-1,format=rgba[logo]",
-            "color=c=0x08111d@0.72:s=160x160,format=rgba[logo_card]",
+            "color=c=0xFFFFFF@0.82:s=166x166,format=rgba[logo_card]",
+            "color=c=0xFFFFFF@0.22:s=174x174,format=rgba[logo_gloss]",
             "[logo_card][logo]overlay=(W-w)/2:(H-h)/2[logo_ready]",
-            f"[logo_ready]drawbox=x=1:y=1:w=158:h=158:color={ACCENT}:t=3[logo_card_final]",
-            f"{last}[logo_card_final]overlay=W-w-28:28:eof_action=repeat:shortest=0:format=auto[finalv]",
+            f"[logo_ready]drawbox=x=1:y=1:w=164:h=164:color={ACCENT}:t=3[logo_card_final]",
+            "[logo_gloss]crop=174:28:0:0[logo_highlight]",
+            "[logo_card_final][logo_highlight]overlay=(W-w)/2:0[logo_gloss_ready]",
+            f"{last}[logo_gloss_ready]overlay=W-w-24:24:eof_action=repeat:shortest=0:format=auto[finalv]",
         ])
         last = "[finalv]"
 
@@ -215,7 +222,7 @@ def apply_branded_finish(bot, video_path: str) -> str:
         os.replace(output, video_path)
         mode = "overlay" if use_overlay else ("logo" if logo.exists() else "border-only")
         print(
-            f"   [Branding] Finishing applied: border + {mode}; "
+            f"   [Branding] Finishing applied: dual-gloss frame + {mode}; "
             f"{source_w}x{source_h}, {source_duration:.2f}s, audio_streams={source_audio_count}, version={BRANDING_VERSION}.",
             flush=True,
         )
