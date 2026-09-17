@@ -234,9 +234,14 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     return prepared
 
 
-def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title=""):
+def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title="", manual_query=""):
     _install_runtime_query_guard(visual_runtime_module)
     candidate = build_candidate_scene(scene, lock_visual_subject(scene, video_title), video_title)
+    manual_query = clean_text(manual_query)
+    if manual_query:
+        # Manual input controls retrieval vocabulary, but never disables the
+        # existing factual identity/semantic safety checks.
+        candidate["manual_visual_query"] = manual_query
     subject = clean_text(candidate.get("factual_primary_entity", "") or candidate.get("primary_entity", ""))
     context = clean_text(candidate.get("specific_search_prompt", "") or candidate.get("visual_context", ""))
     if not subject:
