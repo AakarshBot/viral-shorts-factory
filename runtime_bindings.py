@@ -1,4 +1,4 @@
-"""Bind runtime patches to the actual globals used by the legacy factory."""
+"""Bind runtime patches to the authoritative production globals."""
 
 import functools
 import json
@@ -72,7 +72,7 @@ def _normalise_editorial_records(scored_data, batch_stories):
 
 
 def _install_moviepy_compatibility():
-    """Expose MoviePy v2 classes at the root package for the legacy renderer."""
+    """Expose MoviePy v2 classes at the root package for the renderer."""
     try:
         import moviepy
         from moviepy.video.VideoClip import ImageClip
@@ -81,10 +81,12 @@ def _install_moviepy_compatibility():
         from moviepy.audio.io.AudioFileClip import AudioFileClip
         from moviepy.audio.AudioClip import CompositeAudioClip
         exports = {
-            "ImageClip": ImageClip, "VideoFileClip": VideoFileClip,
+            "ImageClip": ImageClip,
+            "VideoFileClip": VideoFileClip,
             "CompositeVideoClip": CompositeVideoClip,
             "concatenate_videoclips": concatenate_videoclips,
-            "AudioFileClip": AudioFileClip, "CompositeAudioClip": CompositeAudioClip,
+            "AudioFileClip": AudioFileClip,
+            "CompositeAudioClip": CompositeAudioClip,
         }
         installed = []
         for name, value in exports.items():
@@ -93,26 +95,9 @@ def _install_moviepy_compatibility():
                 installed.append(name)
         if installed:
             print("   [Bindings] MoviePy compatibility exports installed: " + ", ".join(installed), flush=True)
-        else:
-            print("   [Bindings] MoviePy compatibility exports already available.", flush=True)
         return True
     except Exception as exc:
         print(f"   [Bindings] MoviePy compatibility bridge unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return False
-
-
-def _install_authoritative_person_sources(bot):
-    """Attach direct Wikipedia/Commons image fetchers used by PERSON sourcing."""
-    try:
-        from person_source_runtime import fetch_wikipedia_person_image, fetch_wikimedia_commons_image
-        if not callable(getattr(bot, "fetch_wiki_person_image", None)):
-            bot.fetch_wiki_person_image = fetch_wikipedia_person_image
-        if not callable(getattr(bot, "fetch_wikimedia_commons", None)):
-            bot.fetch_wikimedia_commons = fetch_wikimedia_commons_image
-        print("   [Bindings] Authoritative person image sources installed: Wikipedia + Wikimedia Commons.", flush=True)
-        return True
-    except Exception as exc:
-        print(f"   [Bindings] Authoritative person image sources unavailable: {type(exc).__name__}: {exc}", flush=True)
         return False
 
 
@@ -188,9 +173,13 @@ def _install_visual_cache_safety():
 
 def _wrap_trend_signal(bot):
     current = getattr(bot, "get_trend_signal_bonus", None)
-    if current is None or getattr(current, "_cached_trend_signal", False): return current
+    if current is None or getattr(current, "_cached_trend_signal", False):
+        return current
+
     @functools.lru_cache(maxsize=128)
-    def cached(keyword): return current(keyword)
+    def cached(keyword):
+        return current(keyword)
+
     cached._cached_trend_signal = True
     bot.get_trend_signal_bonus = cached
     return cached
@@ -207,7 +196,9 @@ def _patch_editorial_scoring(bot):
 
 def _wrap_scored_candidates(bot):
     current = getattr(bot, "process_scored_candidates", None)
-    if current is None or getattr(current, "_hard_reject_safe", False): return current
+    if current is None or getattr(current, "_hard_reject_safe", False):
+        return current
+
     def safe_process(scored_data, batch_stories, bonuses, last_genre, format_mode):
         scored_count = len(scored_data) if isinstance(scored_data, list) else 0
         story_count = len(batch_stories) if isinstance(batch_stories, list) else 0
@@ -239,8 +230,6 @@ def _wrap_scored_candidates(bot):
             print("   [Editorial Diagnostics] Corrected scorer returned 0 candidates.", flush=True)
             return []
 
-        # Monetization risk is a ranking penalty, not a safety block. A story is
-        # blocked here only when the editorial model explicitly hard-rejects it.
         rejected_ids = {
             id(batch_stories[index])
             for index, scores in enumerate(normalised)
@@ -248,9 +237,8 @@ def _wrap_scored_candidates(bot):
         }
         filtered = [item for item in result if id(item) not in rejected_ids]
         print(f"   [Editorial Diagnostics] Corrected scorer candidates={len(result)}; after explicit hard-reject gate={len(filtered)}.", flush=True)
-        if not filtered and result:
-            print("   [Editorial Diagnostics] WARNING: all scored candidates were explicitly hard-rejected.", flush=True)
         return filtered
+
     safe_process._hard_reject_safe = True
     bot.process_scored_candidates = safe_process
     return safe_process
@@ -258,19 +246,23 @@ def _wrap_scored_candidates(bot):
 
 def _wrap_editorial_provider_usage(bot):
     current = getattr(bot, "editorial_gate_batch", None)
-    if current is None or getattr(current, "_gemini_editorial_guarded", False): return current
+    if current is None or getattr(current, "_gemini_editorial_guarded", False):
+        return current
+
     def guarded(stories, bonuses, last_genre, format_mode):
         original_key = getattr(bot, "GEMINI_API_KEY", None)
         bot.GEMINI_API_KEY = None
-        try: return current(stories, bonuses, last_genre, format_mode)
-        finally: bot.GEMINI_API_KEY = original_key
+        try:
+            return current(stories, bonuses, last_genre, format_mode)
+        finally:
+            bot.GEMINI_API_KEY = original_key
+
     guarded._gemini_editorial_guarded = True
     bot.editorial_gate_batch = guarded
     return guarded
 
 
 def _patch_research_pipeline(bot):
-    """Activate the multi-source evidence pass before content-density script wrapping."""
     try:
         from research_runtime import patch_research_pipeline
         return patch_research_pipeline(bot)
@@ -325,7 +317,7 @@ def _patch_youtube_creator_comments(bot):
 
 
 def bind_dashboard_patches(bot):
-    """Bind patched callables into the actual globals used by the legacy factory."""
+    """Bind runtime patch surfaces into the production call graph."""
     try:
         apply_dashboard_theme()
     except Exception as exc:
@@ -335,14 +327,17 @@ def bind_dashboard_patches(bot):
     if run_robot is None or not hasattr(run_robot, "__globals__"):
         print("   [Bindings] WARNING: run_robot globals unavailable.", flush=True)
         return bot
+
     current_validate = getattr(bot, "validate_script", None)
     if current_validate is not None and not getattr(current_validate, "_index_normalized", False):
         def validate(script_data, source_text, format_mode):
             if isinstance(script_data, dict) and script_data.get("recommended_title_index") == 0:
                 script_data["recommended_title_index"] = 1
             return current_validate(script_data, source_text, format_mode)
+
         validate._index_normalized = True
         bot.validate_script = validate
+
     _wrap_trend_signal(bot)
     _patch_editorial_scoring(bot)
     _wrap_scored_candidates(bot)
@@ -353,42 +348,53 @@ def bind_dashboard_patches(bot):
     _patch_audio_direction(bot)
     _patch_subtitles(bot)
     _patch_youtube_creator_comments(bot)
-    _install_authoritative_person_sources(bot)
     _install_visual_cache_safety()
 
     namespace = run_robot.__globals__
-    names = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip")
+    names = (
+        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
+        "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
+        "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep",
+        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip",
+    )
     bound = []
     for name in names:
         value = getattr(bot, name, None)
         if value is not None:
             namespace[name] = value
             bound.append(name)
+
     original_process_visuals = getattr(bot, "process_visuals_async", None)
     if original_process_visuals is not None and not getattr(original_process_visuals, "_traceback_bound", False):
         async def process_visuals_with_traceback(*args, **kwargs):
-            try: return await original_process_visuals(*args, **kwargs)
+            try:
+                return await original_process_visuals(*args, **kwargs)
             except BaseException:
                 print("   [Bindings] FULL TRACEBACK FROM process_visuals_async:", flush=True)
                 traceback.print_exc()
                 raise
+
         process_visuals_with_traceback._traceback_bound = True
         bot.process_visuals_async = process_visuals_with_traceback
         namespace["process_visuals_async"] = process_visuals_with_traceback
         bound.append("process_visuals_async(traceback)")
+
     original_compile_video = getattr(bot, "compile_video", None)
     if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
         def compile_video_with_traceback(*args, **kwargs):
             _install_moviepy_compatibility()
-            try: return original_compile_video(*args, **kwargs)
+            try:
+                return original_compile_video(*args, **kwargs)
             except BaseException:
                 print("   [Bindings] FULL TRACEBACK FROM compile_video:", flush=True)
                 traceback.print_exc()
                 raise
+
         compile_video_with_traceback._traceback_bound = True
         bot.compile_video = compile_video_with_traceback
         namespace["compile_video"] = compile_video_with_traceback
         bound.append("compile_video(traceback)")
+
     try:
         import factory_runtime
         if hasattr(factory_runtime, "_vignette"):
@@ -396,7 +402,8 @@ def bind_dashboard_patches(bot):
             bound.append("_vignette")
     except Exception as exc:
         print(f"   [Bindings] Render dependency binding skipped: {exc}", flush=True)
-    print("   [Bindings] Legacy factory globals bound to active runtime patches: " + ", ".join(dict.fromkeys(bound)), flush=True)
+
+    print("   [Bindings] Production runtime globals bound: " + ", ".join(dict.fromkeys(bound)), flush=True)
     return bot
 
 
