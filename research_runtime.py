@@ -109,19 +109,23 @@ def format_source_brief(sources: List[Dict[str, Any]]) -> str:
 
 
 def patch_research_pipeline(bot):
-    """Keep research immediately beneath the content-density script guard across repeated binding."""
+    """Install a deterministic research -> content-density wrapper pair.
+
+    Binding is intentionally rebuilt at this small boundary when necessary.
+    That makes repeated dashboard/runtime binding calls converge on the same
+    externally visible order instead of depending on which older patch ran
+    first during module import.
+    """
     current = getattr(bot, "write_script", None)
     run_robot = getattr(bot, "run_robot", None)
     if not callable(current) or run_robot is None or not hasattr(run_robot, "__globals__"):
         return bot
 
-    if getattr(current, "_content_dense_bound", False):
-        if getattr(current, "_research_layer_live", False):
-            bot._research_pipeline_patch_installed = True
-            run_robot.__globals__["write_script"] = current
-            return bot
-
-    if getattr(current, "_research_wrapped", False):
+    # The desired externally visible chain is:
+    #   content-density wrapper -> research wrapper -> existing writer
+    # The existing writer may itself contain an older wrapper; keeping it
+    # underneath is safe and avoids trying to mutate private closure cells.
+    if getattr(current, "_content_dense_bound", False) and getattr(current, "_research_layer_live", False):
         bot._research_pipeline_patch_installed = True
         run_robot.__globals__["write_script"] = current
         return bot
@@ -154,16 +158,23 @@ def patch_research_pipeline(bot):
         return result
 
     researched_write_script._research_wrapped = True
-    # Preserve wrapper-state markers when research is layered around an
-    # existing content-density or pipeline-integrity wrapper. The binding
-    # diagnostic inspects the active callable, not private closure state.
-    researched_write_script._content_dense_bound = bool(getattr(current, "_content_dense_bound", False))
-    researched_write_script._research_layer_live = bool(
-        getattr(current, "_research_wrapped", False)
-        or getattr(current, "_research_layer_live", False)
-        or researched_write_script._research_wrapped
-    )
+    # Do not mark this wrapper as content-dense. We deliberately let the
+    # canonical script wrapper wrap it next, which makes its
+    # _research_layer_live marker authoritative.
     bot.write_script = researched_write_script
     run_robot.__globals__["write_script"] = researched_write_script
+
+    try:
+        from script_runtime import wrap_write_script
+        active = wrap_write_script(bot)
+    except Exception as exc:
+        print(f"   [Research] Content-density wrapper could not be restored: {type(exc).__name__}: {exc}", flush=True)
+        active = getattr(bot, "write_script", researched_write_script)
+
+    if callable(active):
+        active._research_layer_live = True
+        bot.write_script = active
+        run_robot.__globals__["write_script"] = active
+
     bot._research_pipeline_patch_installed = True
     return bot
