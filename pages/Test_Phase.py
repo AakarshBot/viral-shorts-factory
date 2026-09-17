@@ -38,10 +38,10 @@ def _init_runtime() -> None:
         install_visual_qa_bridge(visual_runtime)
         patch_provider_adapters(ultimate_bot)
     bind_dashboard_patches(ultimate_bot)
+    install_test_phase_patches()
     install_test_history_bridge(test_phase_runtime, ultimate_bot)
 
 
 _init_runtime()
-install_test_phase_patches()
 test_phase_runtime.render_test_phase(ultimate_bot)
 render_test_history(ultimate_bot, st)
