@@ -219,6 +219,37 @@ def collect_channel_statistics(db_path: str) -> dict[str, Any]:
     }
 
 
+def collect_live_channel_statistics(bot) -> dict[str, Any]:
+    """Read current channel totals through the already-connected YouTube account."""
+    try:
+        import googleapiclient.discovery
+
+        creds = bot.get_google_credentials()
+        youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
+        response = (
+            youtube.channels()
+            .list(part="snippet,statistics", mine=True)
+            .execute()
+        )
+        items = response.get("items") or []
+        if not items:
+            raise RuntimeError("The connected YouTube account returned no channel.")
+        channel = items[0]
+        statistics = channel.get("statistics") or {}
+        snippet = channel.get("snippet") or {}
+        return {
+            "channel_title": str(snippet.get("title") or "Connected channel"),
+            "subscriber_count": int(statistics.get("subscriberCount", 0) or 0),
+            "video_count": int(statistics.get("videoCount", 0) or 0),
+            "view_count": int(statistics.get("viewCount", 0) or 0),
+            "hidden_subscriber_count": bool(statistics.get("hiddenSubscriberCount", False)),
+        }
+    except Exception as exc:
+        return {
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def _run_synthetic_renderer_demo() -> dict[str, Any]:
     """Exercise the current premium subtitle/card renderers without network calls."""
     from subtitle_runtime import (
@@ -324,5 +355,6 @@ def run_demo_section(section: str) -> dict[str, Any]:
 __all__ = [
     "DashboardWorkflowController",
     "collect_channel_statistics",
+    "collect_live_channel_statistics",
     "run_demo_section",
 ]
