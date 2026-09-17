@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-_VERSION = "2026-09-17-v3"
+_VERSION = "2026-09-17-v4"
 _SPACE_RE = re.compile(r"\s+")
 
 
@@ -48,7 +48,34 @@ def unicode_normalise(value):
 
 
 def _planner_tokens(text):
-    return unicode_words(str(text or "").replace("’", "'").replace("‘", "'"))
+    """Tokenise visual queries without changing their original casing.
+
+    Visual search has a stricter contract than generic text matching: the
+    locked primary_entity must be emitted exactly as supplied. Generic Unicode
+    helpers intentionally casefold for comparisons, but that behaviour must
+    never leak into the actual visual search query.
+    """
+    text = str(text or "").replace("’", "'").replace("‘", "'")
+    words = []
+    current = []
+    for char in text:
+        category = unicodedata.category(char)
+        if char.isalnum() or category.startswith("M"):
+            current.append(char)
+            continue
+        if char in {"'", "-", "/"} and current:
+            current.append(char)
+            continue
+        if current:
+            token = "".join(current).strip("'-/")
+            if token:
+                words.append(token)
+            current = []
+    if current:
+        token = "".join(current).strip("'-/")
+        if token:
+            words.append(token)
+    return words
 
 
 def _planner_key(token):
@@ -95,8 +122,6 @@ def _safe_subject_limit_wrapper(module, original_builder):
                     if count < 2:
                         run_counts[key] += 1
                     else:
-                        # Keep the true entity. Vary the retrieval context instead
-                        # of manufacturing a different entity or an empty one.
                         chosen_seg = dict(seg)
                         intent = str(seg.get("visual_intent", "") or "").strip()
                         prompt = str(seg.get("specific_search_prompt", "") or "").strip()
