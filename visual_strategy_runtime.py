@@ -1,9 +1,8 @@
 """Authoritative, genre-agnostic visual-search strategy.
 
-The factual ``primary_entity`` remains provenance. The visual retrieval query is
-resolved by the shared semantic planner into a precise subject, then expanded
-only through a bounded identity-preserving ladder. The strategy layer does not
-contain domain-specific entity tables or branches.
+The strategy layer delegates semantic cleanup, subject resolution and query
+construction to the shared generic guard. It contains no domain-specific
+entity tables or query padding rules.
 """
 from __future__ import annotations
 
@@ -11,65 +10,89 @@ import sys
 import types
 
 import visual_retrieval_planner as _planner
-from visual_retrieval_planner import *  # noqa: F401,F403 - legacy public surface
+from visual_retrieval_planner import *  # noqa: F401,F403
+from visual_semantic_guard_runtime import (
+    MAX_QUERY_WORDS,
+    build_query_ladder,
+    clean_text,
+    prepare_scene,
+    resolve_subject,
+)
 
 for _name in dir(_planner):
     if _name.startswith("_") and not _name.startswith("__"):
         globals()[_name] = getattr(_planner, _name)
 
-_VISUAL_STRATEGY_VERSION = "2026-09-18-v1-generic-semantic-strategy"
-
-
-def _exact_slide_subject(scene):
-    """Return only the immutable factual entity for provenance/debugging."""
-    if not isinstance(scene, dict):
-        return ""
-    return str(scene.get("primary_entity", "") or "").strip()
+_VISUAL_STRATEGY_VERSION = "2026-09-18-v2-generic-semantic-guard"
 
 
 def _scene_category(scene, category=""):
-    """Use explicit caller/scene domain metadata without guessing a genre."""
     if str(category or "").strip():
         return str(category).strip()
     if isinstance(scene, dict):
         for key in ("sport_or_topic_category", "topic_category", "domain", "topic"):
-            value = str(scene.get(key, "") or "").strip()
+            value = clean_text(scene.get(key, ""))
             if value:
                 return value
     return ""
 
 
+def _prepare(scene, video_title=""):
+    prepared = prepare_scene(scene, video_title)
+    category = _scene_category(prepared)
+    if category and not prepared.get("sport_or_topic_category"):
+        prepared["sport_or_topic_category"] = category
+    return prepared
+
+
 def classify_scene(scene, category=""):
-    """Expose the shared semantic classification contract."""
-    return _planner.classify_scene(scene, _scene_category(scene, category))
+    """Expose the generic semantic role classifier."""
+    prepared = _prepare(scene)
+    return resolve_subject(prepared, "").get("visual_type") or "GENERAL_CONTEXT"
+
+
+def build_scene_visual_brief(scene, video_title="", category=""):
+    """Return the generic guarded visual brief expected by runtime callers."""
+    prepared = _prepare(scene, video_title)
+    if category:
+        prepared["sport_or_topic_category"] = category
+    resolution = resolve_subject(prepared, video_title)
+    return {
+        "subject": resolution["subject"],
+        "visual_type": resolution["visual_type"],
+        "scene_action": "",
+        "scene_context": clean_text(prepared.get("visual_context", "")),
+        "scene_index": clean_text(prepared.get("scene_index", prepared.get("scene_number", ""))),
+        "factual_entity": resolution["factual_entity"],
+        "base_type": "GENERAL_CONTEXT",
+        "scene_role": resolution["visual_type"],
+        "domain": _scene_category(prepared, category),
+        "confidence": resolution["confidence"],
+    }
 
 
 def build_deep_queries(scene, video_title="", visual_type=None):
-    """Build the bounded semantic retrieval ladder.
-
-    There is deliberately no raw-entity fallback here. A planner failure is a
-    retrieval contract failure and must be visible to the caller rather than
-    silently degrading to a vague query.
-    """
+    """Build only grounded, non-padded search queries."""
     if not isinstance(scene, dict):
         return [], visual_type or "GENERAL_CONTEXT"
-
-    queries, resolved_type = _planner.build_deep_queries(
-        scene,
-        video_title,
-        visual_type,
-    )
-    return queries[:MAX_VISUAL_SEARCH_QUERIES], resolved_type or visual_type or "GENERAL_CONTEXT"
+    prepared = _prepare(scene, video_title)
+    queries, resolved_type, _resolution = build_query_ladder(prepared, video_title)
+    return queries[:3], (visual_type or resolved_type or "GENERAL_CONTEXT")
 
 
 build_deep_queries._authoritative_locked_subject_planner = True
 
 
+def _exact_slide_subject(scene):
+    """Return the original factual entity for compatibility/provenance."""
+    if not isinstance(scene, dict):
+        return ""
+    return clean_text(scene.get("primary_entity", ""))
+
+
 def _add_unique(values, value, *parts):
-    candidate = _planner._normalise(
-        " ".join(str(part) for part in (value,) + parts if str(part).strip())
-    )
-    if not candidate or candidate in values:
+    candidate = _planner._normalise(" ".join(str(part) for part in (value,) + parts if str(part).strip()))
+    if not candidate or len(candidate.split()) > MAX_QUERY_WORDS or candidate in values:
         return False
     values.append(candidate)
     return True
@@ -97,7 +120,6 @@ except Exception as exc:
     )
 
 
-# Prevent legacy startup code from replacing the authoritative planner.
 class _AuthoritativeVisualStrategyModule(types.ModuleType):
     def __setattr__(self, name, value):
         if name == "build_deep_queries":
