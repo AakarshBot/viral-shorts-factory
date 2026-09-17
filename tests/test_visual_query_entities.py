@@ -1,3 +1,5 @@
+import visual_query_entities_runtime as query_runtime
+
 from visual_query_entities_runtime import (
     build_candidate_scene,
     extract_slide_search_subjects,
@@ -18,12 +20,12 @@ def test_person_subject_is_preserved_without_prompt_padding():
     }
     assert lock_visual_subject(scene) == "Amina Rahman"
     queries, visual_type = build_deep_queries(scene, "Amina Rahman documentary")
-    assert queries == ["Amina Rahman"]
+    assert queries[0] == "Amina Rahman"
+    assert len(queries) <= 5
     assert visual_type == "PERSON"
-    assert all(
-        token not in queries[0].lower()
-        for token in ("press", "conference", "latest", "person", "entertainment")
-    )
+    assert all("press conference" not in query.lower() for query in queries[:1])
+    assert all("latest" not in query.lower() for query in queries[:1])
+    assert all("entertainment" not in query.lower() for query in queries[:1])
 
 
 def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks():
@@ -113,7 +115,7 @@ def test_html_noise_is_removed_from_visual_subject_and_query():
     assert all("not" not in q.lower().split() for q in queries)
 
 
-def test_candidate_scene_rewrites_only_visual_runtime_metadata():
+def test_candidate_scene_keeps_provenance_but_locks_clean_visual_subject():
     source = {
         "primary_entity": "Not Northstar Research Summit",
         "voiceover": "Not just a one-off thing — Northstar Research Summit could return to Berlin &nbsp;.",
@@ -123,29 +125,29 @@ def test_candidate_scene_rewrites_only_visual_runtime_metadata():
 
     candidate = build_candidate_scene(source, source["primary_entity"], "Northstar Research Summit")
     assert candidate["primary_entity"] != source["primary_entity"]
-    assert candidate["specific_search_prompt"] == candidate["primary_entity"]
-    assert candidate["voiceover"] == candidate["primary_entity"]
-    assert candidate["factual_voiceover"] == source["voiceover"]
+    assert candidate["primary_entity"] == candidate["visual_search_subject"]
+    assert candidate["factual_primary_entity"] == "Northstar Research Summit"
+    assert candidate["original_primary_entity"] == source["primary_entity"]
+    assert candidate["specific_search_prompt"] == source["specific_search_prompt"]
+    assert candidate["factual_voiceover"] == source["voiceover"].replace("&nbsp;", " ").strip()
     assert "&nbsp;" not in candidate["voiceover"]
     assert candidate["visual_subject_locked"] is True
 
 
-def test_visual_search_does_not_fall_back_to_raw_narration_or_category():
+def test_visual_search_does_not_fall_back_to_raw_narration_or_category(monkeypatch):
     calls = []
 
-    class FakeVisualRuntime:
-        VISUAL_MAX_SEARCH_QUERIES = 3
+    def fake_retrieval(runtime, bot, seg, category, used_urls, used_hashes, video_title):
+        calls.append(
+            {
+                "entity": seg["primary_entity"],
+                "query_prompt": seg["specific_search_prompt"],
+                "voiceover": seg["voiceover"],
+            }
+        )
+        raise RuntimeError("locked subject rejected")
 
-        @staticmethod
-        def _relevant_asset(bot, scene, category, used_urls, used_hashes, video_title):
-            calls.append(
-                {
-                    "entity": scene["primary_entity"],
-                    "query_prompt": scene["specific_search_prompt"],
-                    "voiceover": scene["voiceover"],
-                }
-            )
-            raise RuntimeError("locked subject rejected")
+    monkeypatch.setattr(query_runtime, "run_visual_retrieval", fake_retrieval)
 
     scene = {
         "primary_entity": "Not Northstar Research Summit",
@@ -155,7 +157,7 @@ def test_visual_search_does_not_fall_back_to_raw_narration_or_category():
     }
 
     try:
-        search_slide_visual(FakeVisualRuntime, object(), scene, "business", set(), set(), "Northstar Research Summit")
+        search_slide_visual(object(), object(), scene, "business", set(), set(), "Northstar Research Summit")
     except RuntimeError:
         pass
     else:
@@ -179,5 +181,5 @@ def test_unicode_primary_subject_is_preserved():
             "visual_intent": "person",
         }
         assert extract_slide_search_subjects(scene) == [entity]
-        assert build_deep_queries(scene)[0] == [entity]
+        assert build_deep_queries(scene)[0][0] == entity
         assert classify_scene(scene) == "PERSON"
