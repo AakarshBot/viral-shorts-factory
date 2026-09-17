@@ -18,6 +18,11 @@ from visual_retrieval_runtime import _source_plan, run_visual_retrieval
 _INVALID = {"", "none", "unknown", "na", "n/a"}
 _MAX_QUERY_BUDGET = 5
 _SEARCH_ACTIONS = {"lift", "lifts", "lifted", "lifting", "celebrate", "celebrates", "celebrated", "celebrating", "discuss", "discusses", "discussed", "discussing", "appear", "appears", "appeared", "show", "shows", "showed"}
+_ROLE_LABELS = {
+    "person", "organization", "organisation", "company", "corporation", "product", "device",
+    "location", "geography", "concept", "process", "event", "document", "quote", "quotation",
+    "statistic", "comparison", "timeline",
+}
 
 
 def _simple_context_terms(text: str, anchor: str) -> list[str]:
@@ -35,6 +40,7 @@ def _simple_context_terms(text: str, anchor: str) -> list[str]:
             or token_key in AUXILIARY_WORDS
             or token_key in _SEARCH_ACTIONS
             or token_key in VISUAL_DESCRIPTORS
+            or token_key in _ROLE_LABELS
         ):
             continue
         if token_key not in {key(item) for item in terms}:
