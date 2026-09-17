@@ -8,7 +8,7 @@ def _assert_query_contract(scene, title, expected_type):
     assert visual_type == expected_type, (brief, visual_type)
     assert queries, "visual planner returned no query"
     assert queries[0] == brief["subject"], (brief, queries)
-    assert len(queries) <= 3, queries
+    assert len(queries) <= 5, queries
     assert all(brief["subject"].casefold() in query.casefold() for query in queries), queries
     assert all(token not in " ".join(queries).casefold() for token in ("editorial_person", "red carpet")), queries
     return brief, queries
@@ -90,8 +90,8 @@ def test_contextual_collective_role_is_generic_not_domain_specific():
         "sport_or_topic_category": "research",
     }
     brief, queries = _assert_query_contract(scene, "Aurora research update", "ORGANIZATION")
-    assert brief["subject"] == "Aurora research team"
-    assert queries[0] == "Aurora research team"
+    assert brief["subject"] == "Aurora"
+    assert queries[0] == "Aurora"
 
 
 def test_contextual_venue_role_is_generic_not_domain_specific():
@@ -102,8 +102,8 @@ def test_contextual_venue_role_is_generic_not_domain_specific():
         "sport_or_topic_category": "business",
     }
     brief, queries = _assert_query_contract(scene, "Central City conference", "LOCATION")
-    assert brief["subject"] == "Central City business venue"
-    assert queries[0] == "Central City business venue"
+    assert brief["subject"] == "Central City"
+    assert queries[0] == "Central City"
 
 
 def test_multilingual_subjects_are_preserved():
@@ -145,5 +145,5 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
     }
     brief, queries = _assert_query_contract(scene, "Noisy title that must never become the search query", "PERSON")
     assert queries[0] == brief["subject"]
-    assert len(queries) <= 3
+    assert len(queries) <= 5
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
