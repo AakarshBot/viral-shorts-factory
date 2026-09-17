@@ -17,6 +17,7 @@ from visual_retrieval_runtime import _source_plan, run_visual_retrieval
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
 _MAX_QUERY_BUDGET = 5
+_SEARCH_ACTIONS = {"lift", "lifts", "lifted", "lifting", "celebrate", "celebrates", "celebrated", "celebrating", "discuss", "discusses", "discussed", "discussing", "appear", "appears", "appeared", "show", "shows", "showed"}
 
 
 def _simple_context_terms(text: str, anchor: str) -> list[str]:
@@ -32,6 +33,7 @@ def _simple_context_terms(text: str, anchor: str) -> list[str]:
             or token_key in STOPWORDS
             or token_key in DISCOURSE_PREFIXES
             or token_key in AUXILIARY_WORDS
+            or token_key in _SEARCH_ACTIONS
             or token_key in VISUAL_DESCRIPTORS
         ):
             continue
@@ -41,25 +43,31 @@ def _simple_context_terms(text: str, anchor: str) -> list[str]:
 
 
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
-    """Build a small recall-first ladder: exact identity, then simple context variants."""
+    """Search the simplest factual identity first, then a few simple context variants."""
     anchor = clean_text(
         seg.get("factual_primary_entity")
         or resolution.get("factual_entity")
-        or resolution.get("subject")
         or seg.get("primary_entity")
+        or resolution.get("subject")
     )
     if not anchor:
         return []
 
     queries = [anchor]
-    context = clean_text(
-        seg.get("factual_search_prompt")
-        or seg.get("specific_search_prompt")
-        or seg.get("factual_visual_intent")
-        or seg.get("visual_intent")
-        or seg.get("visual_context")
+    contexts = (
+        seg.get("factual_visual_intent"),
+        seg.get("visual_intent"),
+        seg.get("factual_search_prompt"),
+        seg.get("specific_search_prompt"),
+        seg.get("visual_context"),
     )
-    terms = _simple_context_terms(context, anchor)
+    terms = []
+    for context in contexts:
+        candidate_terms = _simple_context_terms(clean_text(context), anchor)
+        if candidate_terms:
+            terms = candidate_terms
+            break
+
     if not terms:
         return queries
 
