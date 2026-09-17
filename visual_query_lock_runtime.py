@@ -3,27 +3,25 @@
 The production contract is now:
     identify -> lock -> exact one-query search -> one returned image -> QA -> use/fail
 
-This module remains as a compatibility guard for older runtime imports, but it
-now also hard-locks the retrieval runtime itself so legacy fallback ladders
-cannot reintroduce query noise or best-available image selection.
+This module is a compatibility guard for older runtime imports. The authoritative
+planner lives in visual_strategy_runtime and is never replaced by this installer.
 """
 from __future__ import annotations
 
 import hashlib
-import html
 import io
 import os
 import re
 
 from PIL import Image
 
-_VERSION = "2026-09-17-v12-single-search-single-image"
+_VERSION = "2026-09-17-v13-authoritative-single-search"
 _INSTALLED = False
 _INVALID = {"none", "unknown", "na", "n/a"}
 
 
 def _clean(value: object) -> str:
-    text = html.unescape(str(value or "")).replace("\u200b", " ")
+    text = str(value or "").replace("\u200b", " ")
     text = re.sub(r"\s+", " ", text)
     return text.strip(" ,.-:;|\"'")
 
@@ -48,18 +46,31 @@ def install() -> bool:
         print(f"   [Visual Query Lock] Could not install: {exc}", flush=True)
         return False
 
+    authoritative = getattr(strategy, "build_deep_queries", None)
+
     def exact_queries(scene, video_title="", visual_type=None):
+        """Compatibility wrapper that always returns the locked subject only."""
         subject = _primary(scene)
+        if not subject:
+            return [], visual_type or "GENERAL_CONTEXT"
         resolved_type = visual_type
         if not resolved_type:
             try:
-                resolved_type = planner.classify_scene(scene or {}, str((scene or {}).get("sport_or_topic_category", "")))
+                resolved_type = planner.classify_scene(
+                    scene or {}, str((scene or {}).get("sport_or_topic_category", ""))
+                )
             except Exception:
                 resolved_type = "GENERAL_CONTEXT"
-        return ([subject] if subject else []), resolved_type
+        return [subject], resolved_type
 
-    strategy.build_deep_queries = exact_queries
-    planner.build_deep_queries = exact_queries
+    # visual_strategy_runtime owns the real planner. Never replace it. For any
+    # legacy caller that imported build_deep_queries directly from the old
+    # planner, point that planner at the same authoritative function.
+    if callable(authoritative) and getattr(authoritative, "_authoritative_locked_subject_planner", False):
+        planner.build_deep_queries = authoritative
+    else:
+        planner.build_deep_queries = exact_queries
+
     runtime._build_search_variants = lambda scene, video_title="": exact_queries(scene, video_title)
     runtime.VISUAL_MAX_SEARCH_QUERIES = 1
     runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS = 1
