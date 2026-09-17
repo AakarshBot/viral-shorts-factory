@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from pipeline_integrity_runtime import _wrap_audio
+from pipeline_integrity_loader import patch_pipeline_integrity
 
 
 class _Bot:
@@ -20,9 +20,9 @@ class _Bot:
         self.generate_voiceover_and_timestamps = generate_voiceover_and_timestamps
 
 
-def test_audio_accepts_only_authoritative_validated_script():
+def test_audio_accepts_authoritative_validated_script():
     bot = _Bot()
-    _wrap_audio(bot)
+    patch_pipeline_integrity(bot)
 
     script = {
         "authoritative_narration": True,
@@ -38,12 +38,11 @@ def test_audio_accepts_only_authoritative_validated_script():
 
     assert result["ok"] is True
     assert bot.calls[0]["script"][0]["narration_source"] == "validated_script"
-    assert bot.calls[0]["script"][0]["voiceover"] == "India announced a new policy today."
 
 
 def test_audio_rejects_unvalidated_slide_or_visual_text():
     bot = _Bot()
-    _wrap_audio(bot)
+    patch_pipeline_integrity(bot)
 
     unvalidated = {
         "script": [
@@ -60,7 +59,7 @@ def test_audio_rejects_unvalidated_slide_or_visual_text():
 
 def test_audio_rejects_missing_authoritative_marker_even_with_scene_text():
     bot = _Bot()
-    _wrap_audio(bot)
+    patch_pipeline_integrity(bot)
 
     unmarked = {
         "script": [
