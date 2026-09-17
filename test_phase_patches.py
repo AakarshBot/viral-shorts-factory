@@ -69,58 +69,155 @@ def _clean_subject(value: Any) -> str:
     return _clean_search_subject(value)
 
 
-def _scene_phrase(seg: dict[str, Any]) -> str:
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", str(seg.get("voiceover", "")))
+def _scene_phrase(seg: dict[str, Any], limit: int = 6) -> str:
+    """Extract useful visual words from one narration segment, not sentence debris."""
+    raw = str(seg.get("voiceover", ""))
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", raw)
     stop = {
         "the", "and", "for", "with", "this", "that", "from", "into", "after", "before", "about",
         "they", "their", "there", "here", "when", "what", "which", "where", "while", "have", "has",
         "had", "will", "would", "could", "should", "just", "been", "were", "was", "are", "our",
-        "you", "your", "today", "is", "a", "an", "to", "of", "in", "on", "as", "it", "its",
+        "you", "your", "today", "is", "a", "an", "to", "of", "in", "on", "as", "it", "its", "these", "those",
+        "he", "she", "his", "her", "them", "than", "then", "also", "can", "may", "might", "more", "most",
     }
     sentence_cues = {
         "every", "each", "because", "given", "since", "but", "or", "so", "if", "although", "though",
         "we", "try", "tried", "tries", "get", "gets", "got", "getting", "happen", "happens", "happened",
         "year", "years", "season", "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't",
     }
-    meaningful = []
+    meaningful: list[str] = []
     for word in words:
         lower = word.lower().strip(".,!?;:")
         if lower in sentence_cues and meaningful:
             break
         if lower not in stop:
             meaningful.append(word)
-        if len(meaningful) >= 5:
+        if len(meaningful) >= limit:
             break
-    return " ".join(meaningful).strip()
+    return " ".join(meaningful).strip(" ,.-")
 
 
-def _three_visual_terms(seg: dict[str, Any], video_title: str) -> list[str]:
-    """Produce exactly three compact diagnostic search terms without calling an API."""
+def _content_chunks(seg: dict[str, Any], video_title: str, entity: str) -> list[str]:
+    """Build short, searchable scene phrases from prompt, narration and title."""
+    entity_tokens = {
+        t.lower() for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", entity)
+    }
+    sources = [
+        str(seg.get("specific_search_prompt", "")),
+        _scene_phrase(seg, limit=8),
+        str(video_title or ""),
+    ]
+    stop = {
+        "editorial", "person", "organization", "organisation", "event", "location", "photo", "image",
+        "news_event", "news", "real", "high", "resolution", "official", "press", "story", "today",
+        "the", "and", "for", "with", "this", "that", "from", "into", "after", "before", "about",
+        "every", "each", "because", "given", "since", "but", "or", "so", "if", "although", "though",
+    }
+    chunks: list[str] = []
+    for source in sources:
+        tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9'/-]*", source)
+        useful: list[str] = []
+        for token in tokens:
+            low = token.lower().strip(".,!?;:")
+            if low in entity_tokens or low in stop:
+                continue
+            if len(low) <= 1:
+                continue
+            useful.append(token)
+        if useful:
+            for start in range(0, len(useful), 3):
+                chunk = " ".join(useful[start:start + 4]).strip()
+                if len(chunk.split()) >= 2:
+                    clean = re.sub(r"\s+", " ", chunk).strip(" ,.-")
+                    if clean and clean.lower() not in {x.lower() for x in chunks}:
+                        chunks.append(clean)
+                if len(chunks) >= 6:
+                    return chunks
+    return chunks
+
+
+def _three_visual_terms(seg: dict[str, Any], video_title: str, used_terms: set[str] | None = None) -> list[str]:
+    """Produce three distinct, scene-specific diagnostic search terms without an API call."""
     entity = _clean_subject(seg.get("primary_entity", ""))
-    phrase = _scene_phrase(seg)
     title = _clean_subject(video_title)
+    visual_type = _clean_subject(seg.get("visual_type", ""))
     intent = _clean_subject(seg.get("visual_intent", ""))
+    chunks = _content_chunks(seg, video_title, entity)
+    used = used_terms if used_terms is not None else set()
 
-    def add(parts: list[str], terms: list[str]) -> None:
-        clean = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip(" ,.-")
-        if clean and clean.lower() not in {t.lower() for t in terms}:
-            terms.append(clean)
+    modifiers = {
+        "PERSON": "portrait",
+        "ORGANIZATION": "headquarters",
+        "EVENT": "event photo",
+        "LOCATION": "location photo",
+        "PRODUCT": "product photo",
+        "STATISTIC": "chart",
+        "COMPARISON": "comparison",
+        "TIMELINE": "historical photo",
+        "PROCESS": "diagram",
+        "QUOTE": "press conference",
+        "DOCUMENT": "official document",
+        "CONCEPT": "concept illustration",
+    }
 
     terms: list[str] = []
-    # Keep the entity itself as the first term whenever possible.
-    add([entity], terms)
-    add([entity, phrase], terms)
-    add([entity, intent or title], terms)
 
-    # If the scene does not have a usable entity, use compact title/phrase terms
-    # rather than dumping the whole narration sentence into the search field.
+    def add(parts: list[str]) -> None:
+        clean = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip(" ,.-")
+        key = clean.lower()
+        if not clean or key in {t.lower() for t in terms} or key in used:
+            return
+        # Keep queries useful for web image search: compact, scene-specific, not sentence-length.
+        if len(clean.split()) > 8:
+            clean = " ".join(clean.split()[:8])
+            key = clean.lower()
+        terms.append(clean)
+        used.add(key)
+
+    if entity:
+        for chunk in chunks:
+            add([entity, chunk])
+            if len(terms) >= 3:
+                break
+        if len(terms) < 3:
+            add([entity, intent or modifiers.get(visual_type, "editorial photo")])
+        if len(terms) < 3:
+            add([entity, title])
+        if len(terms) < 3:
+            add([entity, modifiers.get(visual_type, "editorial photo")])
+    else:
+        for chunk in chunks:
+            add([chunk])
+            if len(terms) >= 3:
+                break
+        if len(terms) < 3:
+            add([title])
+        if len(terms) < 3:
+            add([intent or modifiers.get(visual_type, "editorial photo")])
+
+    # A diagnostic should never display three identical queries. Use the most
+    # specific available fallback, then a clearly different visual modifier.
     if not terms:
-        add([phrase], terms)
-    if not terms:
-        add([title], terms)
-    while terms and len(terms) < 3:
-        terms.append(terms[-1])
-    return terms[:3] if terms else ["selected story", "news", "documentary"]
+        terms = [title or "selected story"]
+    fallback_pool = [
+        [entity, modifiers.get(visual_type, "editorial photo")],
+        [entity, "press photo"],
+        [entity, "documentary photo"],
+        [title, "editorial photo"],
+    ]
+    for parts in fallback_pool:
+        if len(terms) >= 3:
+            break
+        add(parts)
+
+    while len(terms) < 3:
+        extra = f"{entity or title or 'selected story'} editorial context"
+        if extra.lower() not in {t.lower() for t in terms}:
+            terms.append(extra)
+        else:
+            terms.append(terms[-1])
+
+    return terms[:3]
 
 
 def _offline_script_test(bot) -> None:
@@ -187,8 +284,9 @@ def _visual_test_limited(bot) -> None:
         video_title = str(script.get("title", "") or (script.get("titles") or [""])[0])
         st.markdown("**Planned search terms — every slide**")
         planned: list[list[str]] = []
+        used_terms: set[str] = set()
         for index, scene in enumerate(scenes, 1):
-            terms = _three_visual_terms(scene if isinstance(scene, dict) else {}, video_title)
+            terms = _three_visual_terms(scene if isinstance(scene, dict) else {}, video_title, used_terms)
             planned.append(terms)
             st.write(f"Slide {index}: `1.` {terms[0]}  ·  `2.` {terms[1]}  ·  `3.` {terms[2]}")
 
@@ -329,173 +427,67 @@ def _local_topic_candidates(bot) -> None:
         st.session_state.tp_candidates = candidates
 
         labels = [f"#{item['discovery_rank']} — {item['title']}" for item in candidates]
-        picked = st.selectbox("Test story", labels, key="tp_story_choice")
-        item = candidates[labels.index(picked)]
-        st.info(f"**Source:** {item['source_label']}\n\n**Reason:** {item['discovery_reason']}")
-        if st.button("✅ Use this topic for the next test", key="tp_use_story"):
-            st.session_state.tp_story = dict(item)
-            st.success("Topic locked into the test workspace. Zero discovery API calls were used.")
+        selected = st.radio("Choose a local test story", labels, key="tp_selected_candidate")
+        selected_index = labels.index(selected) if selected in labels else 0
+        st.session_state.tp_story = candidates[selected_index]
+
+        st.success("Topic diagnostic uses local candidates only — no discovery API call.")
 
 
-def _latest_output_audio(bot) -> list[str]:
-    """Find the newest usable voiceover set from the local output folder."""
-    base = Path(getattr(bot, "ASSETS_DIR", "output"))
-    if not base.exists():
-        return []
-    candidates = []
-    for path in base.rglob("voiceover_*.mp3"):
-        try:
-            if path.is_file() and path.stat().st_size > 500:
-                candidates.append(path)
-        except OSError:
-            continue
-    if not candidates:
-        for suffix in ("*.wav", "*.m4a", "*.mp4"):
-            for path in base.rglob(suffix):
-                if path.name.lower().startswith("voiceover_"):
-                    try:
-                        if path.is_file() and path.stat().st_size > 500:
-                            candidates.append(path)
-                    except OSError:
-                        continue
-    groups: dict[str, list[Path]] = {}
-    for path in candidates:
-        groups.setdefault(str(path.parent), []).append(path)
-    if not groups:
-        return []
-    latest_group = max(groups.values(), key=lambda paths: max(p.stat().st_mtime for p in paths))
+def _audio_test_reuse(bot) -> None:
+    """Reuse the newest locally available audio/timing files; never call a voice API."""
+    with st.expander("3. Audio — reuse latest local audio", expanded=True):
+        candidates = []
+        roots = [Path(getattr(bot, "OUTPUT_DIR", "")), Path(getattr(bot, "BASE_DIR", "")) / "output"]
+        for root in roots:
+            if not root or not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in {".mp3", ".wav", ".aac", ".m4a"}:
+                    candidates.append(path)
+        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-    def scene_num(path: Path) -> int:
-        match = re.search(r"voiceover_(\d+)", path.stem, re.I)
-        return int(match.group(1)) if match else 9999
-
-    return [str(p) for p in sorted(latest_group, key=scene_num)]
+        audio_path = str(candidates[0]) if candidates else ""
+        timing = ""
+        if audio_path:
+            stem = Path(audio_path).with_suffix("")
+            for ext in (".json", ".txt"):
+                probe = Path(str(stem) + "_timings" + ext)
+                if probe.is_file():
+                    timing = str(probe)
+                    break
+        if audio_path:
+            st.session_state.tp_audio = ([audio_path], timing)
+            st.success(f"Reused local audio: {audio_path}")
+        else:
+            st.session_state.tp_audio = None
+            st.warning("No previous audio file was found locally.")
 
 
-def _audio_duration(path: str) -> float:
-    try:
-        completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
-        return max(0.0, float((completed.stdout or "").strip()))
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return 0.0
+def _patch_test_runtime(bot) -> None:
+    """Install only the Test Phase runtime patches for the current dashboard run."""
+    current = getattr(bot, "write_script", None)
+    if current and not getattr(current, "_test_phase_patched", False):
+        original_write = current
+
+        def offline_write_script(story_data, language_cfg, genre_key, conn, format_mode):
+            return script_guard_runtime.source_only_fallback(story_data, language_cfg, genre_key, format_mode)
+
+        offline_write_script._test_phase_patched = True
+        bot.write_script = offline_write_script
+        bot.run_robot.__globals__["write_script"] = offline_write_script
+        bot._test_phase_original_write_script = original_write
+
+    current_visual = getattr(bot, "process_visuals_async", None)
+    if current_visual and not getattr(current_visual, "_test_phase_patched", False):
+        bot._test_phase_original_visuals = current_visual
 
 
-def _approximate_timings(text: str, duration: float) -> list[dict[str, Any]]:
-    """Build local-only word timings for reused audio when the previous run did not persist timings."""
-    words = re.findall(r"\S+", str(text or "").strip())
-    if not words or duration <= 0:
-        return []
-    slot = duration / len(words)
-    return [
-        {"word": word, "start": round(i * slot, 3), "end": round((i + 1) * slot, 3)}
-        for i, word in enumerate(words)
-    ]
-
-
-def _reuse_previous_audio(bot) -> None:
-    """Load the latest local voiceover set; never call the voice provider."""
-    paths = _latest_output_audio(bot)
-    if not paths:
-        st.error("No previous-run voiceover files were found in the output folder. The audio test will not make an API call as a fallback.")
-        return
-
-    script = st.session_state.get("tp_script") or {}
-    scenes = script.get("script", []) if isinstance(script, dict) else []
-    timings: list[list[dict[str, Any]]] = []
-    usable_paths = []
-    for index, path in enumerate(paths):
-        duration = _audio_duration(path)
-        text = ""
-        if isinstance(scenes, list) and index < len(scenes) and isinstance(scenes[index], dict):
-            text = str(scenes[index].get("voiceover", ""))
-        local_timings = _approximate_timings(text, duration)
-        if duration <= 0:
-            continue
-        usable_paths.append(path)
-        timings.append(local_timings)
-
-    if not usable_paths:
-        st.error("Previous-run audio files were found, but none had a readable duration.")
-        return
-
-    st.session_state.tp_audio = (usable_paths, timings)
-    st.session_state.tp_audio_source = "Previous successful run — local output files"
-    st.success(f"Reused {len(usable_paths)} local audio track(s). Zero audio API calls were made.")
-    for index, path in enumerate(usable_paths, 1):
-        st.audio(path, format="audio/mp3")
-        st.caption(f"Scene {index}: {path}")
-
-
-def _audio_test_progress(bot) -> None:
-    with st.expander("3. Audio — reuse previous run / no-API test", expanded=True):
-        script = st.session_state.get("tp_script")
-        if not script:
-            st.warning("Generate a script first.")
-            return
-        st.info("The test does **not** call Edge-TTS. It reuses the latest voiceover files already present in the local output folder.")
-        if st.button("▶ Load previous-run audio", key="tp_run_audio", type="primary", use_container_width=True):
-            _run_with_progress("Loading previous-run audio", lambda: _reuse_previous_audio(bot))
-        audio = st.session_state.get("tp_audio")
-        if audio is None:
-            st.caption("Nothing has been loaded yet.")
-            return
-        paths, timings = audio
-        st.success(f"Audio test ready: {len(paths)} reused track(s), zero audio API calls.")
-        st.caption(f"Source: {st.session_state.get('tp_audio_source', 'Local output folder')}")
-        st.caption("Word timings are local diagnostic timings derived from the reused audio duration; no voice service was contacted.")
-
-
-def _metadata_test_progress(bot) -> None:
-    restores = []
-    for owner, attr, label in (
-        (test_phase_runtime, "_build_clean_metadata", "Metadata builder test"),
-        (test_phase_runtime, "build_pinned_comment", "Pinned-comment builder test"),
-    ):
-        if callable(getattr(owner, attr, None)):
-            restores.append(_wrap_for_progress(owner, attr, label))
-    try:
-        return test_phase_runtime._original_metadata_test(bot)
-    finally:
-        for restore in restores:
-            restore()
-
-
-def _upload_test_progress(bot) -> None:
-    restores = []
-    for owner, attr, label in (
-        (test_phase_runtime, "validate_final_video", "Upload video validation"),
-        (test_phase_runtime, "validate_final_upload_metadata", "Upload metadata validation"),
-    ):
-        if callable(getattr(owner, attr, None)):
-            restores.append(_wrap_for_progress(owner, attr, label))
-    controller_cls = getattr(test_phase_runtime, "WorkflowController", None)
-    if controller_cls is not None and callable(getattr(controller_cls, "upload_manual", None)):
-        restores.append(_wrap_for_progress(controller_cls, "upload_manual", "Real upload test"))
-    try:
-        return test_phase_runtime._original_upload_test(bot)
-    finally:
-        for restore in restores:
-            restore()
-
-
-def install_test_phase_patches() -> None:
-    """Install Test Phase-only UI corrections once."""
-    if getattr(test_phase_runtime, "_enhanced_test_phase_patches_installed", False):
-        return
-
-    test_phase_runtime._original_topic_test = test_phase_runtime._topic_test
-    test_phase_runtime._original_audio_test = test_phase_runtime._audio_test
-    test_phase_runtime._original_metadata_test = test_phase_runtime._metadata_test
-    test_phase_runtime._original_upload_test = test_phase_runtime._upload_test
-
-    test_phase_runtime._topic_test = _local_topic_candidates
-    test_phase_runtime._audio_test = _audio_test_progress
-    test_phase_runtime._script_test = _offline_script_test
-    test_phase_runtime._visual_test = _visual_test_limited
-    test_phase_runtime._render_test = _render_test
-    test_phase_runtime._metadata_test = _metadata_test_progress
-    test_phase_runtime._upload_test = _upload_test_progress
-    test_phase_runtime._enhanced_test_phase_patches_installed = True
+def render_test_phase(bot) -> None:
+    """Render the complete offline/one-fetch Test Phase UI."""
+    _patch_test_runtime(bot)
+    _local_topic_candidates(bot)
+    _offline_script_test(bot)
+    _audio_test_reuse(bot)
+    _visual_test_limited(bot)
+    _render_test(bot)
