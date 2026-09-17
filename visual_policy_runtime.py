@@ -195,7 +195,9 @@ def install_visual_card_policy(bot=None):
 
         original_hook = namespace.get("render_hook_card")
         if callable(original_hook) and not getattr(original_hook, "_qc_hook_passthrough", False):
-            def render_hook_card_no_card(bg_img, hook_text, width=1080, height=1920, font_choice=None):
+            # This legacy global is ultimately called through factory_runtime's
+            # runtime wrapper, which supplies bot + script_data as well.
+            def render_hook_card_no_card(_bot, bg_img, hook_text, width=1080, height=1920, font_choice=None, script_data=None):
                 return bg_img.convert("RGBA")
             render_hook_card_no_card._qc_hook_passthrough = True
             namespace["render_hook_card"] = render_hook_card_no_card
