@@ -135,3 +135,39 @@ def test_collect_channel_statistics_reads_recorded_vault_data(tmp_path):
     assert stats["avg_view_percentage"] == 60.0
     assert stats["avg_ctr"] == 3.5
     assert {row["format"] for row in stats["by_format"]} == {"regular", "top5"}
+
+
+def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
+    import story_ranker
+
+    class Bot:
+        CONTENT_CATEGORIES = {"technology": {"gnews_q": "technology news"}}
+        GNEWS_API_KEY = ""
+
+    topics = [
+        {
+            "title": f"Technology story {index} about a new launch",
+            "url": f"https://reuters.example/story-{index}",
+            "source": "Reuters",
+            "publishedAt": "2026-09-18T00:00:00+00:00",
+            "description": "A current technology development with verified reporting.",
+            "genre": "technology",
+        }
+        for index in range(1, 13)
+    ]
+
+    monkeypatch.setattr(story_ranker, "_query_variants", lambda *_args, **_kwargs: ["technology"])
+    monkeypatch.setattr(story_ranker, "_gnews_items", lambda *_args, **_kwargs: list(topics))
+    monkeypatch.setattr(story_ranker, "_rss_items", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(story_ranker, "_reddit_items", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(story_ranker, "_india_trend_terms", lambda: tuple())
+
+    pool = __import__("dashboard_runtime").discover_ranked_topics(
+        Bot(),
+        {"format_mode": "regular", "category": "technology", "language": "english"},
+        conn=None,
+        max_candidates=12,
+    )
+
+    assert len(pool) == 12
+    assert [item["discovery_rank"] for item in pool] == list(range(1, 13))
