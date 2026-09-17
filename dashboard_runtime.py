@@ -31,10 +31,11 @@ class DashboardWorkflowController(WorkflowController):
         self._last_dashboard_message = ""
 
     def reset(self):
-        # Wake an active production thread before clearing the gate state.
-        if getattr(self, "state", None) is not None and self.state.thread_alive and self.state.stage == "visual_approval":
-            self._visual_rejected = True
-            self._visual_approval_event.set()
+        # Do not reset a live worker out from under its synchronization state.
+        # The explicit Reject button is the supported way to stop a run paused
+        # at visual review; Reset is safe only after the worker has exited.
+        if getattr(self, "state", None) is not None and self.state.thread_alive:
+            return
         self._visual_approval_event.clear()
         self._visual_approved = False
         self._visual_rejected = False
