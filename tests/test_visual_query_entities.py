@@ -26,6 +26,30 @@ def test_person_subject_is_preserved_without_prompt_padding():
     )
 
 
+def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks():
+    scene = {
+        "primary_entity": "Indian athletes",
+        "voiceover": "Indian athletes arrived in Nagoya for the Asian Games.",
+        "specific_search_prompt": "Indian athletes Nagoya Asian Games arrival",
+        "visual_intent": "event",
+    }
+
+    resolution = resolve_subject(scene, "Asian Games story")
+    assert resolution["subject"] == "Indian athletes Nagoya Asian Games arrival"
+    assert resolution["visual_type"] == "EVENT"
+
+    queries, visual_type, _ = build_query_ladder(scene, "Asian Games story")
+    assert visual_type == "EVENT"
+    assert queries == [
+        "Indian athletes Nagoya Asian Games arrival",
+        "Indian athletes Nagoya Asian Games",
+        "Indian athletes",
+    ]
+    assert all("sports" not in q.lower() for q in queries)
+    assert all("cricket" not in q.lower() for q in queries)
+    assert all("event" not in q.lower().split() for q in queries)
+
+
 def test_malformed_leading_negation_is_removed_and_context_grounded():
     scene = {
         "primary_entity": "Not Northstar Research Summit",
