@@ -66,14 +66,20 @@ def build_scene_visual_brief(scene, video_title="", category=""):
     if category:
         prepared["sport_or_topic_category"] = category
     resolution = resolve_subject(prepared, video_title)
+    factual_entity = clean_text(
+        prepared.get("factual_primary_entity") or resolution.get("factual_entity", "")
+    )
+    visual_subject = clean_text(
+        prepared.get("visual_search_subject") or resolution.get("subject", "")
+    )
     return {
-        "subject": resolution["factual_entity"],
-        "visual_subject": resolution["subject"],
+        "subject": factual_entity,
+        "visual_subject": visual_subject,
         "visual_type": resolution["visual_type"],
         "scene_action": "",
         "scene_context": clean_text(prepared.get("visual_context", "")),
         "scene_index": clean_text(prepared.get("scene_index", prepared.get("scene_number", ""))),
-        "factual_entity": resolution["factual_entity"],
+        "factual_entity": factual_entity,
         "base_type": "GENERAL_CONTEXT",
         "scene_role": resolution["visual_type"],
         "domain": _scene_category(prepared, category),
