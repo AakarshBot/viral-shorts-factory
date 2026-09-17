@@ -85,28 +85,60 @@ jobs:
           bcci = {'primary_entity': 'BCCI', 'visual_intent': 'organization', 'voiceover': 'BCCI announced the decision.', 'sport_or_topic_category': 'cricket'}
           delhi = {'primary_entity': 'Delhi', 'visual_intent': 'location', 'voiceover': 'Delhi hosted the event.', 'sport_or_topic_category': 'news'}
           concept = {'primary_entity': 'quantum computing', 'visual_intent': 'technical process', 'voiceover': 'Quantum computers use quantum states to process information.', 'sport_or_topic_category': 'technology'}
+          india = {'primary_entity': 'India', 'visual_intent': 'team players', 'voiceover': 'India will face Afghanistan in the T20 International series in New Delhi.', 'sport_or_topic_category': 'cricket'}
+          afghanistan = {'primary_entity': 'Afghanistan', 'visual_intent': 'team players', 'voiceover': 'Afghanistan will face India in the T20 International series in New Delhi.', 'sport_or_topic_category': 'cricket'}
+          venue = {'primary_entity': 'New Delhi', 'visual_intent': 'stadium venue', 'voiceover': 'The final match will be played at the stadium in New Delhi.', 'sport_or_topic_category': 'cricket'}
 
           assert visual_strategy_runtime.classify_scene(person) == 'PERSON'
           assert visual_strategy_runtime.classify_scene(event) == 'EVENT'
           assert visual_strategy_runtime.classify_scene(bcci) == 'ORGANIZATION'
           assert visual_strategy_runtime.classify_scene(delhi) == 'LOCATION'
           assert visual_strategy_runtime.classify_scene(concept) in {'PROCESS', 'CONCEPT'}
+          assert visual_strategy_runtime.classify_scene(india) == 'ORGANIZATION'
+          assert visual_strategy_runtime.classify_scene(afghanistan) == 'ORGANIZATION'
+          assert visual_strategy_runtime.classify_scene(venue) == 'LOCATION'
 
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
-          assert queries == ['Lionel Messi'], queries
+          assert queries[0] == 'Lionel Messi', queries
+          assert len(queries) <= 3, queries
+          assert all('Lionel Messi' in q for q in queries), queries
 
           event_queries, event_type = visual_strategy_runtime.build_deep_queries(event, 'Argentina vs France')
           assert event_type == 'EVENT'
-          assert event_queries == ['2022 FIFA World Cup Final'], event_queries
+          assert event_queries[0] == '2022 FIFA World Cup Final', event_queries
+          assert len(event_queries) <= 3, event_queries
+          assert all('2022 FIFA World Cup Final' in q for q in event_queries), event_queries
 
           bcci_queries, bcci_type = visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')
           assert bcci_type == 'ORGANIZATION'
-          assert bcci_queries == ['BCCI'], bcci_queries
+          assert bcci_queries[0] == 'BCCI', bcci_queries
+          assert len(bcci_queries) <= 3, bcci_queries
+          assert all('BCCI' in q for q in bcci_queries), bcci_queries
 
           delhi_queries, delhi_type = visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')
           assert delhi_type == 'LOCATION'
-          assert delhi_queries == ['Delhi'], delhi_queries
+          assert delhi_queries[0] == 'Delhi', delhi_queries
+          assert len(delhi_queries) <= 3, delhi_queries
+          assert all('Delhi' in q for q in delhi_queries), delhi_queries
+
+          india_queries, india_type = visual_strategy_runtime.build_deep_queries(india, 'India vs Afghanistan in New Delhi T20 International')
+          assert india_type == 'ORGANIZATION'
+          assert india_queries[0] == 'India cricket team', india_queries
+          assert len(india_queries) <= 3, india_queries
+          assert all('India cricket team' in q for q in india_queries), india_queries
+          assert all('New Delhi cricket team' not in q for q in india_queries), india_queries
+
+          afghanistan_queries, afghanistan_type = visual_strategy_runtime.build_deep_queries(afghanistan, 'India vs Afghanistan in New Delhi T20 International')
+          assert afghanistan_type == 'ORGANIZATION'
+          assert afghanistan_queries[0] == 'Afghanistan cricket team', afghanistan_queries
+          assert len(afghanistan_queries) <= 3, afghanistan_queries
+          assert all('Afghanistan cricket team' in q for q in afghanistan_queries), afghanistan_queries
+
+          venue_queries, venue_type = visual_strategy_runtime.build_deep_queries(venue, 'India vs Afghanistan in New Delhi T20 International')
+          assert venue_type == 'LOCATION'
+          assert venue_queries[0] == 'New Delhi cricket stadium', venue_queries
+          assert all('New Delhi cricket team' not in q for q in venue_queries), venue_queries
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Sachin Tendulkar scored 143 in the match.') is False
@@ -160,8 +192,6 @@ jobs:
           sys.excepthook = sys.__excepthook__
           from diagnostics_runtime import run_offline_diagnostics
           report = run_offline_diagnostics()
-          # ultimate_bot installs an interactive exception hook during imports;
-          # restore CI-safe behaviour before the final assertion can fail.
           sys.excepthook = sys.__excepthook__
           for item in report['results']:
               print(f"[{item['status']}] {item['name']}: {item['detail']}")
