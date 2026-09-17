@@ -1,10 +1,10 @@
 """Generic semantic guard for visual subjects and image-search queries.
 
 This layer is intentionally domain-neutral. It cleans generated scene metadata,
-removes discourse/HTML noise, grounds candidate entities against the scene
-when the candidate is malformed, and derives concise visual phrases without
-turning clean entities into sentences. It never uses sport-, country-,
-celebrity-, product- or genre-specific entity tables.
+removes discourse/HTML noise, grounds candidate entities against the scene,
+and derives concise visual phrases without turning clean entities into
+sentences. It never uses sport-, country-, celebrity-, product- or genre-
+specific entity tables.
 """
 from __future__ import annotations
 
@@ -30,6 +30,13 @@ VISUAL_DESCRIPTORS = {
     "map", "maps", "chart", "charts", "graph", "graphs", "diagram", "diagrams",
     "infographic", "infographics", "screenshot", "screenshots", "poster", "posters",
     "flag", "flags",
+}
+
+DESCRIPTOR_ROLE_CUES = {
+    "PERSON": {"portrait", "portraits", "headshot", "headshots"},
+    "ORGANIZATION": {"logo", "logos", "icon", "icons", "emblem", "emblems", "seal", "seals", "badge", "badges"},
+    "LOCATION": {"map", "maps", "landmark", "landmarks"},
+    "DOCUMENT": {"document", "documents", "report", "reports", "filing", "filings", "paper", "papers"},
 }
 
 DISCOURSE_PREFIXES = {
@@ -154,6 +161,14 @@ def _strip_visual_descriptors(value: str) -> str:
     return sanitize_candidate(" ".join(words))
 
 
+def _descriptor_role_hint(value: str) -> str:
+    descriptor_keys = {key(word) for word in tokens(value)}
+    for role, cues in DESCRIPTOR_ROLE_CUES.items():
+        if descriptor_keys & cues:
+            return role
+    return ""
+
+
 def _descriptor_present(value: str) -> bool:
     words = tokens(value)
     return bool(words) and any(key(word) in VISUAL_DESCRIPTORS for word in words[1:])
@@ -181,17 +196,26 @@ def _intent_words(scene: dict) -> list[str]:
 
 def infer_role(scene: dict) -> str:
     explicit = clean_text(scene.get("visual_type", "")).upper().replace("-", "_").replace(" ", "_")
-    if explicit in ROLE_CUES:
-        return explicit
     candidate = sanitize_candidate(scene.get("primary_entity", ""))
     subject_hint = _subject_role_hint(candidate)
-    if subject_hint and _descriptor_present(candidate):
+    descriptor_hint = _descriptor_role_hint(candidate)
+
+    # Strong lexical evidence from the actual subject beats a stale/generated
+    # visual_type hint. For example, "India cricket team" is an organization,
+    # and "Deccan Herald logo" is organization/branding, even if an upstream
+    # model previously labelled either scene as PERSON or EVENT.
+    if subject_hint:
         return subject_hint
+    if descriptor_hint:
+        return descriptor_hint
+    if explicit in ROLE_CUES:
+        return explicit
+
     intent_words = set(_intent_words(scene))
     for role, cues in ROLE_CUES.items():
         if intent_words & cues:
             return role
-    return subject_hint or "GENERAL_CONTEXT"
+    return "GENERAL_CONTEXT"
 
 
 def evidence_text(scene: dict, video_title: str = "") -> str:
@@ -272,9 +296,6 @@ def _contextual_query_variant(subject: str, anchor: str) -> str:
 
     if not context_words:
         return ""
-    # Keep the first four grounded context terms in their original order. This
-    # preserves useful combinations such as "lifting T20 World Cup" without
-    # turning the query into a sentence.
     return sanitize_candidate(" ".join([*tokens(anchor), *context_words[:4]]))
 
 
@@ -339,26 +360,22 @@ def _reduce_subject_once(subject: str, anchor: str) -> str:
 def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], str, dict]:
     resolution = resolve_subject(scene, video_title)
     subject = resolution["subject"]
-    if not subject:
-        return [], resolution["visual_type"], resolution
-
     anchor = _anchor_for_resolution(resolution)
-    queries = [subject]
-
-    # Preserve the slide's actual context for the second phrase instead of
-    # merely appending a generic word. This is the main route to better search
-    # recall across people, products, places, events, concepts and stories.
+    queries: list[str] = []
+    if subject:
+        queries.append(subject)
     contextual = _contextual_query_variant(subject, anchor)
     if contextual and contextual.casefold() not in {q.casefold() for q in queries}:
         queries.append(contextual)
-
-    reduced = _reduce_subject_once(subject, anchor)
-    if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
-        queries.append(reduced)
-
+    reduced = subject
+    for _ in range(2):
+        reduced = _reduce_subject_once(reduced, anchor)
+        if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
+            queries.append(reduced)
+        else:
+            break
     if anchor and anchor.casefold() not in {q.casefold() for q in queries}:
         queries.append(anchor)
-
     return queries[:4], resolution["visual_type"], resolution
 
 
