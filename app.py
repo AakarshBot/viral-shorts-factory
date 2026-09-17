@@ -136,6 +136,8 @@ def _init_state() -> None:
         "last_demo_results": {},
         "show_offline_diagnostics": False,
         "offline_diagnostics": {},
+        "pending_candidate": None,
+        "visual_search_queries": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -155,6 +157,8 @@ def reset_run() -> None:
         "final_title": "",
         "final_description": "",
         "final_comment": "",
+        "pending_candidate": None,
+        "visual_search_queries": "",
     }.items():
         st.session_state[key] = value
 
@@ -555,6 +559,53 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         render_live_monitor(controller)
         return
 
+    pending_candidate = st.session_state.get("pending_candidate")
+    if pending_candidate:
+        st.markdown("### Visual search queries (optional)")
+        st.caption(
+            "Leave this blank to use the current Full AI visual flow. "
+            "If you enter queries, separate them with semicolons (;). "
+            "The factory will intelligently assign them to the most relevant slides."
+        )
+        st.text_input(
+            "Search queries",
+            placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
+            key="visual_search_queries",
+            label_visibility="collapsed",
+        )
+        st.markdown(
+            f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div>"
+            f"<b>{pending_candidate.get('title', '')}</b></div>",
+            unsafe_allow_html=True,
+        )
+        start_col, cancel_col = st.columns(2)
+        with start_col:
+            if st.button(
+                "🚀 Start production",
+                type="primary",
+                use_container_width=True,
+                key="start_selected_topic",
+            ):
+                config = dict(st.session_state.web_config)
+                config["visual_search_queries"] = str(
+                    st.session_state.get("visual_search_queries", "") or ""
+                ).strip()
+                st.session_state.production_started = True
+                st.session_state.final_qc = False
+                st.session_state.upload_result = ""
+                controller.start_production(config, dict(pending_candidate))
+                st.rerun()
+        with cancel_col:
+            if st.button(
+                "← Choose another topic",
+                use_container_width=True,
+                key="cancel_selected_topic",
+            ):
+                st.session_state.pending_candidate = None
+                st.session_state.visual_search_queries = ""
+                st.rerun()
+        st.markdown("---")
+
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DISCOVERY_CANDIDATES)
     page_size = 3
@@ -587,10 +638,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key=f"use_candidate_{global_index}",
                 use_container_width=True,
             ):
-                st.session_state.production_started = True
-                st.session_state.final_qc = False
-                st.session_state.upload_result = ""
-                controller.start_production(dict(st.session_state.web_config), dict(candidate))
+                st.session_state.pending_candidate = dict(candidate)
+                st.session_state.visual_search_queries = ""
                 st.rerun()
 
     nav_left, nav_right = st.columns(2)
