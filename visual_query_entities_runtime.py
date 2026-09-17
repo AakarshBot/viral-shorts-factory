@@ -60,13 +60,6 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
     if not factual_anchor:
         return []
 
-    # A malformed/discourse-heavy entity may be repaired by resolve_subject()
-    # using grounded scene evidence (for example, adding a verified location).
-    # In that one case the repaired subject is the factual identity we should
-    # search first. Do not use a concrete search prompt this way: prompts stay
-    # context only and never outrank the simple identity. Scene preparation
-    # preserves both original_primary_entity and factual_primary_entity so the
-    # repair can still be detected after it locks primary_entity to the subject.
     original_entity = clean_text(
         seg.get("original_primary_entity") or resolution.get("original_entity", "")
     )
@@ -99,8 +92,6 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
             break
 
     if terms:
-        # First use the simplest visual-intent combination. This remains ahead of
-        # any richer prompt-derived phrase and is intentionally capped at three terms.
         compact = clean_text(" ".join([anchor, *terms[:3]]))
         if compact and compact.casefold() != anchor.casefold():
             queries.append(compact)
@@ -112,8 +103,6 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
             if len(queries) >= _MAX_QUERY_BUDGET:
                 break
 
-    # Simple descriptor fallback: "ICC logo" can sensibly broaden to "ICC".
-    # This is not prompt expansion; it merely removes a generic visual suffix.
     core_anchor_words = tokens(anchor)
     while len(core_anchor_words) > 1 and key(core_anchor_words[-1]) in VISUAL_DESCRIPTORS:
         core_anchor_words.pop()
@@ -207,7 +196,7 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     original_context = clean_text(candidate.get("visual_context", ""))
 
     resolution = resolve_subject(candidate, video_title)
-    factual_entity = clean_text(original_entity or resolution.get("factual_entity", ""))
+    factual_entity = clean_text(resolution.get("factual_entity", "") or original_entity or subject)
     visual_subject = clean_text(resolution.get("subject", "") or factual_entity or subject)
 
     prepared = dict(candidate)
@@ -233,8 +222,10 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     if inferred_role != "GENERAL_CONTEXT":
         prepared["visual_type"] = inferred_role
 
-    prepared["primary_entity"] = factual_entity or visual_subject
-    prepared["visual_search_subject"] = visual_subject
+    # Primary retrieval identity is cleaned/grounded, while the original model
+    # output remains available under original_primary_entity and factual_voiceover.
+    prepared["primary_entity"] = visual_subject or factual_entity
+    prepared["visual_search_subject"] = visual_subject or factual_entity
     prepared["specific_search_prompt"] = original_prompt
     prepared["visual_intent"] = original_intent
     prepared["visual_context"] = original_context
