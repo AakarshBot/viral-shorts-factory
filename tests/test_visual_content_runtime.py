@@ -111,3 +111,32 @@ def test_top5_first_slide_keeps_dedicated_design(monkeypatch, tmp_path):
     assert "hook" not in calls
     assert packages[0][0]["text"] == ""
     assert packages[1][0]["text"] == ""
+
+
+def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
+    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
+
+    monkeypatch.setattr(
+        visual_query_entities_runtime,
+        "search_slide_visual",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic retrieval failure")),
+    )
+    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
+    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
+    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
+    monkeypatch.setattr(visual_retrieval_runtime, "make_visual_rescue", lambda *args, **kwargs: bg.copy())
+    monkeypatch.setattr(content_runtime, "_render_scene_overlay", lambda *args, **kwargs: args[1])
+
+    bot = _fake_bot(tmp_path)
+    script_data = {
+        "title": "Rescue telemetry test",
+        "script": [
+            {"primary_entity": "Scene one", "voiceover": "One."},
+            {"primary_entity": "Scene two", "voiceover": "Two."},
+        ],
+    }
+
+    _run_process(bot, script_data, "regular")
+
+    assert script_data["visual_rescue_count"] == 2
+    assert script_data["visual_fallback_count"] == 2
