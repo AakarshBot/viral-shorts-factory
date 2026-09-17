@@ -1,0 +1,45 @@
+name: One-time OAuth startup check repair
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Remove OAuth file startup blocker
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("app.py")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''    client_secret = getattr(ultimate_bot, "CLIENT_SECRETS_FILE", None)\n    if client_secret and not os.path.exists(client_secret):\n        problems.append(\n            f"Missing OAuth file: `{os.path.relpath(client_secret, base)}` "\n            f"— copy your Google `client_secret.json` into the repo folder "\n            f"(same folder as `ultimate_bot.py`)."\n        )\n\n'''
+
+          if old not in text:
+              raise SystemExit("Expected OAuth startup-check block was not found; stopping without changes.")
+
+          new = '''    # Google OAuth is only needed when a Google-authenticated feature is actually used.\n    # The Streamlit factory can generate/test videos without a local client_secret.json,\n    # so do not block dashboard startup on a desktop-only OAuth file.\n\n'''
+
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          print("Removed mandatory client_secret.json startup check from app.py")
+
+      - name: Commit repair and remove this workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py .github/workflows/one_time_oauth_check_fix.yml
+          git commit -m "Allow Streamlit startup without local OAuth file" || exit 0
+          git rm .github/workflows/one_time_oauth_check_fix.yml
+          git commit -m "Remove one-time OAuth repair workflow"
+          git push
