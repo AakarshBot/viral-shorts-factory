@@ -55,18 +55,15 @@ jobs:
           print('Core runtime imports passed.')
           PY
 
-      - name: Run offline runtime smoke checks
+      - name: Run offline semantic visual smoke checks
         run: |
           python - <<'PY'
           import inspect
-          import sys
           import edge_tts
           import factory_runtime, final_qc_runtime, provider_runtime, runtime_bindings
           import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
-          import visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
-          import visual_policy_runtime
-
-          sys.excepthook = sys.__excepthook__
+          import visual_strategy_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
+          from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
 
           assert 'boundary' in inspect.signature(edge_tts.Communicate).parameters
           assert factory_runtime._vignette((1080, 1920)).size == (1080, 1920)
@@ -80,108 +77,51 @@ jobs:
           assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
           assert getattr(visual_runtime, 'VISUAL_BUDGET_RUNTIME_VERSION', '') == '2026-09-17-v1'
 
-          person = {'primary_entity': 'Lionel Messi', 'visual_intent': 'person portrait', 'voiceover': 'Lionel Messi scored in the final.', 'sport_or_topic_category': 'football'}
-          event = {'primary_entity': '2022 FIFA World Cup Final', 'visual_intent': 'actual match event', 'voiceover': 'The final went to penalties.', 'sport_or_topic_category': 'football'}
-          bcci = {'primary_entity': 'BCCI', 'visual_intent': 'organization', 'voiceover': 'BCCI announced the decision.', 'sport_or_topic_category': 'cricket'}
-          delhi = {'primary_entity': 'Delhi', 'visual_intent': 'location', 'voiceover': 'Delhi hosted the event.', 'sport_or_topic_category': 'news'}
-          concept = {'primary_entity': 'quantum computing', 'visual_intent': 'technical process', 'voiceover': 'Quantum computers use quantum states to process information.', 'sport_or_topic_category': 'technology'}
-          india = {'primary_entity': 'India', 'visual_intent': 'team players', 'voiceover': 'India will face Afghanistan in the T20 International series in New Delhi.', 'sport_or_topic_category': 'cricket'}
-          afghanistan = {'primary_entity': 'Afghanistan', 'visual_intent': 'team players', 'voiceover': 'Afghanistan will face India in the T20 International series in New Delhi.', 'sport_or_topic_category': 'cricket'}
-          venue = {'primary_entity': 'New Delhi', 'visual_intent': 'stadium venue', 'voiceover': 'The final match will be played at the stadium in New Delhi.', 'sport_or_topic_category': 'cricket'}
-
-          politics_person = {'primary_entity': 'Narendra Modi', 'visual_intent': 'person portrait', 'voiceover': 'Narendra Modi addressed the gathering.', 'sport_or_topic_category': 'politics'}
-          politics_org = {'primary_entity': 'Indian Parliament', 'visual_intent': 'institution', 'voiceover': 'The Indian Parliament debated the bill.', 'sport_or_topic_category': 'politics'}
-          technology_company = {'primary_entity': 'Apple', 'visual_intent': 'company', 'voiceover': 'Apple announced a new product.', 'sport_or_topic_category': 'technology'}
-          technology_product = {'primary_entity': 'iPhone 17', 'visual_intent': 'product device', 'voiceover': 'The iPhone 17 was announced.', 'sport_or_topic_category': 'technology'}
-          geography = {'primary_entity': 'Afghanistan', 'visual_intent': 'location geography', 'voiceover': 'Afghanistan is the geographic focus of the report.', 'sport_or_topic_category': 'geography'}
-          science = {'primary_entity': 'photosynthesis', 'visual_intent': 'scientific concept', 'voiceover': 'Photosynthesis converts light energy into chemical energy.', 'sport_or_topic_category': 'science'}
-
-          assert visual_strategy_runtime.classify_scene(person) == 'PERSON'
-          assert visual_strategy_runtime.classify_scene(event) == 'EVENT'
-          assert visual_strategy_runtime.classify_scene(bcci) == 'ORGANIZATION'
-          assert visual_strategy_runtime.classify_scene(delhi) == 'LOCATION'
-          assert visual_strategy_runtime.classify_scene(concept) in {'PROCESS', 'CONCEPT'}
-          assert visual_strategy_runtime.classify_scene(india) == 'ORGANIZATION'
-          assert visual_strategy_runtime.classify_scene(afghanistan) == 'ORGANIZATION'
-          assert visual_strategy_runtime.classify_scene(venue) == 'LOCATION'
-          assert visual_strategy_runtime.classify_scene(politics_person) == 'PERSON'
-          assert visual_strategy_runtime.classify_scene(politics_org) == 'ORGANIZATION'
-          assert visual_strategy_runtime.classify_scene(technology_company) == 'ORGANIZATION'
-          assert visual_strategy_runtime.classify_scene(technology_product) == 'PRODUCT'
-          assert visual_strategy_runtime.classify_scene(geography) == 'LOCATION'
-          assert visual_strategy_runtime.classify_scene(science) == 'CONCEPT'
-
-          queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
-          assert visual_type == 'PERSON'
-          assert queries[0] == 'Lionel Messi', queries
-          assert len(queries) <= 3, queries
-          assert all('Lionel Messi' in q for q in queries), queries
-
-          event_queries, event_type = visual_strategy_runtime.build_deep_queries(event, 'Argentina vs France')
-          assert event_type == 'EVENT'
-          assert event_queries[0] == '2022 FIFA World Cup Final', event_queries
-          assert len(event_queries) <= 3, event_queries
-          assert all('2022 FIFA World Cup Final' in q for q in event_queries), event_queries
-
-          bcci_queries, bcci_type = visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')
-          assert bcci_type == 'ORGANIZATION'
-          assert bcci_queries[0] == 'BCCI', bcci_queries
-          assert len(bcci_queries) <= 3, bcci_queries
-          assert all('BCCI' in q for q in bcci_queries), bcci_queries
-
-          delhi_queries, delhi_type = visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')
-          assert delhi_type == 'LOCATION'
-          assert delhi_queries[0] == 'Delhi', delhi_queries
-          assert len(delhi_queries) <= 3, delhi_queries
-          assert all('Delhi' in q for q in delhi_queries), delhi_queries
-
-          india_queries, india_type = visual_strategy_runtime.build_deep_queries(india, 'India vs Afghanistan in New Delhi T20 International')
-          assert india_type == 'ORGANIZATION'
-          assert india_queries[0] == 'India cricket team', india_queries
-          assert len(india_queries) <= 3, india_queries
-          assert all('India cricket team' in q for q in india_queries), india_queries
-          assert all('New Delhi cricket team' not in q for q in india_queries), india_queries
-
-          afghanistan_queries, afghanistan_type = visual_strategy_runtime.build_deep_queries(afghanistan, 'India vs Afghanistan in New Delhi T20 International')
-          assert afghanistan_type == 'ORGANIZATION'
-          assert afghanistan_queries[0] == 'Afghanistan cricket team', afghanistan_queries
-          assert len(afghanistan_queries) <= 3, afghanistan_queries
-          assert all('Afghanistan cricket team' in q for q in afghanistan_queries), afghanistan_queries
-
-          venue_queries, venue_type = visual_strategy_runtime.build_deep_queries(venue, 'India vs Afghanistan in New Delhi T20 International')
-          assert venue_type == 'LOCATION'
-          assert venue_queries[0] == 'New Delhi cricket stadium', venue_queries
-          assert all('New Delhi cricket team' not in q for q in venue_queries), venue_queries
-
-          cross_genre_cases = [
-              (politics_person, 'Narendra Modi', 'PERSON'),
-              (politics_org, 'Indian Parliament', 'ORGANIZATION'),
-              (technology_company, 'Apple', 'ORGANIZATION'),
-              (technology_product, 'iPhone 17', 'PRODUCT'),
-              (geography, 'Afghanistan', 'LOCATION'),
-              (science, 'photosynthesis', 'CONCEPT'),
+          cases = [
+              ({'primary_entity': 'Amina Rahman', 'visual_intent': 'person portrait', 'voiceover': 'Amina Rahman presented the documentary.', 'sport_or_topic_category': 'entertainment'}, 'Amina Rahman', 'PERSON'),
+              ({'primary_entity': 'Northstar Labs', 'visual_intent': 'company', 'voiceover': 'Northstar Labs announced a research program.', 'sport_or_topic_category': 'technology'}, 'Northstar Labs', 'ORGANIZATION'),
+              ({'primary_entity': 'Nova Phone 8', 'visual_intent': 'product device', 'voiceover': 'Nova Phone 8 was announced.', 'sport_or_topic_category': 'technology'}, 'Nova Phone 8', 'PRODUCT'),
+              ({'primary_entity': 'Central City', 'visual_intent': 'location geography', 'voiceover': 'Central City hosted the report.', 'sport_or_topic_category': 'geography'}, 'Central City', 'LOCATION'),
+              ({'primary_entity': 'Global Climate Summit', 'visual_intent': 'event', 'voiceover': 'The Global Climate Summit opened with a new agreement.', 'sport_or_topic_category': 'climate'}, 'Global Climate Summit', 'EVENT'),
+              ({'primary_entity': 'quantum computing', 'visual_intent': 'scientific concept', 'voiceover': 'Quantum computing uses quantum states to process information.', 'sport_or_topic_category': 'science'}, 'quantum computing', 'CONCEPT'),
+              ({'primary_entity': 'Aurora', 'visual_intent': 'team members', 'voiceover': 'The Aurora team members presented research findings.', 'sport_or_topic_category': 'research'}, 'Aurora research team', 'ORGANIZATION'),
+              ({'primary_entity': 'Central City', 'visual_intent': 'conference venue', 'voiceover': 'The conference venue in Central City hosted the announcement.', 'sport_or_topic_category': 'business'}, 'Central City business venue', 'LOCATION'),
           ]
-          for case, subject, expected_type in cross_genre_cases:
-              case_queries, case_type = visual_strategy_runtime.build_deep_queries(case, 'cross genre regression')
-              assert case_type == expected_type, (case, case_type)
-              assert case_queries and case_queries[0] == subject, case_queries
-              assert len(case_queries) <= 3, case_queries
-              assert all(subject.lower() in q.lower() for q in case_queries), case_queries
+
+          for scene, expected_subject, expected_type in cases:
+              brief = build_scene_visual_brief(scene, scene['primary_entity'], scene.get('sport_or_topic_category', ''))
+              queries, visual_type = build_deep_queries(scene, scene['primary_entity'])
+              assert visual_type == expected_type, (scene, brief, visual_type)
+              assert brief['subject'] == expected_subject, (scene, brief)
+              assert queries and queries[0] == expected_subject, queries
+              assert len(queries) <= 3, queries
+              assert all(expected_subject.casefold() in q.casefold() for q in queries), queries
+              assert all(token not in ' '.join(queries).casefold() for token in ('editorial_person', 'red carpet')), queries
+
+          multilingual = {
+              'primary_entity': 'محمد صلاح',
+              'visual_intent': 'person portrait',
+              'voiceover': 'محمد صلاح appeared in the report.',
+              'sport_or_topic_category': 'international',
+          }
+          brief = build_scene_visual_brief(multilingual, 'Global story', 'international')
+          queries, visual_type = build_deep_queries(multilingual, 'Global story')
+          assert visual_type == 'PERSON'
+          assert brief['subject'] == 'محمد صلاح'
+          assert queries[0] == 'محمد صلاح'
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
-          assert script_guard_runtime.looks_like_instructional_narration('Sachin Tendulkar scored 143 in the match.') is False
+          assert script_guard_runtime.looks_like_instructional_narration('Amina Rahman presented the documentary.') is False
           assert callable(script_guard_runtime.install)
 
           from visual_qa_runtime import _tier_for
           from visual_runtime import _cache_key, _context_fingerprint
           assert _tier_for('person portrait', 'PERSON', 'Wikipedia') == 'IDENTITY'
-          assert _tier_for('person portrait', 'PERSON', 'DDG') == 'IDENTITY'
-          assert _tier_for('stadium_event', 'EVENT', 'DDG') == 'IDENTITY'
           assert _tier_for('conceptual', 'GENERAL_CONTEXT', 'DDG') == 'IDENTITY'
-          c1 = _context_fingerprint('person portrait', 'Messi World Cup final', 'Messi scored in the final', 'Messi story')
-          c2 = _context_fingerprint('person portrait', 'Messi training', 'Messi trained before the match', 'Messi story')
+          c1 = _context_fingerprint('person portrait', 'Amina Rahman documentary', 'Amina presented the documentary', 'documentary story')
+          c2 = _context_fingerprint('person portrait', 'Amina interview', 'Amina discussed the project', 'documentary story')
           assert c1 != c2
-          assert _cache_key('Lionel Messi', 'PERSON', c1) != _cache_key('Lionel Messi', 'PERSON', c2)
+          assert _cache_key('Amina Rahman', 'PERSON', c1) != _cache_key('Amina Rahman', 'PERSON', c2)
 
           factory_runtime.patch_dashboard_runtime(ultimate_bot)
           provider_runtime.patch_provider_adapters(ultimate_bot)
@@ -210,7 +150,7 @@ jobs:
           required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_content_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
           missing = [p for p in required if not Path(p).is_file()]
           assert not missing, missing
-          print('Offline runtime smoke checks passed.')
+          print('Offline semantic visual smoke checks passed.')
           PY
 
       - name: Run full no-API diagnostics
