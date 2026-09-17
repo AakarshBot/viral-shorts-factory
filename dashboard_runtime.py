@@ -459,6 +459,28 @@ def run_demo_section(section: str) -> dict[str, Any]:
         "dashboard_architecture": _test_dashboard_architecture,
     }
 
+    if section == "manual_visual_queries":
+        try:
+            from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
+            queries = parse_manual_visual_queries(
+                "India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium"
+            )
+            scenes = [
+                {"primary_entity": "India Afghanistan", "voiceover": "India and Afghanistan play the final match."},
+                {"primary_entity": "Shubman Gill", "voiceover": "Shubman Gill leads India's batting."},
+                {"primary_entity": "New Delhi", "voiceover": "The match is being played in New Delhi."},
+            ]
+            assignments = assign_manual_queries(scenes, queries)
+            if len(assignments) != len(scenes) or any(not item.get("query") for item in assignments):
+                raise AssertionError("Manual visual queries could not be assigned to all demo scenes.")
+            return {
+                "status": "PASS",
+                "detail": "Semicolon-separated visual queries were parsed and intelligently assigned to the matching demo scenes.",
+                "assignments": assignments,
+            }
+        except Exception as exc:
+            return {"status": "FAIL", "detail": f"{type(exc).__name__}: {exc}"}
+
     if section == "premium_renderers":
         return _run_synthetic_renderer_demo()
 
