@@ -365,6 +365,8 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                     "source": str(layer.get("source_type") or "visual"),
                     "visual_type": str(layer.get("visual_type") or "visual"),
                     "verified": bool(layer.get("visual_verified", False)),
+                    "manual_query": str(layer.get("manual_visual_query") or "").strip(),
+                    "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
                 }
             )
     return items
@@ -411,11 +413,72 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             st.rerun()
 
 
+def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
+    events = snapshot.get("activity_events") or []
+    if not events:
+        return
+    st.markdown("### Live activity")
+    st.caption("Plain-language progress from the actual factory stages.")
+    for index, event in enumerate(events):
+        icon = "⚙️" if index == len(events) - 1 and snapshot.get("thread_alive") else "✅"
+        st.markdown(
+            f"<div class='panel' style='padding:12px 16px;margin-bottom:8px'>"
+            f"<b>{icon} {event.get('stage', 'Factory')}</b> "
+            f"<span class='small-muted'>{event.get('time', '')}</span><br>"
+            f"<span>{event.get('message', '')}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_research_summary(snapshot: Dict[str, Any]) -> None:
+    story = snapshot.get("selected_story") or {}
+    if not story:
+        return
+    headline = str(story.get("title") or "").strip()
+    source = str(story.get("source_label") or story.get("source") or story.get("publisher") or "").strip()
+    url = str(story.get("story_url") or story.get("url") or story.get("link") or "").strip()
+    if not any((headline, source, url)):
+        return
+    st.markdown("### Story & research")
+    if headline:
+        st.markdown(f"**Headline:** {headline}")
+    if source:
+        st.markdown(f"**Source:** {source}")
+    if url.startswith(("http://", "https://")):
+        st.link_button("Open source article", url, use_container_width=True)
+
+
+def render_audio_preview(snapshot: Dict[str, Any]) -> None:
+    paths = [str(path).strip() for path in (snapshot.get("audio_paths") or []) if str(path or "").strip()]
+    existing = [path for path in paths if os.path.isfile(path)]
+    if not existing:
+        return
+    st.markdown("### Voiceover")
+    st.caption(f"{len(existing)} narration track(s) generated with word-level timing.")
+    for index, path in enumerate(existing, 1):
+        st.audio(path, format="audio/mpeg")
+        st.caption(f"Scene {index}")
+
+
+def render_visual_details(snapshot: Dict[str, Any]) -> None:
+    items = _visual_items(snapshot)
+    if not items:
+        return
+    with st.expander("Visual sourcing details", expanded=False):
+        for item in items:
+            details = [f"Visual {item['index']}: {item['visual_type']} · {item['source']}"]
+            if item.get("manual_query"):
+                details.append(f"Manual query: {item['manual_query']}")
+            if item.get("rescue_reason"):
+                details.append(f"Rescue: {item['rescue_reason']}")
+            st.markdown(" — ".join(details))
+
+
 def render_logs(snapshot: Dict[str, Any]) -> None:
     logs = snapshot.get("dashboard_logs") or []
     if not logs:
         return
-    with st.expander("Factory activity", expanded=True):
+    with st.expander("Technical activity summary", expanded=False):
         for index, message in enumerate(logs):
             prefix = "Latest" if index == len(logs) - 1 else "Done"
             st.markdown(f"**{prefix}:** {message}")
@@ -426,6 +489,17 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         return
 
     st.markdown("---")
+    st.markdown("### Final QC")
+    qc_checks = [
+        ("Rendered video", bool(str(snapshot.get("video_path") or "").strip())),
+        ("Script generated", bool(snapshot.get("script_data"))),
+        ("Visual package", bool(snapshot.get("visual_packages"))),
+        ("Visual approval", bool(snapshot.get("visual_review_approved"))),
+    ]
+    qc_cols = st.columns(len(qc_checks))
+    for col, (label, ok) in zip(qc_cols, qc_checks):
+        col.metric(label, "PASS" if ok else "CHECK")
+
     st.markdown("### Final video")
     st.success("The Short is rendered, branded and ready for your upload decision.")
 
@@ -502,11 +576,15 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
                 unsafe_allow_html=True,
             )
 
+        render_research_summary(snapshot)
         render_script(snapshot)
+        render_audio_preview(snapshot)
 
         if snapshot.get("visual_review_required"):
             render_visual_review(controller, snapshot)
+        render_visual_details(snapshot)
 
+        render_activity_timeline(snapshot)
         render_logs(snapshot)
 
         if snapshot.get("stage") == "error":
@@ -763,6 +841,7 @@ def render_demo_page() -> None:
         ("runtime_bindings", "Runtime bindings"),
         ("provider_boundary", "Raw provider boundary"),
         ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
+        ("manual_visual_queries", "Manual visual query routing"),
         ("dashboard_architecture", "Dashboard architecture"),
     ]
 
