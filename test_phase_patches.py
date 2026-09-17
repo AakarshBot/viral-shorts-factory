@@ -21,6 +21,7 @@ import streamlit as st
 
 import script_guard_runtime
 import test_phase_runtime
+import visual_runtime
 from newsroom_dashboard import _collect_visual_items, _script_text
 
 
@@ -147,7 +148,12 @@ def _offline_script_test(bot) -> None:
 
 
 def _visual_test_limited(bot) -> None:
-    """Plan terms for every slide, then perform exactly one real image fetch."""
+    """Plan terms for every slide, then perform exactly one real image fetch.
+
+    Test-only visual policy: bypass semantic Gemini QA and cache reuse so the
+    diagnostic proves the real image-fetch/render path while consuming only the
+    single intended visual fetch path.
+    """
     with st.expander("4. Visual sourcing — one-image diagnostic", expanded=True):
         script = st.session_state.get("tp_script")
         if not script:
@@ -182,16 +188,31 @@ def _visual_test_limited(bot) -> None:
             one_scene_script = dict(script)
             one_scene_script["script"] = [test_scene]
 
-            def run():
-                result = bot.process_visuals_async(
-                    one_scene_script,
-                    bot.LANGUAGES[config["language"]],
-                    config["format_mode"],
-                )
-                return test_phase_runtime._run_async(result) or []
+            original_gate = visual_runtime._strict_gate
+            original_cache = visual_runtime.get_cached_asset
 
-            st.session_state.tp_visuals = _run_with_progress("One-image visual test", run)
-            st.success("Visual diagnostic fetched one image only.")
+            def local_test_gate(bot_obj, img_bytes, seg, video_title="", source=""):
+                if not img_bytes or not visual_runtime._local_visual_sanity(img_bytes):
+                    return False, "LOCAL-REJECT", 0, True
+                return True, "TEST-LOCAL", 100, False
+
+            try:
+                visual_runtime._strict_gate = local_test_gate
+                visual_runtime.get_cached_asset = lambda *args, **kwargs: (None, None)
+
+                def run():
+                    result = bot.process_visuals_async(
+                        one_scene_script,
+                        bot.LANGUAGES[config["language"]],
+                        config["format_mode"],
+                    )
+                    return test_phase_runtime._run_async(result) or []
+
+                st.session_state.tp_visuals = _run_with_progress("One-image visual test", run)
+                st.success("Visual diagnostic fetched one image only. Gemini semantic QA was skipped for this test.")
+            finally:
+                visual_runtime._strict_gate = original_gate
+                visual_runtime.get_cached_asset = original_cache
 
         items = _collect_visual_items(st.session_state.get("tp_visuals") or [])
         if items:
@@ -445,7 +466,6 @@ def install_test_phase_patches() -> None:
     if getattr(test_phase_runtime, "_enhanced_test_phase_patches_installed", False):
         return
 
-    # Preserve originals so the wrappers below can keep the production Test Phase UI.
     test_phase_runtime._original_topic_test = test_phase_runtime._topic_test
     test_phase_runtime._original_audio_test = test_phase_runtime._audio_test
     test_phase_runtime._original_metadata_test = test_phase_runtime._metadata_test
@@ -453,10 +473,9 @@ def install_test_phase_patches() -> None:
 
     test_phase_runtime._topic_test = _local_topic_candidates
     test_phase_runtime._audio_test = _audio_test_progress
-
-    # Test Phase-only replacements.
     test_phase_runtime._script_test = _offline_script_test
     test_phase_runtime._visual_test = _visual_test_limited
     test_phase_runtime._render_test = _render_test
-    test_phase_runtime._topic_test = _local_topic_candidates
+    test_phase_runtime._metadata_test = _metadata_test_progress
+    test_phase_runtime._upload_test = _upload_test_progress
     test_phase_runtime._enhanced_test_phase_patches_installed = True
