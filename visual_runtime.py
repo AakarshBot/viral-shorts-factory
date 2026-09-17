@@ -1,5 +1,9 @@
-"""Scene-aware, bounded visual sourcing for Viral Shorts Factory."""
-import asyncio
+"""Scene-aware, bounded visual sourcing for Viral Shorts Factory.
+
+This module owns visual retrieval, verification and the Top 5 title-card renderer.
+Regular Shorts rendering lives in visual_content_runtime.py so there is only one
+active regular-scene renderer.
+"""
 import hashlib
 import io
 import json
@@ -316,6 +320,11 @@ def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
 
 
 def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=None, accent=None):
+    """Render the intentional Top 5 title card.
+
+    This opaque panel is deliberately retained for the Top 5 format only.
+    Regular Shorts never use this renderer.
+    """
     bg = bg_img.convert("RGBA").resize((1080, 1920), Image.Resampling.LANCZOS)
     overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0)); draw = ImageDraw.Draw(overlay)
     accent = accent or bot.PALETTE.get("accent_primary", (0, 191, 255))
@@ -331,56 +340,3 @@ def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=N
         draw.rounded_rectangle([x - 30, y - 18, x + bb[2] - bb[0] + 30, y + bb[3] - bb[1] + 25], radius=30, fill=(0, 0, 0, 220), outline=accent + (220,), width=2)
         draw.text((x, y), subtitle_text, font=sub_font, fill=accent)
     return Image.alpha_composite(bg, overlay)
-
-
-async def _process_visuals(bot, script_data, language_cfg, format_mode="regular"):
-    print("\n🎨 Sourcing bounded, scene-relevant visuals for every Shorts slide...", flush=True)
-    width, height = 1080, 1920; target_size = (width, height)
-    scenes = script_data.get("script", [])
-    if not scenes: raise RuntimeError("Visual pipeline received an empty script.")
-    try:
-        from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene, get_visual_qa_calls_used
-        reset_visual_qa_video_budget()
-    except Exception:
-        start_visual_qa_scene = None; get_visual_qa_calls_used = lambda: 0
-    font_choice = language_cfg.get("font"); packages = [None] * len(scenes); used_urls, used_hashes = set(), set(); ai_count = 0
-    for idx, seg in enumerate(scenes):
-        if start_visual_qa_scene: start_visual_qa_scene()
-        video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
-        print(f"   [Visual Pipeline] Scene {idx + 1}/{len(scenes)} starting...", flush=True)
-        category = str(seg.get("sport_or_topic_category", "")).lower()
-        bg_img, used_ai, source_type = _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title)
-        ai_count += int(used_ai); bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
-        img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
-        if format_mode == "top5" and idx == 0:
-            rendered = _render_image_slide(bot, bg_img, video_title or seg.get("voiceover", "Top 5"), "TODAY'S TOP 5", font_choice)
-        elif format_mode == "top5":
-            clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", str(seg.get("voiceover", "")), flags=re.IGNORECASE).strip()
-            rendered = bot.render_top5_card(bg_img, max(1, 6 - idx), 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
-        elif idx == 0:
-            rendered = bot.render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice)
-        else:
-            overlay = Image.new("RGBA", target_size, (0, 0, 0, 0)); draw = ImageDraw.Draw(overlay)
-            draw.rectangle([0, 0, width, 40], fill=bot.PALETTE["accent_primary"] + (200,)); draw.rectangle([0, height - 40, width, height], fill=bot.PALETTE["accent_secondary"] + (200,))
-            rendered = Image.alpha_composite(bg_img, overlay)
-        rendered.convert("RGB").save(img_path, "JPEG", quality=95)
-        packages[idx] = [{"image": img_path, "text": "" if (format_mode == "top5" or idx == 0) else seg.get("voiceover", ""), "ai_generated": used_ai, "source_type": source_type}]
-        seg["visual_verified"] = True; seg["visual_source"] = source_type
-    script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2)
-    script_data["visual_coverage"] = 1.0; script_data["visuals_verified"] = True
-    try: script_data["gemini_qa_calls_used"] = get_visual_qa_calls_used()
-    except Exception: script_data["gemini_qa_calls_used"] = 0
-    print(f"   [+] Visual QA complete: {len(scenes)}/{len(scenes)} slides have verified/reviewed relevant visuals.", flush=True)
-    print(f"   [Visual QA] Gemini calls used for video: {script_data['gemini_qa_calls_used']}", flush=True)
-    return packages
-
-
-def patch_visual_pipeline(bot):
-    """Bind the bounded visual renderer to the legacy bot instance."""
-    current = getattr(bot, "process_visuals_async", None)
-    if getattr(current, "_strict_visual_bound", False): return current
-    async def process_visuals_async(script_data, language_cfg, format_mode="regular"):
-        return await _process_visuals(bot, script_data, language_cfg, format_mode)
-    process_visuals_async._strict_visual_bound = True
-    bot.process_visuals_async = process_visuals_async
-    return process_visuals_async
