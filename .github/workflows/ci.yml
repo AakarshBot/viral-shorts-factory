@@ -47,7 +47,7 @@ jobs:
           import audio_direction_runtime, audio_runtime, autopilot_runtime
           import branding_runtime, db_architecture, db_runtime, diagnostics_runtime
           import editorial_runtime, factory_runtime, final_qc_runtime, learning_runtime
-          import provider_runtime, quality_runtime, research_runtime, runtime_bindings
+          import image_sources_runtime, provider_runtime, quality_runtime, research_runtime, runtime_bindings
           import script_guard_runtime, script_runtime, semantic_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
           import visual_runtime, visual_safety_runtime, visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, workflow_runtime, youtube_comment_runtime
@@ -59,10 +59,12 @@ jobs:
         run: |
           python - <<'PY'
           import inspect
+          import io
           import edge_tts
-          import factory_runtime, final_qc_runtime, provider_runtime, runtime_bindings
+          from PIL import Image
+          import factory_runtime, final_qc_runtime, image_sources_runtime, provider_runtime, runtime_bindings
           import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
-          import visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
+          import visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, visual_retrieval_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
           from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
           from visual_semantic_guard_runtime import resolve_subject
 
@@ -96,13 +98,36 @@ jobs:
               assert visual_type == expected_type, (scene, brief, visual_type)
               assert brief['subject'] == expected_subject, (scene, brief)
               assert queries and queries[0] == expected_subject, queries
-              assert len(queries) <= 3, queries
-              assert all(expected_subject.casefold() in q.casefold() for q in queries), queries
+              assert len(queries) <= 4, queries
+              anchor = expected_subject.split()
+              assert all(all(token.casefold() in q.casefold().split() for token in anchor) for q in queries), queries
               joined = ' '.join(queries).casefold()
               assert 'not' not in joined.split(), queries
               assert 'nbsp' not in joined and '&nbsp;' not in joined, queries
               assert 'one-off' not in joined and 'thing' not in joined, queries
               assert 'editorial_person' not in joined and 'red carpet' not in joined, queries
+
+          # The actual runtime binding must expose a 3-5 phrase ladder even
+          # when a stale environment value attempts to force one query.
+          visual_query_entities_runtime._install_runtime_query_guard(visual_runtime)
+          runtime_scene = {
+              'primary_entity': 'Indian cricket team',
+              'specific_search_prompt': 'Indian cricket team lifting T20 World Cup trophy',
+              'visual_intent': 'team trophy celebration',
+              'voiceover': 'The Indian cricket team lifted the T20 World Cup trophy.',
+          }
+          runtime_queries, runtime_type = visual_runtime._build_search_variants(runtime_scene, 'T20 World Cup story')
+          assert 3 <= len(runtime_queries) <= 5, runtime_queries
+          assert runtime_queries[0] == 'Indian cricket team lifting T20 World Cup trophy', runtime_queries
+          assert all('Indian cricket team' in q for q in runtime_queries), runtime_queries
+
+          stale_type_scene = {
+              'primary_entity': 'Indian cricket team lifting T20 World Cup trophy',
+              'visual_type': 'LOCATION',
+              'visual_intent': 'team trophy celebration',
+          }
+          prepared = visual_query_entities_runtime.build_candidate_scene(stale_type_scene, stale_type_scene['primary_entity'])
+          assert prepared['visual_type'] == 'ORGANIZATION', prepared
 
           multilingual = {
               'primary_entity': 'محمد صلاح',
@@ -127,6 +152,49 @@ jobs:
           assert 'not' not in malformed['subject'].casefold().split()
           assert 'nbsp' not in malformed['subject'].casefold()
           assert 'thing' not in malformed['subject'].casefold()
+
+          # Exercise the real retrieval orchestrator with deterministic local
+          # providers: a failed first phrase must advance to the next phrase,
+          # and exhausting all candidates must still produce a non-blank frame.
+          class FakeRuntime:
+              VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
+              def _build_search_variants(self, seg, video_title=''):
+                  return ['Acme launch ceremony', 'Acme launch event', 'Acme'], 'EVENT'
+              def _verification_tier(self, seg, visual_type, source):
+                  return 'STRICT'
+              def _call_fetcher_with_timeout(self, fetcher, args, source, query):
+                  return fetcher(*args)
+              def _strict_gate(self, bot, data, seg, video_title, source=''):
+                  return (True, 'STRICT', 100, False)
+              def get_cached_asset(self, bot, entity, visual_type, context=''):
+                  return None, None
+              def save_to_cache(self, *args, **kwargs):
+                  return None
+              def _context_fingerprint(self, *args):
+                  return 'offline'
+
+          img = Image.new('RGB', (640, 640), (100, 100, 100))
+          buf = io.BytesIO(); img.save(buf, format='JPEG'); valid_bytes = buf.getvalue()
+          seen_queries = []
+          class FakeBot:
+              def fetch_test(self, query, used_urls, marker, video_title):
+                  seen_queries.append(query)
+                  return valid_bytes if query == 'Acme launch event' else None
+              def get_image_hash(self, data):
+                  return __import__('hashlib').sha256(data).hexdigest()
+          original_plan = visual_retrieval_runtime._source_plan
+          visual_retrieval_runtime._source_plan = lambda bot, visual_type: [('TestSource', bot.fetch_test)]
+          try:
+              seg = {'primary_entity': 'Acme launch event', 'factual_primary_entity': 'Acme', 'visual_type': 'EVENT', 'factual_visual_intent': 'launch'}
+              result_img, _, source = visual_retrieval_runtime.run_visual_retrieval(FakeRuntime(), FakeBot(), seg, '', set(), set(), 'Acme story')
+              assert source == 'TestSource'
+              assert seen_queries[:2] == ['Acme launch ceremony', 'Acme launch event'], seen_queries
+              assert result_img.size == (640, 640)
+          finally:
+              visual_retrieval_runtime._source_plan = original_plan
+
+          rescue = visual_retrieval_runtime.make_visual_rescue('Unobtainable subject', 'EVENT')
+          assert rescue.size == (1080, 1920)
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Amina Rahman presented the documentary.') is False
@@ -165,9 +233,11 @@ jobs:
           assert set(workflow_runtime.CRICKET_CATEGORIES) == {'India / Asia', 'Global', 'AI-assisted top story in cricket'}
 
           from pathlib import Path
-          required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_semantic_guard_runtime.py', 'visual_query_entities_runtime.py', 'visual_content_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
+          required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_semantic_guard_runtime.py', 'visual_query_entities_runtime.py', 'visual_content_runtime.py', 'visual_retrieval_runtime.py', 'image_sources_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
           missing = [p for p in required if not Path(p).is_file()]
           assert not missing, missing
+          assert callable(image_sources_runtime.fetch_openverse)
+          assert callable(image_sources_runtime.fetch_pixabay)
           print('Offline semantic visual smoke checks passed.')
           PY
 
