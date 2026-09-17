@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from branding_runtime import _assets, apply_branded_finish, patch_branding_pipeline
+from channel_branding_runtime import install_channel_branding
 
 
 class _Bot:
@@ -91,3 +92,32 @@ def test_logo_asset_is_passed_to_final_ffmpeg_finish(tmp_path, monkeypatch):
     assert str(logo) in command
     assert "-map" in command
     assert "0:a?" in command
+
+
+def test_channel_specific_branding_overrides_shared_assets(tmp_path):
+    shared = tmp_path / "brand_assets"
+    shared.mkdir()
+    shared_logo = shared / "logo.png.jpg"
+    shared_logo.write_bytes(b"shared")
+
+    channel = tmp_path / "channel_one"
+    channel.mkdir()
+    channel_logo = channel / "channel-logo.png"
+    channel_overlay = channel / "channel-overlay.png"
+    channel_logo.write_bytes(b"channel-logo")
+    channel_overlay.write_bytes(b"channel-overlay")
+
+    bot = _Bot(tmp_path)
+    bot._active_web_config = {
+        "channel_branding": {
+            "logo_path": "channel_one/channel-logo.png",
+            "overlay_path": "channel_one/channel-overlay.png",
+        }
+    }
+
+    assert install_channel_branding(bot) is True
+    import branding_runtime
+    logo, overlay = branding_runtime._assets(bot)
+
+    assert logo == channel_logo
+    assert overlay == channel_overlay
