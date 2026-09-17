@@ -333,7 +333,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
     if visual_type in ABSTRACT_TYPES and callable(getattr(bot, "fetch_hf_ai_image", None)):
         prompt_text = _ai_prompt(entity, visual_type)
-        print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{prompt_text[:180]}',", flush=True)
+        print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{prompt_text[:180]}'", flush=True)
         ai = runtime._call_fetcher_with_timeout(bot.fetch_hf_ai_image, (prompt_text,), "HF-AI", prompt_text)
         valid, reason, normalized = _preflight_image(ai)
         if valid and normalized is not None and _hash_image(bot, normalized) not in used_hashes:
@@ -356,10 +356,25 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     return Image.open(io.BytesIO(normalized)).convert("RGB"), True, "ai-generated"
                 if not hard_reject:
                     best_uncertain = (float(score or 40), normalized, "ai-generated", prompt_text)
-            if best_uncertain is not None:
-                pass
         else:
             print(f"   [Visual Source] AI image rejected before QA: {reason}", flush=True)
+
+    if best_uncertain is not None:
+        score, normalized, source, query = best_uncertain
+        image_hash = _hash_image(bot, normalized)
+        if image_hash not in used_hashes:
+            used_hashes.add(image_hash)
+            seg["visual_verified"] = False
+            seg["visual_rescue_reason"] = "ai-or-real-source-unverified"
+            seg["visual_fallback_reason"] = ""
+            seg["visual_query_used"] = query
+            seg["visual_verification_attempts"] = verification_attempts
+            print(
+                f"   [Visual Source] {source} | USED-UNVERIFIED-FALLBACK | score={score:.0f} | query='{query}' | "
+                f"QA={verification_attempts}/{max_verification} hard_rejections={hard_rejections}",
+                flush=True,
+            )
+            return Image.open(io.BytesIO(normalized)).convert("RGB"), source == "ai-generated", source
 
     rescue = make_visual_rescue(entity or factual_entity, visual_type)
     seg["visual_verified"] = False
