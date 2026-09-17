@@ -1,4 +1,4 @@
-"""Production hardening for scene-count integrity and live workflow progress."""
+"""Production hardening for scene-count integrity, visual entity integrity and live workflow progress."""
 from __future__ import annotations
 
 import inspect
@@ -16,6 +16,176 @@ def _scene_count(format_mode: str) -> tuple[int, int]:
     return _MIN_SCENES.get(mode, 5), _MAX_SCENES.get(mode, 8)
 
 
+def _resolve_story_visual_entity(story_data: dict[str, Any], candidate: str) -> str:
+    """Resolve a candidate visual entity against the actual story headline.
+
+    The emergency script fallback used to select the first capitalised token,
+    which turned headlines such as "Sri Lanka name squads..." into "Sri".
+    Prefer a known multi-word location/organisation present in the headline,
+    then preserve a legitimate multi-word candidate.
+    """
+    title = re.sub(r"\s+", " ", str((story_data or {}).get("title") or (story_data or {}).get("topic") or "")).strip()
+    value = re.sub(r"\s+", " ", str(candidate or "")).strip(" ,.-:;|\"'")
+    if not title:
+        return value
+
+    try:
+        from visual_strategy_runtime import LOCATION_NAMES, ORGANIZATION_ACRONYMS
+        known_terms = sorted(
+            set(str(x) for x in LOCATION_NAMES) | set(str(x) for x in ORGANIZATION_ACRONYMS),
+            key=lambda x: (-len(x.split()), -len(x)),
+        )
+    except Exception:
+        known_terms = []
+
+    title_lower = title.lower()
+    for term in known_terms:
+        if re.search(r"(?<![A-Za-z])" + re.escape(term.lower()) + r"(?![A-Za-z])", title_lower):
+            return term
+
+    # Preserve a useful multi-word candidate rather than reducing it to its
+    # first token. Single-token candidates remain valid when no stronger
+    # headline-grounded entity is available.
+    if len(value.split()) >= 2:
+        return value
+
+    # A two-to-four token capitalised span in the headline is safer than the
+    # first token alone. Stop at obvious sentence/function words.
+    words = re.findall(r"[A-Za-z][A-Za-z'/-]*", title)
+    stop = {
+        "name", "names", "announce", "announces", "announced", "squad", "squads", "for", "against",
+        "into", "from", "with", "after", "before", "and", "the", "to", "by", "beat", "beats",
+        "enter", "enters", "win", "wins", "won", "will", "have", "has", "had", "on", "in",
+    }
+    for index, word in enumerate(words):
+        if word.lower() == value.lower() and word[:1].isupper():
+            span = [word]
+            for nxt in words[index + 1:index + 4]:
+                if nxt.lower() in stop or not nxt[:1].isupper():
+                    break
+                span.append(nxt)
+            if len(span) >= 2:
+                return " ".join(span)
+    return value
+
+
+def _repair_visual_identity(script_data: dict[str, Any], story_data: dict[str, Any]) -> dict[str, Any]:
+    """Repair obviously truncated scene entities before visual sourcing begins."""
+    if not isinstance(script_data, dict) or not isinstance(script_data.get("script"), list):
+        return script_data
+    repaired = dict(script_data)
+    scenes = []
+    changed = 0
+    for scene in repaired.get("script") or []:
+        if not isinstance(scene, dict):
+            scenes.append(scene)
+            continue
+        copy = dict(scene)
+        current = str(copy.get("primary_entity") or "").strip()
+        resolved = _resolve_story_visual_entity(story_data, current)
+        if resolved and resolved != current:
+            copy["primary_entity"] = resolved
+            prompt = str(copy.get("specific_search_prompt") or "").strip()
+            if not prompt or prompt.lower() == current.lower():
+                copy["specific_search_prompt"] = resolved
+            changed += 1
+        scenes.append(copy)
+    repaired["script"] = scenes
+    if changed:
+        print(f"   [Visual Entity Hardening] Resolved {changed} scene entity label(s) against the story headline.", flush=True)
+    return repaired
+
+
+def _install_authoritative_visual_query_planner() -> None:
+    """Restore the production scene-aware query ladder after legacy policy patches."""
+    try:
+        import visual_strategy_runtime
+        current = getattr(visual_strategy_runtime, "build_deep_queries", None)
+        if getattr(current, "_production_query_planner_bound", False):
+            return
+
+        def build_deep_queries_authoritative(seg, video_title="", visual_type=None):
+            clean = visual_strategy_runtime._clean
+            normalise = visual_strategy_runtime._normalise_query
+            add_unique = visual_strategy_runtime._add_unique
+            brief_builder = visual_strategy_runtime.build_scene_visual_brief
+            classify = visual_strategy_runtime.classify_scene
+            scene_phrase_builder = visual_strategy_runtime._scene_phrase
+            max_queries = getattr(visual_strategy_runtime, "MAX_VISUAL_SEARCH_QUERIES", 6)
+
+            category = clean(seg.get("sport_or_topic_category", ""))
+            brief = brief_builder(seg, video_title, category)
+            entity = brief["subject"]
+            intent = normalise(seg.get("visual_intent", ""))
+            title = clean(video_title)
+            scene_phrase = scene_phrase_builder(seg)
+            resolved_type = visual_type or brief["visual_type"] or classify(seg, category)
+            action = brief["scene_action"]
+            context = brief["scene_context"]
+            scene_index = brief["scene_index"]
+            queries = []
+
+            def with_scene(*parts):
+                add_unique(queries, *parts)
+                if len(queries) >= max_queries:
+                    return
+                if scene_index:
+                    add_unique(queries, *parts, f"scene {scene_index}")
+
+            if resolved_type == "PERSON":
+                with_scene(entity, action, "photo")
+                with_scene(entity, scene_phrase, intent)
+                with_scene(entity, title, "editorial photo")
+                with_scene(entity, category, "official photo")
+                with_scene(entity, "press photo")
+                return queries[:max_queries], resolved_type
+
+            if resolved_type == "ORGANIZATION":
+                with_scene(entity, action)
+                with_scene(entity, scene_phrase, "official")
+                with_scene(entity, intent, title)
+                with_scene(entity, category, "press")
+                with_scene(entity, "official")
+                with_scene(entity, "press conference")
+                return queries[:max_queries], resolved_type
+
+            if resolved_type == "LOCATION":
+                with_scene(entity, action)
+                with_scene(entity, scene_phrase, "real photo")
+                with_scene(entity, context, "landmark")
+                with_scene(entity, title, "editorial photo")
+                with_scene(entity, category, "cityscape")
+                with_scene(entity, "street view")
+                return queries[:max_queries], resolved_type
+
+            modifier_map = {
+                "EVENT": ["official event photo", "editorial photo", "press photo", "actual event photo"],
+                "PRODUCT": ["official product photo", "product launch photo", "real product image", "press image"],
+                "STATISTIC": ["chart", "infographic", "data visualization", "relevant editorial photo"],
+                "COMPARISON": ["comparison", "side by side", "chart", "editorial photo"],
+                "TIMELINE": ["archive photo", "historical photo", "timeline", "before after"],
+                "PROCESS": ["diagram", "process illustration", "how it works", "technical illustration"],
+                "QUOTE": ["official statement", "press conference photo", "speaker photo", "document"],
+                "DOCUMENT": ["official document", "filing", "report", "study document"],
+                "CONCEPT": ["concept illustration", "editorial illustration", "scientific illustration", "documentary context"],
+                "GENERAL_CONTEXT": ["editorial photo", "documentary photo", "real world photo", "high resolution photo"],
+            }
+            modifiers = modifier_map.get(resolved_type, modifier_map["GENERAL_CONTEXT"])
+            with_scene(action, modifiers[0])
+            with_scene(entity, scene_phrase, modifiers[1])
+            with_scene(entity, intent, modifiers[2])
+            with_scene(entity, category, modifiers[3])
+            with_scene(entity, title, "news photo")
+            with_scene(entity, context)
+            return queries[:max_queries], resolved_type
+
+        build_deep_queries_authoritative._production_query_planner_bound = True
+        visual_strategy_runtime.build_deep_queries = build_deep_queries_authoritative
+        print("   [Visual Strategy Hardening] Restored authoritative scene-aware query planner (up to 6 queries).", flush=True)
+    except Exception as exc:
+        print(f"   [Visual Strategy Hardening] Query planner restore unavailable: {type(exc).__name__}: {exc}", flush=True)
+
+
 def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
     """Give the deterministic fallback enough real evidence to form distinct scenes."""
     enriched = dict(story_data or {})
@@ -26,8 +196,6 @@ def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
         or ""
     ).strip()
 
-    # The normal research layer may already have attached source snippets.
-    # Reuse them directly when present so fallback generation remains cheap.
     sources = enriched.get("research_sources")
     snippets: list[str] = []
     if isinstance(sources, list):
@@ -37,8 +205,6 @@ def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
                 if len(snippet.split()) >= 5:
                     snippets.append(snippet)
 
-    # If the current story object does not carry the research pack, make one
-    # free DDG pass here. This is a recovery path only, not the normal flow.
     if not snippets:
         try:
             from research_runtime import collect_source_bundle
@@ -69,6 +235,7 @@ def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
 def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any], language_cfg: dict[str, Any], genre_key: str, format_mode: str) -> dict[str, Any]:
     """Never let a cleaned script reach rendering below the production minimum."""
     minimum, maximum = _scene_count(format_mode)
+    result = _repair_visual_identity(result, story_data)
     scenes = result.get("script") if isinstance(result, dict) else None
     if isinstance(scenes, list) and minimum <= len(scenes) <= maximum:
         return result
@@ -83,6 +250,7 @@ def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any],
 
         repair_story = _enrich_emergency_story(bot, story_data)
         fallback = _extractive_script_fallback(repair_story, language_cfg, genre_key, format_mode)
+        fallback = _repair_visual_identity(fallback, repair_story)
         fallback, _diag = clean_script_data(fallback, repair_story, format_mode)
         ok, reason = validate_content_density(fallback, story_data, format_mode)
         if not ok:
@@ -119,9 +287,6 @@ def _patch_script_pipeline(bot) -> None:
         print(f"   [Script Hardening] Final scene count: {len(repaired.get('script') or [])}", flush=True)
         return repaired
 
-    # Preserve the binding metadata used by diagnostics and later runtime layers.
-    # Scene hardening is an outer guard around the authoritative content-density
-    # writer; it must not hide the fact that research is directly beneath it.
     guarded_write._scene_contract_bound = True
     guarded_write._content_dense_bound = bool(getattr(current, "_content_dense_bound", False))
     guarded_write._research_layer_live = bool(getattr(current, "_research_layer_live", False))
@@ -212,5 +377,6 @@ def _patch_progress_wrappers(bot) -> None:
 
 
 def install_production_hardening(bot) -> None:
+    _install_authoritative_visual_query_planner()
     _patch_script_pipeline(bot)
     _patch_progress_wrappers(bot)
