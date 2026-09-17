@@ -10,6 +10,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -147,6 +148,8 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
         self._dashboard_logs: list[str] = []
+        self._activity_events: list[dict[str, Any]] = []
+        self._audio_paths: list[str] = []
         self._last_dashboard_message = ""
 
     def reset(self):
@@ -160,6 +163,8 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages = []
         self._dashboard_logs = []
+        self._activity_events = []
+        self._audio_paths = []
         self._last_dashboard_message = ""
         super().reset()
 
@@ -193,7 +198,13 @@ class DashboardWorkflowController(WorkflowController):
         with self._lock:
             if friendly != self._last_dashboard_message:
                 self._dashboard_logs.append(friendly)
-                self._dashboard_logs = self._dashboard_logs[-18:]
+                self._dashboard_logs = self._dashboard_logs[-24:]
+                self._activity_events.append({
+                    "time": datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S"),
+                    "stage": str(stage or "factory").replace("_", " ").title(),
+                    "message": friendly,
+                })
+                self._activity_events = self._activity_events[-24:]
                 self._last_dashboard_message = friendly
 
     def _install_production_wrappers(self):
@@ -264,6 +275,8 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_review_required": data.get("stage") == "visual_approval",
                     "visual_review_approved": self._visual_approved,
                     "dashboard_logs": list(self._dashboard_logs),
+                    "activity_events": list(self._activity_events),
+                    "audio_paths": list(self._audio_paths),
                 }
             )
         return data
