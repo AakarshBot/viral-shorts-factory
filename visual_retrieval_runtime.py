@@ -2,8 +2,9 @@
 
 Retrieval and semantic verification are deliberately separate concerns. A bad
 first result never ends a scene: the retriever walks a bounded query ladder,
-tries every applicable provider, verifies only decodable candidates, and uses a
-clearly marked contextual fallback when no verified visual exists.
+tries every applicable provider, verifies only decodable candidates against the
+factual identity plus scene context, and uses a clearly marked contextual
+fallback when no verified visual exists.
 """
 from __future__ import annotations
 
@@ -45,7 +46,6 @@ def _source_plan(bot, visual_type: str):
         ])
     elif str(visual_type).upper() in {"ORGANIZATION", "EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
         plan.append(("Commons", getattr(bot, "fetch_wikimedia_commons", None)))
-
     plan.extend([
         ("DDG", getattr(bot, "fetch_duckduckgo", None)),
         ("Pexels", getattr(bot, "fetch_pexels", None)),
@@ -172,19 +172,21 @@ def _ai_prompt(subject: str, visual_type: str) -> str:
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Retrieve one scene visual without making the first query a hard stop."""
     entity = str(seg.get("primary_entity", "")).strip()
+    factual_entity = str(seg.get("factual_primary_entity") or entity).strip()
     queries, visual_type = runtime._build_search_variants(seg, video_title)
     visual_type = str(visual_type or "GENERAL_CONTEXT").upper()
     if not entity or not queries:
         seg["visual_verified"] = False
         seg["visual_fallback_reason"] = "no-grounded-visual-query"
-        return make_contextual_fallback(entity, visual_type), False, "contextual-fallback"
+        return make_contextual_fallback(entity or factual_entity, visual_type), False, "contextual-fallback"
 
-    intent = str(seg.get("visual_intent", "")).strip()
-    prompt = str(seg.get("specific_search_prompt", "")).strip()
-    voice = str(seg.get("voiceover", "")).strip()
+    intent = str(seg.get("factual_visual_intent") or seg.get("visual_intent") or "").strip()
+    prompt = str(seg.get("specific_search_prompt") or entity).strip()
+    voice = str(seg.get("factual_voiceover") or seg.get("voiceover") or "").strip()
     context = runtime._context_fingerprint(intent, prompt, voice, video_title)
+    cache_entity = factual_entity or entity
 
-    cached_img, _cache_path = runtime.get_cached_asset(bot, entity, visual_type, context)
+    cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
     if cached_img is not None:
         buffer = io.BytesIO()
         cached_img.save(buffer, format="JPEG", quality=95)
@@ -200,16 +202,26 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     hard_rejections = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 4)))
 
+    # Semantic QA must verify the factual identity, while the search query may
+    # contain scene-specific context. Keep these two concepts separate.
+    qa_scene = dict(seg)
+    qa_scene["primary_entity"] = cache_entity
+    qa_scene["factual_primary_entity"] = cache_entity
+    qa_scene["visual_intent"] = intent
+    qa_scene["specific_search_prompt"] = prompt
+    qa_scene["voiceover"] = voice
+
     for query_index, query in enumerate(queries, 1):
         print(f"   [Visual Search] {query_index}/{len(queries)} | '{query}'", flush=True)
         for source, fetcher in _source_plan(bot, visual_type):
-            tier = runtime._verification_tier(seg, visual_type, source)
+            tier = runtime._verification_tier(qa_scene, visual_type, source)
             semantic_required = tier not in {"STRICT(person)", "SKIPPED(conceptual)"}
             if semantic_required and verification_attempts >= max_verification:
                 print(f"   [Visual QA] semantic budget exhausted; remaining provider checks skipped for query='{query}'", flush=True)
                 break
 
-            args = (entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
+            fetch_entity = cache_entity if source == "Wikipedia" else query
+            args = (fetch_entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
             data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
             valid, reason, normalized = _preflight_image(data)
             if not valid:
@@ -226,7 +238,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
             try:
                 accepted, tier_name, score, hard_reject = runtime._strict_gate(
-                    bot, normalized, seg, video_title, source=source
+                    bot, normalized, qa_scene, video_title, source=source
                 )
             except Exception as exc:
                 hard_reject = True
@@ -241,7 +253,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 continue
 
             try:
-                runtime.save_to_cache(bot, normalized, entity, visual_type, source, context)
+                runtime.save_to_cache(bot, normalized, cache_entity, visual_type, source, context)
             except Exception:
                 pass
             used_hashes.add(image_hash)
@@ -262,14 +274,14 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         valid, reason, normalized = _preflight_image(ai)
         if valid and normalized is not None:
             image_hash = _hash_image(bot, normalized)
-            tier = runtime._verification_tier(seg, visual_type, "AI-generated")
+            tier = runtime._verification_tier(qa_scene, visual_type, "AI-generated")
             semantic_required = tier not in {"SKIPPED(conceptual)"}
             if image_hash not in used_hashes and (not semantic_required or verification_attempts < max_verification):
                 if semantic_required:
                     verification_attempts += 1
                 try:
                     accepted, tier_name, _score, _hard_reject = runtime._strict_gate(
-                        bot, normalized, seg, video_title, source="AI-generated"
+                        bot, normalized, qa_scene, video_title, source="AI-generated"
                     )
                 except Exception as exc:
                     accepted, tier_name = False, "STRICT"
