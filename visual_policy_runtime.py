@@ -1,10 +1,7 @@
-"""Small runtime-only visual policy patches.
+"""Runtime visual policy patches.
 
-Keeps the existing visual sourcing/render pipeline intact while:
-- removing opaque hook/outro cards from non-Top-5 formats;
-- limiting the same visual subject/search term to two scene uses per run;
-- simplifying image search to the clean primary visual subject, with a
-  headline-derived fallback only when the primary subject yields nothing.
+This module keeps non-query visual policies local and deliberately does not
+replace the authoritative scene-aware search planner in visual_strategy_runtime.
 """
 from __future__ import annotations
 
@@ -15,26 +12,9 @@ from collections import defaultdict
 
 from PIL import Image, ImageDraw, ImageFont
 
-
-_CONTEXT = threading.local()
 _INSTALLED = False
-_SIMPLE_SEARCH_INSTALLED = False
 _SUBJECT_LOCK = threading.Lock()
 _SUBJECT_RUNS = {}
-
-# Common words that strongly suggest the field contains a sentence/description
-# rather than a compact visual subject. Coordinating conjunctions are excluded
-# because they are common inside legitimate multi-word entities/event names.
-_SENTENCE_CUES = {
-    "every", "each", "when", "while", "because", "given", "since", "after", "before",
-    "so", "if", "although", "though", "we", "you", "they", "he", "she", "it", "this", "that",
-    "try", "tried", "tries", "get", "gets", "got", "getting", "happen", "happens", "happened", "will",
-    "would", "could", "should", "season", "year", "years", "today", "tomorrow", "yesterday",
-    "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't", "can't", "cannot",
-    "announce", "announced", "announces", "said", "says", "told", "revealed", "reveal", "confirms", "confirmed",
-    "expects", "expected", "hosted", "hosts", "plans", "planned", "wants", "wanted", "notes", "noted",
-    "reports", "reported",
-}
 
 _ORGANISATION_ACRONYMS = {
     "BCCI", "ICC", "PCB", "SLC", "BCB", "ACB", "FIFA", "UEFA", "NBA", "NFL", "ATP", "WTA",
@@ -51,10 +31,7 @@ def _bg_color(bot):
 def _font(bot, size, font_choice=None):
     candidates = []
     if font_choice:
-        candidates.extend([
-            str(font_choice),
-            os.path.join("C:\\Windows\\Fonts", str(font_choice)),
-        ])
+        candidates.extend([str(font_choice), os.path.join("C:\\Windows\\Fonts", str(font_choice))])
     candidates.extend([
         r"C:\Windows\Fonts\segoeuib.ttf",
         r"C:\Windows\Fonts\arialbd.ttf",
@@ -70,33 +47,31 @@ def _font(bot, size, font_choice=None):
 
 
 def _clean_search_subject(value):
-    """Reduce a model-produced visual subject to a compact, searchable entity."""
+    """Reduce a model-produced visual subject to a compact searchable entity."""
     text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-:;|\"'")
     if not text:
         return ""
     text = re.sub(
         r"^(?:primary\s+entity|visual\s+subject|subject|search\s+term|keyword)\s*[:=-]\s*",
-        "",
-        text,
-        flags=re.I,
+        "", text, flags=re.I,
     ).strip()
     text = re.sub(
         r"\s+(?:official(?:\s+photo)?|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|best\s+innings|latest\s+update|latest\s+news|breaking\s+news|photo|image)\s*$",
-        "",
-        text,
-        flags=re.I,
+        "", text, flags=re.I,
     ).strip(" ,.-:;|\"'")
-
     words = text.split()
     if not words:
         return ""
 
-    # First detect whether the value is sentence-like. Only then collapse a
-    # known organisation acronym. This preserves compact entities such as
-    # "2022 FIFA World Cup Final" while still cleaning blobs such as
-    # "BCCI Impact Player Every year we try..." -> "BCCI".
+    # Only collapse a known acronym when the value becomes sentence-like.
+    sentence_cues = {
+        "every", "each", "when", "while", "because", "after", "before", "try", "tried", "tries",
+        "get", "gets", "got", "getting", "happen", "happens", "will", "would", "could", "should",
+        "announce", "announced", "announces", "said", "says", "told", "revealed", "confirmed",
+        "expects", "expected", "plans", "planned", "wants", "wanted", "reports", "reported",
+    }
     cue_index = next(
-        (i for i, word in enumerate(words[1:], start=1) if word.lower().strip(".,!?;:") in _SENTENCE_CUES),
+        (i for i, word in enumerate(words[1:], start=1) if word.lower().strip(".,!?;:") in sentence_cues),
         None,
     )
     if cue_index is not None:
@@ -107,16 +82,11 @@ def _clean_search_subject(value):
                 return token
         words = prefix
 
-    # Keep compact entity/event names intact, but place a finite bound on
-    # genuinely long model garbage. Eight words is still safely searchable.
-    if len(words) > 8:
-        words = words[:8]
-
-    return " ".join(words).strip(" ,.-:;|\"'")
+    return " ".join(words[:8]).strip(" ,.-:;|\"'")
 
 
 def _headline_fallback(video_title):
-    """Pick one compact subject from a headline when a scene has no usable entity."""
+    """Choose a compact subject from a headline when the scene has no entity."""
     text = _clean_search_subject(video_title)
     if not text:
         return ""
@@ -130,44 +100,7 @@ def _headline_fallback(video_title):
     if not words:
         return ""
     proper = [w.strip("'\"") for w in words if any(c.isupper() for c in w if c.isalpha())]
-    if proper:
-        return _clean_search_subject(" ".join(proper[:3]))
-    return _clean_search_subject(words[0])
-
-
-def _simple_build_deep_queries(seg, video_title="", visual_type=None):
-    """Return at most one clean subject query for a scene."""
-    entity = _clean_search_subject(seg.get("primary_entity", ""))
-    try:
-        from visual_strategy_runtime import classify_scene, VISUAL_TYPES
-        category = str(seg.get("sport_or_topic_category", "") or "")
-        classify_seg = dict(seg)
-        classify_seg["primary_entity"] = entity
-        resolved_type = visual_type or classify_scene(classify_seg, category)
-        if resolved_type not in VISUAL_TYPES:
-            resolved_type = "GENERAL_CONTEXT"
-    except Exception:
-        resolved_type = visual_type or "GENERAL_CONTEXT"
-    query = entity if entity and entity.lower() not in {"none", "unknown", "n/a"} else _headline_fallback(video_title)
-    return ([query] if query else []), resolved_type
-
-
-def _install_simple_search_policy():
-    global _SIMPLE_SEARCH_INSTALLED
-    if _SIMPLE_SEARCH_INSTALLED:
-        return True
-    try:
-        import visual_strategy_runtime
-        current = getattr(visual_strategy_runtime, "build_deep_queries", None)
-        if current and not getattr(current, "_simple_search_bound", False):
-            _simple_build_deep_queries._simple_search_bound = True
-            visual_strategy_runtime.build_deep_queries = _simple_build_deep_queries
-            _SIMPLE_SEARCH_INSTALLED = True
-            print("   [Visual Policy] Simple visual search installed: primary subject only; headline fallback when missing.", flush=True)
-            return True
-    except Exception as exc:
-        print(f"   [Visual Policy] Simple search unavailable: {type(exc).__name__}: {exc}", flush=True)
-    return False
+    return _clean_search_subject(" ".join(proper[:3])) if proper else _clean_search_subject(words[0])
 
 
 def _subject_limit_wrapper(original):
@@ -197,16 +130,14 @@ def _subject_limit_wrapper(original):
                         chosen_seg = dict(seg)
                         chosen_seg["primary_entity"] = ""
                         chosen_seg["visual_type"] = "GENERAL_CONTEXT"
+                        chosen_seg["visual_intent"] = "documentary context"
                         chosen_seg["specific_search_prompt"] = ""
-
         try:
             return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
         finally:
             with _SUBJECT_LOCK:
                 if len(_SUBJECT_RUNS) > 32:
-                    oldest_key = next(iter(_SUBJECT_RUNS))
-                    if oldest_key != run_key:
-                        _SUBJECT_RUNS.pop(oldest_key, None)
+                    _SUBJECT_RUNS.pop(next(iter(_SUBJECT_RUNS)), None)
 
     limited_relevant_asset._subject_limit_bound = True
     return limited_relevant_asset
@@ -226,10 +157,9 @@ def _install_subject_limit():
 
 
 def install_visual_card_policy(bot=None):
-    """Patch the legacy card renderers and visual search policy once."""
+    """Patch legacy card renderers without replacing visual search strategy."""
     global _INSTALLED
     if _INSTALLED:
-        _install_simple_search_policy()
         _install_subject_limit()
         return True
     try:
@@ -242,7 +172,6 @@ def install_visual_card_policy(bot=None):
 
         original_hook = namespace.get("render_hook_card")
         if callable(original_hook) and not getattr(original_hook, "_qc_hook_passthrough", False):
-            # Keep the legacy factory call contract: bot + bg + hook + six options.
             def render_hook_card_no_card(_bot, bg_img, hook_text, width=1080, height=1920, font_choice=None, script_data=None):
                 return bg_img.convert("RGBA")
             render_hook_card_no_card._qc_hook_passthrough = True
@@ -267,8 +196,7 @@ def install_visual_card_policy(bot=None):
                 cta = str(subtitle_text or "").strip()
                 def centered(text, font, y, fill):
                     bbox = draw.textbbox((0, 0), text, font=font)
-                    w = bbox[2] - bbox[0]
-                    draw.text(((width - w) / 2, y), text, font=font, fill=fill)
+                    draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, font=font, fill=fill)
                 if title:
                     centered(title, title_font, int(height * 0.42), (242, 244, 246, 255))
                 if cta:
@@ -278,12 +206,11 @@ def install_visual_card_policy(bot=None):
             namespace["create_branded_slide"] = create_branded_slide_policy
 
         _INSTALLED = True
-        _install_simple_search_policy()
         _install_subject_limit()
-        print("   [Visual Policy] Non-Top-5 hook/outro cards disabled; Top-5 cards preserved.", flush=True)
+        print("   [Visual Policy] Non-Top-5 hook/outro cards disabled; Top-5 cards preserved; authoritative search planner retained.", flush=True)
         return True
     except Exception as exc:
-        print(f"   [Visual Policy] Card/search policy unavailable: {type(exc).__name__}: {exc}", flush=True)
+        print(f"   [Visual Policy] Card policy unavailable: {type(exc).__name__}: {exc}", flush=True)
     return False
 
 
