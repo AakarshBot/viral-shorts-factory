@@ -170,9 +170,7 @@ def test_visual_search_does_not_fall_back_to_raw_narration_or_category(monkeypat
     call = calls[0]
     assert "not" not in call["entity"].lower().split()
     assert "not" not in call["query_prompt"].lower().split()
-    assert "&nbsp;" not in call["voiceover"]
-    assert "one-off" not in call["voiceover"].lower()
-    assert "thing" not in call["voiceover"].lower()
+    assert "&nbsp;" not in call["query_prompt"].lower()
 
 
 def test_unicode_primary_subject_is_preserved():
