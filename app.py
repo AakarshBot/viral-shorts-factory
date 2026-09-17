@@ -273,9 +273,15 @@ def render_sidebar_controls() -> Dict[str, Any]:
         )
         st.session_state.category_key = options[selected_label]
 
-    if st.sidebar.button("Reset current run", use_container_width=True):
+    if st.sidebar.button(
+        "Reset current run",
+        use_container_width=True,
+        disabled=bool(st.session_state.workflow_controller.snapshot().get("thread_alive")),
+    ):
         reset_run()
         st.rerun()
+    if st.session_state.workflow_controller.snapshot().get("thread_alive"):
+        st.sidebar.caption("A live run is active. Use the visual review controls to stop or continue it.")
 
     return build_config()
 
@@ -545,6 +551,10 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 st.error(f"Topic discovery failed: {type(exc).__name__}: {exc}")
         return
 
+    if st.session_state.production_started:
+        render_live_monitor(controller)
+        return
+
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DISCOVERY_CANDIDATES)
     page_size = 3
@@ -600,9 +610,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 st.session_state.candidate_page = page + 1
                 st.rerun()
 
-    if st.session_state.production_started:
-        render_live_monitor(controller)
-    elif not controller.snapshot().get("thread_alive"):
+    if not controller.snapshot().get("thread_alive"):
         st.info("Choose one ranked topic above to start the production run.")
 
 
