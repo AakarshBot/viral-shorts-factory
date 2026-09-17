@@ -257,15 +257,25 @@ def patch_content_first_visuals(bot):
             elif format_mode == "top5":
                 clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", str(seg.get("voiceover", "")), flags=re.IGNORECASE).strip()
                 rendered = bot.render_top5_card(bg_img, max(1, 6 - idx), 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
-            elif idx == 0:
-                rendered = _render_hook_card(bot, bg_img, seg.get("voiceover", ""), font_name=font_choice)
             else:
-                rendered = _render_scene_overlay(bot, bg_img, idx + 1, len(scenes), visual_type, source_type, seg.get("voiceover", ""), font_name=font_choice)
+                # Deep Dive never receives the legacy opaque hook-card treatment.
+                # First scenes use the same content-first visual treatment as all
+                # subsequent Deep Dive scenes; Top-5 retains its dedicated cards.
+                rendered = _render_scene_overlay(
+                    bot,
+                    bg_img,
+                    idx + 1,
+                    len(scenes),
+                    visual_type,
+                    source_type,
+                    seg.get("voiceover", ""),
+                    font_name=font_choice,
+                )
 
             rendered.convert("RGB").save(img_path, "JPEG", quality=95)
             packages[idx] = [{
                 "image": img_path,
-                "text": "" if format_mode == "top5" or idx == 0 else seg.get("voiceover", ""),
+                "text": "" if format_mode == "top5" else seg.get("voiceover", ""),
                 "ai_generated": used_ai,
                 "source_type": source_type,
                 "visual_type": visual_type,
