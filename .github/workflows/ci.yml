@@ -50,7 +50,7 @@ jobs:
           import provider_runtime, quality_runtime, research_runtime, runtime_bindings
           import script_guard_runtime, script_runtime, semantic_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
-          import visual_runtime, visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
+          import visual_runtime, visual_safety_runtime, visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
           import newsroom_dashboard
           print('Core runtime imports passed.')
           PY
@@ -61,7 +61,7 @@ jobs:
           import inspect
           import edge_tts
           import factory_runtime, final_qc_runtime, provider_runtime, runtime_bindings
-          import script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime
+          import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
           import visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
           import visual_policy_runtime
 
@@ -69,6 +69,13 @@ jobs:
           assert factory_runtime._vignette((1080, 1920)).size == (1080, 1920)
 
           visual_policy_runtime.install_visual_card_policy(ultimate_bot)
+          contract_errors = runtime_hardener.validate_runtime_contracts(ultimate_bot)
+          assert not contract_errors, contract_errors
+          assert visual_runtime.VISUAL_MAX_SEARCH_QUERIES == visual_safety_runtime.VISUAL_MAX_SEARCH_QUERIES
+          assert visual_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS == visual_safety_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS
+          assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS
+          assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
+          assert getattr(visual_runtime, 'VISUAL_BUDGET_RUNTIME_VERSION', '') == '2026-09-17-v1'
 
           person = {'primary_entity': 'Lionel Messi', 'visual_intent': 'person portrait', 'voiceover': 'Lionel Messi scored in the final.', 'sport_or_topic_category': 'football'}
           event = {'primary_entity': '2022 FIFA World Cup Final', 'visual_intent': 'actual match event', 'voiceover': 'The final went to penalties.', 'sport_or_topic_category': 'football'}
