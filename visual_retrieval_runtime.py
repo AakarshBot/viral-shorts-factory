@@ -35,6 +35,12 @@ REAL_SOURCE_SCORES = {
 }
 
 
+def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
+    """Generate a stable cache context without depending on the caller runtime."""
+    raw = " | ".join(str(value or "").strip().lower() for value in (intent, prompt, voice, video_title))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def _as_image_bytes(data: Any) -> bytes | None:
     if data is None:
         return None
@@ -187,7 +193,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     intent = str(seg.get("factual_visual_intent") or seg.get("visual_intent") or "").strip()
     prompt = str(seg.get("specific_search_prompt") or entity).strip()
     voice = str(seg.get("factual_voiceover") or seg.get("voiceover") or "").strip()
-    context = runtime._context_fingerprint(intent, prompt, voice, video_title)
+    context = _context_fingerprint(intent, prompt, voice, video_title)
     cache_entity = factual_entity or entity
 
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
