@@ -70,13 +70,9 @@ def check_required_local_assets():
     base = ultimate_bot.BASE_DIR
     problems = []
 
-    client_secret = getattr(ultimate_bot, "CLIENT_SECRETS_FILE", None)
-    if client_secret and not os.path.exists(client_secret):
-        problems.append(
-            f"Missing OAuth file: `{os.path.relpath(client_secret, base)}` "
-            f"— copy your Google `client_secret.json` into the repo folder "
-            f"(same folder as `ultimate_bot.py`)."
-        )
+    # Google OAuth is only needed when a Google-authenticated feature is actually used.
+    # The Streamlit factory can generate/test videos without a local client_secret.json,
+    # so do not block dashboard startup on a desktop-only OAuth file.
 
     brand_dir = getattr(ultimate_bot, "BRAND_ASSETS_DIR", None)
     if brand_dir:
