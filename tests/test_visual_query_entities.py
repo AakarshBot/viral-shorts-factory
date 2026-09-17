@@ -128,8 +128,8 @@ def test_candidate_scene_keeps_provenance_but_locks_clean_visual_subject():
     assert candidate["primary_entity"] == candidate["visual_search_subject"]
     assert candidate["factual_primary_entity"] == "Northstar Research Summit"
     assert candidate["original_primary_entity"] == source["primary_entity"]
-    assert candidate["specific_search_prompt"] == source["specific_search_prompt"]
-    assert candidate["factual_voiceover"] == source["voiceover"].replace("&nbsp;", " ").strip()
+    assert candidate["specific_search_prompt"] == clean_text(source["specific_search_prompt"])
+    assert candidate["factual_voiceover"] == clean_text(source["voiceover"])
     assert "&nbsp;" not in candidate["voiceover"]
     assert candidate["visual_subject_locked"] is True
 
