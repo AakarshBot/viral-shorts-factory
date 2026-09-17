@@ -19,9 +19,24 @@ def choose_delivery_profile(bot, script_data):
 
 
 def patch_audio_direction(bot):
+    # Pipeline integrity is installed once at the top-level binding layer.
+    # Do not re-wrap write_script here: doing so changes the final wrapper
+    # order and can hide the research/content-density lifecycle markers.
+    try:
+        if not getattr(bot, "_pipeline_integrity_installed", False):
+            from pipeline_integrity_loader import patch_pipeline_integrity
+            patch_pipeline_integrity(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Pipeline integrity guard unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     # Branding, final artifact QC and channel intelligence are bound here
     # because this patch is part of the live runtime binding stack; each is
     # explicit and idempotent.
+    try:
+        from channel_branding_runtime import install_channel_branding
+        install_channel_branding(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Channel branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
     try:
         from branding_runtime import patch_branding_pipeline
         patch_branding_pipeline(bot)
