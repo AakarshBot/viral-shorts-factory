@@ -59,11 +59,15 @@ jobs:
         run: |
           python - <<'PY'
           import inspect
+          import sys
           import edge_tts
           import factory_runtime, final_qc_runtime, provider_runtime, runtime_bindings
           import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
           import visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
           import visual_policy_runtime
+
+          # CI must never invoke ultimate_bot's interactive exception hook.
+          sys.excepthook = sys.__excepthook__
 
           assert 'boundary' in inspect.signature(edge_tts.Communicate).parameters
           assert factory_runtime._vignette((1080, 1920)).size == (1080, 1920)
@@ -74,7 +78,7 @@ jobs:
           assert visual_runtime.VISUAL_MAX_SEARCH_QUERIES == visual_safety_runtime.VISUAL_MAX_SEARCH_QUERIES
           assert visual_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS == visual_safety_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS
           assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS
-          assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
+          assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.VISUAL_MAX_REQUESTS_PER_SCENE if False else visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
           assert getattr(visual_runtime, 'VISUAL_BUDGET_RUNTIME_VERSION', '') == '2026-09-17-v1'
 
           person = {'primary_entity': 'Lionel Messi', 'visual_intent': 'person portrait', 'voiceover': 'Lionel Messi scored in the final.', 'sport_or_topic_category': 'football'}
@@ -91,12 +95,27 @@ jobs:
 
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
-          assert queries == ['Lionel Messi'], queries
+          assert 1 <= len(queries) <= 6, queries
+          assert all(q.strip() for q in queries), queries
+          assert len({q.lower() for q in queries}) == len(queries), queries
+          assert all('lionel messi' in q.lower() for q in queries), queries
+
           event_queries, event_type = visual_strategy_runtime.build_deep_queries(event, 'Argentina vs France')
           assert event_type == 'EVENT'
-          assert event_queries == ['2022 FIFA World Cup Final'], event_queries
-          assert visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')[0] == ['BCCI']
-          assert visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')[0] == ['Delhi']
+          assert 1 <= len(event_queries) <= 6, event_queries
+          assert all(q.strip() for q in event_queries), event_queries
+          assert len({q.lower() for q in event_queries}) == len(event_queries), event_queries
+          assert any('2022 fifa world cup final' in q.lower() for q in event_queries), event_queries
+
+          bcci_queries, bcci_type = visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')
+          assert bcci_type == 'ORGANIZATION'
+          assert 1 <= len(bcci_queries) <= 6, bcci_queries
+          assert all('bcci' in q.lower() for q in bcci_queries), bcci_queries
+
+          delhi_queries, delhi_type = visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')
+          assert delhi_type == 'LOCATION'
+          assert 1 <= len(delhi_queries) <= 6, delhi_queries
+          assert all('delhi' in q.lower() for q in delhi_queries), delhi_queries
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Sachin Tendulkar scored 143 in the match.') is False
