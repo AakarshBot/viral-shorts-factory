@@ -20,7 +20,6 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -33,225 +32,46 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
 
-      - name: Compile Python sources
+      - name: Compile supported Python sources
         run: python -m compileall -q .
 
-      - name: Explicitly validate dashboard syntax
-        run: python -m py_compile app.py newsroom_dashboard.py pages/Factory_QC.py
+      - name: Validate canonical dashboard syntax
+        run: python -m py_compile app.py
 
-      - name: Import core runtime modules
+      - name: Import supported runtime modules
         run: |
           python - <<'PY'
           import audio_direction_runtime, audio_runtime, autopilot_runtime
           import branding_runtime, db_architecture, db_runtime, diagnostics_runtime
           import editorial_runtime, factory_runtime, final_qc_runtime, learning_runtime
-          import image_sources_runtime, provider_runtime, quality_runtime, research_runtime, runtime_bindings
+          import image_sources_runtime, provider_runtime, quality_runtime, research_runtime
+          import runtime_bindings, runtime_hardener, production_hardening_runtime
           import script_guard_runtime, script_runtime, semantic_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
-          import visual_runtime, visual_safety_runtime, visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, visual_retrieval_runtime, workflow_runtime, youtube_comment_runtime
-          import newsroom_dashboard
-          print('Core runtime imports passed.')
+          import visual_runtime, visual_safety_runtime, visual_strategy_runtime
+          import visual_semantic_guard_runtime, visual_query_entities_runtime
+          import visual_retrieval_runtime, visual_provider_boundary_runtime, workflow_runtime
+          import youtube_comment_runtime
+          print('Supported runtime imports passed.')
           PY
 
-      - name: Run offline semantic visual smoke checks
-        run: |
-          python - <<'PY'
-          import inspect
-          import io
-          from pathlib import Path
-          from PIL import Image
-          import edge_tts
-          import factory_runtime, final_qc_runtime, image_sources_runtime, provider_runtime, runtime_bindings
-          import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
-          import visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, visual_retrieval_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
-          from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
-          from visual_semantic_guard_runtime import resolve_subject
-
-          assert 'boundary' in inspect.signature(edge_tts.Communicate).parameters
-          assert factory_runtime._vignette((1080, 1920)).size == (1080, 1920)
-
-          visual_policy_runtime.install_visual_card_policy(ultimate_bot)
-          contract_errors = runtime_hardener.validate_runtime_contracts(ultimate_bot)
-          assert not contract_errors, contract_errors
-          assert visual_runtime.VISUAL_MAX_SEARCH_QUERIES == visual_safety_runtime.VISUAL_MAX_SEARCH_QUERIES
-          assert visual_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS == visual_safety_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS
-          assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS
-          assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
-
-          cases = [
-              ({'primary_entity': 'Amina Rahman', 'visual_intent': 'person portrait', 'voiceover': 'Amina Rahman presented the documentary.'}, 'Amina Rahman', 'PERSON'),
-              ({'primary_entity': 'Northstar Labs', 'visual_intent': 'company', 'voiceover': 'Northstar Labs announced a research program.'}, 'Northstar Labs', 'ORGANIZATION'),
-              ({'primary_entity': 'Nova Phone 8', 'visual_intent': 'product device', 'voiceover': 'Nova Phone 8 was announced.'}, 'Nova Phone 8', 'PRODUCT'),
-              ({'primary_entity': 'Central City', 'visual_intent': 'location geography', 'voiceover': 'Central City hosted the report.'}, 'Central City', 'LOCATION'),
-              ({'primary_entity': 'Global Climate Summit', 'visual_intent': 'event', 'voiceover': 'The Global Climate Summit opened with a new agreement.'}, 'Global Climate Summit', 'EVENT'),
-              ({'primary_entity': 'quantum computing', 'visual_intent': 'scientific concept', 'voiceover': 'Quantum computing uses quantum states to process information.'}, 'quantum computing', 'CONCEPT'),
-              ({'primary_entity': 'Aurora', 'visual_intent': 'team members', 'voiceover': 'The Aurora team members presented research findings.'}, 'Aurora', 'ORGANIZATION'),
-              ({'primary_entity': 'Not Northstar Research Summit', 'visual_intent': 'news_event', 'voiceover': 'Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin next year &nbsp;.'}, 'Northstar Research Summit Berlin', 'EVENT'),
-          ]
-
-          for scene, expected_subject, expected_type in cases:
-              brief = build_scene_visual_brief(scene, scene['primary_entity'])
-              queries, visual_type = build_deep_queries(scene, scene['primary_entity'])
-              assert visual_type == expected_type, (scene, brief, visual_type)
-              assert brief['subject'] == expected_subject, (scene, brief)
-              assert queries and queries[0] == expected_subject, queries
-              assert len(queries) <= 5, queries
-              assert all(expected_subject.casefold() in q.casefold() for q in queries), queries
-              joined = ' '.join(queries).casefold()
-              assert 'nbsp' not in joined and '&nbsp;' not in joined, queries
-              assert 'not ' not in joined and 'one-off' not in joined and ' thing' not in joined, queries
-
-          # Identity-first is the runtime invariant: a clean factual entity is
-          # always query one. Context may broaden later queries, but the rich
-          # sentence-style prompt must never become the first query.
-          visual_query_entities_runtime._install_runtime_query_guard(visual_runtime)
-          runtime_scene = {
-              'primary_entity': 'Indian cricket team',
-              'specific_search_prompt': 'Indian cricket team lifting T20 World Cup trophy',
-              'visual_intent': 'team trophy celebration',
-              'voiceover': 'The Indian cricket team lifted the T20 World Cup trophy.',
-          }
-          runtime_queries, runtime_type = visual_runtime._build_search_variants(runtime_scene, 'T20 World Cup story')
-          assert runtime_type == 'ORGANIZATION', runtime_queries
-          assert 1 <= len(runtime_queries) <= 5, runtime_queries
-          assert runtime_queries[0] == 'Indian cricket team', runtime_queries
-          assert all('Indian cricket team' in q for q in runtime_queries), runtime_queries
-          assert all(len(q.split()) <= 6 for q in runtime_queries), runtime_queries
-          assert all('lifting' not in q.casefold() for q in runtime_queries), runtime_queries
-          assert 'Indian cricket team lifting T20 World Cup trophy' not in runtime_queries, runtime_queries
-
-          # A stale explicit visual_type must not override semantic role inference.
-          stale_type_scene = {
-              'primary_entity': 'Indian cricket team lifting T20 World Cup trophy',
-              'visual_type': 'LOCATION',
-              'visual_intent': 'team trophy celebration',
-          }
-          prepared = visual_query_entities_runtime.build_candidate_scene(stale_type_scene, stale_type_scene['primary_entity'])
-          assert prepared['visual_type'] == 'ORGANIZATION', prepared
-          assert prepared['primary_entity'] == 'Indian cricket team lifting T20 World Cup trophy', prepared
-
-          multilingual = {
-              'primary_entity': 'محمد صلاح',
-              'visual_intent': 'person portrait',
-              'voiceover': 'محمد صلاح appeared in the report.',
-          }
-          brief = build_scene_visual_brief(multilingual, 'Global story')
-          queries, visual_type = build_deep_queries(multilingual, 'Global story')
-          assert visual_type == 'PERSON'
-          assert brief['subject'] == 'محمد صلاح'
-          assert queries[0] == 'محمد صلاح'
-
-          malformed = resolve_subject({
-              'primary_entity': 'Not BBL Chennai',
-              'visual_intent': 'news_event',
-              'voiceover': "Not just a 'one-off thing' - BBL could continue hosting season-opener in Chennai &nbsp;",
-              'specific_search_prompt': 'news_event',
-          }, 'BBL Chennai story')
-          assert malformed['visual_type'] == 'EVENT'
-          assert malformed['subject'] != 'Not BBL Chennai'
-          assert 'not' not in malformed['subject'].casefold().split()
-          assert 'nbsp' not in malformed['subject'].casefold()
-          assert 'thing' not in malformed['subject'].casefold()
-
-          class FakeRuntime:
-              VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
-              def _build_search_variants(self, seg, video_title=''):
-                  return ['Acme launch ceremony', 'Acme launch event', 'Acme'], 'EVENT'
-              def _verification_tier(self, seg, visual_type, source):
-                  return 'STRICT'
-              def _call_fetcher_with_timeout(self, fetcher, args, source, query):
-                  return fetcher(*args)
-              def _strict_gate(self, bot, data, seg, video_title, source=''):
-                  return (True, 'STRICT', 100, False)
-              def get_cached_asset(self, bot, entity, visual_type, context=''):
-                  return None, None
-              def save_to_cache(self, *args, **kwargs):
-                  return None
-              def _context_fingerprint(self, *args):
-                  return 'offline'
-
-          img = Image.new('RGB', (640, 640), (100, 100, 100))
-          buf = io.BytesIO(); img.save(buf, format='JPEG'); valid_bytes = buf.getvalue()
-          seen_queries = []
-
-          class FakeBot:
-              def fetch_test(self, query, used_urls, marker, video_title):
-                  seen_queries.append(query)
-                  return valid_bytes if query == 'Acme launch event' else None
-              def get_image_hash(self, data):
-                  return __import__('hashlib').sha256(data).hexdigest()
-
-          original_plan = visual_retrieval_runtime._source_plan
-          visual_retrieval_runtime._source_plan = lambda bot, visual_type: [('TestSource', bot.fetch_test)]
-          try:
-              seg = {'primary_entity': 'Acme launch event', 'factual_primary_entity': 'Acme', 'visual_type': 'EVENT', 'factual_visual_intent': 'launch'}
-              result_img, _, source = visual_retrieval_runtime.run_visual_retrieval(FakeRuntime(), FakeBot(), seg, '', set(), set(), 'Acme story')
-              assert source == 'TestSource'
-              assert seen_queries[:2] == ['Acme launch ceremony', 'Acme launch event'], seen_queries
-              assert result_img.size == (640, 640)
-          finally:
-              visual_retrieval_runtime._source_plan = original_plan
-
-          rescue = visual_retrieval_runtime.make_visual_rescue('Unobtainable subject', 'EVENT')
-          assert rescue.size == (1080, 1920)
-
-          assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
-          assert script_guard_runtime.looks_like_instructional_narration('Amina Rahman presented the documentary.') is False
-          assert callable(script_guard_runtime.install)
-          assert callable(image_sources_runtime.fetch_openverse)
-          assert callable(image_sources_runtime.fetch_pixabay)
-
-          from visual_qa_runtime import _tier_for
-          from visual_runtime import _cache_key, _context_fingerprint
-          assert _tier_for('person portrait', 'PERSON', 'Wikipedia') == 'IDENTITY'
-          assert _tier_for('conceptual', 'GENERAL_CONTEXT', 'DDG') == 'IDENTITY'
-          c1 = _context_fingerprint('person portrait', 'Amina Rahman documentary', 'Amina presented the documentary', 'documentary story')
-          c2 = _context_fingerprint('person portrait', 'Amina interview', 'Amina discussed the project', 'documentary story')
-          assert c1 != c2
-          assert _cache_key('Amina Rahman', 'PERSON', c1) != _cache_key('Amina Rahman', 'PERSON', c2)
-
-          factory_runtime.patch_dashboard_runtime(ultimate_bot)
-          provider_runtime.patch_provider_adapters(ultimate_bot)
-          runtime_bindings.harden_editorial_defaults(ultimate_bot)
-          runtime_bindings.bind_dashboard_patches(ultimate_bot)
-          namespace = ultimate_bot.run_robot.__globals__
-          for name in ('gather_and_filter_stories', 'editorial_gate_batch', 'process_scored_candidates', 'validate_script', 'generate_voiceover_and_timestamps', 'process_visuals_async', 'fetch_scene_asset', 'token_overlap_ratio', 'upload_to_youtube', 'generate_karaoke_clip', 'compile_video', 'write_script'):
-              assert namespace[name] is getattr(ultimate_bot, name), name
-
-          uploader_signature = inspect.signature(ultimate_bot.upload_to_youtube)
-          for name in ('title_override', 'description_override', 'comment_override'):
-              assert name in uploader_signature.parameters
-
-          assert callable(final_qc_runtime.validate_final_video)
-          assert callable(final_qc_runtime.validate_final_upload_metadata)
-          clean_title, clean_description, clean_comment = final_qc_runtime.validate_final_upload_metadata('Example story title', 'This is a factual description with enough words to satisfy final upload quality control checks.', 'What do you think about this story?')
-          assert clean_title == 'Example story title'
-          assert clean_description.startswith('This is a factual description')
-          assert clean_comment.startswith('What do you think')
-
-          assert workflow_runtime.WORKFLOW_VERSION.startswith('2026-09-16-newsroom-')
-          assert set(workflow_runtime.FORMAT_OPTIONS) == {'Deep Dive', 'Top-5', 'Cricket'}
-          assert set(workflow_runtime.CRICKET_CATEGORIES) == {'India / Asia', 'Global', 'AI-assisted top story in cricket'}
-
-          required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_semantic_guard_runtime.py', 'visual_query_entities_runtime.py', 'visual_content_runtime.py', 'visual_retrieval_runtime.py', 'image_sources_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
-          missing = [p for p in required if not Path(p).is_file()]
-          assert not missing, missing
-          print('Offline semantic visual smoke checks passed.')
-          PY
-
-      - name: Run full no-API diagnostics
+      - name: Run no-API diagnostics
         run: |
           python - <<'PY'
           import sys
           sys.excepthook = sys.__excepthook__
           from diagnostics_runtime import run_offline_diagnostics
           report = run_offline_diagnostics()
-          sys.excepthook = sys.__excepthook__
           for item in report['results']:
               print(f"[{item['status']}] {item['name']}: {item['detail']}")
           assert report['api_calls'] == 0
           assert report['all_passed'], report
-          print(f"Full no-API diagnostics passed: {report['passed']}/{report['total']}")
+          print(f"Offline diagnostics passed: {report['passed']}/{report['total']}")
           PY
+
+      - name: Run repository regression tests
+        run: python -m pytest -q tests

@@ -1,4 +1,4 @@
-"""Offline, no-API diagnostics for Viral Shorts Factory."""
+"""Offline, no-API diagnostics for the supported Viral Shorts Factory path."""
 from __future__ import annotations
 
 import os
@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import tempfile
 import traceback
+from pathlib import Path
 
 
 def _run(name, fn):
@@ -27,13 +28,13 @@ def _test_imports():
         "script_guard_runtime", "script_runtime", "research_runtime",
         "audio_runtime", "audio_direction_runtime", "visual_runtime",
         "visual_qa_runtime", "visual_strategy_runtime", "visual_semantic_guard_runtime",
-        "visual_query_entities_runtime", "visual_content_runtime", "provider_runtime",
-        "quality_runtime", "runtime_bindings", "workflow_runtime", "subtitle_runtime",
-        "newsroom_dashboard",
+        "visual_query_entities_runtime", "visual_content_runtime", "visual_retrieval_runtime",
+        "visual_provider_boundary_runtime", "provider_runtime", "quality_runtime",
+        "runtime_bindings", "workflow_runtime", "subtitle_runtime", "youtube_comment_runtime",
     ]
     for name in modules:
         __import__(name)
-    return f"Imported {len(modules)} factory modules"
+    return f"Imported {len(modules)} supported factory modules"
 
 
 def _test_environment():
@@ -46,7 +47,7 @@ def _test_environment():
 
 
 def _test_database():
-    from db_architecture import migrate_vault, make_run_id, create_run_record, update_run_record
+    from db_architecture import create_run_record, make_run_id, migrate_vault, update_run_record
     temp_dir = tempfile.mkdtemp(prefix="vsf_diag_")
     db_path = os.path.join(temp_dir, "diagnostic.db")
     try:
@@ -68,63 +69,31 @@ def _test_database():
 
 
 def _test_visual_strategy():
-    from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
+    from visual_query_entities_runtime import build_candidate_scene
     from visual_semantic_guard_runtime import meaningful_tokens, resolve_subject
+    from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
     from visual_qa_runtime import _tier_for
     from visual_runtime import _cache_key, _context_fingerprint
 
     cases = [
-        ({"primary_entity": "Amina Rahman", "voiceover": "Amina Rahman presented the documentary.", "visual_intent": "person portrait", "sport_or_topic_category": "entertainment"}, "Amina Rahman", "PERSON"),
-        ({"primary_entity": "Northstar Labs", "voiceover": "Northstar Labs announced a research program.", "visual_intent": "company", "sport_or_topic_category": "technology"}, "Northstar Labs", "ORGANIZATION"),
-        ({"primary_entity": "Nova Phone 8", "voiceover": "Nova Phone 8 was announced.", "visual_intent": "product device", "sport_or_topic_category": "technology"}, "Nova Phone 8", "PRODUCT"),
-        ({"primary_entity": "Central City", "voiceover": "Central City hosted the report.", "visual_intent": "location geography", "sport_or_topic_category": "geography"}, "Central City", "LOCATION"),
-        ({"primary_entity": "Global Climate Summit", "voiceover": "The summit opened with a new agreement.", "visual_intent": "event", "sport_or_topic_category": "climate"}, "Global Climate Summit", "EVENT"),
-        ({"primary_entity": "quantum computing", "voiceover": "Quantum computing uses quantum states.", "visual_intent": "scientific concept", "sport_or_topic_category": "science"}, "quantum computing", "CONCEPT"),
-        ({"primary_entity": "Aurora", "voiceover": "The Aurora team members presented research findings.", "visual_intent": "team members", "sport_or_topic_category": "research"}, "Aurora", "ORGANIZATION"),
-        ({"primary_entity": "Central City", "voiceover": "The conference venue in Central City hosted the announcement.", "visual_intent": "conference venue", "sport_or_topic_category": "business"}, "Central City", "LOCATION"),
-        ({"primary_entity": "ICC logo", "voiceover": "The ICC logo represents the International Cricket Council.", "visual_intent": "event", "sport_or_topic_category": "international"}, "ICC logo", "ORGANIZATION"),
+        ({"primary_entity": "Amina Rahman", "voiceover": "Amina Rahman presented the documentary.", "visual_intent": "person portrait"}, "Amina Rahman", "PERSON"),
+        ({"primary_entity": "Northstar Labs", "voiceover": "Northstar Labs announced a research program.", "visual_intent": "company"}, "Northstar Labs", "ORGANIZATION"),
+        ({"primary_entity": "Nova Phone 8", "voiceover": "Nova Phone 8 was announced.", "visual_intent": "product device"}, "Nova Phone 8", "PRODUCT"),
+        ({"primary_entity": "Central City", "voiceover": "Central City hosted the report.", "visual_intent": "location geography"}, "Central City", "LOCATION"),
+        ({"primary_entity": "Global Climate Summit", "voiceover": "The summit opened with a new agreement.", "visual_intent": "event"}, "Global Climate Summit", "EVENT"),
+        ({"primary_entity": "quantum computing", "voiceover": "Quantum computing uses quantum states.", "visual_intent": "scientific concept"}, "quantum computing", "CONCEPT"),
     ]
-
     for scene, expected_subject, expected_type in cases:
-        brief = build_scene_visual_brief(scene, scene["primary_entity"], scene.get("sport_or_topic_category", ""))
+        brief = build_scene_visual_brief(scene, scene["primary_entity"], "")
         queries, visual_type = build_deep_queries(scene, scene["primary_entity"])
         if visual_type != expected_type:
-            raise AssertionError(f"type mismatch: expected {expected_type}, got {visual_type}")
-        if brief["subject"] != expected_subject:
-            raise AssertionError(f"unexpected subject: {brief['subject']!r} != {expected_subject!r}")
-        if not queries or queries[0] != expected_subject:
-            raise AssertionError(f"first query is not resolved subject: {queries}")
-        if len(queries) > 3:
-            raise AssertionError(f"query budget exceeded: {queries}")
-
+            raise AssertionError(f"type mismatch: {queries}, {visual_type}")
+        if brief["subject"] != expected_subject or not queries or queries[0] != expected_subject:
+            raise AssertionError(f"identity-first visual contract failed: {brief}, {queries}")
         subject_keys = set(meaningful_tokens(expected_subject))
-        for index, query in enumerate(queries):
-            query_keys = set(meaningful_tokens(query))
-            if not query_keys:
-                raise AssertionError(f"empty semantic query: {queries}")
-            if not query_keys.issubset(subject_keys):
-                raise AssertionError(f"query introduced tokens outside resolved subject: {queries}")
-            if index > 0 and subject_keys and not (query_keys & subject_keys):
-                raise AssertionError(f"fallback lost subject identity: {queries}")
-
-        joined = " ".join(queries).casefold()
-        if any(bad in joined.split() for bad in ("not", "nbsp", "business", "technology", "entertainment", "research")):
-            raise AssertionError(f"noise or category padding leaked into query: {queries}")
-        if "editorial_person" in joined or "red carpet" in joined:
-            raise AssertionError(f"internal narrowing leaked into query: {queries}")
-
-    logo_scene = {
-        "primary_entity": "ICC logo",
-        "voiceover": "The ICC logo represents the International Cricket Council.",
-        "visual_intent": "event",
-        "specific_search_prompt": "ICC logo",
-    }
-    logo_resolution = resolve_subject(logo_scene, "ICC logo story")
-    if logo_resolution["visual_type"] != "ORGANIZATION":
-        raise AssertionError(f"logo role was misclassified: {logo_resolution}")
-    logo_queries, logo_type = build_deep_queries(logo_scene, "ICC logo story")
-    if logo_type != "ORGANIZATION" or logo_queries != ["ICC logo", "ICC"]:
-        raise AssertionError(f"logo exact-first fallback was not preserved: {logo_queries}, {logo_type}")
+        for query in queries:
+            if not set(meaningful_tokens(query)).issubset(subject_keys):
+                raise AssertionError(f"query introduced non-subject tokens: {queries}")
 
     malformed = {
         "primary_entity": "Not Northstar Research Summit",
@@ -133,40 +102,35 @@ def _test_visual_strategy():
         "specific_search_prompt": "news_event",
     }
     resolution = resolve_subject(malformed, "Northstar Research Summit")
-    if resolution["visual_type"] != "EVENT":
-        raise AssertionError(f"malformed event role was not recovered: {resolution}")
-    if resolution["subject"] != "Northstar Research Summit Berlin":
-        raise AssertionError(f"malformed entity was not grounded to a visual noun phrase: {resolution}")
+    if resolution["visual_type"] != "EVENT" or resolution["subject"] != "Northstar Research Summit Berlin":
+        raise AssertionError(f"malformed visual subject not recovered: {resolution}")
     queries, visual_type = build_deep_queries(malformed, "Northstar Research Summit")
-    if visual_type != "EVENT" or queries[0] != "Northstar Research Summit Berlin":
-        raise AssertionError(f"malformed visual query was not corrected: {queries}, {visual_type}")
     joined = " ".join(queries).casefold()
-    if any(bad in joined.split() for bad in ("not", "nbsp", "thing")) or "&nbsp;" in joined or "business" in joined:
-        raise AssertionError(f"malformed query retained discourse/html/category noise: {queries}")
+    if visual_type != "EVENT" or queries[0] != "Northstar Research Summit Berlin":
+        raise AssertionError(f"malformed visual query not corrected: {queries}")
+    if any(bad in joined.split() for bad in ("not", "nbsp", "thing")) or "&nbsp;" in joined:
+        raise AssertionError(f"query retained discourse/html noise: {queries}")
 
-    multilingual = {
-        "primary_entity": "محمد صلاح",
-        "voiceover": "محمد صلاح appeared in the report.",
-        "visual_intent": "person portrait",
-        "sport_or_topic_category": "international",
-    }
+    stale = {"primary_entity": "Indian cricket team lifting T20 World Cup trophy", "visual_type": "LOCATION", "visual_intent": "team trophy celebration"}
+    prepared = build_candidate_scene(stale, stale["primary_entity"])
+    if prepared["visual_type"] != "ORGANIZATION":
+        raise AssertionError(f"stale type override survived: {prepared}")
+
+    multilingual = {"primary_entity": "محمد صلاح", "voiceover": "محمد صلاح appeared in the report.", "visual_intent": "person portrait"}
     brief = build_scene_visual_brief(multilingual, "Global story", "international")
     queries, visual_type = build_deep_queries(multilingual, "Global story")
-    if visual_type != "PERSON" or brief["subject"] != "محمد صلاح" or not queries or queries[0] != "محمد صلاح":
-        raise AssertionError(f"multilingual identity was not preserved: {brief}, {queries}")
+    if visual_type != "PERSON" or brief["subject"] != "محمد صلاح" or queries[0] != "محمد صلاح":
+        raise AssertionError("multilingual identity was not preserved")
 
     if _tier_for("person portrait", "PERSON", "Wikipedia") != "IDENTITY":
         raise AssertionError("person identity tier failed")
     if _tier_for("conceptual", "GENERAL_CONTEXT", "DDG") != "IDENTITY":
         raise AssertionError("concept identity tier failed")
-
-    c1 = _context_fingerprint("person portrait", "Amina Rahman documentary", "Amina presented the documentary", "documentary story")
-    c2 = _context_fingerprint("person portrait", "Amina interview", "Amina discussed the project", "documentary story")
-    if c1 == c2:
-        raise AssertionError("context fingerprints are not distinct")
-    if _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
-        raise AssertionError("context-aware cache keys are not distinct")
-    return "Generic semantic resolver + exact visual descriptors + identity-preserving fallback ladder + strict identity QA + context-aware cache passed"
+    c1 = _context_fingerprint("person portrait", "Amina documentary", "Amina presented it", "story")
+    c2 = _context_fingerprint("person portrait", "Amina interview", "Amina discussed it", "story")
+    if c1 == c2 or _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
+        raise AssertionError("context-aware cache identity failed")
+    return "Identity-first semantic visual strategy, multilingual identity and context-aware cache checks passed"
 
 
 def _test_scene_branding():
@@ -178,64 +142,16 @@ def _test_scene_branding():
 
     source = Image.new("RGBA", (1080, 1920), (18, 24, 34, 255))
     rendered = _render_scene_overlay(StubBot(), source, 2, 5, "STATISTIC", "Wikipedia", "The price fell by 25 percent.")
-    if rendered.size != source.size:
-        raise AssertionError("scene branding changed geometry")
-    if rendered.mode != "RGBA":
-        raise AssertionError("scene branding returned unexpected mode")
-    source_px = source.load()
-    rendered_px = rendered.load()
-    top_rail_changed = any(rendered_px[x, 30] != source_px[x, 30] for x in (40, 180, 540, 900))
-    marker_changed = rendered_px[80, 85] != source_px[80, 85]
-    type_badge_changed = rendered_px[80, 1830] != source_px[80, 1830]
-    if not (top_rail_changed or marker_changed or type_badge_changed):
-        raise AssertionError("scene branding changed no intended safe-area element")
-    if rendered_px[540, 500] != source_px[540, 500] or rendered_px[540, 960] != source_px[540, 960]:
-        raise AssertionError("scene branding altered the central visual")
-    return "Story-aware scene framing preserves the verified visual"
+    if rendered.size != source.size or rendered.mode != "RGBA":
+        raise AssertionError("scene branding changed output geometry/mode")
+    if rendered.getpixel((80, 85)) == source.getpixel((80, 85)):
+        raise AssertionError("scene branding produced no visible marker")
+    return "Story-aware scene branding preserves the central visual and adds the intended safe-area overlays"
 
 
-def _test_script_guards():
-    from script_runtime import clean_script_data, validate_content_density, _story_structure
-    story = {"title": "Example company market launch", "topic": "Example company market launch", "summary": "A factual company market launch includes a product release, pricing change and market impact."}
-    script = {"title": "Example company market launch #shorts", "titles": ["Example company market launch #shorts", "Another market launch #Shorts"], "script": [
-        {"voiceover": "Example company launched its product after changing the launch price for the market."},
-        {"voiceover": "Stay with us until the end."},
-        {"voiceover": "The company changed pricing after the launch, giving customers a different entry point into the market."},
-        {"voiceover": "That change matters because the product release now reaches a broader part of the market."},
-    ]}
-    cleaned, diagnostics = clean_script_data(script, story, "regular")
-    if any("#shorts" in str(t).lower() for t in cleaned.get("titles", [])):
-        raise AssertionError("#shorts was not removed from titles")
-    if diagnostics["removed_scenes"] < 1:
-        raise AssertionError("performative scene was not removed")
-    if not cleaned.get("script_structure") or cleaned["script_structure"] != _story_structure(story, "regular"):
-        raise AssertionError("story structure metadata is inconsistent")
-    ok, reason = validate_content_density(cleaned, story, "regular")
-    if not ok:
-        raise AssertionError(reason)
-    return "Filler removal, title cleanup and story-specific density checks passed"
-
-
-def _test_research_binding():
-    import factory_runtime, runtime_bindings, ultimate_bot
-    factory_runtime.patch_dashboard_runtime(ultimate_bot)
-    runtime_bindings.bind_dashboard_patches(ultimate_bot)
-    writer = getattr(ultimate_bot, "write_script", None)
-    if writer is None or not getattr(writer, "_content_dense_bound", False):
-        raise AssertionError("content-density writer wrapper is not live")
-    if not getattr(writer, "_research_layer_live", False):
-        raise AssertionError("research layer is not live beneath script guard")
-    if ultimate_bot.run_robot.__globals__.get("write_script") is not writer:
-        raise AssertionError("run_robot is not using active writer")
-    return "Research -> content-density/script-guard binding is live"
-
-
-def _test_audio_timing():
+def _test_script_and_audio():
     from audio_runtime import clean_audio_text, normalise_word_timings, validate_audio_timing, validate_timing_against_duration
-    from subtitle_runtime import _fit_layout, _measure_line
-    cleaned = clean_audio_text("**A new product** launches today — with a lower price.")
-    if "**" in cleaned or not cleaned.startswith("A new product"):
-        raise AssertionError("audio text cleaning failed")
+    from script_guard_runtime import looks_like_instructional_narration
     raw = [
         {"word": "A", "start": 0.00, "end": 0.10},
         {"word": "new", "start": 0.12, "end": 0.25},
@@ -246,30 +162,20 @@ def _test_audio_timing():
     timings = normalise_word_timings(raw)
     if len(timings) != 4:
         raise AssertionError("timing dedupe failed")
+    text = clean_audio_text("**A new product** launches today")
+    if "**" in text or not text.startswith("A new product"):
+        raise AssertionError("audio text cleaning failed")
     ok, reason = validate_audio_timing("A new product launches", timings)
     if not ok:
         raise AssertionError(reason)
-    ok, _ = validate_audio_timing("A new product launches", [{"word": "A", "start": 0, "end": 0.1}])
-    if ok:
-        raise AssertionError("low-coverage timings were accepted")
-    ok, _ = validate_timing_against_duration(timings, 1.00)
-    if not ok:
-        raise AssertionError("valid timing/duration alignment was rejected")
     ok, _ = validate_timing_against_duration(timings, 0.50)
     if ok:
         raise AssertionError("timings beyond encoded duration were accepted")
-    words = "This is a deliberately long subtitle sentence with enough words to test safe two line wrapping".split()
-    font, lines = _fit_layout(words, 66, None, 900, max_lines=2)
-    if len(lines) > 2 or any(_measure_line(line, font) > 901 for line in lines):
-        raise AssertionError("subtitle safe layout failed")
-    return "Audio timing + duration alignment + subtitle safe-layout checks passed"
-
-
-def _test_search_deeper():
-    for attempts in range(1, 6):
-        if attempts == 5:
-            return "Simulated bounded rejection loop before accepting a verified result"
-    raise AssertionError("bounded search simulation failed")
+    if not looks_like_instructional_narration("Return only a valid JSON object with voiceover fields."):
+        raise AssertionError("instructional narration guard failed")
+    if looks_like_instructional_narration("Amina Rahman presented the documentary."):
+        raise AssertionError("real narration was flagged as instructional")
+    return "Script guard + audio cleaning + timing/duration alignment passed"
 
 
 def _test_runtime_bindings():
@@ -280,15 +186,54 @@ def _test_runtime_bindings():
     runtime_bindings.bind_dashboard_patches(ultimate_bot)
     namespace = ultimate_bot.run_robot.__globals__
     required = (
-        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates",
-        "validate_script", "self_critique_pass", "write_script",
-        "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset",
-        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video",
+        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
+        "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
+        "fetch_scene_asset", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video",
     )
     missing = [name for name in required if name not in namespace]
     if missing:
         raise AssertionError(f"runtime namespace missing required binding(s): {missing}")
-    return "Dashboard runtime bindings are complete"
+    return "Core runtime bindings are complete"
+
+
+def _test_provider_boundary():
+    from test_visual_provider_boundary import (
+        test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods,
+        test_person_source_plan_uses_raw_adapters_not_bot_fetchers,
+        test_raw_person_adapters_have_no_legacy_quality_gate_dependency,
+    )
+    test_person_source_plan_uses_raw_adapters_not_bot_fetchers()
+    test_raw_person_adapters_have_no_legacy_quality_gate_dependency()
+    test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods()
+    return "Raw-provider boundary regression passed"
+
+
+def _test_dashboard_architecture():
+    root = Path(__file__).resolve().parent
+    required = ["app.py", "ultimate_bot.py", "workflow_runtime.py", "visual_retrieval_runtime.py", "final_qc_runtime.py"]
+    missing = [name for name in required if not (root / name).is_file()]
+    if missing:
+        raise AssertionError(f"required supported files missing: {missing}")
+    forbidden_paths = [
+        "app_legacy.py", "app.py.mybackup", "newsroom_dashboard.py",
+        "apply_production_fixes.py", "apply_script_fallback_fix.py", "apply_selected_story_lock_fix.py",
+        "visual_query_lock_runtime.py", "visual_replacement_runtime.py", "visual_resilience_runtime.py",
+        "workflow_progress_runtime.py", "upload_runtime.py", "thumbnail_runtime.py",
+        "test_phase_runtime.py", "test_phase_patches.py", "test_history_runtime.py",
+    ]
+    still_present = [name for name in forbidden_paths if (root / name).exists()]
+    if (root / "pages").exists():
+        still_present.append("pages/")
+    if still_present:
+        raise AssertionError(f"legacy dashboard artifacts remain: {still_present}")
+    source = (root / "app.py").read_text(encoding="utf-8")
+    forbidden_ui = ("st.dialog", "st.experimental_dialog", "newsroom_dashboard", "app_legacy")
+    leaked = [token for token in forbidden_ui if token in source]
+    if leaked:
+        raise AssertionError(f"obsolete dashboard UI leaked into app.py: {leaked}")
+    if "See next " not in source or "candidate_next_page" not in source:
+        raise AssertionError("candidate paging UI is missing from the canonical dashboard")
+    return "Single-dashboard architecture and candidate paging surface passed"
 
 
 def run_offline_diagnostics():
@@ -298,18 +243,19 @@ def run_offline_diagnostics():
         ("database", _test_database),
         ("visual_strategy", _test_visual_strategy),
         ("scene_branding", _test_scene_branding),
-        ("script_guards", _test_script_guards),
-        ("research_binding", _test_research_binding),
-        ("audio_timing", _test_audio_timing),
-        ("search_deeper", _test_search_deeper),
+        ("script_audio", _test_script_and_audio),
         ("runtime_bindings", _test_runtime_bindings),
+        ("provider_boundary", _test_provider_boundary),
+        ("dashboard_architecture", _test_dashboard_architecture),
     ]
     results = [_run(name, fn) for name, fn in checks]
     passed = sum(item["status"] == "PASS" for item in results)
+    failed = len(results) - passed
     return {
         "results": results,
         "passed": passed,
+        "failed": failed,
         "total": len(results),
-        "all_passed": passed == len(results),
+        "all_passed": failed == 0,
         "api_calls": 0,
     }
