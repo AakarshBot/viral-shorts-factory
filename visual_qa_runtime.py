@@ -1,8 +1,9 @@
-"""Bounded visual QA for the Shorts factory.
+"""Bounded visual identity QA for the Shorts factory.
 
-Gemini is used only for semantic identity/context checks after cheap local
-quality filtering. A candidate with an uncertain verdict is never allowed to
-become a fallback image.
+The visual QA job is deliberately narrow: determine whether the candidate
+image corresponds to the requested visual subject. It does not judge whether
+the person is performing the narrated action or whether the setting perfectly
+illustrates the story. Those are not requirements for a useful Shorts visual.
 """
 import hashlib
 import io
@@ -15,7 +16,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v8"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v9-identity-only"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -43,89 +44,60 @@ def get_visual_qa_calls_used():
         return _VIDEO_CALLS
 
 
-def _cache_key(img_bytes, entity, intent, prompt, video_title, tier, visual_type=""):
+def _cache_key(img_bytes, entity, tier, visual_type=""):
     h = hashlib.sha256(img_bytes).hexdigest()
-    return (h, str(entity).strip().lower(), str(intent).strip().lower(), str(prompt).strip().lower(), str(video_title).strip().lower(), str(tier).strip().lower(), str(visual_type).strip().upper())
-
-
-def _is_event_genre(intent, visual_type=""):
-    text = f"{intent} {visual_type}".strip().lower()
-    return str(visual_type).upper() == "EVENT" or text in {"news_event", "stadium_event"} or any(x in text for x in ("news event", "stadium event", "ceremony", "match", "awards ceremony", "red carpet", "press conference"))
+    return (h, str(entity).strip().lower(), str(tier).strip().lower(), str(visual_type).strip().upper())
 
 
 def _is_conceptual(intent):
     return str(intent or "").strip().lower() == "conceptual"
 
 
-def _tier_for(intent, visual_type, source):
-    source_l = str(source or "").strip().lower()
-    if str(visual_type).upper() == "PERSON" and source_l in {"wikipedia", "commons"}:
-        return "CURATED_PERSON"
-    if _is_conceptual(intent):
-        return "SKIPPED_CONCEPTUAL"
-    if _is_event_genre(intent, visual_type):
-        return "GENRE_PLAUSIBLE_EVENT"
-    return "STRICT"
+def _identity_prompt(entity, visual_type=""):
+    return f"""Look at this image and answer one question only:
 
+Does this image visibly correspond to the requested visual subject: {entity}?
 
-def _event_prompt(entity, intent, prompt, voice, video_title):
-    return f"""Assess this image for a video scene.
-This is an EVENT / NEWS-EVENT / STADIUM-EVENT visual. Do NOT try to prove that it is the exact named event.
-Instead answer whether it plausibly depicts the general real-world scene type described: for example a red carpet event, awards ceremony, stadium/sports venue, match, ceremony, or press conference.
-It must be a genuine real photo that is broadly relevant to that scene type, not a meme, unrelated stock image, illustration, or completely mismatched scene.
-Named entity: {entity}
-Visual intent: {intent}
-Scene requirement: {prompt}
-Voiceover: {voice}
-Video title: {video_title}
-Return YES or NO followed by one short reason."""
-
-
-def _strict_prompt(entity, intent, prompt, voice, video_title, visual_type=""):
-    """Build a strict identity and context test with contradiction checks."""
-    return f"""Look at this image and judge whether it is suitable for ONE specific video scene.
-
-Named subject: {entity}
 Subject type: {visual_type}
-Scene intent: {intent}
-Scene requirement: {prompt}
-Narration context: {voice}
-Video title: {video_title}
 
 Rules:
-1. The image must visibly represent the named subject or place when one is specified.
-2. It must also fit the scene requirement/context, not merely be vaguely related to the same topic.
-3. Treat organizations, locations, products, documents, and events as their actual entity types; do NOT turn them into people because people are mentioned nearby.
-4. Use the narration only to understand the target context; do NOT use the narration as proof that an unrelated image is correct.
-5. Actively look for contradictions. If the scene refers to one team, person, event, product, place, sport, or group and the image clearly depicts a different one, return NO.
-6. For sports teams, check the visible team identity and, when the narration/context establishes it, the correct sport, competition, era, seniority, and gender category. A clearly identifiable women's team must be rejected for a men's-team scene, and vice versa. Do not solve this by guessing from a generic jersey alone.
-7. For people, reject a different person even if they play the same sport or work for the same organization.
-8. For events, reject an image that visibly belongs to a different event when the scene identifies a concrete event.
-9. Reject memes, generic stock imagery, illustrations, screenshots of search pages, logos by themselves when a real-world scene is required, and clearly mismatched scenes.
-10. When the scene requirement is specific (for example a person speaking, an organization press conference, a city street, a product launch), require visible evidence of that specific context.
-11. If the image is ambiguous and there is not enough visible evidence to establish the requested identity, prefer NO rather than accepting a merely plausible image.
+1. Judge the IMAGE, not the narration or video story.
+2. The requested subject must be visibly identifiable in the image.
+3. For a PERSON, the image must depict that specific person, not merely another person from the same sport, team or organisation.
+4. For a TEAM or GROUP, the visible team/group identity must correspond to the requested subject. If the image clearly depicts a different team or group, return NO.
+5. For an ORGANISATION, accept a genuine image that visibly represents that organisation, such as its people, headquarters, office, official setting or clearly identifiable branding. A generic unrelated person is not enough.
+6. For a LOCATION or LANDMARK, the image must visibly depict that place or landmark.
+7. For an EVENT or TOURNAMENT, the image must visibly correspond to that named event/tournament, rather than merely showing a generic event of the same type.
+8. Ignore the person's exact activity, clothing, pose, venue, job setting or what they are doing. Those details do not need to match the story.
+9. Do not reject a valid subject image because it does not illustrate the narrated action.
+10. Reject memes, unrelated stock imagery, generic illustrations, search-page screenshots, or images where the requested subject cannot actually be identified.
+11. If the image is genuinely ambiguous and there is not enough visible evidence to establish the requested subject, return NO.
 
-Return YES or NO followed by one short reason."""
+Return exactly YES or NO followed by one short reason."""
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="STRICT", visual_type=""):
-    """Return True/False/None. Gemini is never called for cheap-pass tiers."""
+    """Return True/False/None. QA verifies subject identity only."""
     global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN
-    tier = tier or _tier_for(intent, visual_type, "")
-    if tier == "CURATED_PERSON":
-        print("   [Visual QA] Tier=STRICT(person) source=curated | Gemini=SKIPPED", flush=True)
+    if tier == "CURATED_PERSON" or tier == "STRICT(person)":
+        print("   [Visual QA] Tier=STRICT(person) | Gemini=SKIPPED (curated person source).", flush=True)
         return True
-    if tier == "SKIPPED_CONCEPTUAL":
-        print("   [Visual QA] Tier=SKIPPED(conceptual) | Gemini=SKIPPED", flush=True)
+    if tier in {"SKIPPED_CONCEPTUAL", "SKIPPED(conceptual)"} or _is_conceptual(intent):
+        print("   [Visual QA] Tier=SKIPPED(conceptual) | Gemini=SKIPPED.", flush=True)
         return True
     if not api_key:
-        print(f"   [Visual QA] Tier={tier} | No Gemini API key; semantic verification unavailable.", flush=True)
+        print(f"   [Visual QA] Tier=IDENTITY | No Gemini API key; semantic verification unavailable.", flush=True)
         return None
-    key = _cache_key(img_bytes, entity, intent, prompt, video_title, tier, visual_type)
+
+    # Event/news genre is intentionally NOT a different QA standard anymore.
+    # Every real entity is checked by the same identity question.
+    tier = "IDENTITY"
+    key = _cache_key(img_bytes, entity, tier, visual_type)
     if key in _CACHE:
         cached = _CACHE[key]
-        print(f"   [Visual QA] Tier={tier} | cached verdict={'YES' if cached is True else 'NO' if cached is False else 'UNCERTAIN'}", flush=True)
+        print(f"   [Visual QA] Tier=IDENTITY | cached verdict={'YES' if cached is True else 'NO' if cached is False else 'UNCERTAIN'}", flush=True)
         return cached
+
     with _LOCK:
         if _CIRCUIT_OPEN:
             print("   [Visual QA] Circuit breaker open; NO Gemini API call attempted.", flush=True)
@@ -139,19 +111,17 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         _VIDEO_CALLS += 1
         _SCENE_CALLS += 1
         call_no = _VIDEO_CALLS
-    print(f"   [Visual QA] Tier={tier} | Gemini request {call_no}/{GEMINI_VISUAL_MAX_REQUESTS} (1 attempt only).", flush=True)
+
+    print(f"   [Visual QA] Tier=IDENTITY | Gemini request {call_no}/{GEMINI_VISUAL_MAX_REQUESTS} (1 attempt only).", flush=True)
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
-        if tier == "GENRE_PLAUSIBLE_EVENT":
-            prompt_text = _event_prompt(entity, intent, prompt, voice, video_title)
-        else:
-            prompt_text = _strict_prompt(entity, intent, prompt, voice, video_title, visual_type=visual_type)
+        prompt_text = _identity_prompt(entity, visual_type)
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         response = client.models.generate_content(model=GEMINI_VISUAL_MODEL, contents=[prompt_text, image])
         raw_text = str(getattr(response, "text", "") or "").strip()
         display_text = raw_text if len(raw_text) <= 1000 else raw_text[:1000] + "...[truncated]"
-        print(f"   [Visual QA] {tier} | Gemini raw verdict: {display_text!r}", flush=True)
+        print(f"   [Visual QA] IDENTITY | Gemini raw verdict: {display_text!r}", flush=True)
         text = raw_text.upper()
         result = True if text.startswith("YES") else False if text.startswith("NO") else None
         if result is None:
