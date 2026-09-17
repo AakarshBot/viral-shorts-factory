@@ -1,9 +1,8 @@
 """Deterministic subject extraction for slide-derived visual search.
 
-The rendered slide's cut script is the source for additional search subjects.
-Queries are exact subject phrases: names, places, events, organizations, teams,
-and other concrete entities. Titles and visual prompts are never appended as
-query noise.
+The rendered slide's cut script is the source for visual subjects. Queries are
+exact subject phrases: names, places, events, organizations, teams, and other
+concrete entities. Model-provided visual prompts never become queries.
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ _ROLE_WORDS = {
 }
 _GROUP_MIDDLE_WORDS = {
     "cricket", "football", "soccer", "basketball", "tennis", "hockey", "baseball",
-    "national", "mens", "women", "men", "women's", "mens", "womens",
+    "national", "mens", "women", "men", "women's", "womens",
 }
 _COMMON_STARTERS = {
     "india", "indian", "england", "english", "australia", "australian", "pakistan", "pakistani",
@@ -36,6 +35,7 @@ _EVENT_SUFFIXES = {
     "cup", "championship", "league", "final", "open", "games", "trophy", "summit",
     "festival", "tournament", "grand", "prix",
 }
+_SENTINELS = {"none", "unknown", "na", "n/a"}
 
 
 def _clean(value: object) -> str:
@@ -208,36 +208,48 @@ def _script_position(script: str, candidate: str) -> int:
     return match.start() if match else -1
 
 
-def extract_slide_search_subjects(scene: dict) -> list[str]:
-    """Return up to three exact search subjects from the current slide.
+def extract_cut_script_subjects(scene: dict) -> list[str]:
+    """Return up to three subjects using only the current slide voiceover.
 
-    Primary entity is first. Additional subjects come only from the cut slide's
-    voiceover. No title, video-level context, or search-prompt prose is ever
-    converted into a query.
+    ``primary_entity`` is used only as a preferred first subject when the same
+    subject actually occurs in the cut voiceover. It is never allowed to inject
+    a subject that the slide script does not contain.
     """
     if not isinstance(scene, dict):
         return []
-    subjects: list[str] = []
-    primary = _clean(scene.get("primary_entity", ""))
-    if primary and _key(primary) not in {"none", "unknown", "na", "n/a"}:
-        _append_unique(subjects, primary)
     script = _clean(scene.get("voiceover", ""))
     if not script:
-        return subjects[:_QUERY_MAX]
+        return []
 
-    candidates: list[tuple[int, str]] = []
-    for extractor in (_extract_person_names, _extract_group_subjects, _extract_event_subjects, _extract_known_entities):
+    candidates: list[tuple[int, int, str]] = []
+    extractors = (
+        (0, _extract_person_names),
+        (1, _extract_group_subjects),
+        (2, _extract_event_subjects),
+        (3, _extract_known_entities),
+    )
+    for priority, extractor in extractors:
         for candidate in extractor(script):
             index = _script_position(script, candidate)
             if index >= 0:
-                candidates.append((index, candidate))
+                candidates.append((index, priority, candidate))
 
-    candidates.sort(key=lambda item: (item[0], -len(_words(item[1]))))
-    for _, candidate in candidates:
-        if len(subjects) >= _QUERY_MAX:
-            break
-        _append_unique(subjects, candidate)
-    return subjects[:_QUERY_MAX]
+    candidates.sort(key=lambda item: (item[0], item[1], -len(_words(item[2]))))
+    ordered: list[str] = []
+    for _, _, candidate in candidates:
+        _append_unique(ordered, candidate)
+
+    primary = _clean(scene.get("primary_entity", ""))
+    primary_valid = bool(primary) and _key(primary) not in _SENTINELS and _script_position(script, primary) >= 0
+    if primary_valid:
+        ordered = [primary] + [value for value in ordered if value.casefold() != primary.casefold()]
+
+    return ordered[:_QUERY_MAX]
+
+
+def extract_slide_search_subjects(scene: dict) -> list[str]:
+    """Backward-compatible entry point for the strict cut-script extractor."""
+    return extract_cut_script_subjects(scene)
 
 
 def classify_search_subject(subject: str) -> str:
@@ -280,9 +292,9 @@ def build_candidate_scene(scene: dict, subject: str) -> dict:
 
 def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title=""):
     """Try clean slide subjects in order; never rewrite a query."""
-    subjects = extract_slide_search_subjects(scene)
+    subjects = extract_cut_script_subjects(scene)
     if not subjects:
-        return visual_runtime_module._relevant_asset(bot, scene, category, used_urls, used_hashes, video_title)
+        raise RuntimeError("No concrete visual subject could be identified from the slide cut script.")
 
     last_error = None
     reset_scene_budget = getattr(visual_runtime_module, "start_visual_qa_scene", None)

@@ -24,6 +24,23 @@ def test_slide_subjects_are_clean_and_script_derived():
     assert visual_type == "LOCATION"
 
 
+def test_wrong_primary_entity_is_rejected_when_absent_from_cut_script():
+    scene = {
+        "primary_entity": "Wrong Person",
+        "voiceover": "Rashid Khan announced the update in India for the Indian cricket team.",
+        "specific_search_prompt": "Wrong Person press conference 2024 interview",
+        "visual_intent": "press conference person",
+        "sport_or_topic_category": "cricket",
+    }
+
+    subjects = extract_slide_search_subjects(scene)
+    queries, _ = build_deep_queries(scene, "Wrong Person noisy video title")
+
+    assert subjects[0] == "Rashid Khan"
+    assert queries == ["Rashid Khan", "India", "Indian cricket team"]
+    assert "Wrong Person" not in queries
+
+
 def test_search_subjects_do_not_include_context_noise():
     scene = {
         "primary_entity": "Rishabh Pant",
