@@ -23,8 +23,6 @@ GENERIC_NOISE = {
     "next", "year",
 }
 
-# These describe how a subject is visually represented. They are not factual
-# identity, so they may be removed only for a later fallback query.
 VISUAL_DESCRIPTORS = {
     "logo", "logos", "portrait", "portraits", "headshot", "headshots", "icon", "icons",
     "badge", "badges", "emblem", "emblems", "symbol", "symbols", "seal", "seals",
@@ -108,7 +106,6 @@ def sanitize_candidate(value: object) -> str:
 
 
 def _strip_visual_descriptors(value: str) -> str:
-    """Remove only trailing visual-presentation words, preserving factual identity."""
     words = tokens(value)
     while len(words) > 1 and key(words[-1]) in VISUAL_DESCRIPTORS:
         words.pop()
@@ -121,18 +118,13 @@ def _descriptor_present(value: str) -> bool:
 
 
 def _subject_role_hint(value: str) -> str:
-    """Infer a factual role from the subject itself, including generic descriptors."""
     core = _strip_visual_descriptors(value)
     core_words = {key(word) for word in tokens(core)}
     if not core_words:
         return ""
-
-    # Generic uppercase acronyms are a useful organization signal (e.g. ABC),
-    # but are only used when a presentation descriptor made the identity clear.
     core_text = clean_text(core)
     if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,12}(?:\s+[A-Z][A-Z0-9&.-]{1,12})*", core_text):
         return "ORGANIZATION"
-
     for role, cues in ROLE_CUES.items():
         if core_words & cues:
             return role
@@ -141,9 +133,6 @@ def _subject_role_hint(value: str) -> str:
 
 def _intent_words(scene: dict) -> list[str]:
     raw = clean_text(scene.get("visual_intent", ""))
-    # Compound labels such as news_event, news-event and person/portrait are
-    # semantic metadata, not literal search phrases. Normalize separators so
-    # the shared role vocabulary can interpret them consistently.
     raw = re.sub(r"[_/-]+", " ", raw)
     return [key(w) for w in tokens(raw) if key(w)]
 
@@ -152,12 +141,10 @@ def infer_role(scene: dict) -> str:
     explicit = clean_text(scene.get("visual_type", "")).upper().replace("-", "_").replace(" ", "_")
     if explicit in ROLE_CUES:
         return explicit
-
     candidate = sanitize_candidate(scene.get("primary_entity", ""))
     subject_hint = _subject_role_hint(candidate)
     if subject_hint and _descriptor_present(candidate):
         return subject_hint
-
     intent_words = set(_intent_words(scene))
     for role, cues in ROLE_CUES.items():
         if intent_words & cues:
@@ -186,11 +173,9 @@ def _grounded_context(candidate: str, scene: dict, video_title: str = "") -> str
     positions = [i for i, item in enumerate(keyed) if item in candidate_keys]
     if not positions:
         return ""
-
     start = max(0, min(positions) - 3)
     end = min(len(evidence_words), max(positions) + 4)
     window = evidence_words[start:end]
-
     kept = []
     candidate_original = {key(word): word for word in tokens(candidate)}
     for word in window:
@@ -199,11 +184,9 @@ def _grounded_context(candidate: str, scene: dict, video_title: str = "") -> str
             continue
         if k not in {key(x) for x in kept}:
             kept.append(word)
-
     for token_key, original in candidate_original.items():
         if token_key not in {key(x) for x in kept}:
             kept.append(original)
-
     if not kept:
         return ""
     return " ".join(kept[:MAX_SUBJECT_WORDS])
@@ -220,22 +203,48 @@ def _prompt_is_concrete(prompt: str, candidate: str) -> bool:
     return candidate_keys.issubset(keys) and len(keys) >= len(candidate_keys)
 
 
+def _contextual_query_variant(subject: str, anchor: str) -> str:
+    """Build a shorter context-rich query while preserving the factual anchor."""
+    subject_words = tokens(subject)
+    anchor_keys = meaningful_tokens(anchor)
+    if not subject_words or not anchor_keys:
+        return ""
+
+    positions = []
+    next_anchor = 0
+    for index, word in enumerate(subject_words):
+        if next_anchor < len(anchor_keys) and key(word) == anchor_keys[next_anchor]:
+            positions.append(index)
+            next_anchor += 1
+    if next_anchor < len(anchor_keys):
+        return ""
+
+    context_words = []
+    for index, word in enumerate(subject_words):
+        if index in positions:
+            continue
+        k = key(word)
+        if not k or k in GENERIC_NOISE or k in STOPWORDS or k in DISCOURSE_PREFIXES or k in AUXILIARY_WORDS:
+            continue
+        context_words.append(word)
+
+    if not context_words:
+        return ""
+    # Keep the first four grounded context terms in their original order. This
+    # preserves useful combinations such as "lifting T20 World Cup" without
+    # turning the query into a sentence.
+    return sanitize_candidate(" ".join([*tokens(anchor), *context_words[:4]]))
+
+
 def resolve_subject(scene: dict, video_title: str = "") -> dict:
     scene = scene if isinstance(scene, dict) else {}
     original = clean_text(scene.get("primary_entity", ""))
     candidate = sanitize_candidate(original)
     role = infer_role(scene)
     prompt = sanitize_candidate(scene.get("specific_search_prompt", ""))
-
     prompt_is_explicit = bool(prompt and _prompt_is_concrete(prompt, candidate))
-    if prompt_is_explicit:
-        subject = prompt
-    else:
-        subject = candidate
+    subject = prompt if prompt_is_explicit else candidate
 
-    # Contextual grounding is a repair operation, not a query-expansion step.
-    # A clean entity must remain exactly that, even when the narration contains
-    # additional facts. Grounding occurs only after detectable entity damage.
     needs_grounding = bool(candidate) and original.casefold() != candidate.casefold() and not prompt_is_explicit
     if needs_grounding and role in {"EVENT", "PROCESS", "CONCEPT", "DOCUMENT", "QUOTE", "GENERAL_CONTEXT"}:
         contextual = _grounded_context(subject, scene, video_title)
@@ -254,26 +263,16 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
 
 
 def _anchor_for_resolution(resolution: dict) -> str:
-    """Return the cleaned factual identity that every fallback must preserve."""
     factual = sanitize_candidate(resolution.get("factual_entity") or resolution.get("original_entity") or "")
     core = _strip_visual_descriptors(factual)
     return core or factual
 
 
 def _reduce_subject_once(subject: str, anchor: str) -> str:
-    """Remove one trailing scene-specific modifier while preserving identity.
-
-    This is intentionally positional rather than genre-driven. It handles
-    phrases such as ``Indian athletes Nagoya Asian Games arrival`` by producing
-    ``Indian athletes Nagoya Asian Games`` while keeping the factual anchor.
-    For a damaged compound such as ``BBL season-opener Chennai`` with anchor
-    ``BBL Chennai``, it removes the non-anchor modifier and yields ``BBL Chennai``.
-    """
     words = tokens(subject)
     anchor_keys = meaningful_tokens(anchor)
     if not words or not anchor_keys:
         return ""
-
     protected = set()
     next_anchor = 0
     for index, word in enumerate(words):
@@ -282,7 +281,6 @@ def _reduce_subject_once(subject: str, anchor: str) -> str:
             next_anchor += 1
     if next_anchor < len(anchor_keys):
         return ""
-
     removable = [i for i in range(len(words) - 1, -1, -1) if i not in protected]
     if not removable:
         return ""
@@ -305,6 +303,13 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
     anchor = _anchor_for_resolution(resolution)
     queries = [subject]
 
+    # Preserve the slide's actual context for the second phrase instead of
+    # merely appending a generic word. This is the main route to better search
+    # recall across people, products, places, events, concepts and stories.
+    contextual = _contextual_query_variant(subject, anchor)
+    if contextual and contextual.casefold() not in {q.casefold() for q in queries}:
+        queries.append(contextual)
+
     reduced = _reduce_subject_once(subject, anchor)
     if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
         queries.append(reduced)
@@ -312,7 +317,7 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
     if anchor and anchor.casefold() not in {q.casefold() for q in queries}:
         queries.append(anchor)
 
-    return queries[:3], resolution["visual_type"], resolution
+    return queries[:4], resolution["visual_type"], resolution
 
 
 def prepare_scene(scene: dict, video_title: str = "") -> dict:
