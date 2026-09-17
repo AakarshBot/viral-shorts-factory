@@ -144,16 +144,30 @@ def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
         CONTENT_CATEGORIES = {"technology": {"gnews_q": "technology news"}}
         GNEWS_API_KEY = ""
 
+    topic_specs = [
+        ("Quantum chip breakthrough", "quantum computing"),
+        ("Electric vehicle battery milestone", "electric vehicles"),
+        ("Satellite internet expansion", "satellite internet"),
+        ("Robot factory rollout", "industrial robotics"),
+        ("Foldable phone launch", "foldable smartphone"),
+        ("AI search assistant release", "AI search"),
+        ("Space telescope discovery", "space telescope"),
+        ("Semiconductor plant investment", "semiconductor plant"),
+        ("Cloud security platform update", "cloud security"),
+        ("Autonomous taxi expansion", "autonomous taxi"),
+        ("New gene editing platform", "gene editing"),
+        ("AR headset developer launch", "augmented reality"),
+    ]
     topics = [
         {
-            "title": f"Technology story {index} about a new launch",
+            "title": f"{title} changes the {subject} market",
             "url": f"https://reuters.example/story-{index}",
             "source": "Reuters",
             "publishedAt": "2026-09-18T00:00:00+00:00",
-            "description": "A current technology development with verified reporting.",
+            "description": f"Current reporting about {subject} with verified details.",
             "genre": "technology",
         }
-        for index in range(1, 13)
+        for index, (title, subject) in enumerate(topic_specs, 1)
     ]
 
     monkeypatch.setattr(story_ranker, "_query_variants", lambda *_args, **_kwargs: ["technology"])
@@ -171,3 +185,4 @@ def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
 
     assert len(pool) == 12
     assert [item["discovery_rank"] for item in pool] == list(range(1, 13))
+
