@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import os
 import re
 from typing import Any, Dict, List
@@ -39,12 +38,13 @@ def _scene_package_paths(package: Any) -> List[str]:
 
 def _render_replacement_scene(bot, bg_img, seg: Dict[str, Any], script_data: Dict[str, Any], index: int, format_mode: str, font_choice: Any):
     from PIL import Image, ImageDraw
+    from visual_runtime import _render_image_slide
 
     width, height = 1080, 1920
     bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS).convert("RGBA")
     video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
     if format_mode == "top5" and index == 0:
-        return bot._render_image_slide(bg_img, video_title or seg.get("voiceover", "Top 5"), "TODAY'S TOP 5", font_choice)
+        return _render_image_slide(bot, bg_img, video_title or seg.get("voiceover", "Top 5"), "TODAY'S TOP 5", font_choice)
     if format_mode == "top5":
         clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", str(seg.get("voiceover", "")), flags=re.IGNORECASE).strip()
         return bot.render_top5_card(bg_img, max(1, 6 - index), 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
@@ -116,8 +116,9 @@ def install_visual_replacement_bridge(bot, dashboard_module) -> None:
         return
 
     def wrapped_render_manual(runtime_bot, stages):
-        runtime_bot._dashboard_visual_decisions = dict(__import__("streamlit").session_state.get("nr_visual_decisions", {}))
-        runtime_bot._dashboard_existing_visuals = __import__("streamlit").session_state.get("nr_visuals", [])
+        import streamlit as st
+        runtime_bot._dashboard_visual_decisions = dict(st.session_state.get("nr_visual_decisions", {}))
+        runtime_bot._dashboard_existing_visuals = st.session_state.get("nr_visuals", [])
         original_render_manual(runtime_bot, stages)
 
     async def wrapped_process(script_data, language_cfg, format_mode="regular"):
