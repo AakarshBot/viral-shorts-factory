@@ -27,7 +27,7 @@ from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
 from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, MAX_DISCOVERY_CANDIDATES
 
-from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, collect_live_channel_statistics, discover_ranked_topics, run_demo_section
+from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, collect_live_channel_statistics, discover_ranked_topics, factory_function_coverage, run_demo_section
 
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
@@ -824,6 +824,34 @@ def render_offline_page() -> None:
         )
 
 
+
+def render_factory_function_coverage() -> None:
+    """Show a complete, read-only map of ultimate_bot callables."""
+    report = factory_function_coverage()
+    st.markdown("### Factory function coverage")
+    st.caption(
+        "Every top-level function in ultimate_bot.py is explicitly classified so we can "
+        "distinguish dashboard features from deliberate internal helpers."
+    )
+    if report.get("complete"):
+        st.success(f"All {report['total']} factory functions are accounted for.")
+    else:
+        st.error(
+            f"Coverage is incomplete: {len(report.get('unmapped', []))} unmapped and "
+            f"{len(report.get('stale_map', []))} stale entries."
+        )
+
+    buckets = report.get("by_surface") or {}
+    cols = st.columns(4)
+    labels = ["Live Factory", "Channel Statistics", "Demo / Diagnostics", "Internal"]
+    for col, label in zip(cols, labels):
+        col.metric(label, len(buckets.get(label, [])))
+
+    for label in labels:
+        names = buckets.get(label, [])
+        with st.expander(f"{label} ({len(names)})", expanded=(label != "Internal")):
+            st.code("\\n".join(names), language="text") if names else st.caption("None")
+
 def render_demo_page() -> None:
     st.markdown("### Component-by-component factory tests")
     st.caption(
@@ -843,6 +871,7 @@ def render_demo_page() -> None:
         ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
         ("manual_visual_queries", "Manual visual query routing"),
         ("dashboard_architecture", "Dashboard architecture"),
+        ("factory_function_coverage", "Factory function coverage"),
     ]
 
     if st.button("▶ Run all demo checks", type="primary", use_container_width=True):
@@ -871,6 +900,9 @@ def render_demo_page() -> None:
                     if artifact_path and os.path.isfile(artifact_path):
                         st.caption(artifact_name.replace("_", " ").title())
                         st.image(artifact_path, use_container_width=True)
+
+    st.markdown("---")
+    render_factory_function_coverage()
 
 
 def main() -> None:
