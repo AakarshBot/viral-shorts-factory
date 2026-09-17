@@ -50,7 +50,7 @@ jobs:
           import provider_runtime, quality_runtime, research_runtime, runtime_bindings
           import script_guard_runtime, script_runtime, semantic_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
-          import visual_runtime, visual_safety_runtime, visual_strategy_runtime, workflow_runtime, youtube_comment_runtime
+          import visual_runtime, visual_safety_runtime, visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, workflow_runtime, youtube_comment_runtime
           import newsroom_dashboard
           print('Core runtime imports passed.')
           PY
@@ -62,8 +62,9 @@ jobs:
           import edge_tts
           import factory_runtime, final_qc_runtime, provider_runtime, runtime_bindings
           import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
-          import visual_strategy_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
+          import visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
           from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
+          from visual_semantic_guard_runtime import resolve_subject
 
           assert 'boundary' in inspect.signature(edge_tts.Communicate).parameters
           assert factory_runtime._vignette((1080, 1920)).size == (1080, 1920)
@@ -84,8 +85,9 @@ jobs:
               ({'primary_entity': 'Central City', 'visual_intent': 'location geography', 'voiceover': 'Central City hosted the report.', 'sport_or_topic_category': 'geography'}, 'Central City', 'LOCATION'),
               ({'primary_entity': 'Global Climate Summit', 'visual_intent': 'event', 'voiceover': 'The Global Climate Summit opened with a new agreement.', 'sport_or_topic_category': 'climate'}, 'Global Climate Summit', 'EVENT'),
               ({'primary_entity': 'quantum computing', 'visual_intent': 'scientific concept', 'voiceover': 'Quantum computing uses quantum states to process information.', 'sport_or_topic_category': 'science'}, 'quantum computing', 'CONCEPT'),
-              ({'primary_entity': 'Aurora', 'visual_intent': 'team members', 'voiceover': 'The Aurora team members presented research findings.', 'sport_or_topic_category': 'research'}, 'Aurora research team', 'ORGANIZATION'),
-              ({'primary_entity': 'Central City', 'visual_intent': 'conference venue', 'voiceover': 'The conference venue in Central City hosted the announcement.', 'sport_or_topic_category': 'business'}, 'Central City business venue', 'LOCATION'),
+              ({'primary_entity': 'Aurora', 'visual_intent': 'team members', 'voiceover': 'The Aurora team members presented research findings.', 'sport_or_topic_category': 'research'}, 'Aurora', 'ORGANIZATION'),
+              ({'primary_entity': 'Central City', 'visual_intent': 'conference venue', 'voiceover': 'The conference venue in Central City hosted the announcement.', 'sport_or_topic_category': 'business'}, 'Central City', 'LOCATION'),
+              ({'primary_entity': 'Not Northstar Research Summit', 'visual_intent': 'news_event', 'voiceover': 'Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin next year &nbsp;.', 'sport_or_topic_category': 'business'}, 'Northstar Research Summit Berlin', 'EVENT'),
           ]
 
           for scene, expected_subject, expected_type in cases:
@@ -96,7 +98,11 @@ jobs:
               assert queries and queries[0] == expected_subject, queries
               assert len(queries) <= 3, queries
               assert all(expected_subject.casefold() in q.casefold() for q in queries), queries
-              assert all(token not in ' '.join(queries).casefold() for token in ('editorial_person', 'red carpet')), queries
+              joined = ' '.join(queries).casefold()
+              assert 'not' not in joined.split(), queries
+              assert 'nbsp' not in joined and '&nbsp;' not in joined, queries
+              assert 'one-off' not in joined and 'thing' not in joined, queries
+              assert 'editorial_person' not in joined and 'red carpet' not in joined, queries
 
           multilingual = {
               'primary_entity': 'محمد صلاح',
@@ -109,6 +115,18 @@ jobs:
           assert visual_type == 'PERSON'
           assert brief['subject'] == 'محمد صلاح'
           assert queries[0] == 'محمد صلاح'
+
+          malformed = resolve_subject({
+              'primary_entity': 'Not BBL Chennai',
+              'visual_intent': 'news_event',
+              'voiceover': "Not just a 'one-off thing' - BBL could continue hosting season-opener in Chennai &nbsp;",
+              'specific_search_prompt': 'news_event',
+          }, 'BBL Chennai story')
+          assert malformed['visual_type'] == 'EVENT'
+          assert malformed['subject'] != 'Not BBL Chennai'
+          assert 'not' not in malformed['subject'].casefold().split()
+          assert 'nbsp' not in malformed['subject'].casefold()
+          assert 'thing' not in malformed['subject'].casefold()
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Amina Rahman presented the documentary.') is False
@@ -147,7 +165,7 @@ jobs:
           assert set(workflow_runtime.CRICKET_CATEGORIES) == {'India / Asia', 'Global', 'AI-assisted top story in cricket'}
 
           from pathlib import Path
-          required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_content_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
+          required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_semantic_guard_runtime.py', 'visual_query_entities_runtime.py', 'visual_content_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
           missing = [p for p in required if not Path(p).is_file()]
           assert not missing, missing
           print('Offline semantic visual smoke checks passed.')
