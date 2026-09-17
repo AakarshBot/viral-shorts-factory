@@ -20,9 +20,14 @@ class _Bot:
         self.generate_voiceover_and_timestamps = generate_voiceover_and_timestamps
 
 
-def test_audio_accepts_authoritative_validated_script():
+def _patched_bot():
     bot = _Bot()
     patch_pipeline_integrity(bot)
+    return bot
+
+
+def test_audio_accepts_only_authoritative_validated_script():
+    bot = _patched_bot()
 
     script = {
         "authoritative_narration": True,
@@ -38,28 +43,28 @@ def test_audio_accepts_authoritative_validated_script():
 
     assert result["ok"] is True
     assert bot.calls[0]["script"][0]["narration_source"] == "validated_script"
+    assert bot.calls[0]["script"][0]["voiceover"] == "India announced a new policy today."
 
 
 def test_audio_rejects_unvalidated_slide_or_visual_text():
-    bot = _Bot()
-    patch_pipeline_integrity(bot)
+    bot = _patched_bot()
 
     unvalidated = {
+        "authoritative_narration": True,
         "script": [
             {
                 "voiceover": "This text came from a slide and is not the generated script.",
                 "narration_source": "visual_text",
             }
-        ]
+        ],
     }
 
-    with pytest.raises(ValueError, match="validated generated script"):
+    with pytest.raises(ValueError, match="validated script"):
         asyncio.run(bot.generate_voiceover_and_timestamps(unvalidated, {}))
 
 
 def test_audio_rejects_missing_authoritative_marker_even_with_scene_text():
-    bot = _Bot()
-    patch_pipeline_integrity(bot)
+    bot = _patched_bot()
 
     unmarked = {
         "script": [
