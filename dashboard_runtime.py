@@ -456,7 +456,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
     """Run one dashboard-visible code section in a no-API demo harness."""
     from diagnostics_runtime import (
         _test_dashboard_architecture,
-        _test_factory_function_coverage,\n        _test_factory_function_coverage,
+        _test_factory_function_coverage,
         _test_database,
         _test_environment,
         _test_imports,
@@ -477,7 +477,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
         "runtime_bindings": _test_runtime_bindings,
         "provider_boundary": _test_provider_boundary,
         "dashboard_architecture": _test_dashboard_architecture,
-        "factory_function_coverage": _test_factory_function_coverage,\n        "factory_function_coverage": _test_factory_function_coverage,
+        "factory_function_coverage": _test_factory_function_coverage,
     }
 
     if section == "manual_visual_queries":
@@ -520,5 +520,5 @@ __all__ = [
     "collect_channel_statistics",
     "collect_live_channel_statistics",
     "run_demo_section",
-    "factory_function_coverage",\n    "factory_function_coverage",
+    "factory_function_coverage",
 ]
