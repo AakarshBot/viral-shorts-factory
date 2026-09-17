@@ -1,8 +1,8 @@
 """Evidence-first visual retrieval planner for Viral Shorts Factory.
 
-A factual entity and a visual subject are different things.  A location in a
+A factual entity and a visual subject are different things. A location in a
 sports story must not be converted into a fictional "location team" merely
-because the story mentions a sport.  This planner resolves the smallest
+because the story mentions a sport. This planner resolves the smallest
 specific visual subject supported by the scene, then builds a bounded query
 ladder around it.
 """
@@ -10,13 +10,14 @@ from __future__ import annotations
 import html
 import re
 
-VISUAL_RETRIEVAL_PLANNER_VERSION = "2026-09-17-v10-role-aware-subject-resolution"
+VISUAL_RETRIEVAL_PLANNER_VERSION = "2026-09-17-v11-sports-role-aware-subject-resolution"
 MAX_VISUAL_SEARCH_QUERIES = 3
 MAX_QUERY_WORDS = 10
 VISUAL_TYPES = {"PERSON","ORGANIZATION","EVENT","PRODUCT","LOCATION","STATISTIC","COMPARISON","TIMELINE","PROCESS","QUOTE","DOCUMENT","CONCEPT","GENERAL_CONTEXT"}
 ORGANIZATION_ACRONYMS = {"BCCI","ICC","PCB","SLC","BCB","ACB","FIFA","UEFA","NBA","NFL","ATP","WTA","ISRO","NASA","ESA","WHO","UN","UNESCO","IMF","WTO","SEBI","RBI","DRDO","NITI","BSE","NSE","TCS","IBM","AMD","HP","LG","BMW"}
 ORGANIZATION_SUFFIXES = ("board","council","federation","association","committee","corporation","company","university","institute","foundation","ministry","government","agency","authority","bank","club","party","commission","league","network","organization","organisation")
 LOCATION_NAMES = {"Delhi","New Delhi","Mumbai","Bengaluru","Bangalore","Hyderabad","Chennai","Kolkata","Pune","Ahmedabad","Jaipur","Lucknow","Surat","Goa","London","Manchester","Sydney","Melbourne","Perth","Brisbane","Auckland","Cape Town","Johannesburg","Dubai","Abu Dhabi","Doha","Singapore","India","Pakistan","Australia","England","South Africa","Sri Lanka","Bangladesh","New Zealand","United States","USA","UK","Afghanistan"}
+NATIONAL_SPORTS_SIDES = {"India","Afghanistan","Pakistan","Australia","England","South Africa","Sri Lanka","Bangladesh","New Zealand"}
 PRODUCT_HINTS = {"iphone","ipad","galaxy","pixel","playstation","xbox","switch","macbook","laptop","smartphone","suv","processor","gpu","chip","watch","headset","console","camera","phone"}
 SPORT_TERMS = {"cricket","football","soccer","basketball","tennis","golf","rugby","hockey","baseball"}
 VISUAL_CUES = {
@@ -57,29 +58,55 @@ def _story_text(seg,category=""):
  return _clean(" ".join(str(seg.get(k,"")) for k in ("voiceover","visual_intent","specific_search_prompt") if seg.get(k))) .lower()+" "+_clean(category).lower()
 
 def _explicit_team_context(text):
- """Return the actual team/entity names supported by the scene, not its venue."""
+ """Return national sides explicitly supported by the scene text."""
  terms=[]
- # Team-name construction is deliberately conservative: countries/national
- # sides are accepted; city names are never promoted to teams.
- for country in ("India","Afghanistan","Pakistan","Australia","England","South Africa","Sri Lanka","Bangladesh","New Zealand"):
-  if re.search(r"\b"+re.escape(country.lower())+r"\b",text): terms.append(country)
+ for country in NATIONAL_SPORTS_SIDES:
+  if re.search(r"\b"+re.escape(country.lower())+r"\b",text):
+   terms.append(country)
  return terms
+
+def _sports_context(text, category=""):
+ combined=f"{text} {_clean(category).lower()}"
+ return any(term in combined for term in SPORT_TERMS)
+
+def _team_role_is_explicit(text):
+ """Require an actual team/match cue before treating a country as a side."""
+ return bool(re.search(
+  r"\b(team|squad|players?|side|eleven|match|series|t20i|t20|odi|test|batting|bowling|face|faces|take on|takes on|vs|versus|against|playing|play)\b",
+  text,
+ ))
 
 def _resolve_visual_subject(entity, seg, category=""):
  entity=_clean(entity); text=_story_text(seg,category); category_l=_clean(category).lower()
- # A named person remains a person; a named venue/location remains a location
- # unless the scene explicitly asks for the venue itself plus a landmark cue.
+ if not entity:
+  return ""
+
+ # Sports roles are resolved before the generic location heuristic. Countries
+ # such as India and Afghanistan can be both geographic entities and national
+ # teams; the scene's sports role determines the visual subject.
+ if entity in NATIONAL_SPORTS_SIDES and _sports_context(text, category_l) and _team_role_is_explicit(text):
+  sport=next((x for x in SPORT_TERMS if x in text), "cricket")
+  return f"{entity} {sport} team"
+
+ # Cities/venues stay locations. In a sports story, add a venue noun only when
+ # the scene actually calls for a stadium/ground/venue visual. Never invent a
+ # city team from a location name.
  if _looks_like_location(entity):
-  # Never infer "Delhi cricket team" from Delhi + cricket.  If the scene is
-  # about a match at a location, the useful location visual is the venue/city.
-  if any(x in text for x in ("stadium","ground","venue","new delhi","delhi")) and not any(x in text for x in ("delhi cricket team","delhi capitals")):
-   return entity
+  sport=next((x for x in SPORT_TERMS if x in text), "")
+  if sport and any(x in text for x in ("stadium","ground","venue","arena")):
+   return f"{entity} {sport} stadium"
   return entity
- if _looks_like_organization(entity) or entity in _explicit_team_context(text): return entity
+
+ if _looks_like_organization(entity):
+  return entity
+ if entity in _explicit_team_context(text) and _sports_context(text, category_l) and _team_role_is_explicit(text):
+  sport=next((x for x in SPORT_TERMS if x in text), "cricket")
+  return f"{entity} {sport} team"
  return entity
 
 def classify_scene(seg,category=""):
  explicit=_clean(seg.get("visual_type","")).upper().replace("-","_").replace(" ","_"); entity=_clean(seg.get("primary_entity","")); intent=_clean(seg.get("visual_intent","")).lower(); text=_story_text(seg,category)
+ if entity in NATIONAL_SPORTS_SIDES and _sports_context(text,category) and _team_role_is_explicit(text): return "ORGANIZATION"
  if _looks_like_organization(entity): return "ORGANIZATION"
  if _looks_like_location(entity): return "LOCATION"
  if _looks_like_product(entity): return "PRODUCT"
