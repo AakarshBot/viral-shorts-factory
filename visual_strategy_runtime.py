@@ -115,16 +115,6 @@ def _scene_phrase(scene=None, *parts, **kwargs):
     return _planner._normalise(" ".join(values))
 
 
-try:
-    from visual_query_lock_runtime import install as _install_visual_query_lock
-    _install_visual_query_lock()
-except Exception as exc:
-    print(
-        f"   [Visual Strategy] Query-lock compatibility install unavailable: {type(exc).__name__}: {exc}",
-        flush=True,
-    )
-
-
 class _AuthoritativeVisualStrategyModule(types.ModuleType):
     def __setattr__(self, name, value):
         if name == "build_deep_queries":
