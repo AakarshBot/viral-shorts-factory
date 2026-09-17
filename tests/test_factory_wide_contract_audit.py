@@ -1,0 +1,84 @@
+from factory_contract_audit import (
+    language_surface_audit,
+    runtime_surface_audit,
+    source_syntax_audit,
+    visual_entity_fallback_audit,
+)
+
+
+def test_factory_source_syntax_audit():
+    assert source_syntax_audit() == []
+
+
+def test_factory_runtime_surface_audit():
+    assert runtime_surface_audit() == []
+
+
+def test_multilingual_language_surface_audit():
+    assert language_surface_audit() == []
+
+
+def test_visual_repeat_limit_never_blanks_entity():
+    assert visual_entity_fallback_audit() == []
+
+
+def test_multilingual_script_grounding_and_metadata():
+    from unicode_runtime import install
+    from script_runtime import validate_content_density
+    from quality_runtime import _quality_validate
+
+    install()
+
+    samples = {
+        "hindi": {
+            "title": "भारत ने नई ऊर्जा नीति की घोषणा की",
+            "summary": "भारत सरकार ने नई ऊर्जा नीति की घोषणा की है। नीति में सौर ऊर्जा, भंडारण और ग्रिड निवेश के लिए नए लक्ष्य शामिल हैं। राज्यों के लिए भी नई योजनाएं जारी की गई हैं।",
+            "script": [
+                {"voiceover": "भारत सरकार ने नई ऊर्जा नीति की घोषणा की है जिसमें सौर ऊर्जा के लिए नए लक्ष्य शामिल हैं।", "primary_entity": "भारत", "specific_search_prompt": "भारत नई ऊर्जा नीति"},
+                {"voiceover": "नई नीति में ऊर्जा भंडारण और ग्रिड निवेश के लिए अतिरिक्त योजनाओं का उल्लेख किया गया है।", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा भंडारण ग्रिड"},
+                {"voiceover": "राज्यों के लिए भी योजना के तहत नई कार्यान्वयन व्यवस्था और लक्ष्य बताए गए हैं।", "primary_entity": "भारत", "specific_search_prompt": "भारत राज्य ऊर्जा योजना"},
+            ],
+        },
+        "telugu": {
+            "title": "భారతదేశం కొత్త ఇంధన విధానాన్ని ప్రకటించింది",
+            "summary": "భారత ప్రభుత్వం కొత్త ఇంధన విధానాన్ని ప్రకటించింది. ఈ విధానంలో సౌర విద్యుత్, నిల్వ వ్యవస్థలు మరియు గ్రిడ్ పెట్టుబడులకు కొత్త లక్ష్యాలు ఉన్నాయి. రాష్ట్రాల కోసం కూడా కొత్త అమలు ప్రణాళికలను విడుదల చేశారు.",
+            "script": [
+                {"voiceover": "భారత ప్రభుత్వం కొత్త ఇంధన విధానాన్ని ప్రకటించింది, ఇందులో సౌర విద్యుత్‌కు కొత్త లక్ష్యాలు ఉన్నాయి.", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం"},
+                {"voiceover": "కొత్త విధానంలో నిల్వ వ్యవస్థలు మరియు గ్రిడ్ పెట్టుబడులకు అదనపు ప్రణాళికలు ఉన్నాయి.", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం నిల్వ గ్రిడ్ పెట్టుబడులు"},
+                {"voiceover": "రాష్ట్రాల కోసం కూడా అమలు ప్రణాళికలు మరియు కొత్త లక్ష్యాలను ప్రభుత్వం వివరించింది.", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం రాష్ట్ర ఇంధన ప్రణాళిక"},
+            ],
+        },
+    }
+
+    for sample in samples.values():
+        script = {
+            "script": sample["script"],
+            "titles": [sample["title"], sample["title"] + " వివరాలు", sample["title"] + " తాజా సమాచారం"],
+            "recommended_title_index": 1,
+            "seo_description": sample["summary"],
+        }
+        ok, reason = validate_content_density(script, sample, "regular")
+        assert ok, reason
+        ok, reason = _quality_validate(lambda *_args: (True, ""), script, sample["summary"], "regular")
+        assert ok, reason
+
+
+def test_unicode_visual_queries_survive_planner():
+    from unicode_runtime import install
+    import visual_retrieval_planner as planner
+
+    install()
+    for entity, title in (
+        ("भारत", "भारत नई ऊर्जा नीति"),
+        ("భారతదేశం", "భారతదేశం కొత్త ఇంధన విధానం"),
+    ):
+        scene = {
+            "primary_entity": entity,
+            "visual_intent": "news event",
+            "specific_search_prompt": title,
+            "voiceover": title,
+            "sport_or_topic_category": "regional_state_news",
+        }
+        queries, visual_type = planner.build_deep_queries(scene, title)
+        assert queries, f"planner lost multilingual entity {entity!r}"
+        assert any(entity in query for query in queries), (entity, queries, visual_type)

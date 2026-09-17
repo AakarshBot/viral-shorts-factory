@@ -9,7 +9,19 @@ from __future__ import annotations
 
 import inspect
 
-RUNTIME_HARDENER_VERSION = "2026-09-17-v3"
+RUNTIME_HARDENER_VERSION = "2026-09-17-v4"
+
+
+def _install_unicode_runtime() -> None:
+    """Install multilingual text contracts before any production validation runs."""
+    try:
+        from unicode_runtime import install
+        install()
+    except Exception as exc:
+        print(
+            f"   [Runtime Hardener] Unicode runtime unavailable: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
 
 
 def reassert_live_bindings(bot) -> None:
@@ -19,6 +31,7 @@ def reassert_live_bindings(bot) -> None:
     resolves the authoritative implementation at rebind time and then writes
     the same callable to both the bot and the legacy run_robot globals.
     """
+    _install_unicode_runtime()
     run_robot = getattr(bot, "run_robot", None)
     namespace = getattr(run_robot, "__globals__", None)
 
@@ -98,6 +111,7 @@ def validate_runtime_contracts(bot) -> list[str]:
     full implementation signatures, making valid wrappers look broken. We now
     validate each layer against its own contract.
     """
+    _install_unicode_runtime()
     errors = []
     run_robot = getattr(bot, "run_robot", None)
     namespace = getattr(run_robot, "__globals__", None)
