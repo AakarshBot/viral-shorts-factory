@@ -36,6 +36,28 @@ def _run_with_progress(label: str, fn: Callable[[], Any]) -> Any:
         raise
 
 
+def _wrap_for_progress(owner: Any, attr: str, label: str):
+    """Temporarily wrap a callable so the Test Phase shows real run progress."""
+    original = getattr(owner, attr)
+    if not callable(original):
+        return lambda: None
+    state = {"restored": False}
+
+    def wrapped(*args, **kwargs):
+        try:
+            return _run_with_progress(label, lambda: original(*args, **kwargs))
+        finally:
+            if not state["restored"]:
+                try:
+                    setattr(owner, attr, original)
+                except Exception:
+                    pass
+                state["restored"] = True
+
+    setattr(owner, attr, wrapped)
+    return lambda: setattr(owner, attr, original)
+
+
 def _clean_subject(value: Any) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-:;|'\"")
     text = re.sub(r"^(?:primary entity|visual subject|subject|search term|keyword)\s*[:=-]\s*", "", text, flags=re.I)
@@ -71,11 +93,9 @@ def _three_visual_terms(seg: dict[str, Any], video_title: str) -> list[str]:
         clean = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-")
         if clean and clean.lower() not in {t.lower() for t in terms}:
             terms.append(clean)
-    while terms:
-        if len(terms) >= 3:
-            return terms[:3]
+    while terms and len(terms) < 3:
         terms.append(terms[-1])
-    return ["selected story", "news", "documentary"]
+    return terms[:3] if terms else ["selected story", "news", "documentary"]
 
 
 def _offline_script_test(bot) -> None:
@@ -177,28 +197,6 @@ def _visual_test_limited(bot) -> None:
             st.caption("No image has been sourced yet.")
 
 
-def _progress_wrap(original: Callable[..., Any], label: str) -> Callable[..., Any]:
-    """Patch a test renderer so clicked operations visibly report progress."""
-    def wrapped(*args, **kwargs):
-        return original(*args, **kwargs)
-    wrapped.__name__ = getattr(original, "__name__", "wrapped")
-    return wrapped
-
-
-def install_test_phase_patches() -> None:
-    """Install Test Phase-only UI corrections once."""
-    if getattr(test_phase_runtime, "_enhanced_test_phase_patches_installed", False):
-        return
-
-    # Existing faithful render test.
-    test_phase_runtime._render_test = _render_test
-
-    # Replace script/visual tests only inside Test Phase; production remains untouched.
-    test_phase_runtime._script_test = _offline_script_test
-    test_phase_runtime._visual_test = _visual_test_limited
-    test_phase_runtime._enhanced_test_phase_patches_installed = True
-
-
 def _render_test(bot) -> None:
     with st.expander("5. Subs / overlays — real compile/render test", expanded=True):
         script = st.session_state.get("tp_script")
@@ -229,3 +227,81 @@ def _render_test(bot) -> None:
             st.success(f"Render test passed: {path}")
         else:
             st.caption("Nothing has been rendered yet.")
+
+
+def _topic_test_progress(bot) -> None:
+    """Keep the original topic UI but wrap its actual discovery call with progress."""
+    original_discovery = test_phase_runtime.discover_three_candidates
+    restore = _wrap_for_progress(test_phase_runtime, "discover_three_candidates", "Topic discovery test")
+    try:
+        return test_phase_runtime._original_topic_test(bot)
+    finally:
+        restore()
+
+
+def _audio_test_progress(bot) -> None:
+    original = getattr(bot, "generate_voiceover_and_timestamps", None)
+    if callable(original):
+        restore = _wrap_for_progress(bot, "generate_voiceover_and_timestamps", "Audio generation test")
+    else:
+        restore = lambda: None
+    try:
+        return test_phase_runtime._original_audio_test(bot)
+    finally:
+        restore()
+
+
+def _metadata_test_progress(bot) -> None:
+    restores = []
+    for owner, attr, label in (
+        (test_phase_runtime, "_build_clean_metadata", "Metadata builder test"),
+        (test_phase_runtime, "build_pinned_comment", "Pinned-comment builder test"),
+    ):
+        if callable(getattr(owner, attr, None)):
+            restores.append(_wrap_for_progress(owner, attr, label))
+    try:
+        return test_phase_runtime._original_metadata_test(bot)
+    finally:
+        for restore in restores:
+            restore()
+
+
+def _upload_test_progress(bot) -> None:
+    restores = []
+    for owner, attr, label in (
+        (test_phase_runtime, "validate_final_video", "Upload video validation"),
+        (test_phase_runtime, "validate_final_upload_metadata", "Upload metadata validation"),
+    ):
+        if callable(getattr(owner, attr, None)):
+            restores.append(_wrap_for_progress(owner, attr, label))
+    controller_cls = getattr(test_phase_runtime, "WorkflowController", None)
+    if controller_cls is not None and callable(getattr(controller_cls, "upload_manual", None)):
+        restores.append(_wrap_for_progress(controller_cls, "upload_manual", "Real upload test"))
+    try:
+        return test_phase_runtime._original_upload_test(bot)
+    finally:
+        for restore in restores:
+            restore()
+
+
+def install_test_phase_patches() -> None:
+    """Install Test Phase-only UI corrections once."""
+    if getattr(test_phase_runtime, "_enhanced_test_phase_patches_installed", False):
+        return
+
+    # Preserve originals so the wrappers below can keep the production Test Phase UI.
+    test_phase_runtime._original_topic_test = test_phase_runtime._topic_test
+    test_phase_runtime._original_audio_test = test_phase_runtime._audio_test
+    test_phase_runtime._original_metadata_test = test_phase_runtime._metadata_test
+    test_phase_runtime._original_upload_test = test_phase_runtime._upload_test
+
+    test_phase_runtime._topic_test = _topic_test_progress
+    test_phase_runtime._audio_test = _audio_test_progress
+    test_phase_runtime._metadata_test = _metadata_test_progress
+    test_phase_runtime._upload_test = _upload_test_progress
+
+    # Test Phase-only replacements.
+    test_phase_runtime._script_test = _offline_script_test
+    test_phase_runtime._visual_test = _visual_test_limited
+    test_phase_runtime._render_test = _render_test
+    test_phase_runtime._enhanced_test_phase_patches_installed = True
