@@ -27,7 +27,7 @@ from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
 from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, MAX_DISCOVERY_CANDIDATES, discover_three_candidates
 
-from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, run_demo_section
+from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, collect_live_channel_statistics, run_demo_section
 
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
@@ -631,12 +631,27 @@ def render_channel_statistics() -> None:
         f"{stats['avg_view_percentage']:.1f}%" if stats["avg_view_percentage"] is not None else "—",
     )
 
-    ctr_col, note_col = st.columns(2)
+    ctr_col, live_col = st.columns(2)
     ctr_col.metric("Average title CTR", f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—")
-    note_col.info(
-        "These figures come from performance already recorded in the factory vault. "
-        "They do not invent missing YouTube analytics."
-    )
+    with live_col:
+        if st.button("↻ Refresh live YouTube totals", use_container_width=True, key="refresh_live_channel_stats"):
+            st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
+
+    live = st.session_state.get("live_channel_stats") or {}
+    if live.get("error"):
+        st.warning(f"Live YouTube totals could not be loaded: {live['error']}")
+    elif live:
+        st.markdown("### Live YouTube channel totals")
+        live_cols = st.columns(4)
+        live_cols[0].metric("Channel", live.get("channel_title", "Connected channel"))
+        live_cols[1].metric("Subscribers", "Hidden" if live.get("hidden_subscriber_count") else f"{live.get('subscriber_count', 0):,}")
+        live_cols[2].metric("Videos", f"{live.get('video_count', 0):,}")
+        live_cols[3].metric("All-time views", f"{live.get('view_count', 0):,}")
+    else:
+        st.caption(
+            "Recorded factory metrics are shown above. Use “Refresh live YouTube totals” "
+            "to query the connected channel account."
+        )
 
     st.markdown("### By format")
     if stats["by_format"]:
