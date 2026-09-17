@@ -71,6 +71,7 @@ def _test_database():
 def _test_visual_strategy():
     from visual_query_entities_runtime import build_candidate_scene
     from visual_semantic_guard_runtime import meaningful_tokens, resolve_subject
+    from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
     from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
     from visual_qa_runtime import _tier_for
     from visual_runtime import _cache_key, _context_fingerprint
@@ -124,13 +125,24 @@ def _test_visual_strategy():
 
     if _tier_for("person portrait", "PERSON", "Wikipedia") != "IDENTITY":
         raise AssertionError("person identity tier failed")
+    manual = parse_manual_visual_queries("Shubman Gill batting; India Afghanistan cricket match; New Delhi stadium")
+    if len(manual) != 3:
+        raise AssertionError(f"manual query parsing failed: {manual}")
+    manual_scenes = [
+        {"primary_entity": "India Afghanistan", "voiceover": "India and Afghanistan play the final match."},
+        {"primary_entity": "Shubman Gill", "voiceover": "Shubman Gill leads India's batting."},
+        {"primary_entity": "New Delhi", "voiceover": "The match is being played in New Delhi."},
+    ]
+    assignments = assign_manual_queries(manual_scenes, manual)
+    if len(assignments) != 3 or any(not item.get("query") for item in assignments):
+        raise AssertionError(f"manual visual assignment failed: {assignments}")
     if _tier_for("conceptual", "GENERAL_CONTEXT", "DDG") != "IDENTITY":
         raise AssertionError("concept identity tier failed")
     c1 = _context_fingerprint("person portrait", "Amina documentary", "Amina presented it", "story")
     c2 = _context_fingerprint("person portrait", "Amina interview", "Amina discussed it", "story")
     if c1 == c2 or _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
         raise AssertionError("context-aware cache identity failed")
-    return "Identity-first semantic visual strategy, multilingual identity and context-aware cache checks passed"
+    return "Identity-first semantic visual strategy, multilingual identity, manual query routing and context-aware cache checks passed"
 
 
 def _test_scene_branding():
