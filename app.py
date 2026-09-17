@@ -25,9 +25,9 @@ from story_ranker import patch_story_selection
 from visual_content_runtime import patch_content_first_visuals as patch_visual_pipeline
 from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
-from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, MAX_DISCOVERY_CANDIDATES, discover_three_candidates
+from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, MAX_DISCOVERY_CANDIDATES
 
-from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, collect_live_channel_statistics, run_demo_section
+from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, collect_live_channel_statistics, discover_ranked_topics, run_demo_section
 
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
@@ -534,7 +534,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 conn = sqlite3.connect(ultimate_bot.DB_PATH)
                 try:
                     migrate_vault(conn)
-                    candidates = discover_three_candidates(ultimate_bot, config, conn)
+                    candidates = discover_ranked_topics(ultimate_bot, config, conn, max_candidates=MAX_DISCOVERY_CANDIDATES)
                 finally:
                     conn.close()
                 st.session_state.candidates = candidates
