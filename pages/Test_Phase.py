@@ -15,6 +15,7 @@ from visual_qa_runtime import install_visual_qa_bridge
 from visual_runtime import patch_visual_pipeline
 import test_phase_runtime
 from test_phase_patches import install_test_phase_patches
+from test_history_runtime import install_test_history_bridge, render_test_history
 
 st.set_page_config(page_title="Test Phase", page_icon="🧪", layout="wide")
 
@@ -37,8 +38,10 @@ def _init_runtime() -> None:
         install_visual_qa_bridge(visual_runtime)
         patch_provider_adapters(ultimate_bot)
     bind_dashboard_patches(ultimate_bot)
+    install_test_history_bridge(test_phase_runtime, ultimate_bot)
 
 
 _init_runtime()
 install_test_phase_patches()
 test_phase_runtime.render_test_phase(ultimate_bot)
+render_test_history(ultimate_bot, st)
