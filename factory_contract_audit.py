@@ -42,6 +42,7 @@ OBSOLETE_REPOSITORY_ARTIFACTS = (
     "apply_production_fixes.py",
     "apply_script_fallback_fix.py",
     "apply_selected_story_lock_fix.py",
+    "person_source_runtime.py",
     "visual_query_lock_runtime.py",
     "visual_replacement_runtime.py",
     "visual_resilience_runtime.py",
