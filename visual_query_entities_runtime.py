@@ -63,9 +63,18 @@ def _key(value: str) -> str:
 
 
 def _append_unique(items: list[str], value: str) -> None:
-    value = _clean(value)
+    value = _clean(value).strip("'")
     if value and value.casefold() not in {item.casefold() for item in items}:
         items.append(value)
+
+
+def _extract_named_starters(text: str) -> list[str]:
+    """Extract concrete country/national names without possessive suffixes."""
+    result: list[str] = []
+    for token in _words(text):
+        if _key(token) in _COMMON_STARTERS:
+            _append_unique(result, token.rstrip("'s").rstrip("’s"))
+    return result
 
 
 def _extract_person_names(text: str) -> list[str]:
@@ -85,7 +94,7 @@ def _extract_person_names(text: str) -> list[str]:
             j += 1
         keys = {_key(word) for word in run}
         if len(run) >= 2 and not keys.intersection(_NOISE) and not keys.intersection(_ROLE_WORDS):
-            _append_unique(result, " ".join(run).strip("'"))
+            _append_unique(result, " ".join(run))
         i = max(i + 1, j)
     return result
 
@@ -99,13 +108,13 @@ def _extract_group_subjects(text: str) -> list[str]:
         if i + 2 < len(tokens):
             a, b, c = tokens[i], tokens[i + 1], tokens[i + 2]
             if _key(a) in _COMMON_STARTERS and _key(c) in {"team", "squad", "board", "association", "government"}:
-                _append_unique(result, f"{a} {b} {c}")
+                _append_unique(result, f"{a.rstrip(chr(39) + 's')} {b} {c}")
                 i += 3
                 continue
         if i + 1 < len(tokens):
             a, b = tokens[i], tokens[i + 1]
             if _key(a) in _COMMON_STARTERS and _key(b) in _ROLE_WORDS:
-                _append_unique(result, f"{a} {b}")
+                _append_unique(result, f"{a.rstrip(chr(39) + 's')} {b}")
         i += 1
     return result
 
@@ -119,22 +128,32 @@ def extract_slide_search_subjects(scene: dict) -> list[str]:
     script = _clean(scene.get("voiceover", ""))
     auxiliary = _clean(scene.get("specific_search_prompt", ""))
 
+    # Priority follows the slide: primary subject, explicitly named people,
+    # named country/national subjects, then concrete groups.
     for name in _extract_person_names(script):
         if len(subjects) >= _QUERY_MAX:
             break
         _append_unique(subjects, name)
+    for named in _extract_named_starters(script):
+        if len(subjects) >= _QUERY_MAX:
+            break
+        _append_unique(subjects, named)
     for group in _extract_group_subjects(script):
         if len(subjects) >= _QUERY_MAX:
             break
         _append_unique(subjects, group)
 
     # A structured prompt may contain a named subject omitted from narration.
-    # Extract only concrete person/group subjects; never use the prompt verbatim.
+    # Extract only concrete entities; never use the prompt verbatim.
     if len(subjects) < _QUERY_MAX:
         for name in _extract_person_names(auxiliary):
             if len(subjects) >= _QUERY_MAX:
                 break
             _append_unique(subjects, name)
+        for named in _extract_named_starters(auxiliary):
+            if len(subjects) >= _QUERY_MAX:
+                break
+            _append_unique(subjects, named)
         for group in _extract_group_subjects(auxiliary):
             if len(subjects) >= _QUERY_MAX:
                 break
