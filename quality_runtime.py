@@ -75,7 +75,7 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
         return False, "One or more generated titles are empty."
 
     recommended = script_data.get("recommended_title_index")
-    if recommended not in (0, 1, 2, 3):
+    if recommended not in (0, 1, 2):
         return False, "Recommended title index is invalid."
 
     description = str(script_data.get("seo_description", "")).strip()
@@ -107,7 +107,7 @@ def _self_critique(script_data, format_mode):
     if any(first.startswith(x) for x in ("welcome to", "hey everyone", "today we are going to", "in this video")):
         score -= 2
         reasons.append("generic opener")
-    if len(scenes) < (4 if format_mode == "top5" else 4):
+    if len(scenes) < 4:
         score -= 1
         reasons.append("low scene count; verify information density")
     for i in range(len(scenes)):

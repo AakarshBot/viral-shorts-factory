@@ -71,7 +71,7 @@ jobs:
           visual_policy_runtime.install_visual_card_policy(ultimate_bot)
 
           person = {'primary_entity': 'Lionel Messi', 'visual_intent': 'person portrait', 'voiceover': 'Lionel Messi scored in the final.', 'sport_or_topic_category': 'football'}
-          event = {'primary_entity': 'FIFA World Cup final', 'visual_intent': 'actual match event', 'voiceover': 'The final decided the champion.', 'sport_or_topic_category': 'football'}
+          event = {'primary_entity': '2022 FIFA World Cup Final', 'visual_intent': 'actual match event', 'voiceover': 'The final went to penalties.', 'sport_or_topic_category': 'football'}
           bcci = {'primary_entity': 'BCCI', 'visual_intent': 'organization', 'voiceover': 'BCCI announced the decision.', 'sport_or_topic_category': 'cricket'}
           delhi = {'primary_entity': 'Delhi', 'visual_intent': 'location', 'voiceover': 'Delhi hosted the event.', 'sport_or_topic_category': 'news'}
           concept = {'primary_entity': 'quantum computing', 'visual_intent': 'technical process', 'voiceover': 'Quantum computers use quantum states to process information.', 'sport_or_topic_category': 'technology'}
@@ -85,6 +85,9 @@ jobs:
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
           assert queries == ['Lionel Messi'], queries
+          event_queries, event_type = visual_strategy_runtime.build_deep_queries(event, 'Argentina vs France')
+          assert event_type == 'EVENT'
+          assert event_queries == ['2022 FIFA World Cup Final'], event_queries
           assert visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')[0] == ['BCCI']
           assert visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')[0] == ['Delhi']
 
@@ -136,6 +139,9 @@ jobs:
       - name: Run full no-API diagnostics
         run: |
           python - <<'PY'
+          import sys
+          # CI must never invoke ultimate_bot's interactive exception hook.
+          sys.excepthook = sys.__excepthook__
           from diagnostics_runtime import run_offline_diagnostics
           report = run_offline_diagnostics()
           for item in report['results']:

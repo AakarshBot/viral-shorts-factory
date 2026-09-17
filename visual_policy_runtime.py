@@ -23,14 +23,17 @@ _SUBJECT_LOCK = threading.Lock()
 _SUBJECT_RUNS = {}
 
 # Common words that strongly suggest the field contains a sentence/description
-# rather than a compact visual subject. This stays deterministic and costs no API
-# calls. Known organisation acronyms are handled before these cues.
+# rather than a compact visual subject. Coordinating conjunctions are excluded
+# because they are common inside legitimate multi-word entities/event names.
 _SENTENCE_CUES = {
-    "every", "each", "when", "while", "because", "given", "since", "after", "before", "but", "and",
-    "or", "so", "if", "although", "though", "we", "you", "they", "he", "she", "it", "this", "that",
+    "every", "each", "when", "while", "because", "given", "since", "after", "before",
+    "so", "if", "although", "though", "we", "you", "they", "he", "she", "it", "this", "that",
     "try", "tried", "tries", "get", "gets", "got", "getting", "happen", "happens", "happened", "will",
     "would", "could", "should", "season", "year", "years", "today", "tomorrow", "yesterday",
     "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't", "can't", "cannot",
+    "announce", "announced", "announces", "said", "says", "told", "revealed", "reveal", "confirms", "confirmed",
+    "expects", "expected", "hosted", "hosts", "plans", "planned", "wants", "wanted", "notes", "noted",
+    "reports", "reported",
 }
 
 _ORGANISATION_ACRONYMS = {
@@ -88,25 +91,26 @@ def _clean_search_subject(value):
     if not words:
         return ""
 
-    # A known acronym is usually the actual entity even when the rest of the
-    # field accidentally contains a sentence. Example:
+    # First detect whether the value is sentence-like. Only then collapse a
+    # known organisation acronym. This preserves compact entities such as
+    # "2022 FIFA World Cup Final" while still cleaning blobs such as
     # "BCCI Impact Player Every year we try..." -> "BCCI".
-    for word in words[:6]:
-        token = re.sub(r"[^A-Za-z0-9&.-]", "", word).upper()
-        if token in _ORGANISATION_ACRONYMS:
-            return token
-
-    # Once a sentence cue appears, keep only the compact subject before it.
     cue_index = next(
         (i for i, word in enumerate(words[1:], start=1) if word.lower().strip(".,!?;:") in _SENTENCE_CUES),
         None,
     )
     if cue_index is not None:
-        words = words[:cue_index]
+        prefix = words[:cue_index]
+        for word in prefix[:6]:
+            token = re.sub(r"[^A-Za-z0-9&.-]", "", word).upper()
+            if token in _ORGANISATION_ACRONYMS:
+                return token
+        words = prefix
 
-    # Never allow a sentence-like value to become a huge search query.
-    if len(words) > 4:
-        words = words[:4]
+    # Keep compact entity/event names intact, but place a finite bound on
+    # genuinely long model garbage. Eight words is still safely searchable.
+    if len(words) > 8:
+        words = words[:8]
 
     return " ".join(words).strip(" ,.-:;|\"'")
 
@@ -137,8 +141,6 @@ def _simple_build_deep_queries(seg, video_title="", visual_type=None):
     try:
         from visual_strategy_runtime import classify_scene, VISUAL_TYPES
         category = str(seg.get("sport_or_topic_category", "") or "")
-        # Classify a sanitised copy so a narration blob cannot force PERSON/other
-        # misclassification just because it contains role words such as "player".
         classify_seg = dict(seg)
         classify_seg["primary_entity"] = entity
         resolved_type = visual_type or classify_scene(classify_seg, category)
@@ -240,8 +242,6 @@ def install_visual_card_policy(bot=None):
 
         original_hook = namespace.get("render_hook_card")
         if callable(original_hook) and not getattr(original_hook, "_qc_hook_passthrough", False):
-            # This legacy global is ultimately called through factory_runtime's
-            # runtime wrapper, which supplies bot + script_data as well.
             def render_hook_card_no_card(_bot, bg_img, hook_text, width=1080, height=1920, font_choice=None, script_data=None):
                 return bg_img.convert("RGBA")
             render_hook_card_no_card._qc_hook_passthrough = True
@@ -285,9 +285,6 @@ def install_visual_card_policy(bot=None):
     return False
 
 
-# The visual strategy module imports this policy before the factory binds
-# script_runtime. Install the script guard at import time so the guard is active
-# automatically for every normal factory startup.
 try:
     from script_guard_runtime import install as _install_script_output_guard
     _install_script_output_guard()

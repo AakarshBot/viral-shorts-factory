@@ -44,7 +44,7 @@ def _dedupe(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _distinct_domain_pack(items: List[Dict[str, Any]], max_sources: int) -> List[Dict[str, Any]]:
-    """Prefer independent publishers before adding another result from the same domain."""
+    """Prefer distinct publishers/domains before adding another result from one domain."""
     selected: List[Dict[str, Any]] = []
     seen_domains = set()
     remainder: List[Dict[str, Any]] = []
@@ -115,15 +115,11 @@ def patch_research_pipeline(bot):
     if not callable(current) or run_robot is None or not hasattr(run_robot, "__globals__"):
         return bot
 
-    # The canonical stack is research -> content-density. A repeated runtime
-    # bind must not wrap the content-density guard in another research layer.
     if getattr(current, "_content_dense_bound", False):
         if getattr(current, "_research_layer_live", False):
             bot._research_pipeline_patch_installed = True
             run_robot.__globals__["write_script"] = current
             return bot
-        # Content-density without research should be repaired by the normal
-        # patch path below; this branch is intentionally not marked installed.
 
     if getattr(current, "_research_wrapped", False):
         bot._research_pipeline_patch_installed = True
@@ -140,15 +136,17 @@ def patch_research_pipeline(bot):
         data["research_distinct_domains"] = len({_domain(item.get("url")) for item in sources if _domain(item.get("url"))})
         data["research_synthesis_required"] = True
         data["research_bundle"] = format_source_brief(sources)
-        instruction = (
-            "\n\nMULTI-SOURCE EVIDENCE PACK — synthesize the strongest factual Short from the evidence below. "
-            "Treat the selected story as the subject, not as the final script. Cross-check details across independent publishers and prefer details repeated or directly supported by multiple sources. "
+        data["research_instruction"] = (
+            "MULTI-SOURCE EVIDENCE PACK — synthesize the strongest factual Short from the evidence below. "
+            "Treat the selected story as the subject, not as the final script. Cross-check details across distinct publishers/domains and prefer details repeated or directly supported by multiple sources. "
             "Merge the strongest verified facts, useful context, numbers and consequences into one coherent story; do not mechanically paraphrase one article. "
             "When sources conflict, omit the disputed detail unless the conflict itself is the verified news point. "
             "Never invent facts, quotes, motives, predictions, statistics or causal links.\n\n"
             + data["research_bundle"]
         )
-        data["text"] = _clean(data.get("text")) + instruction
+        # Never contaminate article/source text with internal editorial
+        # instructions. Emergency fallbacks must continue to see only source data.
+        data["text"] = _clean(data.get("text"))
         result = current(data, language_cfg, genre_key, conn, format_mode)
         if isinstance(result, dict):
             result["research_sources"] = sources
