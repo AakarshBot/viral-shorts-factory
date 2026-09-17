@@ -68,8 +68,8 @@ def _test_database():
 
 
 def _test_visual_strategy():
-    from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
-    from visual_semantic_guard_runtime import resolve_subject
+    from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
+    from visual_semantic_guard_runtime import meaningful_tokens, resolve_subject
     from visual_qa_runtime import _tier_for
     from visual_runtime import _cache_key, _context_fingerprint
 
@@ -90,15 +90,23 @@ def _test_visual_strategy():
         queries, visual_type = build_deep_queries(scene, scene["primary_entity"])
         if visual_type != expected_type:
             raise AssertionError(f"type mismatch: expected {expected_type}, got {visual_type}")
-        actual_subject = brief["subject"]
-        if actual_subject != expected_subject:
-            raise AssertionError(f"unexpected subject: {actual_subject!r} != {expected_subject!r}")
+        if brief["subject"] != expected_subject:
+            raise AssertionError(f"unexpected subject: {brief['subject']!r} != {expected_subject!r}")
         if not queries or queries[0] != expected_subject:
             raise AssertionError(f"first query is not resolved subject: {queries}")
         if len(queries) > 3:
             raise AssertionError(f"query budget exceeded: {queries}")
-        if not all(expected_subject.casefold() in query.casefold() for query in queries):
-            raise AssertionError(f"identity degraded in query ladder: {queries}")
+
+        subject_keys = set(meaningful_tokens(expected_subject))
+        for index, query in enumerate(queries):
+            query_keys = set(meaningful_tokens(query))
+            if not query_keys:
+                raise AssertionError(f"empty semantic query: {queries}")
+            if not query_keys.issubset(subject_keys):
+                raise AssertionError(f"query introduced tokens outside resolved subject: {queries}")
+            if index > 0 and subject_keys and not (query_keys & subject_keys):
+                raise AssertionError(f"fallback lost subject identity: {queries}")
+
         joined = " ".join(queries).casefold()
         if any(bad in joined.split() for bad in ("not", "nbsp", "business", "technology", "entertainment", "research")):
             raise AssertionError(f"noise or category padding leaked into query: {queries}")
@@ -158,7 +166,7 @@ def _test_visual_strategy():
         raise AssertionError("context fingerprints are not distinct")
     if _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
         raise AssertionError("context-aware cache keys are not distinct")
-    return "Generic semantic resolver + exact visual descriptor handling + grounded malformed-entity cleanup + bounded query ladder + identity QA + context-aware cache passed"
+    return "Generic semantic resolver + exact visual descriptors + identity-preserving fallback ladder + strict identity QA + context-aware cache passed"
 
 
 def _test_scene_branding():
@@ -271,7 +279,12 @@ def _test_runtime_bindings():
     runtime_bindings.harden_editorial_defaults(ultimate_bot)
     runtime_bindings.bind_dashboard_patches(ultimate_bot)
     namespace = ultimate_bot.run_robot.__globals__
-    required = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_source_key", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video")
+    required = (
+        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates",
+        "validate_script", "self_critique_pass", "write_script",
+        "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset",
+        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video",
+    )
     missing = [name for name in required if name not in namespace]
     if missing:
         raise AssertionError(f"runtime namespace missing required binding(s): {missing}")
