@@ -26,9 +26,10 @@ def _test_imports():
         "diagnostics_runtime", "editorial_runtime", "runtime_hardener",
         "script_guard_runtime", "script_runtime", "research_runtime",
         "audio_runtime", "audio_direction_runtime", "visual_runtime",
-        "visual_qa_runtime", "visual_strategy_runtime", "visual_content_runtime",
-        "provider_runtime", "quality_runtime", "runtime_bindings", "workflow_runtime",
-        "subtitle_runtime", "newsroom_dashboard",
+        "visual_qa_runtime", "visual_strategy_runtime", "visual_semantic_guard_runtime",
+        "visual_query_entities_runtime", "visual_content_runtime", "provider_runtime",
+        "quality_runtime", "runtime_bindings", "workflow_runtime", "subtitle_runtime",
+        "newsroom_dashboard",
     ]
     for name in modules:
         __import__(name)
@@ -68,6 +69,7 @@ def _test_database():
 
 def _test_visual_strategy():
     from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
+    from visual_semantic_guard_runtime import resolve_subject
     from visual_qa_runtime import _tier_for
     from visual_runtime import _cache_key, _context_fingerprint
 
@@ -78,8 +80,8 @@ def _test_visual_strategy():
         ({"primary_entity": "Central City", "voiceover": "Central City hosted the report.", "visual_intent": "location geography", "sport_or_topic_category": "geography"}, "Central City", "LOCATION"),
         ({"primary_entity": "Global Climate Summit", "voiceover": "The summit opened with a new agreement.", "visual_intent": "event", "sport_or_topic_category": "climate"}, "Global Climate Summit", "EVENT"),
         ({"primary_entity": "quantum computing", "voiceover": "Quantum computing uses quantum states.", "visual_intent": "scientific concept", "sport_or_topic_category": "science"}, "quantum computing", "CONCEPT"),
-        ({"primary_entity": "Aurora", "voiceover": "The Aurora team members presented research findings.", "visual_intent": "team members", "sport_or_topic_category": "research"}, "Aurora research team", "ORGANIZATION"),
-        ({"primary_entity": "Central City", "voiceover": "The conference venue in Central City hosted the announcement.", "visual_intent": "conference venue", "sport_or_topic_category": "business"}, "Central City business venue", "LOCATION"),
+        ({"primary_entity": "Aurora", "voiceover": "The Aurora team members presented research findings.", "visual_intent": "team members", "sport_or_topic_category": "research"}, "Aurora", "ORGANIZATION"),
+        ({"primary_entity": "Central City", "voiceover": "The conference venue in Central City hosted the announcement.", "visual_intent": "conference venue", "sport_or_topic_category": "business"}, "Central City", "LOCATION"),
     ]
 
     for scene, expected_subject, expected_type in cases:
@@ -97,8 +99,28 @@ def _test_visual_strategy():
         if not all(expected_subject.casefold() in query.casefold() for query in queries):
             raise AssertionError(f"identity degraded in query ladder: {queries}")
         joined = " ".join(queries).casefold()
+        if any(bad in joined.split() for bad in ("not", "nbsp", "business", "technology", "entertainment", "research")):
+            raise AssertionError(f"noise or category padding leaked into query: {queries}")
         if "editorial_person" in joined or "red carpet" in joined:
             raise AssertionError(f"internal narrowing leaked into query: {queries}")
+
+    malformed = {
+        "primary_entity": "Not Northstar Research Summit",
+        "voiceover": "Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin next year &nbsp;.",
+        "visual_intent": "news_event",
+        "specific_search_prompt": "news_event",
+    }
+    resolution = resolve_subject(malformed, "Northstar Research Summit")
+    if resolution["visual_type"] != "EVENT":
+        raise AssertionError(f"malformed event role was not recovered: {resolution}")
+    if resolution["subject"] != "Northstar Research Summit Berlin":
+        raise AssertionError(f"malformed entity was not grounded to a visual noun phrase: {resolution}")
+    queries, visual_type = build_deep_queries(malformed, "Northstar Research Summit")
+    if visual_type != "EVENT" or queries[0] != "Northstar Research Summit Berlin":
+        raise AssertionError(f"malformed visual query was not corrected: {queries}, {visual_type}")
+    joined = " ".join(queries).casefold()
+    if any(bad in joined.split() for bad in ("not", "nbsp", "thing")) or "&nbsp;" in joined or "business" in joined:
+        raise AssertionError(f"malformed query retained discourse/html/category noise: {queries}")
 
     multilingual = {
         "primary_entity": "محمد صلاح",
@@ -122,7 +144,7 @@ def _test_visual_strategy():
         raise AssertionError("context fingerprints are not distinct")
     if _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
         raise AssertionError("context-aware cache keys are not distinct")
-    return "Generic semantic resolver + bounded query ladder + identity QA + context-aware cache passed"
+    return "Generic semantic resolver + grounded malformed-entity cleanup + bounded query ladder + identity QA + context-aware cache passed"
 
 
 def _test_scene_branding():
