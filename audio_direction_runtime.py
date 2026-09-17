@@ -33,6 +33,11 @@ def patch_audio_direction(bot):
     # because this patch is part of the live runtime binding stack; each is
     # explicit and idempotent.
     try:
+        from channel_branding_runtime import install_channel_branding
+        install_channel_branding(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Channel branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    try:
         from branding_runtime import patch_branding_pipeline
         patch_branding_pipeline(bot)
     except Exception as exc:
