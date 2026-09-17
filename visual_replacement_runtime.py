@@ -119,6 +119,8 @@ def install_visual_replacement_bridge(bot, dashboard_module) -> None:
         import streamlit as st
         runtime_bot._dashboard_visual_decisions = dict(st.session_state.get("nr_visual_decisions", {}))
         runtime_bot._dashboard_existing_visuals = st.session_state.get("nr_visuals", [])
+        if any(value == "Reject" for value in runtime_bot._dashboard_visual_decisions.values()):
+            st.caption("Visual replacement mode: approved visuals are preserved; only rejected scenes are re-sourced.")
         original_render_manual(runtime_bot, stages)
 
     async def wrapped_process(script_data, language_cfg, format_mode="regular"):
