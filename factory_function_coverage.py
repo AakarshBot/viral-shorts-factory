@@ -41,6 +41,8 @@ SURFACE_MAP: dict[str, str] = {
     "validate_script": "Live Factory",
     "self_critique_pass": "Live Factory",
     "write_script": "Live Factory",
+    "generate_voiceover_and_timestamps": "Live Factory",
+    "process_visuals_async": "Live Factory",
     "passes_quality_gate": "Live Factory",
     "get_cached_asset": "Live Factory",
     "save_to_cache": "Live Factory",
