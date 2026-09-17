@@ -64,12 +64,13 @@ def install() -> bool:
     runtime.VISUAL_MAX_SEARCH_QUERIES = 1
     runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS = 1
 
+    original_source_plan = getattr(runtime, "_source_plan", None)
+
     def single_source_plan(bot, visual_type, category):
         """Return only the first deterministic source; never source-fallback."""
-        original = getattr(runtime, "_source_plan", None)
-        if not callable(original):
+        if not callable(original_source_plan):
             return []
-        plan = original(bot, visual_type, category)
+        plan = original_source_plan(bot, visual_type, category)
         return plan[:1]
 
     runtime._source_plan = single_source_plan
@@ -131,8 +132,7 @@ def install() -> bool:
             visual_type=visual_type,
         )
         if qa_result is not True:
-            reason = "NO/uncertain/unavailable"
-            print(f"   [Visual QA] TERMINAL REJECT | subject='{entity}' | result={reason}", flush=True)
+            print(f"   [Visual QA] TERMINAL REJECT | subject='{entity}' | result=NO/uncertain/unavailable", flush=True)
             raise RuntimeError(f"Visual QA rejected or could not verify the returned image for '{entity}'. No fallback query or image is permitted.")
 
         used_hashes.add(image_hash)
@@ -145,7 +145,6 @@ def install() -> bool:
     runtime._relevant_asset = locked_relevant_asset
     runtime._visual_query_lock_version = _VERSION
 
-    # Keep the compatibility surfaces locked too.
     strategy.MAX_VISUAL_SEARCH_QUERIES = 1
     planner.MAX_VISUAL_SEARCH_QUERIES = 1
 
