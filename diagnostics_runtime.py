@@ -82,36 +82,33 @@ def _test_visual_strategy():
         queries, visual_type = build_deep_queries(scene, title)
         if visual_type != expected_type:
             raise AssertionError(f"{expected_type} classification/search type mismatch: {visual_type}")
-        if not (1 <= len(queries) <= 6):
-            raise AssertionError(f"scene-aware planner returned {len(queries)} queries; expected 1-6: {queries}")
-        cleaned = [str(q).strip() for q in queries]
-        if any(not q for q in cleaned):
+        if queries != [scene["primary_entity"]]:
+            raise AssertionError(f"visual planner must return exactly the locked subject: {queries}")
+        query = str(queries[0]).strip()
+        if not query:
             raise AssertionError(f"visual planner returned a blank query: {queries}")
-        if len({q.lower() for q in cleaned}) != len(cleaned):
-            raise AssertionError(f"visual planner returned duplicate queries: {queries}")
-        if required_entity.lower() not in " ".join(cleaned).lower():
-            raise AssertionError(f"required entity missing from visual queries: {queries}")
-        if any("editorial_person" in q.lower() for q in cleaned):
-            raise AssertionError(f"internal visual label leaked into search query: {queries}")
-        if any("red carpet" in q.lower() for q in cleaned):
-            raise AssertionError(f"irrelevant red-carpet narrowing returned: {queries}")
-        return cleaned
+        if query != str(scene["primary_entity"]).strip():
+            raise AssertionError(f"visual planner rewrote the locked subject: {queries}")
+        if any(token in query.lower() for token in ("editorial_person", "red carpet")):
+            raise AssertionError(f"irrelevant/internal narrowing leaked into search query: {queries}")
+        return [query]
 
     queries = assert_query_contract(person, "Messi's World Cup Moment", "PERSON", "Lionel Messi")
     event_queries = assert_query_contract(event, "Argentina vs France", "EVENT", "2022 FIFA World Cup Final")
     bcci_queries = assert_query_contract(bcci, "BCCI story", "ORGANIZATION", "BCCI")
     delhi_queries = assert_query_contract(delhi, "Delhi story", "LOCATION", "Delhi")
 
-    if _tier_for("player portrait", "PERSON", "Wikipedia") != "CURATED_PERSON": raise AssertionError("curated person tier failed")
-    if _tier_for("player portrait", "PERSON", "DDG") != "STRICT": raise AssertionError("third-party person tier failed")
-    if _tier_for("stadium_event", "EVENT", "DDG") != "GENRE_PLAUSIBLE_EVENT": raise AssertionError("stadium event tier failed")
-    if _tier_for("conceptual", "GENERAL_CONTEXT", "DDG") != "SKIPPED_CONCEPTUAL": raise AssertionError("conceptual tier failed")
+    # All active visual paths now use the same mandatory identity QA decision.
+    if _tier_for("player portrait", "PERSON", "Wikipedia") != "IDENTITY": raise AssertionError("person identity tier failed")
+    if _tier_for("player portrait", "PERSON", "DDG") != "IDENTITY": raise AssertionError("third-party identity tier failed")
+    if _tier_for("stadium_event", "EVENT", "DDG") != "IDENTITY": raise AssertionError("event identity tier failed")
+    if _tier_for("conceptual", "GENERAL_CONTEXT", "DDG") != "IDENTITY": raise AssertionError("conceptual identity tier failed")
 
     c1 = _context_fingerprint("person portrait", "Messi World Cup final", "Messi scored in the final", "Messi World Cup")
     c2 = _context_fingerprint("person portrait", "Messi training", "Messi trained before the match", "Messi World Cup")
     if c1 == c2: raise AssertionError("context fingerprints are not distinct")
     if _cache_key("Lionel Messi", "PERSON", c1) == _cache_key("Lionel Messi", "PERSON", c2): raise AssertionError("context-aware cache keys are not distinct")
-    return f"Scene classification + scene-aware search planning + visual QA tiers + context-aware cache passed ({len(queries)} person, {len(event_queries)} event, {len(bcci_queries)} organisation, {len(delhi_queries)} location)"
+    return f"Locked-subject search planning + mandatory identity QA + context-aware cache passed ({len(queries)} person, {len(event_queries)} event, {len(bcci_queries)} organisation, {len(delhi_queries)} location)"
 
 
 def _test_scene_branding():
