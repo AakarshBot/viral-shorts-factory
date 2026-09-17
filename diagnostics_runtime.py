@@ -62,53 +62,57 @@ def _test_database():
 
 
 def _test_visual_strategy():
-    from visual_strategy_runtime import build_deep_queries, classify_scene
+    from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
     from visual_qa_runtime import _tier_for
     from visual_runtime import _cache_key, _context_fingerprint
 
-    person = {"primary_entity": "Lionel Messi", "voiceover": "Lionel Messi scored the winning goal", "visual_intent": "player", "specific_search_prompt": "Lionel Messi World Cup final", "sport_or_topic_category": "sports"}
-    event = {"primary_entity": "2022 FIFA World Cup Final", "voiceover": "The final went to penalties", "visual_intent": "event", "specific_search_prompt": "Argentina France 2022 final penalty shootout"}
-    bcci = {"primary_entity": "BCCI", "voiceover": "BCCI announced the decision", "visual_intent": "organization", "sport_or_topic_category": "cricket"}
-    delhi = {"primary_entity": "Delhi", "voiceover": "Delhi hosted the event", "visual_intent": "location", "sport_or_topic_category": "news"}
-    process = {"primary_entity": "quantum computing", "voiceover": "Quantum computers work through a different computational process", "visual_intent": "how it works", "specific_search_prompt": "quantum computing process"}
+    cases = [
+        ({"primary_entity": "Amina Rahman", "voiceover": "Amina Rahman presented the documentary.", "visual_intent": "person portrait", "specific_search_prompt": "Amina Rahman documentary premiere editorial_person", "sport_or_topic_category": "entertainment"}, "Amina Rahman", "PERSON"),
+        ({"primary_entity": "Northstar Labs", "voiceover": "Northstar Labs announced a research program.", "visual_intent": "company", "sport_or_topic_category": "technology"}, "Northstar Labs", "ORGANIZATION"),
+        ({"primary_entity": "Nova Phone 8", "voiceover": "Nova Phone 8 was announced.", "visual_intent": "product device", "sport_or_topic_category": "technology"}, "Nova Phone 8", "PRODUCT"),
+        ({"primary_entity": "Central City", "voiceover": "Central City hosted the report.", "visual_intent": "location geography", "sport_or_topic_category": "geography"}, "Central City", "LOCATION"),
+        ({"primary_entity": "Global Climate Summit", "voiceover": "The Global Climate Summit opened with a new agreement.", "visual_intent": "event", "sport_or_topic_category": "climate"}, "Global Climate Summit", "EVENT"),
+        ({"primary_entity": "quantum computing", "voiceover": "Quantum computing uses quantum states to process information.", "visual_intent": "scientific concept", "sport_or_topic_category": "science"}, "quantum computing", "CONCEPT"),
+        ({"primary_entity": "Aurora", "voiceover": "The Aurora team members presented research findings.", "visual_intent": "team members", "sport_or_topic_category": "research"}, "Aurora research team", "ORGANIZATION"),
+        ({"primary_entity": "Central City", "voiceover": "The conference venue in Central City hosted the announcement.", "visual_intent": "conference venue", "sport_or_topic_category": "business"}, "Central City business venue", "LOCATION"),
+    ]
 
-    if classify_scene(person) != "PERSON": raise AssertionError("PERSON classification failed")
-    if classify_scene(event) != "EVENT": raise AssertionError("EVENT classification failed")
-    if classify_scene(bcci) != "ORGANIZATION": raise AssertionError("BCCI classification failed")
-    if classify_scene(delhi) != "LOCATION": raise AssertionError("Delhi classification failed")
-    if classify_scene(process) not in {"PROCESS", "CONCEPT"}: raise AssertionError("PROCESS/CONCEPT classification failed")
-
-    def assert_query_contract(scene, title, expected_type, required_entity):
-        queries, visual_type = build_deep_queries(scene, title)
+    for scene, expected_subject, expected_type in cases:
+        brief = build_scene_visual_brief(scene, scene["primary_entity"], scene.get("sport_or_topic_category", ""))
+        queries, visual_type = build_deep_queries(scene, scene["primary_entity"])
         if visual_type != expected_type:
-            raise AssertionError(f"{expected_type} classification/search type mismatch: {visual_type}")
-        if queries != [scene["primary_entity"]]:
-            raise AssertionError(f"visual planner must return exactly the locked subject: {queries}")
-        query = str(queries[0]).strip()
-        if not query:
-            raise AssertionError(f"visual planner returned a blank query: {queries}")
-        if query != str(scene["primary_entity"]).strip():
-            raise AssertionError(f"visual planner rewrote the locked subject: {queries}")
-        if any(token in query.lower() for token in ("editorial_person", "red carpet")):
-            raise AssertionError(f"irrelevant/internal narrowing leaked into search query: {queries}")
-        return [query]
+            raise AssertionError(f"{expected_type} classification/search type mismatch: {visual_type} for {scene}")
+        if brief["subject"] != expected_subject:
+            raise AssertionError(f"unexpected resolved visual subject: {brief[\"subject\"]!r} != {expected_subject!r}")
+        if not queries or queries[0] != expected_subject:
+            raise AssertionError(f"visual planner did not lead with resolved subject: {queries}")
+        if len(queries) > 3:
+            raise AssertionError(f"visual planner exceeded bounded query budget: {queries}")
+        if not all(expected_subject.casefold() in query.casefold() for query in queries):
+            raise AssertionError(f"query ladder degraded the resolved subject: {queries}")
+        if any(token in " ".join(queries).casefold() for token in ("editorial_person", "red carpet")):
+            raise AssertionError(f"internal/irrelevant narrowing leaked into search query: {queries}")
 
-    queries = assert_query_contract(person, "Messi's World Cup Moment", "PERSON", "Lionel Messi")
-    event_queries = assert_query_contract(event, "Argentina vs France", "EVENT", "2022 FIFA World Cup Final")
-    bcci_queries = assert_query_contract(bcci, "BCCI story", "ORGANIZATION", "BCCI")
-    delhi_queries = assert_query_contract(delhi, "Delhi story", "LOCATION", "Delhi")
+    multilingual = {
+        "primary_entity": "محمد صلاح",
+        "voiceover": "محمد صلاح appeared in the report.",
+        "visual_intent": "person portrait",
+        "sport_or_topic_category": "international",
+    }
+    brief = build_scene_visual_brief(multilingual, "Global story", "international")
+    queries, visual_type = build_deep_queries(multilingual, "Global story")
+    if visual_type != "PERSON" or brief["subject"] != "محمد صلاح" or not queries or queries[0] != "محمد صلاح":
+        raise AssertionError(f"multilingual visual identity was not preserved: {brief}, {queries}")
 
-    # All active visual paths now use the same mandatory identity QA decision.
-    if _tier_for("player portrait", "PERSON", "Wikipedia") != "IDENTITY": raise AssertionError("person identity tier failed")
-    if _tier_for("player portrait", "PERSON", "DDG") != "IDENTITY": raise AssertionError("third-party identity tier failed")
-    if _tier_for("stadium_event", "EVENT", "DDG") != "IDENTITY": raise AssertionError("event identity tier failed")
+    if _tier_for("person portrait", "PERSON", "Wikipedia") != "IDENTITY": raise AssertionError("person identity tier failed")
+    if _tier_for("person portrait", "PERSON", "DDG") != "IDENTITY": raise AssertionError("third-party identity tier failed")
     if _tier_for("conceptual", "GENERAL_CONTEXT", "DDG") != "IDENTITY": raise AssertionError("conceptual identity tier failed")
 
-    c1 = _context_fingerprint("person portrait", "Messi World Cup final", "Messi scored in the final", "Messi World Cup")
-    c2 = _context_fingerprint("person portrait", "Messi training", "Messi trained before the match", "Messi World Cup")
+    c1 = _context_fingerprint("person portrait", "Amina Rahman documentary premiere", "Amina presented the documentary", "documentary story")
+    c2 = _context_fingerprint("person portrait", "Amina Rahman interview", "Amina spoke about the project", "documentary story")
     if c1 == c2: raise AssertionError("context fingerprints are not distinct")
-    if _cache_key("Lionel Messi", "PERSON", c1) == _cache_key("Lionel Messi", "PERSON", c2): raise AssertionError("context-aware cache keys are not distinct")
-    return f"Locked-subject search planning + mandatory identity QA + context-aware cache passed ({len(queries)} person, {len(event_queries)} event, {len(bcci_queries)} organisation, {len(delhi_queries)} location)"
+    if _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2): raise AssertionError("context-aware cache keys are not distinct")
+    return "Generic semantic visual-subject resolution + bounded query ladder + identity QA + context-aware cache passed"
 
 
 def _test_scene_branding():
