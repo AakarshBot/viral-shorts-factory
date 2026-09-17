@@ -24,6 +24,10 @@ _ROLE_WORDS = {
     "ministry", "company", "corporation", "university", "institute", "bank", "agency", "authority",
     "cricket", "football", "soccer", "basketball", "tennis", "hockey", "baseball",
 }
+_GROUP_MIDDLE_WORDS = {
+    "cricket", "football", "soccer", "basketball", "tennis", "hockey", "baseball",
+    "national", "mens", "women", "men", "women's", "mens", "womens",
+}
 _COMMON_STARTERS = {
     "india", "indian", "england", "english", "australia", "australian", "pakistan", "pakistani",
     "bangladesh", "bangladeshi", "sri", "south", "new", "united", "world",
@@ -67,6 +71,17 @@ def _key(value: str) -> str:
     return "".join(c for c in value if c.isalnum() or unicodedata.category(c).startswith("M"))
 
 
+def _known_sets():
+    try:
+        import visual_retrieval_planner as planner
+        return (
+            set(getattr(planner, "LOCATION_NAMES", set())),
+            set(getattr(planner, "ORGANIZATION_ACRONYMS", set())),
+        )
+    except Exception:
+        return set(), set()
+
+
 def _append_unique(items: list[str], value: str) -> None:
     value = _clean(value).strip("'")
     if value and value.casefold() not in {item.casefold() for item in items}:
@@ -74,8 +89,11 @@ def _append_unique(items: list[str], value: str) -> None:
 
 
 def _extract_person_names(text: str) -> list[str]:
-    """Find multi-word proper-name spans in the cut script."""
+    """Find multi-word proper-name spans without turning formats into names."""
     tokens = _words(text)
+    locations, organizations = _known_sets()
+    known_locs = {_key(x) for x in locations}
+    known_orgs = {_key(x) for x in organizations}
     result: list[str] = []
     i = 0
     while i < len(tokens):
@@ -88,14 +106,21 @@ def _extract_person_names(text: str) -> list[str]:
         while j < len(tokens) and len(run) < 4 and tokens[j][0].isupper():
             run.append(tokens[j])
             j += 1
-        keys = {_key(word) for word in run}
+        keys = [_key(word) for word in run]
+        candidate = " ".join(run)
+        candidate_key = "".join(keys)
+        second_is_all_caps = len(run) == 2 and run[1].isupper()
         if (
             len(run) >= 2
-            and not keys.intersection(_NOISE)
-            and not keys.intersection(_ROLE_WORDS)
-            and not keys.intersection(_EVENT_SUFFIXES)
+            and candidate_key not in known_locs
+            and candidate_key not in known_orgs
+            and not set(keys).intersection(_NOISE)
+            and not set(keys).intersection(_ROLE_WORDS)
+            and not set(keys).intersection(_EVENT_SUFFIXES)
+            and not keys[0] in known_orgs
+            and not (second_is_all_caps and len(run[0]) > 2)
         ):
-            _append_unique(result, " ".join(run))
+            _append_unique(result, candidate)
         i = max(i + 1, j)
     return result
 
@@ -107,12 +132,16 @@ def _extract_group_subjects(text: str) -> list[str]:
     for i in range(len(tokens)):
         if i + 2 < len(tokens):
             a, b, c = tokens[i], tokens[i + 1], tokens[i + 2]
-            if _key(a) in _COMMON_STARTERS and _key(c) in {"team", "squad", "board", "association", "government"}:
+            ak, bk, ck = _key(a), _key(b), _key(c)
+            if ak in _COMMON_STARTERS and bk in _GROUP_MIDDLE_WORDS and ck in {"team", "squad"}:
                 first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
                 _append_unique(result, f"{first} {b} {c}")
         if i + 1 < len(tokens):
             a, b = tokens[i], tokens[i + 1]
-            if _key(a) in _COMMON_STARTERS and _key(b) in _ROLE_WORDS:
+            ak, bk = _key(a), _key(b)
+            if ak in _COMMON_STARTERS and bk in {
+                "government", "ministry", "board", "council", "association", "committee", "company", "corporation",
+            }:
                 first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
                 _append_unique(result, f"{first} {b}")
     return result
@@ -141,26 +170,19 @@ def _extract_event_subjects(text: str) -> list[str]:
 
 def _extract_known_entities(text: str) -> list[str]:
     """Find known places/organizations while preserving their script spelling."""
-    try:
-        import visual_retrieval_planner as planner
-        known = set(getattr(planner, "LOCATION_NAMES", set()))
-        known_orgs = set(getattr(planner, "ORGANIZATION_ACRONYMS", set()))
-    except Exception:
-        known, known_orgs = set(), set()
-
+    locations, organizations = _known_sets()
     found: list[tuple[int, str]] = []
-    for name in sorted(known, key=len, reverse=True):
+    for name in sorted(locations, key=len, reverse=True):
         pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?:['’]s)?(?!\w)", re.IGNORECASE)
         match = pattern.search(text)
         if match:
             value = re.sub(r"['’]s$", "", match.group(0), flags=re.IGNORECASE)
             found.append((match.start(), value))
-    for name in sorted(known_orgs, key=len, reverse=True):
+    for name in sorted(organizations, key=len, reverse=True):
         pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)", re.IGNORECASE)
         match = pattern.search(text)
         if match:
             found.append((match.start(), match.group(0)))
-
     found.sort(key=lambda item: item[0])
     result: list[str] = []
     for _, value in found:
@@ -195,9 +217,10 @@ def extract_slide_search_subjects(scene: dict) -> list[str]:
     """
     if not isinstance(scene, dict):
         return []
-
     subjects: list[str] = []
-    _append_unique(subjects, scene.get("primary_entity", ""))
+    primary = _clean(scene.get("primary_entity", ""))
+    if primary and _key(primary) not in {"none", "unknown", "na", "n/a"}:
+        _append_unique(subjects, primary)
     script = _clean(scene.get("voiceover", ""))
     if not script:
         return subjects[:_QUERY_MAX]
@@ -235,7 +258,7 @@ def classify_search_subject(subject: str) -> str:
     keys = {_key(word) for word in _words(subject)}
     if keys.intersection(_EVENT_SUFFIXES):
         return "EVENT"
-    if keys.intersection({"team", "squad", "board", "association", "government"}):
+    if keys.intersection({"team", "squad", "board", "association", "government", "ministry", "committee", "company", "corporation"}):
         return "ORGANIZATION"
     words = _words(subject)
     if len(words) >= 2 and all(word[:1].isupper() for word in words if word):
@@ -267,8 +290,6 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
         candidate = build_candidate_scene(scene, subject)
         subject_type = candidate["visual_type"]
         if callable(reset_scene_budget) and index > 1:
-            # A fallback subject is a new retrieval branch for this slide.
-            # The visual QA module's per-video ceiling still applies globally.
             reset_scene_budget()
         print(f"   [Visual Search] Subject {index}/{len(subjects)} | '{subject}' | type={subject_type}", flush=True)
         try:
