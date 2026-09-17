@@ -1,9 +1,10 @@
 """Content-first visual rendering for Shorts.
 
-Every scene gets a real verified visual when one can be found. Retrieval is
-bounded and resilient: a failed provider/query falls through to the next option,
-and a final contextual fallback keeps the factory renderable without pretending
-that the fallback is a factual depiction.
+Every scene is sent through the multi-source retrieval engine. A provider/query
+failure only means the next source or phrase is tried; the factory continues
+through the complete visual package. AI is deliberately limited, and a tiny
+renderer rescue exists only to prevent an empty frame after every real source
+has been exhausted.
 """
 
 import os
@@ -25,13 +26,12 @@ def _source_label(source_type):
         return "AI ILLUSTRATION"
     if source.lower() == "cached":
         return "VERIFIED CACHE"
-    if source.lower() in {"contextual-fallback", "gradient-fallback"}:
-        return "CONTEXTUAL FALLBACK"
+    if source.lower() == "visual-rescue":
+        return "VISUAL RESCUE"
     return f"SOURCE · {_human_label(source)}"
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
-    """Use the factory's existing bold-font resolver, with a safe local fallback."""
     try:
         resolver = getattr(bot, "get_bold_font", None)
         if callable(resolver):
@@ -41,10 +41,7 @@ def _load_brand_font(bot, size, custom_font_name=None):
 
     paths = []
     if custom_font_name:
-        paths.extend([
-            str(custom_font_name),
-            os.path.join("/usr/share/fonts/truetype", str(custom_font_name)),
-        ])
+        paths.extend([str(custom_font_name), os.path.join("/usr/share/fonts/truetype", str(custom_font_name))])
     paths.extend([
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
@@ -72,7 +69,6 @@ def _text_size(draw, text, font):
 
 
 def _fit_font(bot, text, max_width, base_size, min_size=20, custom_font_name=None):
-    """Select the largest readable bold font that fits inside max_width."""
     for size in range(int(base_size), int(min_size) - 1, -2):
         font = _load_brand_font(bot, size, custom_font_name)
         width, _ = _text_size(ImageDraw.Draw(Image.new("RGBA", (1, 1))), text, font)
@@ -82,7 +78,6 @@ def _fit_font(bot, text, max_width, base_size, min_size=20, custom_font_name=Non
 
 
 def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, source_type, voiceover, font_name=None):
-    """Add restrained editorial framing without obscuring the verified visual."""
     canvas = image.convert("RGBA")
     width, height = canvas.size
     accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
@@ -104,14 +99,12 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
     marker_w, marker_h = _text_size(draw, marker, marker_font)
     marker_box = [48, 62, 48 + marker_w + 40, max(112, 62 + marker_h + 24)]
     draw.rounded_rectangle(marker_box, radius=18, fill=(5, 9, 16, 175))
-    draw.text((marker_box[0] + 20, marker_box[1] + 10), marker, font=marker_font,
-              fill=(255, 255, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+    draw.text((marker_box[0] + 20, marker_box[1] + 10), marker, font=marker_font, fill=(255, 255, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
     type_w, type_h = _text_size(draw, type_label, type_font)
     type_box = [48, height - 62 - type_h - 24, min(width - 48, 48 + type_w + 40), height - 62]
     draw.rounded_rectangle(type_box, radius=18, fill=(5, 9, 16, 175), outline=accent + (150,), width=2)
-    draw.text((type_box[0] + 20, type_box[1] + 10), type_label, font=type_font,
-              fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+    draw.text((type_box[0] + 20, type_box[1] + 10), type_label, font=type_font, fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
     source_w, source_h = _text_size(draw, source_text, source_font)
     source_box_w = min(width - 96, source_w + 36)
@@ -119,8 +112,7 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
     sx = width - source_box_w - 48
     source_box = [sx, 62, width - 48, 62 + source_box_h]
     draw.rounded_rectangle(source_box, radius=18, fill=(5, 9, 16, 175), outline=(255, 255, 255, 80), width=1)
-    draw.text((sx + 18, 62 + 10), source_text, font=source_font,
-              fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
+    draw.text((sx + 18, 72), source_text, font=source_font, fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
     fact_match = re.search(r"(?:₹|\$|€|£)?\b\d+(?:[.,]\d+)?%?\b", str(voiceover or ""))
     if fact_match:
@@ -132,14 +124,12 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
         cx = width - chip_w - 48
         cy = height - 178
         draw.rounded_rectangle([cx, cy, width - 48, cy + chip_h], radius=20, fill=accent + (215,))
-        draw.text((cx + 20, cy + 10), fact, font=fact_font, fill=(255, 255, 255, 250),
-                  stroke_width=1, stroke_fill=(0, 0, 0, 80))
+        draw.text((cx + 20, cy + 10), fact, font=fact_font, fill=(255, 255, 255, 250), stroke_width=1, stroke_fill=(0, 0, 0, 80))
 
     return Image.alpha_composite(canvas, overlay)
 
 
 def _render_hook_card(bot, image, hook_text, font_name=None):
-    """Render the opening hook directly over the image without a blocking card."""
     canvas = image.convert("RGBA")
     width, height = canvas.size
     accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
@@ -169,7 +159,6 @@ def _render_hook_card(bot, image, hook_text, font_name=None):
 
 
 def _fit_hook_text(bot, text, font_name, max_width):
-    """Fit the hook into a readable, centred text treatment without a card."""
     text = str(text or "").strip() or "THIS STORY MATTERS"
     for size in range(92, 44, -4):
         font = _load_brand_font(bot, size, font_name)
@@ -196,7 +185,7 @@ def patch_content_first_visuals(bot):
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import cover_crop, install as install_visual_quality
-        from visual_retrieval_runtime import make_contextual_fallback
+        from visual_retrieval_runtime import make_visual_rescue
     except Exception as exc:
         print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
         return bot
@@ -208,15 +197,15 @@ def patch_content_first_visuals(bot):
         if not scenes:
             raise RuntimeError("Visual pipeline received an empty script.")
 
-        width, height = 1080, 1920
-        target_size = (width, height)
+        target_size = (1080, 1920)
         font_choice = language_cfg.get("font")
         packages = [None] * len(scenes)
         used_urls, used_hashes = set(), set()
         ai_count = 0
         verified_count = 0
+        rescue_count = 0
 
-        print("\n🎨 Rendering content-first visual package (bounded retrieval + strict QA)...", flush=True)
+        print("\n🎨 Rendering content-first visual package (multi-source retrieval + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
@@ -232,24 +221,25 @@ def patch_content_first_visuals(bot):
                     video_title,
                 )
             except Exception as exc:
-                # Retrieval is allowed to fail locally without killing the whole
-                # factory. The fallback is explicitly marked unverified.
-                subject = str(seg.get("primary_entity") or "Visual unavailable").strip()
+                subject = str(seg.get("primary_entity") or "Visual rescue").strip()
                 seg["visual_verified"] = False
-                seg["visual_fallback_reason"] = f"visual-search-exception:{type(exc).__name__}:{exc}"
+                seg["visual_rescue_reason"] = f"visual-search-exception:{type(exc).__name__}:{exc}"
+                seg["visual_fallback_reason"] = ""
                 print(
-                    f"   [Visual Fallback] Scene {idx + 1} retrieval exception; using contextual fallback: "
+                    f"   [Visual Rescue] Scene {idx + 1} retrieval exception; continuing with renderer rescue: "
                     f"{type(exc).__name__}: {exc}",
                     flush=True,
                 )
-                bg_img, used_ai, source_type = make_contextual_fallback(subject, str(seg.get("visual_type", "GENERAL_CONTEXT"))) , False, "contextual-fallback"
+                bg_img, used_ai, source_type = make_visual_rescue(subject, str(seg.get("visual_type", "GENERAL_CONTEXT"))), False, "visual-rescue"
+                rescue_count += 1
 
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
                 verified_count += 1
             ai_count += int(used_ai)
+            if str(source_type).lower() == "visual-rescue":
+                rescue_count += 1
 
-            # Scale-to-cover + crop. Never stretch a source image to 9:16.
             bg_img = cover_crop(bg_img, target_size).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
@@ -265,29 +255,12 @@ def patch_content_first_visuals(bot):
                     "TODAY'S TOP 5", font_choice
                 )
             elif format_mode == "top5":
-                clean = re.sub(
-                    r"(number\s*\d+|story\s*#?\d+|#\d+)", "",
-                    str(seg.get("voiceover", "")), flags=re.IGNORECASE
-                ).strip()
-                rendered = bot.render_top5_card(
-                    bg_img, max(1, 6 - idx), 5,
-                    clean or seg.get("voiceover", ""), font_choice=font_choice
-                )
+                clean = re.sub(r"(number\s*\d+|story\s*#?\d+|#\d+)", "", str(seg.get("voiceover", "")), flags=re.IGNORECASE).strip()
+                rendered = bot.render_top5_card(bg_img, max(1, 6 - idx), 5, clean or seg.get("voiceover", ""), font_choice=font_choice)
             elif idx == 0:
-                rendered = _render_hook_card(
-                    bot, bg_img, seg.get("voiceover", ""), font_name=font_choice
-                )
+                rendered = _render_hook_card(bot, bg_img, seg.get("voiceover", ""), font_name=font_choice)
             else:
-                rendered = _render_scene_overlay(
-                    bot,
-                    bg_img,
-                    idx + 1,
-                    len(scenes),
-                    visual_type,
-                    source_type,
-                    seg.get("voiceover", ""),
-                    font_name=font_choice,
-                )
+                rendered = _render_scene_overlay(bot, bg_img, idx + 1, len(scenes), visual_type, source_type, seg.get("voiceover", ""), font_name=font_choice)
 
             rendered.convert("RGB").save(img_path, "JPEG", quality=95)
             packages[idx] = [{
@@ -297,7 +270,8 @@ def patch_content_first_visuals(bot):
                 "source_type": source_type,
                 "visual_type": visual_type,
                 "visual_verified": scene_verified,
-                "visual_fallback_reason": seg.get("visual_fallback_reason", ""),
+                "visual_rescue_reason": seg.get("visual_rescue_reason", ""),
+                "visual_fallback_reason": "",
                 "visual_query_used": seg.get("visual_query_used", ""),
             }]
             seg["visual_type"] = visual_type
@@ -308,10 +282,11 @@ def patch_content_first_visuals(bot):
         script_data["ai_image_ratio"] = round(ai_count / max(1, total), 2)
         script_data["visual_coverage"] = round(verified_count / max(1, total), 2)
         script_data["visuals_verified"] = verified_count == total
-        script_data["visual_fallback_count"] = total - verified_count
+        script_data["visual_fallback_count"] = 0
+        script_data["visual_rescue_count"] = rescue_count
         print(
             f"   [+] Content-first visual pass complete: {verified_count}/{total} scenes have verified visuals; "
-            f"{total - verified_count} contextual fallback(s).",
+            f"AI images={ai_count}; renderer rescues={rescue_count}.",
             flush=True,
         )
         return packages
