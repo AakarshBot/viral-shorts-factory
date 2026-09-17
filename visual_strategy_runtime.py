@@ -8,27 +8,20 @@ whitespace. No normaliser, Unicode helper, visual cue, title, narration or
 legacy planner is allowed to rewrite the search query.
 """
 
-import html
-import re
-
 import visual_retrieval_planner as _planner
 from visual_retrieval_planner import *
-from visual_query_entities_runtime import extract_slide_search_subjects, lock_visual_subject
 
 for _name in dir(_planner):
     if _name.startswith("_") and not _name.startswith("__"):
         globals()[_name] = getattr(_planner, _name)
 
-_VISUAL_STRATEGY_VERSION = "2026-09-17-v14-immutable-subject-autolock"
+_VISUAL_STRATEGY_VERSION = "2026-09-17-v15-single-authoritative-planner"
 
 
 def _exact_slide_subject(scene):
     """Read the locked entity without passing it through any query normaliser."""
     if not isinstance(scene, dict):
         return ""
-    # Do not use planner._normalise(), unicode_normalise(), or any query helper
-    # here. Those helpers are allowed to normalise text for comparison, but the
-    # emitted search query must remain exactly the locked primary_entity.
     raw = scene.get("primary_entity", "")
     if raw is None:
         return ""
@@ -50,22 +43,27 @@ def build_deep_queries(scene, video_title="", visual_type=None):
         except Exception:
             resolved_type = "GENERAL_CONTEXT"
 
-    # Hard contract: exactly the original locked string. Never lower-case it,
-    # tokenise it, deduplicate it, add context, or rewrite it.
+    # This function is the authoritative planner. It is deliberately marked so
+    # the compatibility lock cannot replace it with a second implementation.
     return [subject], resolved_type
 
 
+build_deep_queries._authoritative_locked_subject_planner = True
+
+
 def _add_unique(values, value, *parts):
-    """Legacy compatibility helper; it cannot create a second search query."""
+    """Legacy compatibility helper; never used by production search planning."""
     candidate = _planner._normalise(" ".join(str(part) for part in (value,) + parts if str(part).strip()))
-    if not candidate or values:
+    if not candidate:
+        return False
+    if candidate in values:
         return False
     values.append(candidate)
     return True
 
 
 def _scene_phrase(scene=None, *parts, **kwargs):
-    """Legacy diagnostic helper; search-query generation must not use it."""
+    """Legacy diagnostic helper; production query generation never uses it."""
     values = []
     if isinstance(scene, dict):
         value = scene.get("primary_entity")
@@ -76,9 +74,9 @@ def _scene_phrase(scene=None, *parts, **kwargs):
     return _planner._normalise(" ".join(values))
 
 
-# The strict query lock must exist before any caller imports build_deep_queries
-# or asks visual_runtime for search variants. This removes import-order ambiguity
-# between the legacy planner, the test phase, and the production visual path.
+# Install the retrieval/runtime guard after the authoritative function exists.
+# The guard may patch compatibility surfaces, but it must never replace the
+# authoritative planner itself.
 try:
     from visual_query_lock_runtime import install as _install_visual_query_lock
     _install_visual_query_lock()
@@ -87,3 +85,7 @@ except Exception as exc:
         f"   [Visual Strategy] Query lock auto-install unavailable: {type(exc).__name__}: {exc}",
         flush=True,
     )
+finally:
+    # The lock installer runs during module import, so explicitly restore our
+    # function in case an older installer attempted to overwrite it midway.
+    globals()["build_deep_queries"] = build_deep_queries
