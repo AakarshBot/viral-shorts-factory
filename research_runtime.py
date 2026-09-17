@@ -144,8 +144,6 @@ def patch_research_pipeline(bot):
             "Never invent facts, quotes, motives, predictions, statistics or causal links.\n\n"
             + data["research_bundle"]
         )
-        # Never contaminate article/source text with internal editorial
-        # instructions. Emergency fallbacks must continue to see only source data.
         data["text"] = _clean(data.get("text"))
         result = current(data, language_cfg, genre_key, conn, format_mode)
         if isinstance(result, dict):
@@ -156,6 +154,15 @@ def patch_research_pipeline(bot):
         return result
 
     researched_write_script._research_wrapped = True
+    # Preserve wrapper-state markers when research is layered around an
+    # existing content-density or pipeline-integrity wrapper. The binding
+    # diagnostic inspects the active callable, not private closure state.
+    researched_write_script._content_dense_bound = bool(getattr(current, "_content_dense_bound", False))
+    researched_write_script._research_layer_live = bool(
+        getattr(current, "_research_wrapped", False)
+        or getattr(current, "_research_layer_live", False)
+        or researched_write_script._research_wrapped
+    )
     bot.write_script = researched_write_script
     run_robot.__globals__["write_script"] = researched_write_script
     bot._research_pipeline_patch_installed = True
