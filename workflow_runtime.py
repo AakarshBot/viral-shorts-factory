@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from youtube_comment_runtime import _build_clean_metadata, build_pinned_comment
 from db_runtime import run_robot_with_exact_identity
+from db_architecture import migrate_vault, update_run_record
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
 
@@ -337,23 +338,34 @@ class WorkflowController:
             globals_dict["upload_to_youtube"] = production_blocked_upload
         self._patched = True
 
-    def _mark_latest_run_ready_for_qc(self, topic: str):
-        """Undo the legacy pipeline's upload-shaped DB state after its fake uploader."""
+    def _mark_latest_run_ready_for_qc(self, _topic: str = ""):
+        """Mark only the exact production row as READY_FOR_UPLOAD."""
+        import ultimate_bot
+
+        row_id = getattr(self.bot, "_last_run_row_id", None)
+        run_id = getattr(self.bot, "_last_run_run_id", None)
+        if row_id is None or not run_id:
+            raise RuntimeError("Cannot mark READY_FOR_UPLOAD without exact run identity.")
+
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
-            import ultimate_bot
-            conn = sqlite3.connect(ultimate_bot.DB_PATH)
-            try:
-                conn.execute(
-                    """UPDATE vault
-                       SET video_id='READY_FOR_UPLOAD', status='READY_FOR_UPLOAD', updated_at=CURRENT_TIMESTAMP
-                       WHERE id=(SELECT id FROM vault WHERE topic=? ORDER BY id DESC LIMIT 1)""",
-                    (topic,),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        except Exception as exc:
-            print(f"   [Workflow] Could not mark run READY_FOR_UPLOAD: {exc}")
+            migrate_vault(conn)
+            row = conn.execute(
+                "SELECT run_id, status, topic FROM vault WHERE id = ?",
+                (row_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError(f"Exact production row {row_id} was not found.")
+            if row[0] != run_id:
+                raise RuntimeError("Exact production row identity does not match the active run_id.")
+            update_run_record(
+                conn,
+                row_id,
+                video_id="READY_FOR_UPLOAD",
+                status="READY_FOR_UPLOAD",
+            )
+        finally:
+            conn.close()
 
     def start_production(self, web_config: Dict[str, Any], selected_story: Dict[str, Any]):
         if self.state.thread_alive:
