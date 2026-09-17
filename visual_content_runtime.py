@@ -135,6 +135,82 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
     return Image.alpha_composite(canvas, overlay)
 
 
+def _render_hook_card(bot, image, hook_text, font_name=None):
+    """Render the opening hook directly over the verified image.
+
+    The old hook renderer blurred and covered a large central region with an
+    opaque dark rounded rectangle. That made the first slide look like a title
+    card instead of the actual story visual. The hook now preserves the image
+    and uses text shadow/stroke for readability without a background panel.
+    """
+    canvas = image.convert("RGBA")
+    width, height = canvas.size
+    accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    # Minimal edge treatment; deliberately no full-width bars or central box.
+    draw.rectangle([24, 24, width - 24, 30], fill=accent + (180,))
+
+    font_body, wrapped_lines = _fit_hook_text(bot, hook_text, font_name, width - 140)
+    line_heights = []
+    for line in wrapped_lines:
+        bbox = draw.textbbox((0, 0), line, font=font_body)
+        line_heights.append(max(1, bbox[3] - bbox[1]))
+
+    line_gap = 18
+    total_h = sum(line_heights) + line_gap * max(0, len(wrapped_lines) - 1)
+    y = max(180, (height - total_h) / 2)
+
+    for line, line_h in zip(wrapped_lines, line_heights):
+        bbox = draw.textbbox((0, 0), line, font=font_body)
+        text_w = bbox[2] - bbox[0]
+        x = (width - text_w) / 2
+        # Strong outline keeps the image visible while maintaining readability.
+        draw.text(
+            (x + 8, y + 8),
+            line,
+            font=font_body,
+            fill=(0, 0, 0, 210),
+            stroke_width=8,
+            stroke_fill=(0, 0, 0, 180),
+        )
+        draw.text(
+            (x, y),
+            line,
+            font=font_body,
+            fill=accent + (250,),
+            stroke_width=5,
+            stroke_fill=(0, 0, 0, 245),
+        )
+        y += line_h + line_gap
+
+    return Image.alpha_composite(canvas, overlay)
+
+
+def _fit_hook_text(bot, text, font_name, max_width):
+    """Fit the hook into a readable, centred text treatment without a card."""
+    text = str(text or "").strip() or "THIS STORY MATTERS"
+    for size in range(92, 44, -4):
+        font = _load_brand_font(bot, size, font_name)
+        lines = []
+        current = ""
+        draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+        for word in text.split():
+            candidate = f"{current} {word}".strip()
+            if not current or draw.textbbox((0, 0), candidate, font=font)[2] <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        if lines and len(lines) <= 5:
+            return font, lines
+    font = _load_brand_font(bot, 44, font_name)
+    return font, [text]
+
+
 def patch_content_first_visuals(bot):
     try:
         import visual_runtime
@@ -195,8 +271,8 @@ def patch_content_first_visuals(bot):
                     clean or seg.get("voiceover", ""), font_choice=font_choice
                 )
             elif idx == 0:
-                rendered = bot.render_hook_card(
-                    bg_img, seg.get("voiceover", ""), font_choice=font_choice
+                rendered = _render_hook_card(
+                    bot, bg_img, seg.get("voiceover", ""), font_name=font_choice
                 )
             else:
                 rendered = _render_scene_overlay(
