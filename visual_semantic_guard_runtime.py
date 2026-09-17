@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import re
+import unicodedata
 
 MAX_SUBJECT_WORDS = 8
 MAX_QUERY_WORDS = 10
@@ -78,11 +79,36 @@ def clean_text(value: object) -> str:
 
 
 def key(value: str) -> str:
-    return re.sub(r"[^\w]+", "", clean_text(value).casefold(), flags=re.UNICODE)
+    return "".join(
+        char
+        for char in clean_text(value).casefold()
+        if char.isalnum() or unicodedata.category(char).startswith("M")
+    )
 
 
 def tokens(value: str) -> list[str]:
-    return re.findall(r"[\w][\w'/-]*", clean_text(value), flags=re.UNICODE)
+    """Tokenise multilingual text without stripping Unicode combining marks."""
+    text = clean_text(value).replace("’", "'").replace("‘", "'")
+    words = []
+    current = []
+    for char in text:
+        category = unicodedata.category(char)
+        if char.isalnum() or category.startswith("M"):
+            current.append(char)
+            continue
+        if char in {"'", "-", "/"} and current:
+            current.append(char)
+            continue
+        if current:
+            token = "".join(current).strip("'-/’")
+            if token:
+                words.append(token)
+            current = []
+    if current:
+        token = "".join(current).strip("'-/’")
+        if token:
+            words.append(token)
+    return words
 
 
 def meaningful_tokens(value: str) -> list[str]:
@@ -96,13 +122,29 @@ def meaningful_tokens(value: str) -> list[str]:
 
 
 def sanitize_candidate(value: object) -> str:
+    """Remove discourse/noise while preserving clean entity spelling and punctuation."""
     text = clean_text(value)
     words = tokens(text)
-    while words and key(words[0]) in DISCOURSE_PREFIXES:
-        words.pop(0)
-    while words and key(words[-1]) in GENERIC_NOISE:
-        words.pop()
-    return " ".join(words[:MAX_SUBJECT_WORDS]).strip(" ,.;:|\"'")
+    if not words:
+        return ""
+
+    start = 0
+    end = len(words)
+    while start < end and key(words[start]) in DISCOURSE_PREFIXES:
+        start += 1
+    while end > start and key(words[end - 1]) in GENERIC_NOISE:
+        end -= 1
+
+    filtered = words[start:end]
+    if not filtered:
+        return ""
+
+    # A clean entity should remain byte-for-byte readable (apart from outer
+    # whitespace/HTML cleanup). In particular, preserve punctuation such as
+    # "Dr. Lena Park" instead of rebuilding it as "Dr Lena Park".
+    if start == 0 and end == len(words) and len(filtered) <= MAX_SUBJECT_WORDS:
+        return text
+    return " ".join(filtered[:MAX_SUBJECT_WORDS]).strip(" ,.;:|\"'")
 
 
 def _strip_visual_descriptors(value: str) -> str:
