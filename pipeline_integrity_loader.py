@@ -29,6 +29,6 @@ def _bind_authoritative_audio(bot):
 
 def patch_pipeline_integrity(bot):
     """Install the canonical integrity wrappers, then bind authoritative audio."""
-    bot = pipeline_integrity_runtime.patch_pipeline_integrity(bot)
+    pipeline_integrity_runtime.patch_pipeline_integrity(bot)
     _bind_authoritative_audio(bot)
     return bot
