@@ -17,7 +17,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "16")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-18-v13-identity-aware-uncertainty"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-18-v14-identity-aware-uncertainty"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -71,14 +71,15 @@ Search phrase used: {search_prompt}
 Rules:
 1. Judge the IMAGE, not the narration alone.
 2. The locked visual subject must be visibly identifiable when the subject is identity-specific.
-3. The image should also fit the concrete visual intent/context when one is supplied.
-4. For a PERSON, the image must depict that specific person, not another person from the same field.
-5. For a TEAM or GROUP, the visible team/group identity must correspond to the requested subject.
-6. For an ORGANISATION, accept a genuine image that visibly represents that organisation, such as its people, headquarters, office, official setting or clearly identifiable branding.
-7. For a LOCATION or LANDMARK, the image must visibly depict that place or landmark.
-8. For an EVENT or TOURNAMENT, the image must visibly correspond to that named event/tournament, rather than merely a generic event of the same type.
-9. Reject memes, unrelated stock imagery, generic illustrations, search-page screenshots, or images where the requested subject cannot actually be identified.
-10. If the image is genuinely ambiguous or the subject cannot be established from visible evidence, return NO.
+3. The search phrase is the retrieval target. When it contains a concrete visual descriptor such as logo, portrait, headshot, map, emblem, badge, seal, screenshot, poster or flag, that descriptor is authoritative for what should be visible.
+4. Broader narrative context is supporting context, not a requirement that can override the concrete search target. For example, a newspaper logo requested during a news story should be judged as a logo/branding image, not rejected merely because it is not a photograph of the news event.
+5. For a PERSON, the image must depict that specific person, not another person from the same field.
+6. For a TEAM or GROUP, the visible team/group identity must correspond to the requested subject.
+7. For an ORGANISATION, accept a genuine image that visibly represents that organisation, such as its logo/branding, people, headquarters, office, official setting or clearly identifiable branding.
+8. For a LOCATION or LANDMARK, the image must visibly depict that place or landmark.
+9. For an EVENT or TOURNAMENT, the image must visibly correspond to that named event/tournament, rather than merely a generic event of the same type.
+10. Reject memes, unrelated stock imagery, generic illustrations, search-page screenshots, or images where the requested subject cannot actually be identified.
+11. If the image is genuinely ambiguous or the subject cannot be established from visible evidence, return NO.
 
 Return exactly YES or NO followed by one short reason."""
 
