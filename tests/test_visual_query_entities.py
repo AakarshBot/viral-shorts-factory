@@ -10,7 +10,7 @@ def test_slide_subjects_are_clean_and_script_derived():
     scene = {
         "primary_entity": "India",
         "voiceover": (
-            "India's cricket team is being discussed, with Rashid Khan also mentioned in the report. "
+            "India is being discussed, with Rashid Khan also mentioned. "
             "The Indian cricket team remains part of the story."
         ),
         "specific_search_prompt": "India cricket team Rashid Khan interview press conference 2024 person",
@@ -55,10 +55,16 @@ def test_candidate_scene_makes_each_query_the_qa_subject():
     assert candidate["visual_type"] == "PERSON"
 
 
-def test_visual_search_falls_back_to_next_clean_subject(monkeypatch):
+def test_visual_search_falls_back_to_next_clean_subject():
     calls = []
 
     class FakeVisualRuntime:
+        start_calls = 0
+
+        @staticmethod
+        def start_visual_qa_scene():
+            FakeVisualRuntime.start_calls += 1
+
         @staticmethod
         def _relevant_asset(bot, scene, category, used_urls, used_hashes, video_title):
             calls.append({
@@ -88,6 +94,7 @@ def test_visual_search_falls_back_to_next_clean_subject(monkeypatch):
         "voice": "Rashid Khan",
         "visual_type": "PERSON",
     }
+    assert FakeVisualRuntime.start_calls == 1
 
 
 def test_unicode_primary_subject_is_preserved():
