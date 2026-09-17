@@ -97,24 +97,48 @@ def _safe_font(size: int):
     return ImageFont.load_default()
 
 
+def _safe_rounded_rectangle(draw, coords, width: int, height: int, radius: int, fill=None, outline=None):
+    """Draw a rounded rectangle only after normalizing/clamping its geometry."""
+    try:
+        x0, y0, x1, y1 = [float(value) for value in coords]
+        left, right = sorted((x0, x1))
+        top, bottom = sorted((y0, y1))
+        left = max(0.0, min(left, max(0, width - 1)))
+        right = max(0.0, min(right, max(0, width - 1)))
+        top = max(0.0, min(top, max(0, height - 1)))
+        bottom = max(0.0, min(bottom, max(0, height - 1)))
+        if right <= left or bottom <= top:
+            return
+        safe_radius = max(0, min(int(radius), int((right - left) / 2), int((bottom - top) / 2)))
+        draw.rounded_rectangle([left, top, right, bottom], radius=safe_radius, fill=fill, outline=outline, width=max(1, int(width and 1)))
+    except Exception:
+        return
+
+
 def make_contextual_fallback(subject: str, visual_type: str, size=(1080, 1920)) -> Image.Image:
     """Create a neutral, explicitly non-factual visual when retrieval is exhausted."""
-    width, height = size
+    width, height = [max(2, int(value)) for value in size]
     image = Image.new("RGB", (width, height), (12, 18, 28))
     draw = ImageDraw.Draw(image)
 
+    # Keep the decorative geometry inside the canvas. Previously the fixed
+    # twelve-ring loop eventually produced x0 > x1 on normal portrait frames.
+    inner_limit = max(1, (min(width, height) - 20) // 2)
     for index in range(12):
         inset = 70 + index * 55
-        shade = 20 + index * 7
-        draw.rounded_rectangle(
+        if inset >= inner_limit:
+            break
+        _safe_rounded_rectangle(
+            draw,
             [inset, inset, width - inset, height - inset],
+            width=12 - index // 2,
+            height=height,
             radius=42,
-            outline=(shade, shade + 8, shade + 18),
-            width=max(2, 12 - index // 2),
+            outline=(20 + index * 7, 28 + index * 7, 38 + index * 7),
         )
     for angle_index in range(10):
         x0 = int(width * 0.08 + angle_index * width * 0.095)
-        draw.line([(x0, 120), (width - x0, height - 120)], fill=(24, 44, 64), width=5)
+        draw.line([(x0, min(120, height // 4)), (max(0, width - x0), max(0, height - min(120, height // 4)))], fill=(24, 44, 64), width=max(1, min(5, width // 100)))
 
     subject = re.sub(r"\s+", " ", str(subject or "")).strip() or "Visual unavailable"
     if len(subject) > 90:
@@ -126,27 +150,52 @@ def make_contextual_fallback(subject: str, visual_type: str, size=(1080, 1920)) 
 
     try:
         box = draw.textbbox((0, 0), subject, font=font)
-        max_width = width - 180
+        max_width = max(1, width - 180)
         if box[2] - box[0] > max_width:
             font = _safe_font(48)
             box = draw.textbbox((0, 0), subject, font=font)
         text_w = box[2] - box[0]
         text_h = box[3] - box[1]
-        x = (width - text_w) / 2
-        y = (height - text_h) / 2
-        draw.rounded_rectangle([90, y - 70, width - 90, y + text_h + 70], radius=38, fill=(7, 12, 20), outline=(78, 108, 136), width=3)
-        draw.text((x + 4, y + 5), subject, font=font, fill=(0, 0, 0))
-        draw.text((x, y), subject, font=font, fill=(236, 241, 246))
+        x = max(0, (width - text_w) / 2)
+        y = max(0, (height - text_h) / 2)
+        _safe_rounded_rectangle(
+            draw,
+            [90, y - 70, width - 90, y + text_h + 70],
+            width=3,
+            height=height,
+            radius=38,
+            fill=(7, 12, 20),
+            outline=(78, 108, 136),
+        )
+        draw.text((min(width - 1, x + 4), min(height - 1, y + 5)), subject, font=font, fill=(0, 0, 0))
+        draw.text((min(width - 1, x), min(height - 1, y)), subject, font=font, fill=(236, 241, 246))
     except Exception:
-        draw.text((100, height // 2), subject, font=font, fill=(236, 241, 246))
+        try:
+            draw.text((max(0, width // 20), max(0, height // 2)), subject, font=font, fill=(236, 241, 246))
+        except Exception:
+            pass
 
     footer = "CONTEXTUAL VISUAL · SOURCE IMAGE UNAVAILABLE"
     footer_box = draw.textbbox((0, 0), footer, font=small)
-    draw.text(((width - (footer_box[2] - footer_box[0])) / 2, height - 180), footer, font=small, fill=(145, 168, 190))
+    footer_x = max(0, min(width - 1, (width - (footer_box[2] - footer_box[0])) / 2))
+    footer_y = max(0, height - 180)
+    draw.text((footer_x, footer_y), footer, font=small, fill=(145, 168, 190))
     badge_text = f"{type_text} · FALLBACK"
     badge_box = draw.textbbox((0, 0), badge_text, font=badge)
-    draw.rounded_rectangle([55, 55, 55 + badge_box[2] - badge_box[0] + 34, 55 + badge_box[3] - badge_box[1] + 24], radius=16, fill=(22, 34, 48), outline=(72, 104, 132), width=2)
-    draw.text((72, 67), badge_text, font=badge, fill=(188, 208, 224))
+    badge_left = min(max(5, 55), max(5, width - 5))
+    badge_top = min(max(5, 55), max(5, height - 5))
+    badge_right = min(width - 1, max(badge_left + 1, badge_left + badge_box[2] - badge_box[0] + 34))
+    badge_bottom = min(height - 1, max(badge_top + 1, badge_top + badge_box[3] - badge_box[1] + 24))
+    _safe_rounded_rectangle(
+        draw,
+        [badge_left, badge_top, badge_right, badge_bottom],
+        width=2,
+        height=height,
+        radius=16,
+        fill=(22, 34, 48),
+        outline=(72, 104, 132),
+    )
+    draw.text((min(width - 1, badge_left + 17), min(height - 1, badge_top + 12)), badge_text, font=badge, fill=(188, 208, 224))
     return image.filter(ImageFilter.GaussianBlur(radius=0.15))
 
 
