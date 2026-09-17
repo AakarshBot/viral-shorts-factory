@@ -37,6 +37,17 @@ REAL_SOURCE_SCORES = {
 MAX_CANDIDATES_PER_SOURCE = max(1, min(6, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "4"))))
 
 
+def _source_plan(_bot, visual_type: str):
+    """Compatibility boundary: return the authoritative raw provider plan.
+
+    This intentionally contains no legacy bot fetchers or semantic QA. The
+    raw provider plan belongs to ``visual_provider_boundary_runtime`` so the
+    active retrieval path still has a single provider boundary.
+    """
+    from visual_provider_boundary_runtime import build_raw_source_plan
+    return build_raw_source_plan(visual_type)
+
+
 def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
     raw = " | ".join(str(value or "").strip().lower() for value in (intent, prompt, voice, video_title))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
@@ -162,14 +173,6 @@ def _ai_prompt(subject: str, visual_type: str) -> str:
     )
 
 
-def _candidate_items(data: Any) -> list[Any]:
-    if data is None:
-        return []
-    if isinstance(data, (list, tuple)):
-        return list(data)[:MAX_CANDIDATES_PER_SOURCE]
-    return [data]
-
-
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
@@ -221,8 +224,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
     print(
         f"   [Visual Strategy] entity='{cache_entity}' type={visual_type} "
-        f"search_phrases={len(queries)} sources={len(source_plan)} max_checks={max_provider_checks} "
-        f"candidates_per_source={MAX_CANDIDATES_PER_SOURCE}",
+        f"search_phrases={len(queries)} sources={len(source_plan)} max_checks={max_provider_checks}",
         flush=True,
     )
 
@@ -234,83 +236,61 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             provider_checks += 1
             tier = runtime._verification_tier(qa_scene, visual_type, source)
             semantic_required = tier not in {"STRICT(person)", "SKIPPED(conceptual)"}
+            verification_available = semantic_required and verification_attempts < max_verification
 
             fetch_entity = cache_entity if source == "Wikipedia" else query
             args = (fetch_entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
-            raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
-            candidates = _candidate_items(raw_data)
-            if not candidates:
-                print(f"   [Visual Source] {source} | no candidate returned | query='{query}'", flush=True)
+            data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
+            valid, reason, normalized = _preflight_image(data)
+            if not valid:
+                if reason.startswith("provider-returned-"):
+                    print(f"   [Visual Source] {source} | no candidate returned | query='{query}'", flush=True)
+                else:
+                    print(f"   [Visual Quality] REJECTED | {reason} | source={source} | query='{query}'", flush=True)
                 continue
 
-            for candidate_index, data in enumerate(candidates, 1):
-                valid, reason, normalized = _preflight_image(data)
-                if not valid:
-                    if reason.startswith("provider-returned-"):
-                        print(f"   [Visual Source] {source} | candidate {candidate_index}/{len(candidates)} unavailable | query='{query}'", flush=True)
-                    else:
-                        print(
-                            f"   [Visual Quality] REJECTED | {reason} | source={source} "
-                            f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
-                            flush=True,
-                        )
-                    continue
+            image_hash = _hash_image(bot, normalized)
+            if image_hash in used_hashes:
+                print(f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'", flush=True)
+                continue
 
-                image_hash = _hash_image(bot, normalized)
-                if image_hash in used_hashes:
-                    print(f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'", flush=True)
-                    continue
-
-                verification_available = semantic_required and verification_attempts < max_verification
-                if verification_available:
-                    verification_attempts += 1
-                    try:
-                        accepted, tier_name, score, hard_reject = runtime._strict_gate(
-                            bot, normalized, qa_scene, video_title, source=source
-                        )
-                    except Exception as exc:
-                        accepted, tier_name, score, hard_reject = False, tier, 0, False
-                        print(f"   [Visual QA] candidate check unavailable; keeping as uncertain: {type(exc).__name__}: {exc}", flush=True)
-                elif semantic_required:
-                    accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
-                else:
-                    accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
-
-                if accepted:
-                    try:
-                        runtime.save_to_cache(bot, normalized, cache_entity, visual_type, source, context)
-                    except Exception:
-                        pass
-                    used_hashes.add(image_hash)
-                    seg["visual_verified"] = True
-                    seg["visual_rescue_reason"] = ""
-                    seg["visual_fallback_reason"] = ""
-                    seg["visual_query_used"] = query
-                    seg["visual_verification_attempts"] = verification_attempts
-                    print(
-                        f"   [Visual Source] {source} | VERIFIED | tier={tier_name} | score={score} | "
-                        f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
-                        flush=True,
+            if semantic_required and verification_available:
+                verification_attempts += 1
+                try:
+                    accepted, tier_name, score, hard_reject = runtime._strict_gate(
+                        bot, normalized, qa_scene, video_title, source=source
                     )
-                    return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
+                except Exception as exc:
+                    accepted, tier_name, score, hard_reject = False, tier, 0, False
+                    print(f"   [Visual QA] candidate check unavailable; keeping as uncertain: {type(exc).__name__}: {exc}", flush=True)
+            elif semantic_required:
+                accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
+            else:
+                accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
 
-                if hard_reject:
-                    hard_rejections += 1
-                    print(
-                        f"   [Visual Quality] REJECTED | semantic mismatch | source={source} "
-                        f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
-                        flush=True,
-                    )
-                    continue
+            if accepted:
+                try:
+                    runtime.save_to_cache(bot, normalized, cache_entity, visual_type, source, context)
+                except Exception:
+                    pass
+                used_hashes.add(image_hash)
+                seg["visual_verified"] = True
+                seg["visual_rescue_reason"] = ""
+                seg["visual_fallback_reason"] = ""
+                seg["visual_query_used"] = query
+                seg["visual_verification_attempts"] = verification_attempts
+                print(f"   [Visual Source] {source} | VERIFIED | tier={tier_name} | score={score} | query='{query}'", flush=True)
+                return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
 
-                candidate_score = float(score or REAL_SOURCE_SCORES.get(source.lower(), 50))
-                if best_uncertain is None or candidate_score > best_uncertain[0]:
-                    best_uncertain = (candidate_score, normalized, source, query)
-                print(
-                    f"   [Visual Candidate] retained as uncertain | source={source} | score={candidate_score:.0f} | "
-                    f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
-                    flush=True,
-                )
+            if hard_reject:
+                hard_rejections += 1
+                print(f"   [Visual Quality] REJECTED | semantic mismatch | source={source} | query='{query}'", flush=True)
+                continue
+
+            candidate_score = float(score or REAL_SOURCE_SCORES.get(source.lower(), 50))
+            if best_uncertain is None or candidate_score > best_uncertain[0]:
+                best_uncertain = (candidate_score, normalized, source, query)
+            print(f"   [Visual Candidate] retained as uncertain | source={source} | score={candidate_score:.0f} | query='{query}'", flush=True)
         if provider_checks >= max_provider_checks:
             break
 
@@ -340,45 +320,24 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             if verification_attempts < max_verification:
                 verification_attempts += 1
                 try:
-                    accepted, tier_name, score, hard_reject = runtime._strict_gate(
-                        bot, normalized, qa_scene, video_title, source="ai-generated"
-                    )
-                except Exception as exc:
-                    accepted, tier_name, score, hard_reject = False, "AI-UNCERTAIN", 40, False
-                    print(f"   [Visual QA] AI check unavailable; using generated image as uncertain: {type(exc).__name__}: {exc}", flush=True)
-                if accepted:
-                    used_hashes.add(_hash_image(bot, normalized))
-                    seg["visual_verified"] = True
-                    seg["visual_rescue_reason"] = ""
-                    seg["visual_fallback_reason"] = ""
-                    seg["visual_query_used"] = prompt_text
-                    seg["visual_verification_attempts"] = verification_attempts
-                    return Image.open(io.BytesIO(normalized)).convert("RGB"), True, "ai-generated"
-                if not hard_reject:
-                    best_uncertain = (float(score or 40), normalized, "ai-generated", prompt_text)
-        else:
-            print(f"   [Visual Source] AI image rejected before QA: {reason}", flush=True)
+                    accepted, tier_name, score, hard_reject = runtime._strict_gate(bot, normalized, qa_scene, video_title, source="AI-generated")
+                except Exception:
+                    accepted, tier_name, score, hard_reject = False, "AI", 0, False
+            else:
+                accepted, tier_name, score, hard_reject = False, "QA-BUDGET", 45, False
+            if accepted:
+                used_hashes.add(_hash_image(bot, normalized))
+                seg["visual_verified"] = True
+                seg["visual_rescue_reason"] = ""
+                seg["visual_fallback_reason"] = ""
+                seg["visual_query_used"] = "AI illustration"
+                seg["visual_verification_attempts"] = verification_attempts
+                print(f"   [Visual Source] AI-generated | VERIFIED | score={score}", flush=True)
+                return Image.open(io.BytesIO(normalized)).convert("RGB"), True, "AI-generated"
 
-    if best_uncertain is not None:
-        score, normalized, source, query = best_uncertain
-        image_hash = _hash_image(bot, normalized)
-        if image_hash not in used_hashes:
-            used_hashes.add(image_hash)
-            seg["visual_verified"] = False
-            seg["visual_rescue_reason"] = "ai-or-real-source-unverified"
-            seg["visual_fallback_reason"] = ""
-            seg["visual_query_used"] = query
-            seg["visual_verification_attempts"] = verification_attempts
-            print(
-                f"   [Visual Source] {source} | USED-UNVERIFIED-FALLBACK | score={score:.0f} | query='{query}' | "
-                f"QA={verification_attempts}/{max_verification} hard_rejections={hard_rejections}",
-                flush=True,
-            )
-            return Image.open(io.BytesIO(normalized)).convert("RGB"), source == "ai-generated", source
-
-    rescue = make_visual_rescue(entity or factual_entity, visual_type)
+    rescue = make_visual_rescue(entity, visual_type)
     seg["visual_verified"] = False
-    seg["visual_rescue_reason"] = "real-and-ai-sources-exhausted"
+    seg["visual_rescue_reason"] = "real-sources-exhausted"
     seg["visual_fallback_reason"] = ""
     seg["visual_query_used"] = ""
     seg["visual_verification_attempts"] = verification_attempts
@@ -389,3 +348,10 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         flush=True,
     )
     return rescue, False, "visual-rescue"
+
+
+def _hash_image(bot, data: bytes) -> str:
+    try:
+        return str(bot.get_image_hash(data))
+    except Exception:
+        return hashlib.sha256(data).hexdigest()
