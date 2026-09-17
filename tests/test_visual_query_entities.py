@@ -72,6 +72,38 @@ def test_exact_logo_subject_keeps_exact_first_query_and_identity_fallback():
     assert all("event" not in q.lower().split() for q in queries)
 
 
+def test_team_identity_overrides_stale_person_type_hint():
+    scene = {
+        "primary_entity": "India cricket team",
+        "voiceover": "India cricket team in action during the match.",
+        "specific_search_prompt": "India cricket team in action during match",
+        "visual_intent": "team in action during match",
+        "visual_type": "PERSON",
+    }
+    resolution = resolve_subject(scene, "India cricket team story")
+    assert resolution["subject"] == "India cricket team"
+    assert resolution["visual_type"] == "ORGANIZATION"
+    queries, visual_type = build_deep_queries(scene, "India cricket team story")
+    assert queries[0] == "India cricket team"
+    assert visual_type == "ORGANIZATION"
+
+
+def test_logo_identity_overrides_stale_event_type_hint():
+    scene = {
+        "primary_entity": "Deccan Herald logo",
+        "voiceover": "The Deccan Herald logo identifies the newspaper.",
+        "specific_search_prompt": "Deccan Herald logo",
+        "visual_intent": "news_event",
+        "visual_type": "EVENT",
+    }
+    resolution = resolve_subject(scene, "Deccan Herald logo story")
+    assert resolution["subject"] == "Deccan Herald logo"
+    assert resolution["visual_type"] == "ORGANIZATION"
+    queries, visual_type = build_deep_queries(scene, "Deccan Herald logo story")
+    assert queries[0] == "Deccan Herald logo"
+    assert visual_type == "ORGANIZATION"
+
+
 def test_malformed_leading_negation_is_removed_and_context_grounded():
     scene = {
         "primary_entity": "Not Northstar Research Summit",
