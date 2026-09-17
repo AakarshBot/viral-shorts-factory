@@ -306,7 +306,7 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     current = str(snapshot.get("stage") or "idle")
     percent = int(snapshot.get("percent", 0) or 0)
 
-    st.markdown("### Factory progress")
+    st.markdown("<div class='section-kicker'>Production pipeline</div><h3 style='margin-top:0'>Factory progress</h3>", unsafe_allow_html=True)
     for label, key, _lo, hi in stages:
         if current == "error":
             value = 0.0
@@ -323,7 +323,10 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
         st.markdown(f"**{icon} {label}** · {value * 100:.0f}%")
         st.progress(value)
 
-    st.caption(str(snapshot.get("message") or ""))
+    st.progress(max(0.0, min(1.0, percent / 100)), text=f"{percent}% complete")
+    message = str(snapshot.get("message") or "").strip()
+    if message:
+        st.info(message, icon="ℹ️")
 
 
 def _script_text(script_data: Dict[str, Any]) -> str:
@@ -379,7 +382,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     if not items:
         return
 
-    st.markdown("### Visual review")
+    st.markdown("<div class='section-kicker'>Approval gate</div><h2 style='margin-top:0'>Visual review</h2>", unsafe_allow_html=True)
     st.caption(
         f"{len(items)} visuals are ready. Review every image below. Rendering will not continue until you approve them."
     )
@@ -491,7 +494,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         return
 
     st.markdown("---")
-    st.markdown("### Final QC")
+    st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
     qc_checks = [
         ("Rendered video", bool(str(snapshot.get("video_path") or "").strip())),
         ("Script generated", bool(snapshot.get("script_data"))),
@@ -503,7 +506,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         col.metric(label, "PASS" if ok else "CHECK")
 
     st.markdown("### Final video")
-    st.success("The Short is rendered, branded and ready for your upload decision.")
+    st.success("The Short is rendered, branded and ready for your upload decision.", icon="✅")
 
     video_path = str(snapshot.get("video_path") or "").strip()
     if video_path and os.path.isfile(video_path):
@@ -522,6 +525,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     comment = st.text_area("Creator comment", value=default_comment, height=110, key="final_comment")
 
     st.markdown("#### Choose upload visibility")
+    st.caption("Choose how the video should be published. Upload occurs only when you press one of the buttons below.")
     public_col, private_col = st.columns(2)
     with public_col:
         if st.button("🌐 Upload Publicly", type="primary", use_container_width=True, key="upload_public"):
@@ -605,7 +609,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             "Some live provider keys are not configured. Discovery/production may stop when that provider is required."
         )
 
-    st.markdown("### 1. Choose a topic")
+    st.markdown("<div class='section-kicker'>Step 01 · Discovery</div><h2 style='margin-top:0'>Choose a story</h2>", unsafe_allow_html=True)
     st.caption(
         "The factory finds up to 12 ranked stories. Three appear first; use the next-page controls to review 3 more at a time."
     )
@@ -694,7 +698,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     start = page * page_size
     end = min(start + page_size, total)
 
-    st.caption(f"Ranked topics {start + 1}–{end} of {total}")
+    st.markdown(f"<div class='panel'><b>Ranked topics {start + 1}–{end} of {total}</b><span class='small-muted' style='float:right'>Page {page + 1} of {page_count}</span></div>", unsafe_allow_html=True)
     columns = st.columns(3, gap="medium")
     for local_index, candidate in enumerate(candidates[start:end]):
         global_index = start + local_index
@@ -744,7 +748,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
 
 def render_channel_statistics() -> None:
-    st.markdown("### Channel performance")
+    st.markdown("<div class='section-kicker'>Analytics</div><h2 style='margin-top:0'>Channel performance</h2>", unsafe_allow_html=True)
     try:
         stats = collect_channel_statistics(ultimate_bot.DB_PATH)
     except Exception as exc:
@@ -798,7 +802,7 @@ def render_channel_statistics() -> None:
 
 
 def render_offline_page() -> None:
-    st.markdown("### Offline diagnostics")
+    st.markdown("<div class='section-kicker'>Engineering</div><h2 style='margin-top:0'>Offline diagnostics</h2>", unsafe_allow_html=True)
     st.caption("These checks are safe to run while coding. They make zero provider/API calls.")
 
     if st.button("🧪 Run offline diagnostics", type="primary", use_container_width=True):
@@ -855,7 +859,7 @@ def render_factory_function_coverage() -> None:
             st.code("\\n".join(names), language="text") if names else st.caption("None")
 
 def render_demo_page() -> None:
-    st.markdown("### Component-by-component factory tests")
+    st.markdown("<div class='section-kicker'>Engineering lab</div><h2 style='margin-top:0'>Demo Factory</h2><h4>Component-by-component factory tests</h4>", unsafe_allow_html=True)
     st.caption(
         "Demo mode never performs a production upload and does not need provider calls. "
         "It exercises existing factory contracts with controlled test inputs."
