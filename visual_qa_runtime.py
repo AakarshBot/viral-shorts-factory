@@ -1,12 +1,8 @@
 """Bounded visual QA for the Shorts factory.
 
-Tiers:
-- Curated PERSON assets from Wikipedia/Commons: cheap visual sanity only.
-- EVENT/news-event/stadium-event scenes: genre-plausibility Gemini check.
-- conceptual scenes: cheap visual sanity only.
-- Other third-party real-entity assets: strict Gemini relevance check.
-
-Gemini is a bounded quality-control layer, never an unbounded retry loop.
+Gemini is used only for semantic identity/context checks after cheap local
+quality filtering. A candidate with an uncertain verdict is never allowed to
+become a fallback image.
 """
 import hashlib
 import io
@@ -19,7 +15,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v7"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v8"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -49,15 +45,7 @@ def get_visual_qa_calls_used():
 
 def _cache_key(img_bytes, entity, intent, prompt, video_title, tier, visual_type=""):
     h = hashlib.sha256(img_bytes).hexdigest()
-    return (
-        h,
-        str(entity).strip().lower(),
-        str(intent).strip().lower(),
-        str(prompt).strip().lower(),
-        str(video_title).strip().lower(),
-        str(tier).strip().lower(),
-        str(visual_type).strip().upper(),
-    )
+    return (h, str(entity).strip().lower(), str(intent).strip().lower(), str(prompt).strip().lower(), str(video_title).strip().lower(), str(tier).strip().lower(), str(visual_type).strip().upper())
 
 
 def _is_event_genre(intent, visual_type=""):
@@ -94,13 +82,7 @@ Return YES or NO followed by one short reason."""
 
 
 def _strict_prompt(entity, intent, prompt, voice, video_title, visual_type=""):
-    """Build a scene-aware relevance test.
-
-    The validator should require two things together: the named subject must be
-    represented correctly, and the image must fit what the scene is actually
-    saying/doing. A generic image of the entity alone is not enough when the
-    narration requires a particular action, setting, or context.
-    """
+    """Build a strict identity and context test with contradiction checks."""
     return f"""Look at this image and judge whether it is suitable for ONE specific video scene.
 
 Named subject: {entity}
@@ -114,9 +96,14 @@ Rules:
 1. The image must visibly represent the named subject or place when one is specified.
 2. It must also fit the scene requirement/context, not merely be vaguely related to the same topic.
 3. Treat organizations, locations, products, documents, and events as their actual entity types; do NOT turn them into people because people are mentioned nearby.
-4. Do not use the headline, title, or narration as proof that an unrelated image is correct.
-5. Reject memes, generic stock imagery, illustrations, screenshots of search pages, logos by themselves when a real-world scene is required, and clearly mismatched scenes.
-6. When the scene requirement is specific (for example a person speaking, an organization press conference, a city street, a product launch), require visible evidence of that specific context.
+4. Use the narration only to understand the target context; do NOT use the narration as proof that an unrelated image is correct.
+5. Actively look for contradictions. If the scene refers to one team, person, event, product, place, sport, or group and the image clearly depicts a different one, return NO.
+6. For sports teams, check the visible team identity and, when the narration/context establishes it, the correct sport, competition, era, seniority, and gender category. A clearly identifiable women's team must be rejected for a men's-team scene, and vice versa. Do not solve this by guessing from a generic jersey alone.
+7. For people, reject a different person even if they play the same sport or work for the same organization.
+8. For events, reject an image that visibly belongs to a different event when the scene identifies a concrete event.
+9. Reject memes, generic stock imagery, illustrations, screenshots of search pages, logos by themselves when a real-world scene is required, and clearly mismatched scenes.
+10. When the scene requirement is specific (for example a person speaking, an organization press conference, a city street, a product launch), require visible evidence of that specific context.
+11. If the image is ambiguous and there is not enough visible evidence to establish the requested identity, prefer NO rather than accepting a merely plausible image.
 
 Return YES or NO followed by one short reason."""
 
