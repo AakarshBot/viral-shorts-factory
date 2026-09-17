@@ -50,7 +50,7 @@ jobs:
           import image_sources_runtime, provider_runtime, quality_runtime, research_runtime, runtime_bindings
           import script_guard_runtime, script_runtime, semantic_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
-          import visual_runtime, visual_safety_runtime, visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, workflow_runtime, youtube_comment_runtime
+          import visual_runtime, visual_safety_runtime, visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, visual_retrieval_runtime, workflow_runtime, youtube_comment_runtime
           import newsroom_dashboard
           print('Core runtime imports passed.')
           PY
@@ -60,8 +60,8 @@ jobs:
           python - <<'PY'
           import inspect
           import io
-          import edge_tts
           from PIL import Image
+          import edge_tts
           import factory_runtime, final_qc_runtime, image_sources_runtime, provider_runtime, runtime_bindings
           import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
           import visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, visual_retrieval_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
@@ -107,8 +107,8 @@ jobs:
               assert 'one-off' not in joined and 'thing' not in joined, queries
               assert 'editorial_person' not in joined and 'red carpet' not in joined, queries
 
-          # The actual runtime binding must expose a 3-5 phrase ladder even
-          # when a stale environment value attempts to force one query.
+          # The active runtime is intentionally identity-first. Rich prompt/context
+          # must never outrank the simple factual entity used by image search.
           visual_query_entities_runtime._install_runtime_query_guard(visual_runtime)
           runtime_scene = {
               'primary_entity': 'Indian cricket team',
@@ -117,9 +117,12 @@ jobs:
               'voiceover': 'The Indian cricket team lifted the T20 World Cup trophy.',
           }
           runtime_queries, runtime_type = visual_runtime._build_search_variants(runtime_scene, 'T20 World Cup story')
-          assert 3 <= len(runtime_queries) <= 5, runtime_queries
-          assert runtime_queries[0] == 'Indian cricket team lifting T20 World Cup trophy', runtime_queries
-          assert all('Indian cricket team' in q for q in runtime_queries), runtime_queries
+          assert runtime_type == 'ORGANIZATION', runtime_queries
+          assert 1 <= len(runtime_queries) <= 5, runtime_queries
+          assert runtime_queries[0] == 'Indian cricket team', runtime_queries
+          assert any(q == 'Indian cricket team T20 World Cup' for q in runtime_queries), runtime_queries
+          assert any(q == 'Indian cricket team trophy' for q in runtime_queries), runtime_queries
+          assert all(len(q.split()) <= 5 for q in runtime_queries), runtime_queries
 
           stale_type_scene = {
               'primary_entity': 'Indian cricket team lifting T20 World Cup trophy',
@@ -128,6 +131,7 @@ jobs:
           }
           prepared = visual_query_entities_runtime.build_candidate_scene(stale_type_scene, stale_type_scene['primary_entity'])
           assert prepared['visual_type'] == 'ORGANIZATION', prepared
+          assert prepared['primary_entity'] == 'Indian cricket team lifting T20 World Cup trophy', prepared
 
           multilingual = {
               'primary_entity': 'محمد صلاح',
@@ -153,9 +157,6 @@ jobs:
           assert 'nbsp' not in malformed['subject'].casefold()
           assert 'thing' not in malformed['subject'].casefold()
 
-          # Exercise the real retrieval orchestrator with deterministic local
-          # providers: a failed first phrase must advance to the next phrase,
-          # and exhausting all candidates must still produce a non-blank frame.
           class FakeRuntime:
               VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
               def _build_search_variants(self, seg, video_title=''):
