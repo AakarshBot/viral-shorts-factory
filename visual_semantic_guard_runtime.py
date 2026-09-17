@@ -1,11 +1,4 @@
-"""Generic semantic guard for visual subjects and image-search queries.
-
-This layer is intentionally domain-neutral. It cleans generated scene metadata,
-removes discourse/HTML noise, grounds candidate entities against the scene,
-and derives concise visual phrases without turning clean entities into
-sentences. It never uses sport-, country-, celebrity-, product- or genre-
-specific entity tables.
-"""
+"""Generic semantic guard for visual subjects and image-search queries."""
 from __future__ import annotations
 
 import html
@@ -77,6 +70,8 @@ ROLE_CUES = {
     "TIMELINE": {"timeline", "chronology", "history"},
 }
 
+_STABLE_IDENTITY_ROLES = {"PERSON", "ORGANIZATION", "PRODUCT", "LOCATION"}
+
 
 def clean_text(value: object) -> str:
     text = html.unescape(str(value or "")).replace("\u00a0", " ").replace("\u200b", " ")
@@ -96,8 +91,8 @@ def key(value: str) -> str:
 def tokens(value: str) -> list[str]:
     """Tokenise multilingual text without stripping Unicode combining marks."""
     text = clean_text(value).replace("’", "'").replace("‘", "'")
-    words = []
-    current = []
+    words: list[str] = []
+    current: list[str] = []
     for char in text:
         category = unicodedata.category(char)
         if char.isalnum() or category.startswith("M"):
@@ -119,7 +114,7 @@ def tokens(value: str) -> list[str]:
 
 
 def meaningful_tokens(value: str) -> list[str]:
-    result = []
+    result: list[str] = []
     for token in tokens(value):
         k = key(token)
         if not k or k in GENERIC_NOISE or k in STOPWORDS:
@@ -134,21 +129,15 @@ def sanitize_candidate(value: object) -> str:
     words = tokens(text)
     if not words:
         return ""
-
     start = 0
     end = len(words)
     while start < end and key(words[start]) in DISCOURSE_PREFIXES:
         start += 1
     while end > start and key(words[end - 1]) in GENERIC_NOISE:
         end -= 1
-
     filtered = words[start:end]
     if not filtered:
         return ""
-
-    # A clean entity should remain byte-for-byte readable (apart from outer
-    # whitespace/HTML cleanup). In particular, preserve punctuation such as
-    # "Dr. Lena Park" instead of rebuilding it as "Dr Lena Park".
     if start == 0 and end == len(words) and len(filtered) <= MAX_SUBJECT_WORDS:
         return text
     return " ".join(filtered[:MAX_SUBJECT_WORDS]).strip(" ,.;:|\"'")
@@ -191,7 +180,7 @@ def _subject_role_hint(value: str) -> str:
 def _intent_words(scene: dict) -> list[str]:
     raw = clean_text(scene.get("visual_intent", ""))
     raw = re.sub(r"[_/-]+", " ", raw)
-    return [key(w) for w in tokens(raw) if key(w)]
+    return [key(word) for word in tokens(raw) if key(word)]
 
 
 def infer_role(scene: dict) -> str:
@@ -199,18 +188,12 @@ def infer_role(scene: dict) -> str:
     candidate = sanitize_candidate(scene.get("primary_entity", ""))
     subject_hint = _subject_role_hint(candidate)
     descriptor_hint = _descriptor_role_hint(candidate)
-
-    # Strong lexical evidence from the actual subject beats a stale/generated
-    # visual_type hint. For example, "India cricket team" is an organization,
-    # and "Deccan Herald logo" is organization/branding, even if an upstream
-    # model previously labelled either scene as PERSON or EVENT.
     if subject_hint:
         return subject_hint
     if descriptor_hint:
         return descriptor_hint
     if explicit in ROLE_CUES:
         return explicit
-
     intent_words = set(_intent_words(scene))
     for role, cues in ROLE_CUES.items():
         if intent_words & cues:
@@ -219,7 +202,7 @@ def infer_role(scene: dict) -> str:
 
 
 def evidence_text(scene: dict, video_title: str = "") -> str:
-    parts = []
+    parts: list[str] = []
     for field in ("voiceover", "visual_context", "specific_search_prompt", "visual_intent"):
         value = clean_text(scene.get(field, ""))
         if value:
@@ -242,7 +225,7 @@ def _grounded_context(candidate: str, scene: dict, video_title: str = "") -> str
     start = max(0, min(positions) - 3)
     end = min(len(evidence_words), max(positions) + 4)
     window = evidence_words[start:end]
-    kept = []
+    kept: list[str] = []
     candidate_original = {key(word): word for word in tokens(candidate)}
     for word in window:
         k = key(word)
@@ -269,14 +252,22 @@ def _prompt_is_concrete(prompt: str, candidate: str) -> bool:
     return candidate_keys.issubset(keys) and len(keys) >= len(candidate_keys)
 
 
+def _prompt_can_define_subject(role: str, candidate: str, prompt: str) -> bool:
+    """Allow descriptive prompts only when they do not threaten stable identity."""
+    if role in _STABLE_IDENTITY_ROLES:
+        return False
+    if _subject_role_hint(candidate) or _descriptor_role_hint(candidate):
+        return False
+    return _prompt_is_concrete(prompt, candidate)
+
+
 def _contextual_query_variant(subject: str, anchor: str) -> str:
     """Build a shorter context-rich query while preserving the factual anchor."""
     subject_words = tokens(subject)
     anchor_keys = meaningful_tokens(anchor)
     if not subject_words or not anchor_keys:
         return ""
-
-    positions = []
+    positions: list[int] = []
     next_anchor = 0
     for index, word in enumerate(subject_words):
         if next_anchor < len(anchor_keys) and key(word) == anchor_keys[next_anchor]:
@@ -284,8 +275,7 @@ def _contextual_query_variant(subject: str, anchor: str) -> str:
             next_anchor += 1
     if next_anchor < len(anchor_keys):
         return ""
-
-    context_words = []
+    context_words: list[str] = []
     for index, word in enumerate(subject_words):
         if index in positions:
             continue
@@ -293,7 +283,6 @@ def _contextual_query_variant(subject: str, anchor: str) -> str:
         if not k or k in GENERIC_NOISE or k in STOPWORDS or k in DISCOURSE_PREFIXES or k in AUXILIARY_WORDS:
             continue
         context_words.append(word)
-
     if not context_words:
         return ""
     return sanitize_candidate(" ".join([*tokens(anchor), *context_words[:4]]))
@@ -305,7 +294,7 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
     candidate = sanitize_candidate(original)
     role = infer_role(scene)
     prompt = sanitize_candidate(scene.get("specific_search_prompt", ""))
-    prompt_is_explicit = bool(prompt and _prompt_is_concrete(prompt, candidate))
+    prompt_is_explicit = bool(prompt and _prompt_can_define_subject(role, candidate, prompt))
     subject = prompt if prompt_is_explicit else candidate
 
     needs_grounding = bool(candidate) and original.casefold() != candidate.casefold() and not prompt_is_explicit
@@ -336,7 +325,7 @@ def _reduce_subject_once(subject: str, anchor: str) -> str:
     anchor_keys = meaningful_tokens(anchor)
     if not words or not anchor_keys:
         return ""
-    protected = set()
+    protected: set[int] = set()
     next_anchor = 0
     for index, word in enumerate(words):
         if next_anchor < len(anchor_keys) and key(word) == anchor_keys[next_anchor]:
@@ -367,13 +356,9 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
     contextual = _contextual_query_variant(subject, anchor)
     if contextual and contextual.casefold() not in {q.casefold() for q in queries}:
         queries.append(contextual)
-    reduced = subject
-    for _ in range(2):
-        reduced = _reduce_subject_once(reduced, anchor)
-        if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
-            queries.append(reduced)
-        else:
-            break
+    reduced = _reduce_subject_once(subject, anchor)
+    if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
+        queries.append(reduced)
     if anchor and anchor.casefold() not in {q.casefold() for q in queries}:
         queries.append(anchor)
     return queries[:4], resolution["visual_type"], resolution
@@ -387,7 +372,7 @@ def prepare_scene(scene: dict, video_title: str = "") -> dict:
     prepared["primary_entity"] = resolution["subject"]
     prepared["visual_search_subject"] = resolution["subject"]
     prepared["visual_type"] = resolution["visual_type"]
-    prepared["specific_search_prompt"] = resolution["subject"]
+    prepared["specific_search_prompt"] = clean_text(scene.get("specific_search_prompt", ""))
     prepared["visual_subject_confidence"] = resolution["confidence"]
     prepared["visual_subject_locked"] = True
     return prepared
