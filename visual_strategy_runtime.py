@@ -23,7 +23,11 @@ for _name in dir(_planner):
     if _name.startswith("_") and not _name.startswith("__"):
         globals()[_name] = getattr(_planner, _name)
 
-_VISUAL_STRATEGY_VERSION = "2026-09-18-v3-identity-first"
+_VISUAL_STRATEGY_VERSION = "2026-09-18-v4-identity-first"
+
+# Compatibility helper for diagnostics/runtime installers that expect the
+# normalizer to exist on this module before unicode_runtime.install() runs.
+_normalise_query = _planner._normalise
 
 
 def _scene_category(scene, category=""):
@@ -52,13 +56,19 @@ def classify_scene(scene, category=""):
 
 
 def build_scene_visual_brief(scene, video_title="", category=""):
-    """Return the generic guarded visual brief expected by runtime callers."""
+    """Return a factual identity-first visual brief.
+
+    The ``subject`` field is the exact cleaned factual entity used as the first
+    search query. Rich prompt/context material remains separate so it cannot
+    accidentally replace a clean identity with a sentence or editorial cue.
+    """
     prepared = _prepare(scene, video_title)
     if category:
         prepared["sport_or_topic_category"] = category
     resolution = resolve_subject(prepared, video_title)
     return {
-        "subject": resolution["subject"],
+        "subject": resolution["factual_entity"],
+        "visual_subject": resolution["subject"],
         "visual_type": resolution["visual_type"],
         "scene_action": "",
         "scene_context": clean_text(prepared.get("visual_context", "")),
@@ -89,7 +99,7 @@ build_deep_queries._authoritative_locked_subject_planner = True
 
 
 def _exact_slide_subject(scene):
-    """Return the original factual entity for compatibility/provenance."""
+    """Return the original factual entity for provenance."""
     if not isinstance(scene, dict):
         return ""
     return clean_text(scene.get("primary_entity", ""))
