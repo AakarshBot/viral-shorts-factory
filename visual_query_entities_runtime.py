@@ -1,41 +1,18 @@
-"""Deterministic subject extraction for slide-derived visual search.
+"""Exact visual-subject extraction for Viral Shorts Factory.
 
-The rendered slide's cut script is the source for additional search subjects.
-Queries are exact subject phrases: names, places, events, organizations, teams,
-and other concrete entities. Titles and visual prompts are never appended as
-query noise.
+The production visual contract is intentionally simple:
+    slide -> primary_entity -> one exact image-search query
+
+The narration is used upstream to decide the primary entity. Once that entity
+exists, narration, titles, visual intent and scene prose are NOT allowed to
+become search-query terms. They remain available to other parts of the
+pipeline, but never contaminate the image search.
 """
 from __future__ import annotations
 
 import re
-import unicodedata
 
-_QUERY_MAX = 3
-_NOISE = {
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "from",
-    "this", "that", "these", "those", "is", "was", "were", "are", "be", "been",
-    "latest", "breaking", "news", "update", "story", "report", "reports", "reported",
-    "according", "says", "said", "today", "yesterday", "tomorrow", "interview",
-    "press", "conference", "players", "player", "person", "photo", "image", "picture",
-    "editorial", "official", "selection", "meeting", "details", "detail", "also", "just",
-}
-_ROLE_WORDS = {
-    "team", "squad", "board", "council", "association", "committee", "club", "government",
-    "ministry", "company", "corporation", "university", "institute", "bank", "agency", "authority",
-    "cricket", "football", "soccer", "basketball", "tennis", "hockey", "baseball",
-}
-_GROUP_MIDDLE_WORDS = {
-    "cricket", "football", "soccer", "basketball", "tennis", "hockey", "baseball",
-    "national", "mens", "women", "men", "women's", "mens", "womens",
-}
-_COMMON_STARTERS = {
-    "india", "indian", "england", "english", "australia", "australian", "pakistan", "pakistani",
-    "bangladesh", "bangladeshi", "sri", "south", "new", "united", "world",
-}
-_EVENT_SUFFIXES = {
-    "cup", "championship", "league", "final", "open", "games", "trophy", "summit",
-    "festival", "tournament", "grand", "prix",
-}
+_QUERY_MAX = 1
 
 
 def _clean(value: object) -> str:
@@ -43,43 +20,9 @@ def _clean(value: object) -> str:
     return re.sub(r"\s+", " ", text).strip(" ,.;:|\"'()[]{}")
 
 
-def _words(value: str) -> list[str]:
-    words: list[str] = []
-    current: list[str] = []
-    for char in value:
-        category = unicodedata.category(char)
-        if char.isalnum() or category.startswith("M"):
-            current.append(char)
-        elif char in {"'", "’", "-", "/"} and current:
-            current.append(char)
-        elif current:
-            token = "".join(current).strip("'-/’")
-            if token:
-                words.append(token)
-            current = []
-    if current:
-        token = "".join(current).strip("'-/’")
-        if token:
-            words.append(token)
-    return words
-
-
 def _key(value: str) -> str:
-    value = value.casefold()
-    if value.endswith("'s") or value.endswith("’s"):
-        value = value[:-2]
-    return "".join(c for c in value if c.isalnum() or unicodedata.category(c).startswith("M"))
-
-
-def _known_sets():
-    try:
-        import visual_retrieval_planner as planner
-        return (
-            set(getattr(planner, "LOCATION_NAMES", set())),
-            set(getattr(planner, "ORGANIZATION_ACRONYMS", set())),
-        )
-    except Exception:
-        return set(), set()
+    value = _clean(value).casefold()
+    return re.sub(r"[^\w]+", "", value, flags=re.UNICODE)
 
 
 def _append_unique(items: list[str], value: str) -> None:
@@ -88,159 +31,23 @@ def _append_unique(items: list[str], value: str) -> None:
         items.append(value)
 
 
-def _extract_person_names(text: str) -> list[str]:
-    """Find multi-word proper-name spans without turning formats into names."""
-    tokens = _words(text)
-    locations, organizations = _known_sets()
-    known_locs = {_key(x) for x in locations}
-    known_orgs = {_key(x) for x in organizations}
-    result: list[str] = []
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if not token or not token[0].isupper():
-            i += 1
-            continue
-        run = [token]
-        j = i + 1
-        while j < len(tokens) and len(run) < 4 and tokens[j][0].isupper():
-            run.append(tokens[j])
-            j += 1
-        keys = [_key(word) for word in run]
-        candidate = " ".join(run)
-        candidate_key = "".join(keys)
-        second_is_all_caps = len(run) == 2 and run[1].isupper()
-        if (
-            len(run) >= 2
-            and candidate_key not in known_locs
-            and candidate_key not in known_orgs
-            and not set(keys).intersection(_NOISE)
-            and not set(keys).intersection(_ROLE_WORDS)
-            and not set(keys).intersection(_EVENT_SUFFIXES)
-            and not keys[0] in known_orgs
-            and not (second_is_all_caps and len(run[0]) > 2)
-        ):
-            _append_unique(result, candidate)
-        i = max(i + 1, j)
-    return result
-
-
-def _extract_group_subjects(text: str) -> list[str]:
-    """Find concrete named groups such as 'Indian cricket team'."""
-    tokens = _words(text)
-    result: list[str] = []
-    for i in range(len(tokens)):
-        if i + 2 < len(tokens):
-            a, b, c = tokens[i], tokens[i + 1], tokens[i + 2]
-            ak, bk, ck = _key(a), _key(b), _key(c)
-            if ak in _COMMON_STARTERS and bk in _GROUP_MIDDLE_WORDS and ck in {"team", "squad"}:
-                first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
-                _append_unique(result, f"{first} {b} {c}")
-        if i + 1 < len(tokens):
-            a, b = tokens[i], tokens[i + 1]
-            ak, bk = _key(a), _key(b)
-            if ak in _COMMON_STARTERS and bk in {
-                "government", "ministry", "board", "council", "association", "committee", "company", "corporation",
-            }:
-                first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
-                _append_unique(result, f"{first} {b}")
-    return result
-
-
-def _extract_event_subjects(text: str) -> list[str]:
-    """Find named events without adding action/context words."""
-    tokens = _words(text)
-    result: list[str] = []
-    for i, token in enumerate(tokens):
-        if _key(token) not in _EVENT_SUFFIXES:
-            continue
-        start = i
-        while start > 0 and i - start < 4:
-            previous = tokens[start - 1]
-            if previous[0].isupper() or _key(previous) in {"of", "the", "and", "vs", "v"} or previous.isdigit():
-                start -= 1
-                continue
-            break
-        candidate = " ".join(tokens[start:i + 1])
-        candidate = re.sub(r"^the\s+", "", candidate, flags=re.IGNORECASE)
-        if len(_words(candidate)) >= 2:
-            _append_unique(result, candidate)
-    return result
-
-
-def _extract_known_entities(text: str) -> list[str]:
-    """Find known places/organizations while preserving their script spelling."""
-    locations, organizations = _known_sets()
-    found: list[tuple[int, str]] = []
-    for name in sorted(locations, key=len, reverse=True):
-        pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?:['’]s)?(?!\w)", re.IGNORECASE)
-        match = pattern.search(text)
-        if match:
-            value = re.sub(r"['’]s$", "", match.group(0), flags=re.IGNORECASE)
-            found.append((match.start(), value))
-    for name in sorted(organizations, key=len, reverse=True):
-        pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)", re.IGNORECASE)
-        match = pattern.search(text)
-        if match:
-            found.append((match.start(), match.group(0)))
-    found.sort(key=lambda item: item[0])
-    result: list[str] = []
-    for _, value in found:
-        _append_unique(result, value)
-    return result
-
-
-def _script_position(script: str, candidate: str) -> int:
-    direct = script.casefold().find(candidate.casefold())
-    if direct >= 0:
-        return direct
-    parts = _words(candidate)
-    if not parts:
-        return -1
-    pattern_parts = []
-    for index, part in enumerate(parts):
-        escaped = re.escape(part)
-        if index == 0:
-            escaped += r"(?:['’]s)?"
-        pattern_parts.append(escaped)
-    match = re.search(r"(?<!\w)" + r"\s+".join(pattern_parts) + r"(?!\w)", script, flags=re.IGNORECASE)
-    return match.start() if match else -1
-
-
 def extract_slide_search_subjects(scene: dict) -> list[str]:
-    """Return up to three exact search subjects from the current slide.
+    """Return exactly one search subject: the scene's primary_entity.
 
-    Primary entity is first. Additional subjects come only from the cut slide's
-    voiceover. No title, video-level context, or search-prompt prose is ever
-    converted into a query.
+    This function deliberately does NOT mine the voiceover for additional
+    search terms. Mentioned people, organisations and events are context for
+    editorial/script logic, not automatic extra image-search targets.
     """
     if not isinstance(scene, dict):
         return []
-    subjects: list[str] = []
     primary = _clean(scene.get("primary_entity", ""))
-    if primary and _key(primary) not in {"none", "unknown", "na", "n/a"}:
-        _append_unique(subjects, primary)
-    script = _clean(scene.get("voiceover", ""))
-    if not script:
-        return subjects[:_QUERY_MAX]
-
-    candidates: list[tuple[int, str]] = []
-    for extractor in (_extract_person_names, _extract_group_subjects, _extract_event_subjects, _extract_known_entities):
-        for candidate in extractor(script):
-            index = _script_position(script, candidate)
-            if index >= 0:
-                candidates.append((index, candidate))
-
-    candidates.sort(key=lambda item: (item[0], -len(_words(item[1]))))
-    for _, candidate in candidates:
-        if len(subjects) >= _QUERY_MAX:
-            break
-        _append_unique(subjects, candidate)
-    return subjects[:_QUERY_MAX]
+    if not primary or _key(primary) in {"none", "unknown", "na", "n/a"}:
+        return []
+    return [primary][: _QUERY_MAX]
 
 
 def classify_search_subject(subject: str) -> str:
-    """Classify an extracted subject for source/QA routing only."""
+    """Classify the already-selected subject for source routing/QA only."""
     subject = _clean(subject)
     if not subject:
         return "GENERAL_CONTEXT"
@@ -254,57 +61,41 @@ def classify_search_subject(subject: str) -> str:
             return "PRODUCT"
     except Exception:
         pass
-    keys = {_key(word) for word in _words(subject)}
-    if keys.intersection(_EVENT_SUFFIXES):
+
+    words = subject.split()
+    keys = {_key(word) for word in words}
+    if keys.intersection({"cup", "championship", "league", "final", "open", "games", "trophy", "summit", "festival", "tournament", "prix"}):
         return "EVENT"
     if keys.intersection({"team", "squad", "board", "association", "government", "ministry", "committee", "company", "corporation"}):
         return "ORGANIZATION"
-    words = _words(subject)
     if len(words) >= 2 and all(word[:1].isupper() for word in words if word):
         return "PERSON"
     return "GENERAL_CONTEXT"
 
 
 def build_candidate_scene(scene: dict, subject: str) -> dict:
-    """Create a subject-focused scene while preserving the original context.
-
-    The old implementation replaced the voiceover with the subject itself.
-    That accidentally removed the very context needed by semantic QA to tell,
-    for example, a men's team from a women's team. Search remains subject-only;
-    verification keeps the complete original scene evidence.
-    """
+    """Create a subject-focused scene without rewriting its narration."""
     candidate = dict(scene or {})
     subject_type = classify_search_subject(subject)
     candidate["primary_entity"] = subject
     candidate["visual_type"] = subject_type
-    candidate["specific_search_prompt"] = str(scene.get("specific_search_prompt", "") or subject)
-    candidate["visual_intent"] = str(scene.get("visual_intent", "") or f"{subject_type.lower()} subject identity")
+    # The search prompt is EXACTLY the entity. Never copy narration into it.
+    candidate["specific_search_prompt"] = subject
+    candidate["visual_intent"] = f"{subject_type.lower()} subject identity"
     candidate["voiceover"] = str(scene.get("voiceover", "") or "")
     return candidate
 
 
 def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title=""):
-    """Try clean slide subjects in order; never rewrite a query."""
+    """Search only the primary visual subject; no query expansion."""
     subjects = extract_slide_search_subjects(scene)
     if not subjects:
         return visual_runtime_module._relevant_asset(bot, scene, category, used_urls, used_hashes, video_title)
 
-    last_error = None
-    reset_scene_budget = getattr(visual_runtime_module, "start_visual_qa_scene", None)
-    for index, subject in enumerate(subjects, 1):
-        candidate = build_candidate_scene(scene, subject)
-        subject_type = candidate["visual_type"]
-        if callable(reset_scene_budget) and index > 1:
-            reset_scene_budget()
-        print(f"   [Visual Search] Subject {index}/{len(subjects)} | '{subject}' | type={subject_type}", flush=True)
-        try:
-            return visual_runtime_module._relevant_asset(
-                bot, candidate, category, used_urls, used_hashes, video_title
-            )
-        except RuntimeError as exc:
-            last_error = exc
-            print(f"   [Visual Search] Subject '{subject}' produced no usable visual; falling back to next slide subject.", flush=True)
-
-    if last_error is not None:
-        raise RuntimeError(f"No usable visual found for slide subjects {subjects!r}. Last failure: {last_error}") from last_error
-    raise RuntimeError(f"No usable visual found for slide subjects {subjects!r}.")
+    subject = subjects[0]
+    candidate = build_candidate_scene(scene, subject)
+    subject_type = candidate["visual_type"]
+    print(f"   [Visual Search] Subject 1/1 | '{subject}' | type={subject_type}", flush=True)
+    return visual_runtime_module._relevant_asset(
+        bot, candidate, category, used_urls, used_hashes, video_title
+    )
