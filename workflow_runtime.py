@@ -202,6 +202,10 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
         reverse=True,
     )
     top = _diverse_top_three(stories)
+    if len(top) != 3:
+        raise ValueError(
+            f"Discovery produced only {len(top)} strong diverse candidate(s); production is blocked until exactly 3 are available."
+        )
 
     for rank, story in enumerate(top, 1):
         story["discovery_rank"] = rank
@@ -349,7 +353,7 @@ class WorkflowController:
             finally:
                 conn.close()
         except Exception as exc:
-            print(f"   [Workflow] Could not mark run READY_FOR_UPLOAD: {exc}", flush=True)
+            print(f"   [Workflow] Could not mark run READY_FOR_UPLOAD: {exc}")
 
     def start_production(self, web_config: Dict[str, Any], selected_story: Dict[str, Any]):
         if self.state.thread_alive:
