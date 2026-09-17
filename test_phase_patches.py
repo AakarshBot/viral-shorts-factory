@@ -112,6 +112,10 @@ def _content_chunks(seg: dict[str, Any], video_title: str, entity: str) -> list[
         "news_event", "news", "real", "high", "resolution", "official", "press", "story", "today",
         "the", "and", "for", "with", "this", "that", "from", "into", "after", "before", "about",
         "every", "each", "because", "given", "since", "but", "or", "so", "if", "although", "though",
+        "he", "she", "his", "her", "them", "they", "their", "there", "here", "when", "what", "which", "where",
+        "while", "have", "has", "had", "will", "would", "could", "should", "just", "been", "were", "was",
+        "are", "our", "you", "your", "today", "is", "a", "an", "to", "of", "in", "on", "as", "it", "its",
+        "these", "those", "can", "may", "might", "more", "most", "than", "then", "also",
     }
     chunks: list[str] = []
     for source in sources:
@@ -167,7 +171,6 @@ def _three_visual_terms(seg: dict[str, Any], video_title: str, used_terms: set[s
         key = clean.lower()
         if not clean or key in {t.lower() for t in terms} or key in used:
             return
-        # Keep queries useful for web image search: compact, scene-specific, not sentence-length.
         if len(clean.split()) > 8:
             clean = " ".join(clean.split()[:8])
             key = clean.lower()
@@ -195,8 +198,6 @@ def _three_visual_terms(seg: dict[str, Any], video_title: str, used_terms: set[s
         if len(terms) < 3:
             add([intent or modifiers.get(visual_type, "editorial photo")])
 
-    # A diagnostic should never display three identical queries. Use the most
-    # specific available fallback, then a clearly different visual modifier.
     if not terms:
         terms = [title or "selected story"]
     fallback_pool = [
