@@ -23,6 +23,7 @@ import visual_runtime
 from workflow_runtime import (
     CRICKET_CATEGORIES,
     FORMAT_OPTIONS,
+    MAX_DISCOVERY_CANDIDATES,
     WorkflowController,
     discover_three_candidates,
 )
@@ -158,6 +159,8 @@ if "final_qc" not in st.session_state:
     st.session_state.final_qc = False
 if "upload_result" not in st.session_state:
     st.session_state.upload_result = ""
+if "candidate_page" not in st.session_state:
+    st.session_state.candidate_page = 0
 
 controller: WorkflowController = st.session_state.workflow_controller
 
@@ -234,6 +237,8 @@ if "final_qc" not in st.session_state:
     st.session_state.final_qc = False
 if "upload_result" not in st.session_state:
     st.session_state.upload_result = ""
+if "candidate_page" not in st.session_state:
+    st.session_state.candidate_page = 0
 
 controller: WorkflowController = st.session_state.workflow_controller
 
@@ -427,6 +432,7 @@ with left:
         st.session_state.production_started = False
         st.session_state.final_qc = False
         st.session_state.upload_result = ""
+        st.session_state.candidate_page = 0
         st.rerun()
 
 
@@ -476,8 +482,10 @@ with right:
             st.session_state.candidates = candidates
             st.session_state.web_config = config
             st.session_state.final_qc = False
+            st.session_state.candidate_page = 0
             if candidates:
-                st.success(f"Found {len(candidates)} candidate stories. Choose one to begin production.")
+                visible_total = min(len(candidates), MAX_DISCOVERY_CANDIDATES)
+                st.success(f"Found {visible_total} candidate stories. Showing 1–{min(3, visible_total)} initially; choose one to begin production.")
             else:
                 st.warning("No suitable stories survived the discovery filters. Try another category or run again later.")
         except Exception as exc:
@@ -486,21 +494,33 @@ with right:
     candidates = st.session_state.get("candidates", [])
     if candidates:
         st.markdown("### 2. Choose the story")
+        total = min(len(candidates), MAX_DISCOVERY_CANDIDATES)
+        page_size = 3
+        page_count = max(1, (total + page_size - 1) // page_size)
+        page = int(st.session_state.get("candidate_page", 0) or 0)
+        page = max(0, min(page, page_count - 1))
+        start = page * page_size
+        end = min(start + page_size, total)
+
+        st.caption(f"Showing candidates {start + 1}–{end} of {total}")
         cols = st.columns(3, gap="medium")
-        for idx, candidate in enumerate(candidates[:3]):
-            with cols[idx]:
+        visible_candidates = candidates[start:end]
+        for local_idx, candidate in enumerate(visible_candidates):
+            global_idx = start + local_idx
+            label_num = global_idx + 1
+            with cols[local_idx]:
                 title = str(candidate.get("title") or "Untitled story")
                 reason = str(candidate.get("discovery_reason") or "")
                 source = str(candidate.get("source_label") or "News source")
                 score = candidate.get("candidate_score")
                 score_line = f"Opportunity signal: {float(score):.1f}" if score is not None else "Opportunity signal: live"
                 st.markdown(
-                    f"<div class='candidate'><div class='candidate-rank'>CANDIDATE {idx + 1}</div><div class='candidate-title'>{title}</div><div class='candidate-reason'>{reason}</div><div class='small-muted' style='margin-top:10px'>Source: {source}<br>{score_line}</div></div>",
+                    f"<div class='candidate'><div class='candidate-rank'>CANDIDATE {label_num}</div><div class='candidate-title'>{title}</div><div class='candidate-reason'>{reason}</div><div class='small-muted' style='margin-top:10px'>Source: {source}<br>{score_line}</div></div>",
                     unsafe_allow_html=True,
                 )
                 if candidate.get("story_url"):
                     st.link_button("Open source", candidate["story_url"], use_container_width=True)
-                if st.button(f"Use Candidate {idx + 1}", key=f"use_candidate_{idx}", use_container_width=True):
+                if st.button(f"Use Candidate {label_num}", key=f"use_candidate_{global_idx}", use_container_width=True):
                     selected = dict(candidate)
                     production_config = dict(st.session_state.web_config)
                     st.session_state.production_started = True
@@ -513,6 +533,24 @@ with right:
                         st.error(snapshot["error"])
                     elif snapshot.get("completed"):
                         st.session_state.final_qc = True
+
+        nav_left, nav_right = st.columns(2)
+        if page > 0:
+            with nav_left:
+                if st.button("← Previous 3 stories", key="candidate_previous_page", use_container_width=True):
+                    st.session_state.candidate_page = page - 1
+                    st.rerun()
+        if end < total:
+            remaining = total - end
+            next_count = min(page_size, remaining)
+            with nav_right:
+                if st.button(
+                    f"See next {next_count} stories ({end + 1}–{min(end + next_count, total)})",
+                    key="candidate_next_page",
+                    use_container_width=True,
+                ):
+                    st.session_state.candidate_page = page + 1
+                    st.rerun()
 
     if st.session_state.production_started and controller.snapshot().get("thread_alive"):
         poll_production()
