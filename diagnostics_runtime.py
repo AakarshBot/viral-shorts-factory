@@ -199,10 +199,10 @@ def _test_runtime_bindings():
 def _test_provider_boundary():
     from test_visual_provider_boundary import (
         test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods,
-        test_person_source_plan_uses_raw_adapters_not_bot_fetchers,
+        test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers,
         test_raw_person_adapters_have_no_legacy_quality_gate_dependency,
     )
-    test_person_source_plan_uses_raw_adapters_not_bot_fetchers()
+    test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers()
     test_raw_person_adapters_have_no_legacy_quality_gate_dependency()
     test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods()
     return "Raw-provider boundary regression passed"
