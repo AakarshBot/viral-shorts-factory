@@ -74,4 +74,4 @@ jobs:
           PY
 
       - name: Run repository regression tests
-        run: python -m pytest -q tests
+        run: python -m pytest -q
