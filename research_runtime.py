@@ -112,6 +112,35 @@ def format_source_brief(sources: List[Dict[str, Any]]) -> str:
     return "\n\n".join(rows)
 
 
+def _prepare_primary_writer_data(story_data: Dict[str, Any], format_mode: str) -> Dict[str, Any]:
+    """Adapt Cricket's single-story evidence to the legacy writer without losing facts.
+
+    ``ultimate_bot.write_script`` predates the dedicated Cricket mode and treats any
+    non-regular/non-trending/non-tech mode as a Top-5 payload whose ``text`` must be
+    a JSON list. Cricket supplies one selected story with ordinary article text, so
+    direct JSON decoding otherwise collapses the writer input to an empty heading.
+    """
+    data = dict(story_data or {})
+    if str(format_mode or "").lower() != "cricket":
+        return data
+
+    raw_text = _clean(data.get("text"))
+    if not raw_text:
+        raw_text = _clean(data.get("summary") or data.get("description") or data.get("title"))
+    title = _clean(data.get("title") or data.get("topic") or "Selected cricket story")
+    research_bundle = _clean(data.get("research_bundle"))
+    evidence = raw_text
+    if research_bundle:
+        evidence = f"{evidence}\n\n{research_bundle}".strip()
+
+    data["text"] = json.dumps([{"title": title, "text": evidence}])
+    print(
+        f"   [Research] Cricket writer adapter preserved selected-story evidence ({len(evidence)} chars).",
+        flush=True,
+    )
+    return data
+
+
 def _validate_provider_script(result: Any, story_data: Dict[str, Any], format_mode: str, provider_name: str):
     """Run every fallback through the same canonical acceptance gate."""
     if not isinstance(result, dict) or not isinstance(result.get("script"), list):
@@ -295,8 +324,9 @@ def patch_research_pipeline(bot):
             + data["research_bundle"]
         )
         data["text"] = _clean(data.get("text"))
+        prepared_for_primary = _prepare_primary_writer_data(data, format_mode)
         try:
-            result = current(data, language_cfg, genre_key, conn, format_mode)
+            result = current(prepared_for_primary, language_cfg, genre_key, conn, format_mode)
         except Exception as exc:
             # Never expose provider exception payloads to later script stages.
             # Convert the failure into a safe chain diagnostic so OpenRouter and
