@@ -1,8 +1,8 @@
 from factory_contract_audit import (
+    dashboard_architecture_audit,
     language_surface_audit,
     runtime_surface_audit,
     source_syntax_audit,
-    visual_entity_fallback_audit,
 )
 
 
@@ -18,8 +18,8 @@ def test_multilingual_language_surface_audit():
     assert language_surface_audit() == []
 
 
-def test_visual_repeat_limit_never_blanks_entity():
-    assert visual_entity_fallback_audit() == []
+def test_single_dashboard_architecture_audit():
+    assert dashboard_architecture_audit() == []
 
 
 def test_multilingual_script_grounding_and_metadata():
