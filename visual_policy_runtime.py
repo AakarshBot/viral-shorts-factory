@@ -22,6 +22,23 @@ _SIMPLE_SEARCH_INSTALLED = False
 _SUBJECT_LOCK = threading.Lock()
 _SUBJECT_RUNS = {}
 
+# Common words that strongly suggest the field contains a sentence/description
+# rather than a compact visual subject. This stays deterministic and costs no API
+# calls. Known organisation acronyms are handled before these cues.
+_SENTENCE_CUES = {
+    "every", "each", "when", "while", "because", "given", "since", "after", "before", "but", "and",
+    "or", "so", "if", "although", "though", "we", "you", "they", "he", "she", "it", "this", "that",
+    "try", "tried", "tries", "get", "gets", "got", "getting", "happen", "happens", "happened", "will",
+    "would", "could", "should", "season", "year", "years", "today", "tomorrow", "yesterday",
+    "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't", "can't", "cannot",
+}
+
+_ORGANISATION_ACRONYMS = {
+    "BCCI", "ICC", "PCB", "SLC", "BCB", "ACB", "FIFA", "UEFA", "NBA", "NFL", "ATP", "WTA",
+    "ISRO", "NASA", "ESA", "WHO", "UN", "UNESCO", "IMF", "WTO", "SEBI", "RBI",
+    "DRDO", "NITI", "BSE", "NSE", "TCS", "IBM", "AMD", "HP", "LG", "BMW",
+}
+
 
 def _bg_color(bot):
     palette = getattr(bot, "PALETTE", {})
@@ -50,7 +67,7 @@ def _font(bot, size, font_choice=None):
 
 
 def _clean_search_subject(value):
-    """Reduce a visual entity/query to the smallest useful search subject."""
+    """Reduce a model-produced visual subject to a compact, searchable entity."""
     text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-:;|\"'")
     if not text:
         return ""
@@ -60,14 +77,38 @@ def _clean_search_subject(value):
         text,
         flags=re.I,
     ).strip()
-    text = re.split(r"(?:'s|’s)\s+", text, maxsplit=1)[0].strip()
     text = re.sub(
         r"\s+(?:official(?:\s+photo)?|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|best\s+innings|latest\s+update|latest\s+news|breaking\s+news|photo|image)\s*$",
         "",
         text,
         flags=re.I,
     ).strip(" ,.-:;|\"'")
-    return text
+
+    words = text.split()
+    if not words:
+        return ""
+
+    # A known acronym is usually the actual entity even when the rest of the
+    # field accidentally contains a sentence. Example:
+    # "BCCI Impact Player Every year we try..." -> "BCCI".
+    for word in words[:6]:
+        token = re.sub(r"[^A-Za-z0-9&.-]", "", word).upper()
+        if token in _ORGANISATION_ACRONYMS:
+            return token
+
+    # Once a sentence cue appears, keep only the compact subject before it.
+    cue_index = next(
+        (i for i, word in enumerate(words[1:], start=1) if word.lower().strip(".,!?;:") in _SENTENCE_CUES),
+        None,
+    )
+    if cue_index is not None:
+        words = words[:cue_index]
+
+    # Never allow a sentence-like value to become a huge search query.
+    if len(words) > 4:
+        words = words[:4]
+
+    return " ".join(words).strip(" ,.-:;|\"'")
 
 
 def _headline_fallback(video_title):
@@ -96,7 +137,11 @@ def _simple_build_deep_queries(seg, video_title="", visual_type=None):
     try:
         from visual_strategy_runtime import classify_scene, VISUAL_TYPES
         category = str(seg.get("sport_or_topic_category", "") or "")
-        resolved_type = visual_type or classify_scene(seg, category)
+        # Classify a sanitised copy so a narration blob cannot force PERSON/other
+        # misclassification just because it contains role words such as "player".
+        classify_seg = dict(seg)
+        classify_seg["primary_entity"] = entity
+        resolved_type = visual_type or classify_scene(classify_seg, category)
         if resolved_type not in VISUAL_TYPES:
             resolved_type = "GENERAL_CONTEXT"
     except Exception:
@@ -237,7 +282,7 @@ def install_visual_card_policy(bot=None):
         return True
     except Exception as exc:
         print(f"   [Visual Policy] Card/search policy unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return False
+    return False
 
 
 # The visual strategy module imports this policy before the factory binds
