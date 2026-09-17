@@ -88,7 +88,22 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
     stage30 = _cheap_filter(relevance_filtered, max_items=30, max_age_hours=24 if ai_cricket else 48)
     stage15 = _deduplicate_stage(stage30, max_items=15)
     stage8 = _fact_source_stage(stage15, max_items=15)
+
+    # The production ranker intentionally returns only its top 3. The
+    # dashboard must expose a broader review pool, so retain additional
+    # distinct candidates rather than truncating the factory selection.
     stage12 = _originality_stage(stage8, used_topics, max_items=max_candidates)
+    if len(stage12) < min(max_candidates, len(stage8)):
+        used = {id(item) for item in stage12}
+        for item in stage8:
+            if id(item) in used:
+                continue
+            if len(stage12) >= max_candidates:
+                break
+            item["originality_score"] = float(item.get("originality_score") or 5.0)
+            item["originality_pass"] = True
+            stage12.append(item)
+
     ranked = [
         _editorial_score(
             item,
