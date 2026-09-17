@@ -16,6 +16,7 @@ from visual_runtime import patch_visual_pipeline
 import test_phase_runtime
 from test_phase_patches import install_test_phase_patches
 from test_history_runtime import install_test_history_bridge, render_test_history
+from visual_resilience_runtime import install_visual_resilience
 
 st.set_page_config(page_title="Test Phase", page_icon="🧪", layout="wide")
 
@@ -38,6 +39,7 @@ def _init_runtime() -> None:
         install_visual_qa_bridge(visual_runtime)
         patch_provider_adapters(ultimate_bot)
     bind_dashboard_patches(ultimate_bot)
+    install_visual_resilience()
     install_test_phase_patches()
     install_test_history_bridge(test_phase_runtime, ultimate_bot)
 
