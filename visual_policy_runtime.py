@@ -242,6 +242,7 @@ def install_visual_card_policy(bot=None):
 
         original_hook = namespace.get("render_hook_card")
         if callable(original_hook) and not getattr(original_hook, "_qc_hook_passthrough", False):
+            # Keep the legacy factory call contract: bot + bg + hook + six options.
             def render_hook_card_no_card(_bot, bg_img, hook_text, width=1080, height=1920, font_choice=None, script_data=None):
                 return bg_img.convert("RGBA")
             render_hook_card_no_card._qc_hook_passthrough = True
@@ -249,18 +250,19 @@ def install_visual_card_policy(bot=None):
 
         original_slide = namespace.get("create_branded_slide")
         if callable(original_slide) and not getattr(original_slide, "_qc_non_top5_slide", False):
-            def create_branded_slide_policy(title_text, subtitle_text, is_outro=False, width=1080, height=1920, font_choice=None):
+            def create_branded_slide_policy(_bot, title_text, subtitle_text, is_outro=False, width=1080, height=1920, font_choice=None, script_data=None):
+                active_bot = _bot or bot
                 if str(subtitle_text or "").strip().upper() in {"TODAY'S SPECIAL", "SUBSCRIBE!"}:
-                    return original_slide(title_text, subtitle_text, is_outro=is_outro, width=width, height=height, font_choice=font_choice)
-                bg = Image.new("RGBA", (width, height), _bg_color(bot) + (255,))
+                    return original_slide(active_bot, title_text, subtitle_text, is_outro=is_outro, width=width, height=height, font_choice=font_choice, script_data=script_data)
+                bg = Image.new("RGBA", (width, height), _bg_color(active_bot) + (255,))
                 draw = ImageDraw.Draw(bg)
-                palette = getattr(bot, "PALETTE", {})
+                palette = getattr(active_bot, "PALETTE", {})
                 primary = tuple(palette.get("accent_primary", (0, 191, 255)))
                 secondary = tuple(palette.get("accent_secondary", (255, 140, 0)))
                 draw.rectangle((0, 0, width, 36), fill=primary + (180,))
                 draw.rectangle((0, height - 36, width, height), fill=secondary + (150,))
-                title_font = _font(bot, 86, font_choice)
-                cta_font = _font(bot, 60, font_choice)
+                title_font = _font(active_bot, 86, font_choice)
+                cta_font = _font(active_bot, 60, font_choice)
                 title = str(title_text or "").strip()
                 cta = str(subtitle_text or "").strip()
                 def centered(text, font, y, fill):
@@ -290,3 +292,9 @@ try:
     _install_script_output_guard()
 except Exception as exc:
     print(f"   [Script Guard] Auto-install unavailable: {type(exc).__name__}: {exc}", flush=True)
+
+try:
+    from visual_safety_runtime import install as _install_visual_safety
+    _install_visual_safety()
+except Exception as exc:
+    print(f"   [Visual Safety] Auto-install unavailable: {type(exc).__name__}: {exc}", flush=True)
