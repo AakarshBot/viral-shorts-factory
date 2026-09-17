@@ -7,7 +7,9 @@ runtime is rebound.
 """
 from __future__ import annotations
 
-RUNTIME_HARDENER_VERSION = "2026-09-16-v1"
+import inspect
+
+RUNTIME_HARDENER_VERSION = "2026-09-17-v2"
 
 
 def reassert_live_bindings(bot) -> None:
@@ -52,3 +54,50 @@ def assert_authoritative_binding(bot, name: str) -> bool:
     if not callable(value) or not isinstance(namespace, dict):
         return False
     return namespace.get(name) is value
+
+
+def validate_runtime_contracts(bot) -> list[str]:
+    """Return signature/binding errors that commonly break patched legacy calls.
+
+    This is intentionally a local contract check rather than another runtime
+    patch. It catches incompatible monkey-patched signatures before a production
+    run reaches the renderer.
+    """
+    errors = []
+    run_robot = getattr(bot, "run_robot", None)
+    namespace = getattr(run_robot, "__globals__", None)
+    if not isinstance(namespace, dict):
+        return ["run_robot.__globals__ is unavailable"]
+
+    def accepts_positionals(name, count):
+        value = namespace.get(name)
+        if not callable(value):
+            errors.append(f"{name}: callable is missing")
+            return
+        try:
+            signature = inspect.signature(value)
+            positional = [
+                parameter for parameter in signature.parameters.values()
+                if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+            ]
+            variadic = any(
+                parameter.kind is parameter.VAR_POSITIONAL
+                for parameter in signature.parameters.values()
+            )
+            if not variadic and len(positional) < count:
+                errors.append(f"{name}: accepts {len(positional)} positional args; expected at least {count}")
+        except (TypeError, ValueError) as exc:
+            errors.append(f"{name}: signature unavailable ({type(exc).__name__})")
+
+    # These are the legacy call contracts used by factory_runtime. The hook
+    # contract is especially important because it is patched by visual policy.
+    accepts_positionals("render_hook_card", 7)
+    accepts_positionals("create_branded_slide", 8)
+    accepts_positionals("render_top5_card", 9)
+
+    for name in ("write_script", "process_visuals_async", "generate_voiceover_and_timestamps"):
+        value = getattr(bot, name, None)
+        if not callable(value) or namespace.get(name) is not value:
+            errors.append(f"{name}: bot/global binding is not authoritative")
+
+    return errors
