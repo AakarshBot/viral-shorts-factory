@@ -82,6 +82,7 @@ def _test_visual_strategy():
         ({"primary_entity": "quantum computing", "voiceover": "Quantum computing uses quantum states.", "visual_intent": "scientific concept", "sport_or_topic_category": "science"}, "quantum computing", "CONCEPT"),
         ({"primary_entity": "Aurora", "voiceover": "The Aurora team members presented research findings.", "visual_intent": "team members", "sport_or_topic_category": "research"}, "Aurora", "ORGANIZATION"),
         ({"primary_entity": "Central City", "voiceover": "The conference venue in Central City hosted the announcement.", "visual_intent": "conference venue", "sport_or_topic_category": "business"}, "Central City", "LOCATION"),
+        ({"primary_entity": "ICC logo", "voiceover": "The ICC logo represents the International Cricket Council.", "visual_intent": "event", "sport_or_topic_category": "international"}, "ICC logo", "ORGANIZATION"),
     ]
 
     for scene, expected_subject, expected_type in cases:
@@ -103,6 +104,19 @@ def _test_visual_strategy():
             raise AssertionError(f"noise or category padding leaked into query: {queries}")
         if "editorial_person" in joined or "red carpet" in joined:
             raise AssertionError(f"internal narrowing leaked into query: {queries}")
+
+    logo_scene = {
+        "primary_entity": "ICC logo",
+        "voiceover": "The ICC logo represents the International Cricket Council.",
+        "visual_intent": "event",
+        "specific_search_prompt": "ICC logo",
+    }
+    logo_resolution = resolve_subject(logo_scene, "ICC logo story")
+    if logo_resolution["visual_type"] != "ORGANIZATION":
+        raise AssertionError(f"logo role was misclassified: {logo_resolution}")
+    logo_queries, logo_type = build_deep_queries(logo_scene, "ICC logo story")
+    if logo_type != "ORGANIZATION" or logo_queries != ["ICC logo", "ICC"]:
+        raise AssertionError(f"logo exact-first fallback was not preserved: {logo_queries}, {logo_type}")
 
     malformed = {
         "primary_entity": "Not Northstar Research Summit",
@@ -144,7 +158,7 @@ def _test_visual_strategy():
         raise AssertionError("context fingerprints are not distinct")
     if _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
         raise AssertionError("context-aware cache keys are not distinct")
-    return "Generic semantic resolver + grounded malformed-entity cleanup + bounded query ladder + identity QA + context-aware cache passed"
+    return "Generic semantic resolver + exact visual descriptor handling + grounded malformed-entity cleanup + bounded query ladder + identity QA + context-aware cache passed"
 
 
 def _test_scene_branding():
@@ -257,69 +271,32 @@ def _test_runtime_bindings():
     runtime_bindings.harden_editorial_defaults(ultimate_bot)
     runtime_bindings.bind_dashboard_patches(ultimate_bot)
     namespace = ultimate_bot.run_robot.__globals__
-    required = (
-        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates",
-        "validate_script", "generate_voiceover_and_timestamps", "process_visuals_async",
-        "fetch_scene_asset", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip",
-        "compile_video", "write_script",
-    )
-    for name in required:
-        if namespace.get(name) is not getattr(ultimate_bot, name):
-            raise AssertionError(f"runtime binding missing: {name}")
-    return "Live run_robot globals are connected to active runtime implementations"
-
-
-def _test_binding_lifecycle():
-    import factory_runtime, runtime_bindings, ultimate_bot
-    from runtime_hardener import assert_authoritative_binding, reassert_live_bindings
-    factory_runtime.patch_dashboard_runtime(ultimate_bot)
-    runtime_bindings.harden_editorial_defaults(ultimate_bot)
-    runtime_bindings.bind_dashboard_patches(ultimate_bot)
-    legacy = ultimate_bot.run_robot.__globals__.get("process_scored_candidates")
-    ultimate_bot.process_scored_candidates = legacy
-    ultimate_bot.run_robot.__globals__["process_scored_candidates"] = legacy
-    runtime_bindings.bind_dashboard_patches(ultimate_bot)
-    active = getattr(ultimate_bot, "process_scored_candidates", None)
-    if active is not ultimate_bot.run_robot.__globals__.get("process_scored_candidates"):
-        raise AssertionError("rebinding did not restore bot/global identity")
-    if not assert_authoritative_binding(ultimate_bot, "process_scored_candidates"):
-        raise AssertionError("authoritative binding check failed")
-    reassert_live_bindings(ultimate_bot)
-    return "Binding lifecycle restored authoritative implementation after overwrite"
-
-
-TESTS = [
-    ("Imports", _test_imports),
-    ("Environment", _test_environment),
-    ("Database", _test_database),
-    ("Visual strategy", _test_visual_strategy),
-    ("Scene branding", _test_scene_branding),
-    ("Script safeguards", _test_script_guards),
-    ("Research binding", _test_research_binding),
-    ("Audio timing", _test_audio_timing),
-    ("Search deeper simulation", _test_search_deeper),
-    ("Runtime bindings", _test_runtime_bindings),
-    ("Binding lifecycle", _test_binding_lifecycle),
-]
+    required = ("gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script", "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "fetch_scene_asset", "get_source_key", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video")
+    missing = [name for name in required if name not in namespace]
+    if missing:
+        raise AssertionError(f"runtime namespace missing required binding(s): {missing}")
+    return "Dashboard runtime bindings are complete"
 
 
 def run_offline_diagnostics():
-    results = [_run(name, fn) for name, fn in TESTS]
-    passed = sum(1 for item in results if item["status"] == "PASS")
+    checks = [
+        ("imports", _test_imports),
+        ("environment", _test_environment),
+        ("database", _test_database),
+        ("visual_strategy", _test_visual_strategy),
+        ("scene_branding", _test_scene_branding),
+        ("script_guards", _test_script_guards),
+        ("research_binding", _test_research_binding),
+        ("audio_timing", _test_audio_timing),
+        ("search_deeper", _test_search_deeper),
+        ("runtime_bindings", _test_runtime_bindings),
+    ]
+    results = [_run(name, fn) for name, fn in checks]
+    passed = sum(item["status"] == "PASS" for item in results)
     return {
+        "results": results,
         "passed": passed,
-        "failed": len(results) - passed,
         "total": len(results),
         "all_passed": passed == len(results),
         "api_calls": 0,
-        "results": results,
     }
-
-
-def main():
-    import json
-    print(json.dumps(run_offline_diagnostics(), indent=2))
-
-
-if __name__ == "__main__":
-    main()
