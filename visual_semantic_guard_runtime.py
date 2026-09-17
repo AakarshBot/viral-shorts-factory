@@ -18,6 +18,7 @@ GENERIC_NOISE = {
     "update", "story", "article", "headline", "reported", "reports", "according",
     "says", "said", "today", "yesterday", "tomorrow", "editorial", "official",
     "photo", "image", "picture", "real", "high", "resolution", "event", "item",
+    "thing", "stuff", "matter", "point", "one", "off", "kind", "way", "part", "time",
 }
 
 DISCOURSE_PREFIXES = {
@@ -129,8 +130,7 @@ def _grounded_context(candidate: str, scene: dict, video_title: str = "") -> str
     candidate_keys = set(meaningful_tokens(candidate))
     if not candidate_keys:
         return ""
-    evidence = evidence_text(scene, video_title)
-    evidence_words = _tokenise_evidence(evidence)
+    evidence_words = _tokenise_evidence(evidence_text(scene, video_title))
     keyed = [key(word) for word in evidence_words]
     positions = [i for i, item in enumerate(keyed) if item in candidate_keys]
     if not positions:
@@ -146,9 +146,6 @@ def _grounded_context(candidate: str, scene: dict, video_title: str = "") -> str
         k = key(word)
         if not k or k in GENERIC_NOISE or k in STOPWORDS or k in DISCOURSE_PREFIXES:
             continue
-        # Removing common discourse/auxiliary verbs makes the result a visual
-        # phrase rather than a sentence, while preserving concrete actions such
-        # as "hosting", "launched", or "opened" when they are informative.
         if k in AUXILIARY_WORDS:
             continue
         if k not in {key(x) for x in kept}:
@@ -188,10 +185,6 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
     else:
         subject = prompt
 
-    # Some roles benefit from nearby factual context because the bare entity is
-    # ambiguous (e.g. an event, process or generic contextual scene). This is
-    # grounded extraction, not free-form generation: every retained token comes
-    # from the supplied scene evidence.
     if role in {"EVENT", "PROCESS", "CONCEPT", "DOCUMENT", "QUOTE", "GENERAL_CONTEXT"} and subject:
         contextual = _grounded_context(subject, scene, video_title)
         if contextual and len(meaningful_tokens(contextual)) > len(meaningful_tokens(subject)):
@@ -215,9 +208,6 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
         return [], resolution["visual_type"], resolution
 
     queries = [subject]
-    # Only add a second search phrase when it is independently grounded in the
-    # scene and actually adds information. Never append a domain or role label
-    # merely to make the query list longer.
     contextual = _grounded_context(subject, scene, video_title)
     if contextual and contextual.casefold() != subject.casefold():
         candidate = sanitize_candidate(contextual)
