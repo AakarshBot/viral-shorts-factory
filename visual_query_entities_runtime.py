@@ -1,53 +1,48 @@
-"""Exact visual-subject extraction for Viral Shorts Factory.
+"""Exact visual-subject locking for Viral Shorts Factory.
 
-The production visual contract is intentionally simple:
-    slide -> primary_entity -> one exact image-search query
+Production visual contract:
+    story/script -> identify subject -> lock subject -> search exact subject once -> QA -> use/fail
 
-The narration is used upstream to decide the primary entity. Once that entity
-exists, narration, titles, visual intent and scene prose are NOT allowed to
-become search-query terms. They remain available to other parts of the
-pipeline, but never contaminate the image search.
+Once ``primary_entity`` has been selected upstream, this module deliberately
+refuses to mine narration, titles, visual intent or scene prose for additional
+search subjects. Those fields remain context for QA/editorial logic only.
 """
 from __future__ import annotations
 
+import html
 import re
 
 _QUERY_MAX = 1
+_INVALID = {"none", "unknown", "na", "n/a"}
 
 
 def _clean(value: object) -> str:
-    text = str(value or "").replace("\u200b", " ")
+    text = html.unescape(str(value or "")).replace("\u200b", " ")
     return re.sub(r"\s+", " ", text).strip(" ,.;:|\"'()[]{}")
 
 
 def _key(value: str) -> str:
-    value = _clean(value).casefold()
-    return re.sub(r"[^\w]+", "", value, flags=re.UNICODE)
+    return re.sub(r"[^\w]+", "", _clean(value).casefold(), flags=re.UNICODE)
 
 
-def _append_unique(items: list[str], value: str) -> None:
-    value = _clean(value).strip("'")
-    if value and value.casefold() not in {item.casefold() for item in items}:
-        items.append(value)
+def lock_visual_subject(scene: dict) -> str:
+    """Return the already-selected primary entity as the immutable search subject."""
+    if not isinstance(scene, dict):
+        return ""
+    subject = _clean(scene.get("primary_entity", ""))
+    if not subject or _key(subject) in _INVALID:
+        return ""
+    return subject
 
 
 def extract_slide_search_subjects(scene: dict) -> list[str]:
-    """Return exactly one search subject: the scene's primary_entity.
-
-    This function deliberately does NOT mine the voiceover for additional
-    search terms. Mentioned people, organisations and events are context for
-    editorial/script logic, not automatic extra image-search targets.
-    """
-    if not isinstance(scene, dict):
-        return []
-    primary = _clean(scene.get("primary_entity", ""))
-    if not primary or _key(primary) in {"none", "unknown", "na", "n/a"}:
-        return []
-    return [primary][: _QUERY_MAX]
+    """Return exactly one subject: the upstream-selected primary_entity."""
+    subject = lock_visual_subject(scene)
+    return [subject][: _QUERY_MAX] if subject else []
 
 
 def classify_search_subject(subject: str) -> str:
-    """Classify the already-selected subject for source routing/QA only."""
+    """Classify the locked subject for QA/source metadata only."""
     subject = _clean(subject)
     if not subject:
         return "GENERAL_CONTEXT"
@@ -74,28 +69,25 @@ def classify_search_subject(subject: str) -> str:
 
 
 def build_candidate_scene(scene: dict, subject: str) -> dict:
-    """Create a subject-focused scene without rewriting its narration."""
+    """Create a QA-focused copy without changing the original story/narration."""
     candidate = dict(scene or {})
-    subject_type = classify_search_subject(subject)
-    candidate["primary_entity"] = subject
-    candidate["visual_type"] = subject_type
-    # The search prompt is EXACTLY the entity. Never copy narration into it.
-    candidate["specific_search_prompt"] = subject
-    candidate["visual_intent"] = f"{subject_type.lower()} subject identity"
-    candidate["voiceover"] = str(scene.get("voiceover", "") or "")
+    locked = _clean(subject)
+    candidate["primary_entity"] = locked
+    candidate["visual_type"] = classify_search_subject(locked)
+    candidate["specific_search_prompt"] = locked
+    candidate["visual_subject_locked"] = True
+    candidate["visual_subject_lock"] = locked
     return candidate
 
 
 def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title=""):
-    """Search only the primary visual subject; no query expansion."""
-    subjects = extract_slide_search_subjects(scene)
-    if not subjects:
+    """Search the one locked subject. QA rejection is terminal; never try another subject."""
+    subject = lock_visual_subject(scene)
+    if not subject:
         return visual_runtime_module._relevant_asset(bot, scene, category, used_urls, used_hashes, video_title)
 
-    subject = subjects[0]
     candidate = build_candidate_scene(scene, subject)
-    subject_type = candidate["visual_type"]
-    print(f"   [Visual Search] Subject 1/1 | '{subject}' | type={subject_type}", flush=True)
+    print(f"   [Visual Search] Locked subject | '{subject}' | type={candidate['visual_type']}", flush=True)
     return visual_runtime_module._relevant_asset(
         bot, candidate, category, used_urls, used_hashes, video_title
     )
