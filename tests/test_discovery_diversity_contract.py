@@ -22,7 +22,7 @@ def _story(title, score):
     return {"title": title, "candidate_score": score}
 
 
-def test_live_dashboard_binding_rejects_diversity_backfill():
+def test_live_dashboard_binding_preserves_three_diverse_first_choices():
     bot = _Bot()
     factory_runtime.patch_dashboard_runtime(bot)
 
@@ -35,9 +35,10 @@ def test_live_dashboard_binding_rejects_diversity_backfill():
 
     selected = workflow_runtime._diverse_top_three(stories)
 
-    assert len(selected) == 2
+    assert len(selected) == 3
     assert selected[0]["title"].startswith("India announces")
     assert selected[1]["title"] == "Central bank changes interest rate guidance"
+    assert selected[2]["title"].startswith("India announces")
 
 
 def test_live_dashboard_binding_still_returns_three_distinct_candidates():
