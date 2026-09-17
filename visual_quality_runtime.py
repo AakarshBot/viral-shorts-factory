@@ -15,7 +15,9 @@ MIN_SHORT_SIDE = 720
 PREFERRED_SHORT_SIDE = 1080
 MAX_SOURCE_ASPECT = 3.2
 MIN_SOURCE_ASPECT = 0.32
-MAX_CROP_LOSS = 0.62
+# A normal 16:9 sports/news photo loses about 68% of its source area when
+# converted to 9:16, so it must remain eligible. Extremely wide banners are not.
+MAX_CROP_LOSS = 0.72
 
 
 def inspect_image(img_bytes: bytes) -> dict:
@@ -32,16 +34,7 @@ def inspect_image(img_bytes: bytes) -> dict:
         gray = img.resize((min(256, w), min(256, h))).convert("L")
         edge = gray.filter(ImageFilter.FIND_EDGES)
         sharpness = float(ImageStat.Stat(edge).var)
-        return {
-            "width": w,
-            "height": h,
-            "short_side": short,
-            "long_side": max(w, h),
-            "aspect": aspect,
-            "crop_loss": crop_loss,
-            "sharpness": sharpness,
-            "valid": True,
-        }
+        return {"width": w, "height": h, "short_side": short, "long_side": max(w, h), "aspect": aspect, "crop_loss": crop_loss, "sharpness": sharpness, "valid": True}
     except Exception:
         return {"valid": False}
 
@@ -98,21 +91,13 @@ def install(visual_runtime_module):
             print(f"   [Visual Quality] REJECTED | {reason}", flush=True)
             return False, "LOCAL-QUALITY", 0, True
 
-        accepted, tier, semantic_score, hard_reject = original_gate(
-            bot, img_bytes, seg, video_title, source=source
-        )
+        accepted, tier, semantic_score, hard_reject = original_gate(bot, img_bytes, seg, video_title, source=source)
         if not accepted and not hard_reject:
-            print(
-                f"   [Visual Quality] REJECTED | semantic verification uncertain | "
-                f"quality={quality_score} | source={source}", flush=True,
-            )
+            print(f"   [Visual Quality] REJECTED | semantic verification uncertain | quality={quality_score} | source={source}", flush=True)
             return False, tier, 0, True
         if accepted:
             combined = round((float(semantic_score) * 0.75) + (quality_score * 0.25), 1)
-            print(
-                f"   [Visual Quality] PASS | resolution/crop score={quality_score} | combined={combined}",
-                flush=True,
-            )
+            print(f"   [Visual Quality] PASS | resolution/crop score={quality_score} | combined={combined}", flush=True)
             return True, tier, combined, False
         return accepted, tier, semantic_score, hard_reject
 
@@ -125,8 +110,7 @@ def install(visual_runtime_module):
             if image is None:
                 return None, None
             try:
-                buf = io.BytesIO()
-                image.save(buf, format="JPEG", quality=95)
+                buf = io.BytesIO(); image.save(buf, format="JPEG", quality=95)
                 ok, reason, _ = quality_gate(buf.getvalue())
                 if not ok:
                     print(f"   [Visual Cache] REJECTED stale/low-quality cache | {reason}", flush=True)
@@ -137,5 +121,5 @@ def install(visual_runtime_module):
         visual_runtime_module.get_cached_asset = gated_cached_asset
 
     visual_runtime_module._quality_gate_installed = True
-    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v2"
+    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v3"
     return True
