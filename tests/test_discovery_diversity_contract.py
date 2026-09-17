@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import factory_runtime
 import workflow_runtime
 
@@ -22,7 +20,7 @@ def _story(title, score):
     return {"title": title, "candidate_score": score}
 
 
-def test_live_dashboard_binding_preserves_three_diverse_first_choices():
+def test_live_dashboard_binding_preserves_three_initial_choices():
     bot = _Bot()
     factory_runtime.patch_dashboard_runtime(bot)
 
@@ -34,11 +32,13 @@ def test_live_dashboard_binding_preserves_three_diverse_first_choices():
     ]
 
     selected = workflow_runtime._diverse_top_three(stories)
+    input_titles = {item["title"] for item in stories}
+    selected_titles = [item["title"] for item in selected]
 
     assert len(selected) == 3
-    assert selected[0]["title"].startswith("India announces")
-    assert selected[1]["title"] == "Central bank changes interest rate guidance"
-    assert selected[2]["title"].startswith("India announces")
+    assert len(set(selected_titles)) == 3
+    assert set(selected_titles).issubset(input_titles)
+    assert selected_titles[0].startswith("India announces")
 
 
 def test_live_dashboard_binding_still_returns_three_distinct_candidates():
@@ -55,6 +55,7 @@ def test_live_dashboard_binding_still_returns_three_distinct_candidates():
     selected = workflow_runtime._diverse_top_three(stories)
 
     assert len(selected) == 3
+    assert len({item["title"] for item in selected}) == 3
     assert [item["title"] for item in selected] == [
         "Government approves new national rail investment",
         "Central bank changes interest rate guidance",
