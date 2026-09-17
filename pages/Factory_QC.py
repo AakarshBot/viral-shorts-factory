@@ -20,6 +20,7 @@ from visual_replacement_runtime import install_visual_replacement_bridge
 from workflow_progress_runtime import install_workflow_progress_bridge, render_progress_events
 from visual_resilience_runtime import install_visual_resilience
 from upload_runtime import install as install_upload_hardening
+from thumbnail_runtime import install as install_thumbnail_disable
 
 st.set_page_config(page_title="Factory QC", page_icon="🛠️", layout="wide")
 
@@ -46,6 +47,7 @@ def _init_runtime() -> None:
     install_visual_replacement_bridge(ultimate_bot, newsroom_dashboard)
     install_workflow_progress_bridge(__import__("workflow_runtime"))
     install_upload_hardening()
+    install_thumbnail_disable()
 
 
 _init_runtime()
