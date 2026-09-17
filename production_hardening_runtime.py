@@ -97,93 +97,35 @@ def _repair_visual_identity(script_data: dict[str, Any], story_data: dict[str, A
 
 
 def _install_authoritative_visual_query_planner() -> None:
-    """Restore the production scene-aware query ladder after legacy policy patches."""
+    """Preserve the immutable one-query visual planner; never restore a legacy query ladder."""
     try:
         import visual_strategy_runtime
         current = getattr(visual_strategy_runtime, "build_deep_queries", None)
-        if getattr(current, "_production_query_planner_bound", False):
+
+        if getattr(current, "_authoritative_locked_subject_planner", False):
+            print(
+                "   [Visual Strategy Hardening] Strict single-query visual planner preserved; legacy multi-query hardening skipped.",
+                flush=True,
+            )
             return
 
-        def build_deep_queries_authoritative(seg, video_title="", visual_type=None):
-            clean = visual_strategy_runtime._clean
-            normalise = visual_strategy_runtime._normalise_query
-            add_unique = visual_strategy_runtime._add_unique
-            brief_builder = visual_strategy_runtime.build_scene_visual_brief
-            classify = visual_strategy_runtime.classify_scene
-            scene_phrase_builder = visual_strategy_runtime._scene_phrase
-            max_queries = getattr(visual_strategy_runtime, "MAX_VISUAL_SEARCH_QUERIES", 6)
-
-            category = clean(seg.get("sport_or_topic_category", ""))
-            brief = brief_builder(seg, video_title, category)
-            entity = brief["subject"]
-            intent = normalise(seg.get("visual_intent", ""))
-            title = clean(video_title)
-            scene_phrase = scene_phrase_builder(seg)
-            resolved_type = visual_type or brief["visual_type"] or classify(seg, category)
-            action = brief["scene_action"]
-            context = brief["scene_context"]
-            scene_index = brief["scene_index"]
-            queries = []
-
-            def with_scene(*parts):
-                add_unique(queries, *parts)
-                if len(queries) >= max_queries:
-                    return
-                if scene_index:
-                    add_unique(queries, *parts, f"scene {scene_index}")
-
-            if resolved_type == "PERSON":
-                with_scene(entity, action, "photo")
-                with_scene(entity, scene_phrase, intent)
-                with_scene(entity, title, "editorial photo")
-                with_scene(entity, category, "official photo")
-                with_scene(entity, "press photo")
-                return queries[:max_queries], resolved_type
-
-            if resolved_type == "ORGANIZATION":
-                with_scene(entity, action)
-                with_scene(entity, scene_phrase, "official")
-                with_scene(entity, intent, title)
-                with_scene(entity, category, "press")
-                with_scene(entity, "official")
-                with_scene(entity, "press conference")
-                return queries[:max_queries], resolved_type
-
-            if resolved_type == "LOCATION":
-                with_scene(entity, action)
-                with_scene(entity, scene_phrase, "real photo")
-                with_scene(entity, context, "landmark")
-                with_scene(entity, title, "editorial photo")
-                with_scene(entity, category, "cityscape")
-                with_scene(entity, "street view")
-                return queries[:max_queries], resolved_type
-
-            modifier_map = {
-                "EVENT": ["official event photo", "editorial photo", "press photo", "actual event photo"],
-                "PRODUCT": ["official product photo", "product launch photo", "real product image", "press image"],
-                "STATISTIC": ["chart", "infographic", "data visualization", "relevant editorial photo"],
-                "COMPARISON": ["comparison", "side by side", "chart", "editorial photo"],
-                "TIMELINE": ["archive photo", "historical photo", "timeline", "before after"],
-                "PROCESS": ["diagram", "process illustration", "how it works", "technical illustration"],
-                "QUOTE": ["official statement", "press conference photo", "speaker photo", "document"],
-                "DOCUMENT": ["official document", "filing", "report", "study document"],
-                "CONCEPT": ["concept illustration", "editorial illustration", "scientific illustration", "documentary context"],
-                "GENERAL_CONTEXT": ["editorial photo", "documentary photo", "real world photo", "high resolution photo"],
-            }
-            modifiers = modifier_map.get(resolved_type, modifier_map["GENERAL_CONTEXT"])
-            with_scene(action, modifiers[0])
-            with_scene(entity, scene_phrase, modifiers[1])
-            with_scene(entity, intent, modifiers[2])
-            with_scene(entity, category, modifiers[3])
-            with_scene(entity, title, "news photo")
-            with_scene(entity, context)
-            return queries[:max_queries], resolved_type
-
-        build_deep_queries_authoritative._production_query_planner_bound = True
-        visual_strategy_runtime.build_deep_queries = build_deep_queries_authoritative
-        print("   [Visual Strategy Hardening] Restored authoritative scene-aware query planner (up to 6 queries).", flush=True)
+        # Recovery path only: ask the real visual lock runtime to install the
+        # authoritative planner. This function must never construct its own
+        # multi-query planner.
+        from visual_query_lock_runtime import install
+        install()
+        current = getattr(visual_strategy_runtime, "build_deep_queries", None)
+        if not getattr(current, "_authoritative_locked_subject_planner", False):
+            raise RuntimeError("authoritative one-query visual planner could not be installed")
+        print(
+            "   [Visual Strategy Hardening] Strict single-query visual planner installed.",
+            flush=True,
+        )
     except Exception as exc:
-        print(f"   [Visual Strategy Hardening] Query planner restore unavailable: {type(exc).__name__}: {exc}", flush=True)
+        print(
+            f"   [Visual Strategy Hardening] Strict planner check failed: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
 
 
 def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
