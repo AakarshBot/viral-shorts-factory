@@ -446,10 +446,16 @@ def _run_synthetic_renderer_demo() -> dict[str, Any]:
     }
 
 
+def factory_function_coverage() -> dict[str, Any]:
+    """Return the explicit coverage audit used by Demo Factory and diagnostics."""
+    from factory_function_coverage import collect_factory_function_coverage
+    return collect_factory_function_coverage(Path(__file__).resolve().parent)
+
+
 def run_demo_section(section: str) -> dict[str, Any]:
     """Run one dashboard-visible code section in a no-API demo harness."""
     from diagnostics_runtime import (
-        _test_dashboard_architecture,
+        _test_dashboard_architecture,\n        _test_factory_function_coverage,
         _test_database,
         _test_environment,
         _test_imports,
@@ -469,7 +475,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
         "script_audio": _test_script_and_audio,
         "runtime_bindings": _test_runtime_bindings,
         "provider_boundary": _test_provider_boundary,
-        "dashboard_architecture": _test_dashboard_architecture,
+        "dashboard_architecture": _test_dashboard_architecture,\n        "factory_function_coverage": _test_factory_function_coverage,
     }
 
     if section == "manual_visual_queries":
@@ -511,5 +517,5 @@ __all__ = [
     "discover_ranked_topics",
     "collect_channel_statistics",
     "collect_live_channel_statistics",
-    "run_demo_section",
+    "run_demo_section",\n    "factory_function_coverage",
 ]
