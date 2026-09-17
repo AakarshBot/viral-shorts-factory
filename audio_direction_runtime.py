@@ -19,6 +19,14 @@ def choose_delivery_profile(bot, script_data):
 
 
 def patch_audio_direction(bot):
+    # Pipeline integrity is bound first so script -> narration -> visuals ->
+    # subtitles all share one authoritative scene source.
+    try:
+        from pipeline_integrity_loader import patch_pipeline_integrity
+        patch_pipeline_integrity(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Pipeline integrity guard unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     # Branding, final artifact QC and channel intelligence are bound here
     # because this patch is part of the live runtime binding stack; each is
     # explicit and idempotent.
