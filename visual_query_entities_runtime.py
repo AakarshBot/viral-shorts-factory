@@ -70,7 +70,9 @@ def build_candidate_scene(scene: dict, subject: str) -> dict:
             str(candidate.get("sport_or_topic_category", "")),
         )
         visual_subject = _clean(brief.get("subject", "")) or factual_subject
-        visual_type = brief.get("visual_type") or classify_search_subject(visual_subject)
+        visual_type = classify_search_subject(visual_subject)
+        if visual_type == "GENERAL_CONTEXT":
+            visual_type = brief.get("visual_type") or visual_type
     except Exception:
         visual_subject = factual_subject
         visual_type = classify_search_subject(visual_subject)
