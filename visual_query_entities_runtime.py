@@ -191,7 +191,6 @@ def _extract_known_entities(text: str) -> list[str]:
 
 
 def _script_position(script: str, candidate: str) -> int:
-    """Locate a normalized subject, including possessive spelling in the script."""
     direct = script.casefold().find(candidate.casefold())
     if direct >= 0:
         return direct
@@ -267,14 +266,20 @@ def classify_search_subject(subject: str) -> str:
 
 
 def build_candidate_scene(scene: dict, subject: str) -> dict:
-    """Create the subject-only scene passed into the visual runtime."""
+    """Create a subject-focused scene while preserving the original context.
+
+    The old implementation replaced the voiceover with the subject itself.
+    That accidentally removed the very context needed by semantic QA to tell,
+    for example, a men's team from a women's team. Search remains subject-only;
+    verification keeps the complete original scene evidence.
+    """
     candidate = dict(scene or {})
     subject_type = classify_search_subject(subject)
     candidate["primary_entity"] = subject
     candidate["visual_type"] = subject_type
-    candidate["visual_intent"] = f"{subject_type.lower()} subject identity"
-    candidate["specific_search_prompt"] = subject
-    candidate["voiceover"] = subject
+    candidate["specific_search_prompt"] = str(scene.get("specific_search_prompt", "") or subject)
+    candidate["visual_intent"] = str(scene.get("visual_intent", "") or f"{subject_type.lower()} subject identity")
+    candidate["voiceover"] = str(scene.get("voiceover", "") or "")
     return candidate
 
 
@@ -301,7 +306,5 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
             print(f"   [Visual Search] Subject '{subject}' produced no usable visual; falling back to next slide subject.", flush=True)
 
     if last_error is not None:
-        raise RuntimeError(
-            f"No usable visual found for slide subjects {subjects!r}. Last failure: {last_error}"
-        ) from last_error
+        raise RuntimeError(f"No usable visual found for slide subjects {subjects!r}. Last failure: {last_error}") from last_error
     raise RuntimeError(f"No usable visual found for slide subjects {subjects!r}.")
