@@ -7,10 +7,31 @@ crashing the factory.
 """
 from __future__ import annotations
 
-from visual_semantic_guard_runtime import build_query_ladder, clean_text, prepare_scene, resolve_subject
+from visual_semantic_guard_runtime import build_query_ladder, clean_text, infer_role, prepare_scene, resolve_subject
 from visual_retrieval_runtime import run_visual_retrieval
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
+_MAX_QUERY_BUDGET = 6
+_MIN_QUERY_BUDGET = 3
+
+# Generic presentation terms are fall-through retrieval variants, not factual
+# identity. They are selected by visual modality so the logic remains shared
+# across genres rather than carrying category-specific search rules.
+_QUERY_FALLBACKS = {
+    "PERSON": ("portrait", "biography"),
+    "ORGANIZATION": ("official", "logo"),
+    "PRODUCT": ("product", "specifications"),
+    "LOCATION": ("map", "landmark"),
+    "EVENT": ("event", "ceremony"),
+    "DOCUMENT": ("document", "report"),
+    "QUOTE": ("quotation", "statement"),
+    "STATISTIC": ("chart", "data"),
+    "COMPARISON": ("comparison", "chart"),
+    "TIMELINE": ("timeline", "chronology"),
+    "PROCESS": ("diagram", "workflow"),
+    "CONCEPT": ("diagram", "illustration"),
+    "GENERAL_CONTEXT": ("context", "illustration"),
+}
 
 
 def _install_runtime_query_guard(visual_runtime_module):
@@ -18,20 +39,62 @@ def _install_runtime_query_guard(visual_runtime_module):
     if getattr(visual_runtime_module, "_generic_semantic_query_guard", False):
         return
 
+    # Activate the bounded fetch worker and central budget layer on the active
+    # path. This is intentionally runtime-local so import order stays safe.
+    try:
+        from visual_safety_runtime import install as install_visual_safety
+        install_visual_safety()
+    except Exception as exc:
+        print(f"   [Visual Safety] Runtime installation deferred: {type(exc).__name__}: {exc}", flush=True)
+
     def guarded_build_search_variants(seg, video_title=""):
         queries, visual_type, resolution = build_query_ladder(seg, video_title)
+
+        # A malformed environment value of 0/1 must not turn retrieval into a
+        # single-point-of-failure. Keep a bounded minimum of three attempts and
+        # a hard ceiling of six, independent of the content genre.
+        try:
+            configured_budget = int(getattr(visual_runtime_module, "VISUAL_MAX_SEARCH_QUERIES", _MIN_QUERY_BUDGET))
+        except (TypeError, ValueError):
+            configured_budget = _MIN_QUERY_BUDGET
+        search_budget = min(_MAX_QUERY_BUDGET, max(_MIN_QUERY_BUDGET, configured_budget))
+        visual_runtime_module.VISUAL_MAX_SEARCH_QUERIES = search_budget
+
         if not queries:
             raise RuntimeError(
                 "No grounded visual query could be derived from the scene; "
                 "refusing to fall back to narration, title, category, or role text."
             )
+
+        # Clean factual identity is the final retrieval anchor. When the normal
+        # ladder already has fewer than three unique queries (for example a
+        # clean one-word person/entity), add neutral modality descriptors rather
+        # than reusing raw narration or expanding into a sentence.
+        anchor = clean_text(
+            resolution.get("factual_entity")
+            or seg.get("factual_primary_entity")
+            or resolution.get("subject")
+            or seg.get("primary_entity")
+        )
+        fallback_terms = _QUERY_FALLBACKS.get(str(visual_type).upper(), ("context", "illustration"))
+        seen = {clean_text(q).casefold() for q in queries}
+        for term in fallback_terms:
+            if len(queries) >= _MAX_QUERY_BUDGET or not anchor:
+                break
+            query = clean_text(f"{anchor} {term}")
+            if query and query.casefold() not in seen:
+                queries.append(query)
+                seen.add(query.casefold())
+            if len(queries) >= _MIN_QUERY_BUDGET:
+                break
+
         print(
-            f"   [Visual Semantic Guard] original='{resolution.get('original_entity','')}' "
-            f"resolved='{resolution.get('subject','')}' type={visual_type} "
+            f"   [Visual Semantic Guard] original='{resolution.get('original_entity','')}" 
+            f"' resolved='{resolution.get('subject','')}' type={visual_type} "
             f"confidence={resolution.get('confidence', 0):.2f}",
             flush=True,
         )
-        return queries[:visual_runtime_module.VISUAL_MAX_SEARCH_QUERIES], visual_type
+        return queries[:search_budget], visual_type
 
     def generic_source_plan(bot, visual_type, category=""):
         """Choose sources by visual modality/source strength, never by genre."""
@@ -116,6 +179,15 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     prepared["original_primary_entity"] = original_entity
     prepared["factual_voiceover"] = original_voiceover
     prepared["factual_visual_intent"] = original_intent
+
+    # Recover a strong generic factual role from the resolved subject when the
+    # upstream script carries an inconsistent stale visual_type. For example,
+    # the word "team" is an organization cue regardless of whether the story
+    # is sports, business, science, entertainment, or another genre. Weak/no
+    # subject evidence never overrides the explicit upstream type.
+    subject_role = infer_role({"primary_entity": visual_subject})
+    if subject_role != "GENERAL_CONTEXT":
+        prepared["visual_type"] = subject_role
 
     # Retrieval/AI receives only the compact visual subject, never raw narration.
     prepared["primary_entity"] = visual_subject
