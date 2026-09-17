@@ -21,7 +21,8 @@ _SEARCH_ACTIONS = {"lift", "lifts", "lifted", "lifting", "celebrate", "celebrate
 _ROLE_LABELS = {
     "person", "organization", "organisation", "company", "corporation", "product", "device",
     "location", "geography", "concept", "process", "event", "document", "quote", "quotation",
-    "statistic", "comparison", "timeline",
+    "statistic", "comparison", "timeline", "scientific", "technical", "abstract", "team", "members",
+    "venue", "conference",
 }
 
 
@@ -97,21 +98,28 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
             terms = candidate_terms
             break
 
-    if not terms:
-        return queries
+    if terms:
+        # First use the simplest visual-intent combination. This remains ahead of
+        # any richer prompt-derived phrase and is intentionally capped at three terms.
+        compact = clean_text(" ".join([anchor, *terms[:3]]))
+        if compact and compact.casefold() != anchor.casefold():
+            queries.append(compact)
 
-    # First use the simplest visual-intent combination. This remains ahead of
-    # any richer prompt-derived phrase and is intentionally capped at three terms.
-    compact = clean_text(" ".join([anchor, *terms[:3]]))
-    if compact and compact.casefold() != anchor.casefold():
-        queries.append(compact)
+        for term in (terms[-1], terms[0]):
+            query = clean_text(f"{anchor} {term}")
+            if query and query.casefold() not in {q.casefold() for q in queries}:
+                queries.append(query)
+            if len(queries) >= _MAX_QUERY_BUDGET:
+                break
 
-    for term in (terms[-1], terms[0]):
-        query = clean_text(f"{anchor} {term}")
-        if query and query.casefold() not in {q.casefold() for q in queries}:
-            queries.append(query)
-        if len(queries) >= _MAX_QUERY_BUDGET:
-            break
+    # Simple descriptor fallback: "ICC logo" can sensibly broaden to "ICC".
+    # This is not prompt expansion; it merely removes a generic visual suffix.
+    core_anchor_words = tokens(anchor)
+    while len(core_anchor_words) > 1 and key(core_anchor_words[-1]) in VISUAL_DESCRIPTORS:
+        core_anchor_words.pop()
+    core_anchor = clean_text(" ".join(core_anchor_words))
+    if core_anchor and core_anchor.casefold() not in {q.casefold() for q in queries} and len(queries) < _MAX_QUERY_BUDGET:
+        queries.append(core_anchor)
 
     return queries[:_MAX_QUERY_BUDGET]
 
