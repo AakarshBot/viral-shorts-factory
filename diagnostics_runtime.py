@@ -220,6 +220,22 @@ def _test_provider_boundary():
     return "Raw-provider boundary regression passed"
 
 
+def _test_manual_visual_queries():
+    from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
+    queries = parse_manual_visual_queries(
+        "India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium"
+    )
+    scenes = [
+        {"primary_entity": "India Afghanistan", "voiceover": "India and Afghanistan play the final match."},
+        {"primary_entity": "Shubman Gill", "voiceover": "Shubman Gill leads India's batting."},
+        {"primary_entity": "New Delhi", "voiceover": "The match is being played in New Delhi."},
+    ]
+    assignments = assign_manual_queries(scenes, queries)
+    if len(queries) != 3 or len(assignments) != 3 or any(not item.get("query") for item in assignments):
+        raise AssertionError(f"manual visual query routing failed: {assignments}")
+    return "Manual semicolon-separated visual queries are parsed and assigned to the relevant scenes"
+
+
 def _test_dashboard_architecture():
     root = Path(__file__).resolve().parent
     required = ["app.py", "ultimate_bot.py", "workflow_runtime.py", "visual_retrieval_runtime.py", "final_qc_runtime.py"]
@@ -258,6 +274,7 @@ def run_offline_diagnostics():
         ("script_audio", _test_script_and_audio),
         ("runtime_bindings", _test_runtime_bindings),
         ("provider_boundary", _test_provider_boundary),
+        ("manual_visual_queries", _test_manual_visual_queries),
         ("dashboard_architecture", _test_dashboard_architecture),
     ]
     results = [_run(name, fn) for name, fn in checks]
