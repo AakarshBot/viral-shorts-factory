@@ -1,9 +1,8 @@
 """Visual-subject preparation for Viral Shorts Factory.
 
-The factual entity is preserved in ``factual_primary_entity``. The runtime's
-``primary_entity`` is then set to the precise, scene-grounded visual subject so
-retrieval and QA evaluate the same thing. Example: ``India`` becomes
-``India cricket team`` when the scene is explicitly about cricket.
+The authoritative semantic resolver preserves the factual entity while deriving
+one precise visual subject for retrieval. Resolution is genre-agnostic and uses
+scene role + optional domain context rather than entity-specific exceptions.
 """
 from __future__ import annotations
 
@@ -40,21 +39,9 @@ def classify_search_subject(subject: str) -> str:
         return "GENERAL_CONTEXT"
     try:
         import visual_retrieval_planner as planner
-        if planner._looks_like_organization(subject):
-            return "ORGANIZATION"
-        if planner._looks_like_location(subject):
-            return "LOCATION"
-        if planner._looks_like_product(subject):
-            return "PRODUCT"
+        return planner.classify_subject_text(subject)
     except Exception:
-        pass
-    words = subject.split()
-    keys = {_key(word) for word in words}
-    if keys.intersection({"cup", "championship", "league", "final", "open", "games", "trophy", "summit", "festival", "tournament", "prix"}):
-        return "EVENT"
-    if keys.intersection({"team", "squad", "board", "association", "government", "ministry", "committee", "company", "corporation"}):
-        return "ORGANIZATION"
-    return "GENERAL_CONTEXT"
+        return "GENERAL_CONTEXT"
 
 
 def build_candidate_scene(scene: dict, subject: str) -> dict:
@@ -70,15 +57,13 @@ def build_candidate_scene(scene: dict, subject: str) -> dict:
             str(candidate.get("sport_or_topic_category", "")),
         )
         visual_subject = _clean(brief.get("subject", "")) or factual_subject
-        visual_type = classify_search_subject(visual_subject)
-        if visual_type == "GENERAL_CONTEXT":
-            visual_type = brief.get("visual_type") or visual_type
+        visual_type = str(brief.get("visual_type") or classify_search_subject(visual_subject)).upper()
     except Exception:
         visual_subject = factual_subject
         visual_type = classify_search_subject(visual_subject)
 
     # The downstream runtime historically uses primary_entity as its search
-    # identity. Give it the precise visual subject, while retaining the original
+    # identity. Give it the resolved visual subject while retaining the original
     # factual entity separately for provenance/debugging.
     candidate["primary_entity"] = visual_subject
     candidate["visual_search_subject"] = visual_subject
