@@ -65,6 +65,61 @@ def test_strict_fallback_refuses_thin_source_instead_of_inventing_text():
         raise AssertionError("Thin source should not be padded with invented narration")
 
 
+def test_generated_script_is_cleaned_and_marked_authoritative():
+    bot = _Bot()
+
+    def dirty_writer(story_data, language_cfg, genre_key, conn, format_mode):
+        return {
+            "script": [
+                {
+                    "voiceover": "India&nbsp;announced <b>a new plan</b> today. https://example.com\u200b",
+                    "primary_entity": "India&nbsp;",
+                }
+            ]
+        }
+
+    bot.write_script = dirty_writer
+    _wrap_script_writer(bot)
+    result = bot.write_script({}, {}, "news", None, "regular")
+
+    scene = result["script"][0]
+    assert result["authoritative_narration"] is True
+    assert result["integrity_version"]
+    assert scene["narration_source"] == "validated_script"
+    assert scene["voiceover"] == "India announced a new plan today."
+    assert "http" not in scene["voiceover"].lower()
+    assert "<b>" not in scene["voiceover"].lower()
+    assert "nbsp" not in scene["voiceover"].lower()
+
+
+def test_provider_garbage_falls_back_without_leaking_into_script():
+    bot = _Bot()
+
+    def broken_writer(story_data, language_cfg, genre_key, conn, format_mode):
+        return {
+            "script": [
+                {
+                    "voiceover": "[!] Groq API error 429 — return only a valid JSON schema.",
+                }
+            ]
+        }
+
+    bot.write_script = broken_writer
+    _wrap_script_writer(bot)
+    source = (
+        "India announced a new policy today. The ministry said the measure will begin next month. "
+        "Officials described the change as a response to recent developments. The first phase covers major cities. "
+        "The government said more details will be published before implementation."
+    )
+    result = bot.write_script({"title": "India announces new policy", "text": source}, {}, "news", None, "regular")
+
+    assert result["fallback_mode"] == "strict_source_only"
+    assert result["authoritative_narration"] is True
+    assert all("Groq" not in scene["voiceover"] for scene in result["script"])
+    assert all("JSON schema" not in scene["voiceover"] for scene in result["script"])
+    assert all(scene["narration_source"] == "validated_script" for scene in result["script"])
+
+
 def test_content_density_marker_survives_integrity_wrapper_order():
     bot = _Bot()
     wrap_write_script(bot)
