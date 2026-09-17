@@ -1,7 +1,7 @@
 from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
 
 
-def test_search_uses_exact_slide_entity_only():
+def test_search_uses_exact_locked_slide_entity_only():
     scene = {
         "primary_entity": "Rishabh Pant",
         "voiceover": "Rishabh Pant was omitted from India's ODI squad after the selection meeting.",
@@ -12,12 +12,8 @@ def test_search_uses_exact_slide_entity_only():
     queries, visual_type = build_deep_queries(scene, "Rishabh Pant omission from ODI squad")
 
     assert visual_type == "PERSON"
-    assert queries == ["Rishabh Pant", "India"]
-    assert all("odi" not in q.lower() for q in queries)
-    assert all("press" not in q.lower() for q in queries)
-    assert all("conference" not in q.lower() for q in queries)
-    assert all("editorial" not in q.lower() for q in queries)
-    assert all("squad" not in q.lower() for q in queries)
+    assert queries == ["Rishabh Pant"]
+    assert all(noise not in queries[0].lower() for noise in ("india", "odi", "players", "press", "conference", "editorial", "squad"))
 
 
 def test_exact_search_preserves_multilingual_subject_text():
@@ -44,7 +40,7 @@ def test_search_query_does_not_synthesize_context_for_non_person_subjects():
         assert queries == [expected], (scene, queries)
 
 
-def test_india_cricket_brief_remains_available_but_is_not_a_search_rewrite():
+def test_india_brief_remains_available_but_is_not_a_search_rewrite():
     scene = {
         "primary_entity": "India",
         "voiceover": "India's white-ball stars move up the latest T20I rankings",
