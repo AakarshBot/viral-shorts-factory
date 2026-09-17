@@ -87,20 +87,6 @@ def install() -> bool:
         visual_runtime.VISUAL_BUDGET_RUNTIME_VERSION = "2026-09-17-v1"
         visual_qa_runtime.VISUAL_BUDGET_RUNTIME_VERSION = "2026-09-17-v1"
 
-        try:
-            from runtime_hardener import validate_runtime_contracts
-            import ultimate_bot
-            contract_errors = validate_runtime_contracts(ultimate_bot)
-            if contract_errors:
-                print("   [Runtime Hardener] Contract warnings: " + " | ".join(contract_errors), flush=True)
-            else:
-                print("   [Runtime Hardener] Renderer/runtime contracts passed.", flush=True)
-        except Exception as contract_exc:
-            print(
-                f"   [Runtime Hardener] Contract check unavailable: {type(contract_exc).__name__}: {contract_exc}",
-                flush=True,
-            )
-
         _INSTALLED = True
         print(
             "   [Visual Safety] Central budgets + bounded fetch workers installed: "
