@@ -18,6 +18,150 @@ from PIL import Image
 from workflow_runtime import WorkflowController
 
 
+def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 12) -> list[dict[str, Any]]:
+    """Dashboard-only discovery pool: preserve the factory ranker, but retain up to 12 ranked topics."""
+    from story_ranker import (
+        _canonical_url,
+        _cheap_filter,
+        _cricket_relevance_pass,
+        _deduplicate_stage,
+        _editorial_score,
+        _fact_source_stage,
+        _load_history,
+        _load_used_topics,
+        _originality_stage,
+        _requested_topic_pass,
+        _source_url_from_item,
+        _query_variants,
+        _gnews_items,
+        _rss_items,
+        _reddit_items,
+    )
+    from workflow_runtime import _candidate_reason, _source_label, _story_key, _story_url
+
+    max_candidates = max(3, min(12, int(max_candidates or 12)))
+    fmt = str(web_config.get("format_mode", "regular"))
+    category = str(web_config.get("category", ""))
+    language = str(web_config.get("language", "english"))
+    bot._active_web_config = dict(web_config)
+
+    is_cricket = fmt == "cricket" or bool(web_config.get("cricket_pipeline"))
+    if is_cricket:
+        cricket_name = str(web_config.get("cricket_category", "AI-assisted top story in cricket"))
+        from workflow_runtime import CRICKET_CATEGORIES
+        cricket_cfg = CRICKET_CATEGORIES.get(cricket_name, CRICKET_CATEGORIES["AI-assisted top story in cricket"])
+        genre_key = "sports_stories_of_day"
+        genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key, {})
+        custom_q = str(web_config.get("requested_topic", "") or "").strip() or cricket_cfg["query"]
+        custom_rss = cricket_cfg["rss"]
+    else:
+        genre_key = category or "national_global_affairs"
+        genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key)
+        if not genre_cfg:
+            raise ValueError(f"Unknown category: {genre_key}")
+        custom_q = None
+        custom_rss = None
+
+    api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
+    base_query = str(web_config.get("requested_topic", "") or "").strip() or genre_cfg.get("gnews_q", "")
+    if is_cricket and not str(web_config.get("requested_topic", "") or "").strip():
+        base_query = custom_q
+
+    raw: list[dict[str, Any]] = []
+    try:
+        legacy = bot.gather_and_filter_stories(
+            conn,
+            genre_key,
+            genre_cfg,
+            web_config.get("trend_keyword"),
+            custom_q,
+            custom_rss,
+        )
+        if isinstance(legacy, list):
+            raw.extend(legacy)
+    except Exception as exc:
+        print(f"   [Dashboard Discovery] Existing discovery intake skipped: {type(exc).__name__}", flush=True)
+
+    for query in _query_variants(
+        base_query,
+        genre_key,
+        ai_cricket=(
+            genre_key == "sports_stories_of_day"
+            and str(web_config.get("cricket_category", "")) == "AI-assisted top story in cricket"
+        ),
+    ):
+        raw.extend(_gnews_items(query, api_key, genre_key))
+
+    raw.extend(_rss_items(custom_rss or genre_cfg.get("rss_url", ""), genre_key))
+    social_rows = _reddit_items(genre_key)
+    social_titles = [row.get("title", "") for row in social_rows]
+
+    compact: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for story in raw:
+        if not isinstance(story, dict):
+            continue
+        source_key = _canonical_url(_source_url_from_item(story))
+        title_key = "title:" + " ".join(sorted(str(story.get("title", "")).lower().split()))
+        key = source_key or title_key
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        compact.append(story)
+
+    requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+    relevance_filtered = []
+    for candidate in compact:
+        if not _cricket_relevance_pass(candidate, genre_key):
+            continue
+        if not _requested_topic_pass(candidate, requested_topic):
+            continue
+        relevance_filtered.append(candidate)
+    compact = relevance_filtered
+
+    ai_cricket = (
+        genre_key == "sports_stories_of_day"
+        and str(web_config.get("cricket_category", "")) == "AI-assisted top story in cricket"
+    )
+    rows = _load_history(conn)
+    used_topics = _load_used_topics(conn)
+    stage30 = _cheap_filter(compact, max_items=30, max_age_hours=24 if ai_cricket else 48)
+    stage15 = _deduplicate_stage(stage30, max_items=15)
+    stage8 = _fact_source_stage(stage15, max_items=15)
+    stage12 = _originality_stage(stage8, used_topics, max_items=max_candidates)
+    ranked = [
+        _editorial_score(
+            item,
+            rows,
+            category or genre_key,
+            web_config.get("format_mode", "regular"),
+            language,
+            social_titles,
+            ai_cricket,
+        )
+        for item in stage12
+    ]
+    ranked.sort(key=lambda item: float(item.get("candidate_score") or -9999.0), reverse=True)
+
+    pool = ranked[:max_candidates]
+    for rank, story in enumerate(pool, 1):
+        story["discovery_rank"] = rank
+        story["discovery_reason"] = _candidate_reason(story)
+        story["source_label"] = _source_label(story)
+        story["story_url"] = _story_url(story)
+        story["story_key"] = _story_key(story)
+
+    if len(pool) < 3:
+        raise ValueError(
+            f"Discovery produced only {len(pool)} dashboard candidate(s). At least 3 are required to start production."
+        )
+    print(
+        f"   [Dashboard Discovery] Ranked topic pool ready: {len(pool)} candidate(s); dashboard shows 3 at a time.",
+        flush=True,
+    )
+    return pool
+
+
 class DashboardWorkflowController(WorkflowController):
     """WorkflowController with a dashboard-side visual approval checkpoint."""
 
@@ -354,6 +498,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
 
 __all__ = [
     "DashboardWorkflowController",
+    "discover_ranked_topics",
     "collect_channel_statistics",
     "collect_live_channel_statistics",
     "run_demo_section",
