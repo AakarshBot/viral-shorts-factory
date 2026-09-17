@@ -7,11 +7,16 @@ preferred over an empty frame when verification infrastructure is unavailable.
 AI generation is reserved for abstract/contextual scenes after real-source
 retrieval is exhausted. A tiny built-in visual rescue exists only as the final
 renderer guarantee; it is never presented as a factual photograph.
+
+The provider layer is intentionally raw. Provider adapters only search and
+return downloadable image bytes; this module is the sole active acceptance
+boundary for image decode, dimensions, deduplication and semantic QA.
 """
 from __future__ import annotations
 
 import hashlib
 import io
+import os
 import re
 from typing import Any
 
@@ -45,31 +50,11 @@ def _as_image_bytes(data: Any) -> bytes | None:
     return None
 
 
-def _source_plan(bot, visual_type: str):
-    """Choose sources by visual modality, never by story genre."""
-    try:
-        from image_sources_runtime import fetch_openverse, fetch_pixabay
-    except Exception:
-        fetch_openverse = fetch_pixabay = None
+def _source_plan(_bot, visual_type: str):
+    """Return only raw providers; bot provider methods are never used here."""
+    from visual_provider_boundary_runtime import build_raw_source_plan
 
-    kind = str(visual_type or "GENERAL_CONTEXT").upper()
-    plan = []
-    if kind == "PERSON":
-        plan.extend([
-            ("Wikipedia", getattr(bot, "fetch_wiki_person_image", None)),
-            ("Commons", getattr(bot, "fetch_wikimedia_commons", None)),
-        ])
-    elif kind in {"ORGANIZATION", "EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
-        plan.append(("Commons", getattr(bot, "fetch_wikimedia_commons", None)))
-
-    plan.extend([
-        ("Openverse", fetch_openverse),
-        ("DDG", getattr(bot, "fetch_duckduckgo", None)),
-        ("Pixabay", fetch_pixabay),
-        ("Pexels", getattr(bot, "fetch_pexels", None)),
-        ("Unsplash", getattr(bot, "fetch_unsplash", None)),
-    ])
-    return [(name, fn) for name, fn in plan if callable(fn)]
+    return build_raw_source_plan(visual_type)
 
 
 def _hash_image(bot, data: bytes) -> str:
@@ -81,9 +66,11 @@ def _hash_image(bot, data: bytes) -> str:
 
 def _preflight_image(data: Any) -> tuple[bool, str, bytes | None]:
     """Cheap decode/size/aspect validation; invalid bytes consume no QA budget."""
+    if data is None:
+        return False, "provider-returned-no-candidate", None
     normalized = _as_image_bytes(data)
     if not normalized:
-        return False, "empty-or-nonimage", None
+        return False, "provider-returned-unsupported-data", None
     try:
         image = Image.open(io.BytesIO(normalized))
         image.load()
@@ -183,7 +170,7 @@ def _ai_prompt(subject: str, visual_type: str) -> str:
 
 
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
-    """Search several grounded phrases across several real sources without blank frames."""
+    """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
     factual_entity = str(seg.get("factual_primary_entity") or entity).strip()
     queries, visual_type = runtime._build_search_variants(seg, video_title)
@@ -252,7 +239,10 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
             valid, reason, normalized = _preflight_image(data)
             if not valid:
-                print(f"   [Visual Quality] REJECTED | {reason} | source={source} | query='{query}'", flush=True)
+                if reason.startswith("provider-returned-"):
+                    print(f"   [Visual Source] {source} | no candidate returned | query='{query}'", flush=True)
+                else:
+                    print(f"   [Visual Quality] REJECTED | {reason} | source={source} | query='{query}'", flush=True)
                 continue
 
             image_hash = _hash_image(bot, normalized)
