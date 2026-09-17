@@ -4,6 +4,7 @@ import os
 import streamlit as st
 
 import ultimate_bot
+import visual_runtime
 from factory_runtime import install_safe_exception_hook, patch_dashboard_runtime
 from provider_runtime import patch_provider_adapters
 from quality_runtime import patch_quality_control
@@ -14,8 +15,9 @@ from visual_qa_runtime import install_visual_qa_bridge
 from visual_runtime import patch_visual_pipeline
 from audio_runtime import patch_audio_pipeline
 from newsroom_dashboard import render_dashboard
-import visual_runtime
-
+import newsroom_dashboard
+from visual_replacement_runtime import install_visual_replacement_bridge
+from workflow_progress_runtime import install_workflow_progress_bridge, render_progress_events
 
 st.set_page_config(page_title="Factory QC", page_icon="🛠️", layout="wide")
 
@@ -38,8 +40,14 @@ def _init_runtime() -> None:
         install_visual_qa_bridge(visual_runtime)
         patch_provider_adapters(ultimate_bot)
     bind_dashboard_patches(ultimate_bot)
+    install_visual_replacement_bridge(ultimate_bot, newsroom_dashboard)
+    install_workflow_progress_bridge(__import__("workflow_runtime"))
 
 
 _init_runtime()
 
 render_dashboard(ultimate_bot)
+controller = st.session_state.get("nr_ai_controller")
+if controller:
+    snap = controller.snapshot()
+    render_progress_events(snap, st)
