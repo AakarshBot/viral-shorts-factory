@@ -1,9 +1,9 @@
 """Deterministic subject extraction for slide-derived visual search.
 
-The rendered slide's cut script is the only source of additional search
-subjects. Search queries are exact subject phrases: names, places, events,
-organizations, teams, and other concrete entities. Titles and visual prompts
-are never appended as query noise.
+The rendered slide's cut script is the source for additional search subjects.
+Queries are exact subject phrases: names, places, events, organizations, teams,
+and other concrete entities. Titles and visual prompts are never appended as
+query noise.
 """
 from __future__ import annotations
 
@@ -85,13 +85,9 @@ def _extract_person_names(text: str) -> list[str]:
             continue
         run = [token]
         j = i + 1
-        while j < len(tokens) and len(run) < 4:
-            nxt = tokens[j]
-            if nxt[0].isupper():
-                run.append(nxt)
-                j += 1
-                continue
-            break
+        while j < len(tokens) and len(run) < 4 and tokens[j][0].isupper():
+            run.append(tokens[j])
+            j += 1
         keys = {_key(word) for word in run}
         if (
             len(run) >= 2
@@ -113,11 +109,13 @@ def _extract_group_subjects(text: str) -> list[str]:
             a, b, c = tokens[i], tokens[i + 1], tokens[i + 2]
             ak, ck = _key(a), _key(c)
             if ak in _COMMON_STARTERS and ck in {"team", "squad", "board", "association", "government"}:
-                _append_unique(result, f"{a.rstrip(\"'s\").rstrip(\"’s\")} {b} {c}")
+                first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
+                _append_unique(result, f"{first} {b} {c}")
         if i + 1 < len(tokens):
             a, b = tokens[i], tokens[i + 1]
             if _key(a) in _COMMON_STARTERS and _key(b) in _ROLE_WORDS:
-                _append_unique(result, f"{a.rstrip(\"'s\").rstrip(\"’s\")} {b}")
+                first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
+                _append_unique(result, f"{first} {b}")
     return result
 
 
@@ -171,12 +169,30 @@ def _extract_known_entities(text: str) -> list[str]:
     return result
 
 
+def _script_position(script: str, candidate: str) -> int:
+    """Locate a normalized subject, including possessive spelling in the script."""
+    direct = script.casefold().find(candidate.casefold())
+    if direct >= 0:
+        return direct
+    parts = _words(candidate)
+    if not parts:
+        return -1
+    pattern_parts = []
+    for index, part in enumerate(parts):
+        escaped = re.escape(part)
+        if index == 0:
+            escaped += r"(?:['’]s)?"
+        pattern_parts.append(escaped)
+    match = re.search(r"(?<!\w)" + r"\s+".join(pattern_parts) + r"(?!\w)", script, flags=re.IGNORECASE)
+    return match.start() if match else -1
+
+
 def extract_slide_search_subjects(scene: dict) -> list[str]:
     """Return up to three exact search subjects from the current slide.
 
-    Priority is deterministic: primary entity first, then named people, named
-    groups/events/organizations/places in the cut script. The video title and
-    structured search prompt are deliberately ignored.
+    Primary entity is first. Additional subjects come only from the cut
+    slide's voiceover. No title, video-level context, or search-prompt prose is
+    ever converted into a query.
     """
     if not isinstance(scene, dict):
         return []
@@ -190,7 +206,7 @@ def extract_slide_search_subjects(scene: dict) -> list[str]:
     candidates: list[tuple[int, str]] = []
     for extractor in (_extract_person_names, _extract_group_subjects, _extract_event_subjects, _extract_known_entities):
         for candidate in extractor(script):
-            index = script.casefold().find(candidate.casefold())
+            index = _script_position(script, candidate)
             if index >= 0:
                 candidates.append((index, candidate))
 
@@ -199,7 +215,6 @@ def extract_slide_search_subjects(scene: dict) -> list[str]:
         if len(subjects) >= _QUERY_MAX:
             break
         _append_unique(subjects, candidate)
-
     return subjects[:_QUERY_MAX]
 
 
@@ -210,7 +225,7 @@ def classify_search_subject(subject: str) -> str:
         return "GENERAL_CONTEXT"
     try:
         import visual_retrieval_planner as planner
-        if planner._looks_like_organization(subject) or _key(subject).split() and _key(subject).split()[0] in {"bcci", "icc", "pcb", "fifa", "uefa", "nasa", "isro", "who", "un"}:
+        if planner._looks_like_organization(subject):
             return "ORGANIZATION"
         if planner._looks_like_location(subject):
             return "LOCATION"
@@ -221,7 +236,7 @@ def classify_search_subject(subject: str) -> str:
     keys = {_key(word) for word in _words(subject)}
     if keys.intersection(_EVENT_SUFFIXES):
         return "EVENT"
-    if "team" in keys or "squad" in keys or "board" in keys or "association" in keys or "government" in keys:
+    if keys.intersection({"team", "squad", "board", "association", "government"}):
         return "ORGANIZATION"
     words = _words(subject)
     if len(words) >= 2 and all(word[:1].isupper() for word in words if word):
