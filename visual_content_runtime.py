@@ -148,8 +148,6 @@ def _render_hook_card(bot, image, hook_text, font_name=None):
     accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-
-    # Minimal edge treatment; deliberately no full-width bars or central box.
     draw.rectangle([24, 24, width - 24, 30], fill=accent + (180,))
 
     font_body, wrapped_lines = _fit_hook_text(bot, hook_text, font_name, width - 140)
@@ -166,23 +164,8 @@ def _render_hook_card(bot, image, hook_text, font_name=None):
         bbox = draw.textbbox((0, 0), line, font=font_body)
         text_w = bbox[2] - bbox[0]
         x = (width - text_w) / 2
-        # Strong outline keeps the image visible while maintaining readability.
-        draw.text(
-            (x + 8, y + 8),
-            line,
-            font=font_body,
-            fill=(0, 0, 0, 210),
-            stroke_width=8,
-            stroke_fill=(0, 0, 0, 180),
-        )
-        draw.text(
-            (x, y),
-            line,
-            font=font_body,
-            fill=accent + (250,),
-            stroke_width=5,
-            stroke_fill=(0, 0, 0, 245),
-        )
+        draw.text((x + 8, y + 8), line, font=font_body, fill=(0, 0, 0, 210), stroke_width=8, stroke_fill=(0, 0, 0, 180))
+        draw.text((x, y), line, font=font_body, fill=accent + (250,), stroke_width=5, stroke_fill=(0, 0, 0, 245))
         y += line_h + line_gap
 
     return Image.alpha_composite(canvas, overlay)
@@ -215,9 +198,12 @@ def patch_content_first_visuals(bot):
     try:
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
+        from visual_quality_runtime import cover_crop, install as install_visual_quality
     except Exception as exc:
         print(f"   [Visual Content] Could not load strict visual runtime: {exc}", flush=True)
         return bot
+
+    install_visual_quality(visual_runtime)
 
     async def process(script_data, language_cfg, format_mode="regular"):
         scenes = script_data.get("script", [])
@@ -247,7 +233,8 @@ def patch_content_first_visuals(bot):
             )
 
             ai_count += int(used_ai)
-            bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
+            # Scale-to-cover + crop. Never stretch a source image to 9:16.
+            bg_img = cover_crop(bg_img, target_size).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
             try:
