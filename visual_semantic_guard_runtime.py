@@ -2,8 +2,9 @@
 
 This layer is intentionally domain-neutral. It cleans generated scene metadata,
 removes discourse/HTML noise, grounds candidate entities against the scene
-and derives a concise visual phrase from nearby factual context. It never uses
-sport-, country-, celebrity-, product- or genre-specific entity tables.
+when the candidate is malformed, and derives concise visual phrases without
+turning clean entities into sentences. It never uses sport-, country-,
+celebrity-, product- or genre-specific entity tables.
 """
 from __future__ import annotations
 
@@ -175,20 +176,23 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
     role = infer_role(scene)
     prompt = sanitize_candidate(scene.get("specific_search_prompt", ""))
 
-    if prompt and _prompt_is_concrete(prompt, candidate):
+    prompt_is_explicit = bool(prompt and _prompt_is_concrete(prompt, candidate))
+    if prompt_is_explicit:
         subject = prompt
-    elif candidate:
-        subject = candidate
     else:
-        subject = prompt
+        subject = candidate
 
-    if role in {"EVENT", "PROCESS", "CONCEPT", "DOCUMENT", "QUOTE", "GENERAL_CONTEXT"} and subject:
+    # Contextual grounding is a repair operation, not a query-expansion step.
+    # A clean multi-word entity such as "Global Climate Summit" must remain
+    # exactly that, even when the narration contains additional facts.
+    needs_grounding = bool(candidate) and original.casefold() != candidate.casefold() and not prompt_is_explicit
+    if needs_grounding and role in {"EVENT", "PROCESS", "CONCEPT", "DOCUMENT", "QUOTE", "GENERAL_CONTEXT"}:
         contextual = _grounded_context(subject, scene, video_title)
         if contextual and len(meaningful_tokens(contextual)) > len(meaningful_tokens(subject)):
             subject = contextual
 
     subject = sanitize_candidate(subject)
-    confidence = 0.97 if subject and subject != original else (0.90 if subject else 0.0)
+    confidence = 0.97 if subject and subject == candidate else (0.90 if subject else 0.0)
     return {
         "factual_entity": candidate or original,
         "original_entity": original,
@@ -205,7 +209,7 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
         return [], resolution["visual_type"], resolution
 
     queries = [subject]
-    contextual = _grounded_context(subject, scene, video_title)
+    contextual = _grounded_context(subject, scene, video_title) if resolution["original_entity"].casefold() != subject.casefold() else ""
     if contextual and contextual.casefold() != subject.casefold():
         candidate = sanitize_candidate(contextual)
         if candidate and candidate.casefold() not in {q.casefold() for q in queries} and len(tokens(candidate)) <= MAX_QUERY_WORDS:
