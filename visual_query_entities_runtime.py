@@ -1,19 +1,20 @@
-"""Visual-subject preparation for Viral Shorts Factory.
+"""Visual-subject preparation and robust retrieval for Viral Shorts Factory.
 
 The factual entity is preserved for provenance, while the search identity is
-cleaned and resolved by the shared genre-agnostic semantic guard. The visual
-runtime boundary never receives raw narration as a search/AI prompt and never
-selects providers from hard-coded genre names.
+resolved by the shared genre-agnostic semantic guard. Retrieval is delegated to
+one bounded resilience engine that can exhaust queries/providers without
+crashing the factory.
 """
 from __future__ import annotations
 
 from visual_semantic_guard_runtime import build_query_ladder, clean_text, prepare_scene, resolve_subject
+from visual_retrieval_runtime import run_visual_retrieval
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
 
 
 def _install_runtime_query_guard(visual_runtime_module):
-    """Remove legacy raw-text fallback and genre-specific provider heuristics."""
+    """Install the single authoritative generic retrieval boundary."""
     if getattr(visual_runtime_module, "_generic_semantic_query_guard", False):
         return
 
@@ -33,7 +34,7 @@ def _install_runtime_query_guard(visual_runtime_module):
         return queries[:visual_runtime_module.VISUAL_MAX_SEARCH_QUERIES], visual_type
 
     def generic_source_plan(bot, visual_type, category=""):
-        """Choose sources from visual modality, never from genre keywords."""
+        """Choose sources by visual modality/source strength, never by genre."""
         plan = []
         if visual_type == "PERSON":
             plan.extend([
@@ -42,9 +43,6 @@ def _install_runtime_query_guard(visual_runtime_module):
             ])
         elif visual_type in {"ORGANIZATION", "EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
             plan.append(("Commons", getattr(bot, "fetch_wikimedia_commons", None)))
-
-        # Broad image discovery is available to every visual type. The semantic
-        # guard, not the provider choice, determines relevance.
         plan.extend([
             ("DDG", getattr(bot, "fetch_duckduckgo", None)),
             ("Pexels", getattr(bot, "fetch_pexels", None)),
@@ -62,10 +60,23 @@ def _install_runtime_query_guard(visual_runtime_module):
             return "STRICT(concept)"
         return "STRICT"
 
+    def robust_relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
+        return run_visual_retrieval(
+            visual_runtime_module,
+            bot,
+            seg,
+            category,
+            used_urls,
+            used_hashes,
+            video_title,
+        )
+
     visual_runtime_module._build_search_variants = guarded_build_search_variants
     visual_runtime_module._source_plan = generic_source_plan
     visual_runtime_module._verification_tier = generic_verification_tier
+    visual_runtime_module._relevant_asset = robust_relevant_asset
     visual_runtime_module._generic_semantic_query_guard = True
+    visual_runtime_module._robust_retrieval_boundary = True
 
 
 def lock_visual_subject(scene: dict, video_title: str = "") -> str:
@@ -94,8 +105,8 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     original_voiceover = clean_text(candidate.get("voiceover", ""))
     original_intent = clean_text(candidate.get("visual_intent", ""))
 
-    # Resolve from the original scene, not from a pre-resolved label, so the
-    # semantic guard has the maximum available evidence exactly once.
+    # Resolve from the original scene so the semantic guard sees the complete
+    # evidence exactly once and the rendered narration remains untouched.
     prepared = prepare_scene(candidate, video_title)
     visual_subject = clean_text(prepared.get("visual_search_subject", prepared.get("primary_entity", "")))
     if not visual_subject and clean_text(subject):
@@ -106,8 +117,7 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     prepared["factual_voiceover"] = original_voiceover
     prepared["factual_visual_intent"] = original_intent
 
-    # Retrieval and AI-image generation receive a compact visual brief, never
-    # the full narration or raw category metadata.
+    # Retrieval/AI receives only the compact visual subject, never raw narration.
     prepared["primary_entity"] = visual_subject
     prepared["visual_search_subject"] = visual_subject
     prepared["voiceover"] = visual_subject
@@ -132,6 +142,16 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
         f"precise visual subject='{subject}' | type={candidate.get('visual_type', 'GENERAL_CONTEXT')}",
         flush=True,
     )
-    return visual_runtime_module._relevant_asset(
+    result = visual_runtime_module._relevant_asset(
         bot, candidate, category, used_urls, used_hashes, video_title
     )
+
+    # Carry retrieval status back to the authoritative scene for rendering/QC.
+    if isinstance(scene, dict):
+        for key in (
+            "visual_verified", "visual_fallback_reason", "visual_query_used",
+            "visual_verification_attempts", "visual_type",
+        ):
+            if key in candidate:
+                scene[key] = candidate[key]
+    return result

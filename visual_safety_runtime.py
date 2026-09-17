@@ -12,14 +12,14 @@ import traceback
 
 
 VISUAL_FETCH_TIMEOUT_SECONDS = max(1, int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "15")))
-VISUAL_MAX_SEARCH_QUERIES = min(6, max(1, int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "6"))))
+# Retrieval needs room to fall through the exact query, refined query and
+# identity-only fallback. An accidental value of 1 can never collapse the
+# strategy into a single-point-of-failure search.
+VISUAL_MAX_SEARCH_QUERIES = min(6, max(3, int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "3"))))
 VISUAL_MAX_VERIFICATION_ATTEMPTS = min(6, max(1, int(os.getenv("VISUAL_MAX_VERIFICATION_ATTEMPTS", "4"))))
 GEMINI_VISUAL_MAX_REQUESTS = min(12, max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "8"))))
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = min(6, max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4"))))
 
-# A timeout cannot kill an arbitrary third-party Python function. Keep the
-# existing daemon-thread approach, but cap the number of abandoned workers so
-# one stuck provider cannot create an unbounded thread pile-up.
 _FETCH_WORKER_SLOTS = threading.BoundedSemaphore(2)
 _INSTALLED = False
 
@@ -87,9 +87,6 @@ def install() -> bool:
         visual_runtime.VISUAL_BUDGET_RUNTIME_VERSION = "2026-09-17-v1"
         visual_qa_runtime.VISUAL_BUDGET_RUNTIME_VERSION = "2026-09-17-v1"
 
-        # Surface binding mistakes immediately. This is diagnostic-only: a
-        # warning never blocks startup, but it makes a future patch-order/signature
-        # regression visible before a production render reaches that function.
         try:
             from runtime_hardener import validate_runtime_contracts
             import ultimate_bot

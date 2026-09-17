@@ -1,8 +1,9 @@
 """Content-first visual rendering for Shorts.
 
-Every factual scene is rendered with a verified visual. Person scenes now go
-through the single authoritative visual runtime instead of a separate curated
-Commons shortcut, so search scope stays broad and identity QA remains consistent.
+Every scene gets a real verified visual when one can be found. Retrieval is
+bounded and resilient: a failed provider/query falls through to the next option,
+and a final contextual fallback keeps the factory renderable without pretending
+that the fallback is a factual depiction.
 """
 
 import os
@@ -19,11 +20,13 @@ def _human_label(value, fallback="EDITORIAL"):
 def _source_label(source_type):
     source = str(source_type or "").strip()
     if not source:
-        return "VERIFIED VISUAL"
+        return "VISUAL"
     if source.lower() == "ai-generated":
         return "AI ILLUSTRATION"
-    if source.lower() == "gradient-fallback":
-        return "EDITORIAL BACKDROP"
+    if source.lower() == "cached":
+        return "VERIFIED CACHE"
+    if source.lower() in {"contextual-fallback", "gradient-fallback"}:
+        return "CONTEXTUAL FALLBACK"
     return f"SOURCE · {_human_label(source)}"
 
 
@@ -136,13 +139,7 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
 
 
 def _render_hook_card(bot, image, hook_text, font_name=None):
-    """Render the opening hook directly over the verified image.
-
-    The old hook renderer blurred and covered a large central region with an
-    opaque dark rounded rectangle. That made the first slide look like a title
-    card instead of the actual story visual. The hook now preserves the image
-    and uses text shadow/stroke for readability without a background panel.
-    """
+    """Render the opening hook directly over the image without a blocking card."""
     canvas = image.convert("RGBA")
     width, height = canvas.size
     accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
@@ -199,8 +196,9 @@ def patch_content_first_visuals(bot):
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import cover_crop, install as install_visual_quality
+        from visual_retrieval_runtime import make_contextual_fallback
     except Exception as exc:
-        print(f"   [Visual Content] Could not load strict visual runtime: {exc}", flush=True)
+        print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
         return bot
 
     install_visual_quality(visual_runtime)
@@ -216,23 +214,41 @@ def patch_content_first_visuals(bot):
         packages = [None] * len(scenes)
         used_urls, used_hashes = set(), set()
         ai_count = 0
+        verified_count = 0
 
-        print("\n🎨 Rendering content-first visual package (slide subjects + strict QA)...", flush=True)
+        print("\n🎨 Rendering content-first visual package (bounded retrieval + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
-            bg_img, used_ai, source_type = search_slide_visual(
-                visual_runtime,
-                bot,
-                seg,
-                category,
-                used_urls,
-                used_hashes,
-                video_title,
-            )
+            try:
+                bg_img, used_ai, source_type = search_slide_visual(
+                    visual_runtime,
+                    bot,
+                    seg,
+                    category,
+                    used_urls,
+                    used_hashes,
+                    video_title,
+                )
+            except Exception as exc:
+                # Retrieval is allowed to fail locally without killing the whole
+                # factory. The fallback is explicitly marked unverified.
+                subject = str(seg.get("primary_entity") or "Visual unavailable").strip()
+                seg["visual_verified"] = False
+                seg["visual_fallback_reason"] = f"visual-search-exception:{type(exc).__name__}:{exc}"
+                print(
+                    f"   [Visual Fallback] Scene {idx + 1} retrieval exception; using contextual fallback: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                bg_img, used_ai, source_type = make_contextual_fallback(subject, str(seg.get("visual_type", "GENERAL_CONTEXT"))) , False, "contextual-fallback"
 
+            scene_verified = bool(seg.get("visual_verified", False))
+            if scene_verified:
+                verified_count += 1
             ai_count += int(used_ai)
+
             # Scale-to-cover + crop. Never stretch a source image to 9:16.
             bg_img = cover_crop(bg_img, target_size).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
@@ -280,16 +296,24 @@ def patch_content_first_visuals(bot):
                 "ai_generated": used_ai,
                 "source_type": source_type,
                 "visual_type": visual_type,
-                "visual_verified": True,
+                "visual_verified": scene_verified,
+                "visual_fallback_reason": seg.get("visual_fallback_reason", ""),
+                "visual_query_used": seg.get("visual_query_used", ""),
             }]
             seg["visual_type"] = visual_type
-            seg["visual_verified"] = True
+            seg["visual_verified"] = scene_verified
             seg["visual_source"] = source_type
 
-        script_data["ai_image_ratio"] = round(ai_count / max(1, len(scenes)), 2)
-        script_data["visual_coverage"] = 1.0
-        script_data["visuals_verified"] = True
-        print(f"   [+] Content-first visual QA complete: {len(scenes)}/{len(scenes)} scenes rendered with verified visuals.", flush=True)
+        total = len(scenes)
+        script_data["ai_image_ratio"] = round(ai_count / max(1, total), 2)
+        script_data["visual_coverage"] = round(verified_count / max(1, total), 2)
+        script_data["visuals_verified"] = verified_count == total
+        script_data["visual_fallback_count"] = total - verified_count
+        print(
+            f"   [+] Content-first visual pass complete: {verified_count}/{total} scenes have verified visuals; "
+            f"{total - verified_count} contextual fallback(s).",
+            flush=True,
+        )
         return packages
 
     bot.process_visuals_async = process
