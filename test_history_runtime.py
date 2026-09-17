@@ -32,7 +32,7 @@ def _safe(value: Any, depth: int = 0) -> Any:
     return str(value)[:MAX_TEXT]
 
 
-def _read(bot, limit: int = 50) -> list[dict[str, Any]]:
+def _read(bot, limit: int = 60) -> list[dict[str, Any]]:
     path = _history_path(bot)
     if not path.exists():
         return []
@@ -52,12 +52,13 @@ def _read(bot, limit: int = 50) -> list[dict[str, Any]]:
 
 
 def record(bot, step: str, function: str, inputs: Dict[str, Any], status: str, output: Any = None, error: str = "") -> None:
+    elapsed = inputs.pop("__elapsed_ms", 0) if isinstance(inputs, dict) else 0
     item = {
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "step": str(step),
         "function": str(function),
         "status": str(status),
-        "elapsed_ms": int(max(0.0, float(inputs.pop("__elapsed_ms", 0) or 0))) if isinstance(inputs, dict) else 0,
+        "elapsed_ms": int(max(0.0, float(elapsed or 0))),
         "inputs": _safe(inputs),
         "output": _safe(output),
         "error": str(error or ""),
@@ -82,24 +83,26 @@ def _step_inputs(st, step: str) -> Dict[str, Any]:
     }.get(step, ())
     result = {key: st.session_state.get(key) for key in keys if key in st.session_state}
     for key in ("tp_script", "tp_visuals", "tp_audio"):
-        if key in result:
-            value = result[key]
-            if key == "tp_script":
-                text = ""
-                try:
-                    scenes = value.get("script", []) if isinstance(value, dict) else []
-                    text = "\n".join(str(scene.get("voiceover", "")) for scene in scenes if isinstance(scene, dict))
-                except Exception:
-                    text = str(value)
-                result[key] = {"scene_count": len(value.get("script", [])) if isinstance(value, dict) and isinstance(value.get("script"), list) else 0, "narration": text}
-            elif key == "tp_visuals":
-                result[key] = {"item_count": len(value) if isinstance(value, list) else 0}
-            elif key == "tp_audio":
-                try:
-                    paths, timings = value
-                    result[key] = {"track_count": len(paths or []), "timing_count": len(timings or [])}
-                except Exception:
-                    result[key] = {"present": True}
+        if key not in result:
+            continue
+        value = result[key]
+        if key == "tp_script":
+            try:
+                scenes = value.get("script", []) if isinstance(value, dict) else []
+                result[key] = {
+                    "scene_count": len(scenes),
+                    "narration": "\n".join(str(scene.get("voiceover", "")) for scene in scenes if isinstance(scene, dict)),
+                }
+            except Exception:
+                result[key] = str(value)
+        elif key == "tp_visuals":
+            result[key] = {"item_count": len(value) if isinstance(value, list) else 0}
+        elif key == "tp_audio":
+            try:
+                paths, timings = value
+                result[key] = {"track_count": len(paths or []), "timing_count": len(timings or [])}
+            except Exception:
+                result[key] = {"present": True}
     return result
 
 
@@ -113,57 +116,6 @@ def _function_for_step(step: str) -> str:
         "metadata": "_build_clean_metadata + build_pinned_comment",
         "upload": "WorkflowController.upload_manual",
     }.get(step, "unknown")
-
-
-def install_test_history_bridge(module, bot) -> None:
-    if getattr(module, "_test_history_bridge_installed", False):
-        return
-    step_map = {
-        "_topic_test": "topic",
-        "_script_test": "script",
-        "_audio_test": "audio",
-        "_visual_test": "visuals",
-        "_render_test": "render",
-        "_metadata_test": "metadata",
-        "_upload_test": "upload",
-    }
-
-    for name, step in step_map.items():
-        original = getattr(module, name, None)
-        if not callable(original):
-            continue
-
-        def make_wrapper(original_fn: Callable[..., Any], step_name: str):
-            def wrapped(*args, **kwargs):
-                started = time.perf_counter()
-                inputs = _step_inputs(module.st, step_name)
-                captured_errors: list[str] = []
-                original_error = getattr(module.st, "error")
-
-                def capture_error(message, *a, **k):
-                    captured_errors.append(str(message))
-                    return original_error(message, *a, **k)
-
-                module.st.error = capture_error
-                try:
-                    result = original_fn(*args, **kwargs)
-                    elapsed = (time.perf_counter() - started) * 1000
-                    inputs["__elapsed_ms"] = elapsed
-                    state = _state_output(module.st, step_name)
-                    status = "FAIL" if captured_errors else ("PASS" if state.get("result") else "NO_RESULT")
-                    record(bot, step_name, _function_for_step(step_name), inputs, status, state, captured_errors[-1] if captured_errors else "")
-                    return result
-                except Exception as exc:
-                    elapsed = (time.perf_counter() - started) * 1000
-                    inputs["__elapsed_ms"] = elapsed
-                    record(bot, step_name, _function_for_step(step_name), inputs, "FAIL", _state_output(module.st, step_name), f"{type(exc).__name__}: {exc}")
-                    raise
-                finally:
-                    module.st.error = original_error
-            return wrapped
-
-        setattr(module, name, make_wrapper(original, step))
-    module._test_history_bridge_installed = True
 
 
 def _state_output(st, step: str) -> Dict[str, Any]:
@@ -203,6 +155,61 @@ def _state_output(st, step: str) -> Dict[str, Any]:
     return {"result": any(bool(v) for v in state.values()), "state": state}
 
 
+def install_test_history_bridge(module, bot) -> None:
+    if getattr(module, "_test_history_bridge_installed", False):
+        return
+
+    step_map = {
+        "_topic_test": "topic",
+        "_script_test": "script",
+        "_audio_test": "audio",
+        "_visual_test": "visuals",
+        "_render_test": "render",
+        "_metadata_test": "metadata",
+        "_upload_test": "upload",
+    }
+
+    for name, step in step_map.items():
+        original = getattr(module, name, None)
+        if not callable(original):
+            continue
+
+        def make_wrapper(original_fn: Callable[..., Any], step_name: str):
+            def wrapped(*args, **kwargs):
+                started = time.perf_counter()
+                inputs = _step_inputs(module.st, step_name)
+                before = _state_output(module.st, step_name)
+                captured_errors: list[str] = []
+                original_error = getattr(module.st, "error")
+
+                def capture_error(message, *a, **k):
+                    captured_errors.append(str(message))
+                    return original_error(message, *a, **k)
+
+                module.st.error = capture_error
+                try:
+                    result = original_fn(*args, **kwargs)
+                    after = _state_output(module.st, step_name)
+                    elapsed = (time.perf_counter() - started) * 1000
+                    changed = before != after
+                    if captured_errors or changed:
+                        inputs["__elapsed_ms"] = elapsed
+                        status = "FAIL" if captured_errors else ("PASS" if after.get("result") else "NO_RESULT")
+                        record(bot, step_name, _function_for_step(step_name), inputs, status, after, captured_errors[-1] if captured_errors else "")
+                    return result
+                except Exception as exc:
+                    elapsed = (time.perf_counter() - started) * 1000
+                    inputs["__elapsed_ms"] = elapsed
+                    record(bot, step_name, _function_for_step(step_name), inputs, "FAIL", _state_output(module.st, step_name), f"{type(exc).__name__}: {exc}")
+                    raise
+                finally:
+                    module.st.error = original_error
+            return wrapped
+
+        setattr(module, name, make_wrapper(original, step))
+    module._test_history_bridge_installed = True
+
+
 def render_test_history(bot, st) -> None:
     rows = list(reversed(_read(bot, 60)))
     with st.expander("📜 Test history — previous diagnostic runs", expanded=False):
@@ -217,5 +224,4 @@ def render_test_history(bot, st) -> None:
                 st.error(row["error"])
             with st.expander(f"Details #{index}", expanded=False):
                 st.json({"inputs": row.get("inputs", {}), "output": row.get("output", {})})
-        path = _history_path(bot)
-        st.caption(f"Ledger: {path}")
+        st.caption(f"Ledger: {_history_path(bot)}")
