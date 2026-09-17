@@ -19,7 +19,7 @@ for _name in dir(_planner):
     if _name.startswith("_") and not _name.startswith("__"):
         globals()[_name] = getattr(_planner, _name)
 
-_VISUAL_STRATEGY_VERSION = "2026-09-17-v13-immutable-subject"
+_VISUAL_STRATEGY_VERSION = "2026-09-17-v14-immutable-subject-autolock"
 
 
 def _exact_slide_subject(scene):
@@ -74,3 +74,16 @@ def _scene_phrase(scene=None, *parts, **kwargs):
     elif scene is not None:
         values.append(str(scene))
     return _planner._normalise(" ".join(values))
+
+
+# The strict query lock must exist before any caller imports build_deep_queries
+# or asks visual_runtime for search variants. This removes import-order ambiguity
+# between the legacy planner, the test phase, and the production visual path.
+try:
+    from visual_query_lock_runtime import install as _install_visual_query_lock
+    _install_visual_query_lock()
+except Exception as exc:
+    print(
+        f"   [Visual Strategy] Query lock auto-install unavailable: {type(exc).__name__}: {exc}",
+        flush=True,
+    )
