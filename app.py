@@ -18,7 +18,7 @@ from runtime_bindings import bind_dashboard_patches, harden_editorial_defaults
 from semantic_runtime import patch_semantic_dedup
 from story_ranker import patch_story_selection
 from visual_qa_runtime import install_visual_qa_bridge
-from visual_runtime import patch_visual_pipeline
+from visual_content_runtime import patch_content_first_visuals as patch_visual_pipeline
 import visual_runtime
 from workflow_runtime import (
     CRICKET_CATEGORIES,
