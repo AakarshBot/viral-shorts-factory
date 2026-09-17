@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 
-RUNTIME_HARDENER_VERSION = "2026-09-17-v2"
+RUNTIME_HARDENER_VERSION = "2026-09-17-v3"
 
 
 def reassert_live_bindings(bot) -> None:
@@ -56,12 +56,47 @@ def assert_authoritative_binding(bot, name: str) -> bool:
     return namespace.get(name) is value
 
 
+def _count_positional_parameters(value) -> tuple[int, bool]:
+    """Return (positional_parameter_count, accepts_varargs) for a callable."""
+    signature = inspect.signature(value)
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    variadic = any(
+        parameter.kind is parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    )
+    return len(positional), variadic
+
+
+def _validate_signature(errors, name: str, value, minimum: int, label: str) -> None:
+    if not callable(value):
+        errors.append(f"{label}: callable is missing")
+        return
+    try:
+        count, variadic = _count_positional_parameters(value)
+        if not variadic and count < minimum:
+            errors.append(
+                f"{label}: accepts {count} positional args; expected at least {minimum}"
+            )
+    except (TypeError, ValueError) as exc:
+        errors.append(f"{label}: signature unavailable ({type(exc).__name__})")
+
+
 def validate_runtime_contracts(bot) -> list[str]:
     """Return signature/binding errors that commonly break patched legacy calls.
 
-    This is intentionally a local contract check rather than another runtime
-    patch. It catches incompatible monkey-patched signatures before a production
-    run reaches the renderer.
+    There are two deliberate renderer layers in this factory:
+
+    * ``factory_runtime`` contains the full authoritative renderer contracts.
+    * ``run_robot.__globals__`` may contain compatibility wrappers that inject
+      ``bot`` or other context before calling those renderers.
+
+    The previous validator incorrectly required wrapper functions to expose the
+    full implementation signatures, making valid wrappers look broken. We now
+    validate each layer against its own contract.
     """
     errors = []
     run_robot = getattr(bot, "run_robot", None)
@@ -69,31 +104,35 @@ def validate_runtime_contracts(bot) -> list[str]:
     if not isinstance(namespace, dict):
         return ["run_robot.__globals__ is unavailable"]
 
-    def accepts_positionals(name, count):
-        value = namespace.get(name)
-        if not callable(value):
-            errors.append(f"{name}: callable is missing")
-            return
-        try:
-            signature = inspect.signature(value)
-            positional = [
-                parameter for parameter in signature.parameters.values()
-                if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
-            ]
-            variadic = any(
-                parameter.kind is parameter.VAR_POSITIONAL
-                for parameter in signature.parameters.values()
-            )
-            if not variadic and len(positional) < count:
-                errors.append(f"{name}: accepts {len(positional)} positional args; expected at least {count}")
-        except (TypeError, ValueError) as exc:
-            errors.append(f"{name}: signature unavailable ({type(exc).__name__})")
+    # Compatibility wrappers used by the live run_robot namespace. These are
+    # intentionally smaller because they inject context before delegating.
+    wrapper_contracts = {
+        "render_hook_card": 5,
+        "create_branded_slide": 6,
+        "render_top5_card": 7,
+    }
+    for name, minimum in wrapper_contracts.items():
+        _validate_signature(errors, name, namespace.get(name), minimum, name)
 
-    # These are the legacy call contracts used by factory_runtime. The hook
-    # contract is especially important because it is patched by visual policy.
-    accepts_positionals("render_hook_card", 7)
-    accepts_positionals("create_branded_slide", 8)
-    accepts_positionals("render_top5_card", 9)
+    # Full implementation contracts are what must remain stable across patches.
+    try:
+        import factory_runtime
+
+        authoritative_contracts = {
+            "render_hook_card": 7,
+            "create_branded_slide": 8,
+            "render_top5_card": 9,
+        }
+        for name, minimum in authoritative_contracts.items():
+            _validate_signature(
+                errors,
+                name,
+                getattr(factory_runtime, name, None),
+                minimum,
+                f"factory_runtime.{name}",
+            )
+    except Exception as exc:
+        errors.append(f"factory_runtime renderer contracts unavailable ({type(exc).__name__})")
 
     for name in ("write_script", "process_visuals_async", "generate_voiceover_and_timestamps"):
         value = getattr(bot, name, None)
