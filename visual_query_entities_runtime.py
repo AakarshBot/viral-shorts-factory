@@ -56,7 +56,10 @@ def _words(value: str) -> list[str]:
 
 
 def _key(value: str) -> str:
-    return "".join(c for c in value.casefold() if c.isalnum() or unicodedata.category(c).startswith("M"))
+    value = value.casefold()
+    if value.endswith("'s") or value.endswith("’s"):
+        value = value[:-2]
+    return "".join(c for c in value if c.isalnum() or unicodedata.category(c).startswith("M"))
 
 
 def _append_unique(items: list[str], value: str) -> None:
@@ -82,7 +85,7 @@ def _extract_person_names(text: str) -> list[str]:
             j += 1
         keys = {_key(word) for word in run}
         if len(run) >= 2 and not keys.intersection(_NOISE) and not keys.intersection(_ROLE_WORDS):
-            _append_unique(result, " ".join(run))
+            _append_unique(result, " ".join(run).strip("'"))
         i = max(i + 1, j)
     return result
 
@@ -91,15 +94,19 @@ def _extract_group_subjects(text: str) -> list[str]:
     """Find concrete named groups such as 'Indian cricket team'."""
     tokens = _words(text)
     result: list[str] = []
-    for i in range(len(tokens) - 1):
-        a, b = tokens[i], tokens[i + 1]
-        ak, bk = _key(a), _key(b)
-        if ak in _COMMON_STARTERS and bk in _ROLE_WORDS:
-            _append_unique(result, f"{a} {b}")
+    i = 0
+    while i < len(tokens):
         if i + 2 < len(tokens):
-            c = tokens[i + 2]
-            if ak in _COMMON_STARTERS and _key(c) in {"team", "squad", "board", "association", "government"}:
+            a, b, c = tokens[i], tokens[i + 1], tokens[i + 2]
+            if _key(a) in _COMMON_STARTERS and _key(c) in {"team", "squad", "board", "association", "government"}:
                 _append_unique(result, f"{a} {b} {c}")
+                i += 3
+                continue
+        if i + 1 < len(tokens):
+            a, b = tokens[i], tokens[i + 1]
+            if _key(a) in _COMMON_STARTERS and _key(b) in _ROLE_WORDS:
+                _append_unique(result, f"{a} {b}")
+        i += 1
     return result
 
 
@@ -121,8 +128,8 @@ def extract_slide_search_subjects(scene: dict) -> list[str]:
             break
         _append_unique(subjects, group)
 
-    # The structured prompt may contain a named entity that the spoken script
-    # omits. Extract only concrete names/groups; never use the prompt verbatim.
+    # A structured prompt may contain a named subject omitted from narration.
+    # Extract only concrete person/group subjects; never use the prompt verbatim.
     if len(subjects) < _QUERY_MAX:
         for name in _extract_person_names(auxiliary):
             if len(subjects) >= _QUERY_MAX:
