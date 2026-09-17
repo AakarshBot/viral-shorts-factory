@@ -46,6 +46,9 @@ GENERIC_NOISE = {
     "says", "said", "today", "yesterday", "tomorrow", "editorial", "official",
     "photo", "image", "picture", "real", "high", "resolution", "unknown", "none", "na",
 }
+# Backward-compatible alias used by legacy Unicode/runtime wrappers. It is the
+# same generic noise set and does not add any domain-specific behavior.
+NOISE = GENERIC_NOISE
 STOPWORDS = {
     "the", "and", "for", "with", "this", "that", "from", "into", "after", "before",
     "about", "they", "their", "there", "here", "when", "what", "which", "where",
@@ -327,8 +330,6 @@ def _extract_visual_cues(seg, category=""):
 
 
 def _context_entity(seg, category=""):
-    # Only scene-provided context is eligible. This function never fabricates
-    # entities or maintains a domain catalogue.
     for field in ("visual_context", "specific_search_prompt"):
         text = _clean(seg.get(field, ""))
         if text:
