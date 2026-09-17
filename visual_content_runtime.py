@@ -231,7 +231,7 @@ def patch_content_first_visuals(bot):
                     flush=True,
                 )
                 bg_img, used_ai, source_type = make_visual_rescue(subject, str(seg.get("visual_type", "GENERAL_CONTEXT"))), False, "visual-rescue"
-                rescue_count += 1
+                # The source-type branch below records this rescue exactly once.
 
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
@@ -292,7 +292,7 @@ def patch_content_first_visuals(bot):
         script_data["ai_image_ratio"] = round(ai_count / max(1, total), 2)
         script_data["visual_coverage"] = round(verified_count / max(1, total), 2)
         script_data["visuals_verified"] = verified_count == total
-        script_data["visual_fallback_count"] = 0
+        script_data["visual_fallback_count"] = rescue_count
         script_data["visual_rescue_count"] = rescue_count
         print(
             f"   [+] Content-first visual pass complete: {verified_count}/{total} scenes have verified visuals; "
