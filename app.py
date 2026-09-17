@@ -224,15 +224,39 @@ def render_header(action_mode: str) -> None:
         "Demo Factory": ("Demo Factory", "Exercise individual factory sections with safe, controlled test inputs."),
     }
     title, subtitle = titles[action_mode]
-    st.markdown(
-        f"""
+    logo_path = ""
+    brand_dir = getattr(ultimate_bot, "BRAND_ASSETS_DIR", None)
+    if brand_dir:
+        for candidate in ("logo.png", "channels4_profile.jpg"):
+            candidate_path = os.path.join(brand_dir, candidate)
+            if os.path.isfile(candidate_path):
+                logo_path = candidate_path
+                break
+
+    if logo_path:
+        left, right = st.columns([1, 7])
+        with left:
+            st.image(logo_path, width=86)
+        with right:
+            st.markdown(
+                f"""
+<div class="brand-card">
+  <div class="brand-title">Viral Shorts Factory</div>
+  <div class="brand-sub">{title} · {subtitle}</div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.markdown(
+            f"""
 <div class="brand-card">
   <div class="brand-title">🎬 Viral Shorts Factory</div>
   <div class="brand-sub">{title} · {subtitle}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
 
 
 def render_sidebar_controls() -> Dict[str, Any]:
@@ -279,10 +303,20 @@ def render_sidebar_controls() -> Dict[str, Any]:
         )
         st.session_state.category_key = options[selected_label]
 
+    sidebar_snapshot = st.session_state.workflow_controller.snapshot()
+    if sidebar_snapshot.get("thread_alive"):
+        st.sidebar.success("Factory run active", icon="⚙️")
+    elif sidebar_snapshot.get("completed"):
+        st.sidebar.success("Latest run complete", icon="✅")
+    elif sidebar_snapshot.get("stage") == "error":
+        st.sidebar.error("Latest run stopped", icon="⚠️")
+    else:
+        st.sidebar.info("Ready for a new run", icon="●")
+
     if st.sidebar.button(
         "Reset current run",
         use_container_width=True,
-        disabled=bool(st.session_state.workflow_controller.snapshot().get("thread_alive")),
+        disabled=bool(sidebar_snapshot.get("thread_alive")),
     ):
         reset_run()
         st.rerun()
