@@ -226,6 +226,7 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     # output remains available under original_primary_entity and factual_voiceover.
     prepared["primary_entity"] = visual_subject or factual_entity
     prepared["visual_search_subject"] = visual_subject or factual_entity
+    prepared["visual_subject_locked"] = True
     prepared["specific_search_prompt"] = original_prompt
     prepared["visual_intent"] = original_intent
     prepared["visual_context"] = original_context
