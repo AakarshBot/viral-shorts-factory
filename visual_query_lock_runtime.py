@@ -1,37 +1,42 @@
-"""Compatibility shim for the visual query lock.
+"""Compatibility layer for the visual query lock.
 
-The old lock conflated the factual primary entity with the exact search string and
-then forced one query, one source and one QA decision. That made retrieval brittle.
-The current contract is stricter in the right place: the factual subject remains
-locked, while the retrieval planner may derive a small, evidence-grounded query
-ladder from that subject and the scene context.
+The factual subject remains locked, but the search string may be refined by the
+bounded retrieval planner. This module must never collapse retrieval to one
+query, one provider, or one candidate.
 """
 from __future__ import annotations
 
-_VERSION = "2026-09-17-v14-semantic-subject-bounded-retrieval"
+_VERSION = "2026-09-17-v15-subject-lock-bounded-provider-fallback"
 _INSTALLED = False
 
 
 def install() -> bool:
-    """Install compatibility metadata without overriding the real retriever.
-
-    visual_runtime already implements bounded multi-query and multi-source
-    retrieval. Older versions of this shim replaced that logic with a single
-    exact query/source, which is precisely what caused false terminal failures.
-    """
     global _INSTALLED
     if _INSTALLED:
         return True
     try:
         import visual_runtime as runtime
-        runtime._visual_query_lock_version = _VERSION
     except Exception as exc:
         print(f"   [Visual Query Lock] Compatibility install unavailable: {exc}", flush=True)
         return False
+
+    original_source_plan = getattr(runtime, "_source_plan", None)
+    if callable(original_source_plan) and not getattr(original_source_plan, "_semantic_lock_wrapped", False):
+        def source_plan_with_entity_support(bot, visual_type, category):
+            plan = list(original_source_plan(bot, visual_type, category))
+            if str(visual_type).upper() == "ORGANIZATION":
+                commons = getattr(bot, "fetch_wikimedia_commons", None)
+                if callable(commons) and not any(name == "Commons" for name, _ in plan):
+                    plan.insert(0, ("Commons", commons))
+            return plan
+        source_plan_with_entity_support._semantic_lock_wrapped = True
+        runtime._source_plan = source_plan_with_entity_support
+
+    runtime._visual_query_lock_version = _VERSION
     _INSTALLED = True
     print(
         f"   [Visual Query Lock] Compatibility mode | version={_VERSION} | "
-        "subject locked, bounded query/source fallback enabled",
+        "factual subject locked + bounded query/source fallback enabled",
         flush=True,
     )
     return True
