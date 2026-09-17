@@ -126,16 +126,25 @@ def _install_runtime_query_guard(visual_runtime_module):
 
     def guarded_build_search_variants(seg, video_title=""):
         resolution = resolve_subject(seg, video_title)
-        queries = _build_identity_first_queries(seg, resolution)
+        manual_query = clean_text(seg.get("manual_visual_query", ""))
+        if manual_query:
+            queries = [manual_query]
+            print(
+                f"   [Visual Semantic Guard] MANUAL query='{manual_query}' "
+                f"factual='{resolution.get('factual_entity', '')}'",
+                flush=True,
+            )
+        else:
+            queries = _build_identity_first_queries(seg, resolution)
+            print(
+                f"   [Visual Semantic Guard] factual='{queries[0] if queries else ''}' "
+                f"context_variants={max(0, len(queries) - 1)} type={resolution.get('visual_type', 'GENERAL_CONTEXT')}",
+                flush=True,
+            )
+
         visual_type = str(resolution.get("visual_type") or seg.get("visual_type") or "GENERAL_CONTEXT").upper()
         if not queries:
             raise RuntimeError("No grounded visual identity could be derived from the scene.")
-
-        print(
-            f"   [Visual Semantic Guard] factual='{queries[0]}' "
-            f"context_variants={len(queries) - 1} type={visual_type}",
-            flush=True,
-        )
         return queries, visual_type
 
     def generic_verification_tier(seg, visual_type, source):
