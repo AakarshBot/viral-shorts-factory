@@ -295,7 +295,17 @@ def patch_research_pipeline(bot):
             + data["research_bundle"]
         )
         data["text"] = _clean(data.get("text"))
-        result = current(data, language_cfg, genre_key, conn, format_mode)
+        try:
+            result = current(data, language_cfg, genre_key, conn, format_mode)
+        except Exception as exc:
+            # Never expose provider exception payloads to later script stages.
+            # Convert the failure into a safe chain diagnostic so OpenRouter and
+            # Ollama still get their opportunity before deterministic fallback.
+            print(
+                f"   [Research] Primary script providers raised {type(exc).__name__}; continuing through fallback chain.",
+                flush=True,
+            )
+            result = None
         if result is None:
             print("   [Research] Primary script providers exhausted; trying OpenRouter free router.", flush=True)
             result = _openrouter_script_fallback(data, language_cfg, genre_key, format_mode)
