@@ -99,13 +99,16 @@ def sanitize_candidate(value: object) -> str:
 
 def _intent_words(scene: dict) -> list[str]:
     raw = clean_text(scene.get("visual_intent", ""))
+    # Compound labels such as news_event, news-event and person/portrait are
+    # semantic metadata, not literal search phrases. Normalize separators so
+    # the shared role vocabulary can interpret them consistently.
+    raw = re.sub(r"[_/-]+", " ", raw)
     return [key(w) for w in tokens(raw) if key(w)]
 
 
 def infer_role(scene: dict) -> str:
     explicit = clean_text(scene.get("visual_type", "")).upper().replace("-", "_").replace(" ", "_")
-    roles = set(ROLE_CUES)
-    if explicit in roles and explicit != "GENERAL_CONTEXT":
+    if explicit in ROLE_CUES:
         return explicit
     intent_words = set(_intent_words(scene))
     for role, cues in ROLE_CUES.items():
@@ -183,8 +186,8 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
         subject = candidate
 
     # Contextual grounding is a repair operation, not a query-expansion step.
-    # A clean multi-word entity such as "Global Climate Summit" must remain
-    # exactly that, even when the narration contains additional facts.
+    # A clean entity must remain exactly that, even when the narration contains
+    # additional facts. Grounding occurs only after detectable entity damage.
     needs_grounding = bool(candidate) and original.casefold() != candidate.casefold() and not prompt_is_explicit
     if needs_grounding and role in {"EVENT", "PROCESS", "CONCEPT", "DOCUMENT", "QUOTE", "GENERAL_CONTEXT"}:
         contextual = _grounded_context(subject, scene, video_title)
