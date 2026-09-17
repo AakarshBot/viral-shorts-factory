@@ -1,10 +1,11 @@
 """Runtime visual-search contract for Viral Shorts Factory.
 
-The production path is intentionally simple:
+Production visual contract:
     identify subject -> lock subject -> one exact search -> visual QA
 
-No title, narration, visual intent, action, category or editorial adjective is
-allowed to rewrite the locked image-search query.
+The locked ``primary_entity`` is returned byte-for-byte apart from surrounding
+whitespace. No normaliser, Unicode helper, visual cue, title, narration or
+legacy planner is allowed to rewrite the search query.
 """
 
 import html
@@ -18,24 +19,39 @@ for _name in dir(_planner):
     if _name.startswith("_") and not _name.startswith("__"):
         globals()[_name] = getattr(_planner, _name)
 
-_normalise_query = _planner._normalise
+_VISUAL_STRATEGY_VERSION = "2026-09-17-v13-immutable-subject"
 
 
 def _exact_slide_subject(scene):
-    return lock_visual_subject(scene)
+    """Read the locked entity without passing it through any query normaliser."""
+    if not isinstance(scene, dict):
+        return ""
+    # Do not use planner._normalise(), unicode_normalise(), or any query helper
+    # here. Those helpers are allowed to normalise text for comparison, but the
+    # emitted search query must remain exactly the locked primary_entity.
+    raw = scene.get("primary_entity", "")
+    if raw is None:
+        return ""
+    return str(raw).strip()
 
 
 def build_deep_queries(scene, video_title="", visual_type=None):
-    """Return exactly one query: the locked primary entity."""
+    """Return exactly one query: the immutable locked primary entity."""
     subject = _exact_slide_subject(scene)
     if not subject:
         return [], visual_type or "GENERAL_CONTEXT"
+
     resolved_type = visual_type
     if not resolved_type:
         try:
-            resolved_type = _planner.classify_scene(scene or {}, str((scene or {}).get("sport_or_topic_category", "")))
+            resolved_type = _planner.classify_scene(
+                scene or {}, str((scene or {}).get("sport_or_topic_category", ""))
+            )
         except Exception:
             resolved_type = "GENERAL_CONTEXT"
+
+    # Hard contract: exactly the original locked string. Never lower-case it,
+    # tokenise it, deduplicate it, add context, or rewrite it.
     return [subject], resolved_type
 
 
