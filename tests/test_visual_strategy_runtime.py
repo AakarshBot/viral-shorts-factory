@@ -12,7 +12,7 @@ def test_search_uses_exact_slide_entity_only():
     queries, visual_type = build_deep_queries(scene, "Rishabh Pant omission from ODI squad")
 
     assert visual_type == "PERSON"
-    assert queries == ["Rishabh Pant"]
+    assert queries == ["Rishabh Pant", "India"]
     assert all("odi" not in q.lower() for q in queries)
     assert all("press" not in q.lower() for q in queries)
     assert all("conference" not in q.lower() for q in queries)
