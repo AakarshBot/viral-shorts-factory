@@ -1,5 +1,8 @@
 """Load pipeline integrity and bind voiceover strictly to the validated script."""
+import json
 import pipeline_integrity_runtime
+
+pipeline_integrity_runtime.json = json
 
 
 def _bind_authoritative_audio(bot):
