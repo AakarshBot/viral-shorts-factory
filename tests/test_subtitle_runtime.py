@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PIL import Image, ImageDraw
 
 from subtitle_runtime import (
@@ -55,7 +53,7 @@ def test_deep_dive_subtitle_clip_is_simple_glass(tmp_path):
     assert rendered.getpixel((540, 150))[3] > 0
 
 
-def test_top5_card_uses_same_glass_language(tmp_path):
+def test_top5_card_uses_same_glass_language():
     background = Image.new("RGB", (1080, 1920), (24, 34, 48))
     rendered = render_premium_top5_card(
         background,
@@ -76,8 +74,9 @@ def test_compile_patch_enables_deep_dive_scene_one_and_removes_duplicate_logo():
         is_outro_scene = False
         is_hook_scene = True
         word_timings = [{}]
+        subtitle_enabled = False
         if not is_outro_scene and not is_hook_scene and idx < len(word_timings):
-            return "old-path"
+            subtitle_enabled = True
         logo_file_path = os.path.join(BRAND_ASSETS_DIR, "logo.png")
         if not os.path.exists(logo_file_path):
             logo_file_path = os.path.join(
@@ -91,14 +90,21 @@ def test_compile_patch_enables_deep_dive_scene_one_and_removes_duplicate_logo():
         ]:
             pass
         print("   [+] Writing video file to disk for Quality Control...")
-        return "new-path"
+        return "subtitle-enabled" if subtitle_enabled else "not-enabled"
 
     import os
 
     bot = _Bot()
     bot.run_robot.__globals__["compile_video"] = compile_video
+    bot.run_robot.__globals__["BRAND_ASSETS_DIR"] = "/does/not/exist"
+    bot.run_robot.__globals__["format_mode"] = "regular"
+
+    def fail_if_logo_called(*_args, **_kwargs):
+        raise AssertionError("legacy compile-time logo renderer should not be called")
+
+    bot.run_robot.__globals__["create_glossy_logo_watermark"] = fail_if_logo_called
 
     assert _patch_deep_dive_subtitle_condition(bot) is True
-    assert bot.compile_video() == "new-path"
+    assert bot.compile_video() == "subtitle-enabled"
     assert getattr(bot.compile_video, "_deep_dive_subtitles_bound", False) is True
     assert getattr(bot.compile_video, "_premium_compile_logo_bound", False) is True
