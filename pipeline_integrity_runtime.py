@@ -1,0 +1,457 @@
+"""Strict end-to-end integrity guards for script, narration, subtitles and branding.
+
+This layer is deliberately conservative: it cleans transport artifacts, rejects
+prompt/log leakage, keeps the validated script as the narration source of truth,
+and refuses to manufacture emergency narration when source material is too thin.
+"""
+from __future__ import annotations
+
+import html
+import os
+import re
+import subprocess
+import tempfile
+import unicodedata
+from pathlib import Path
+from typing import Any
+
+
+VERSION = "2026-09-17-v1"
+
+_ZERO_WIDTH = re.compile(r"[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180d\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\u3164\ufe00-\ufe0f\ufeff]")
+_HTML_TAG = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
+_URL = re.compile(r"https?://\S+", re.IGNORECASE)
+
+_NOISE_PATTERNS = (
+    r"^\s*(?:\[!\]|\[fatal|\[error|traceback|validation failed|script validation failed)",
+    r"\breturn only a valid json\b",
+    r"\bjson schema\b",
+    r"\bdo not output this block\b",
+    r"\beditorial script contract\b",
+    r"\bcore shape\s*:",
+    r"\boriginal contribution\s*:",
+    r"\bpacing\s*:",
+    r"\bworkflow (?:stage|step|contract|instructions?)\b",
+    r"\b(?:you are|as an ai|as a language model)\b",
+    r"\b(?:api error|rate limit|groq exhausted|gemini fallback|provider unavailable)\b",
+    r"\b(?:step_1_headline|step_2_data_points|step_3_critique|step_4_metadata)\b",
+    r"```(?:json|python|text)?",
+)
+_NOISE_RE = tuple(re.compile(pattern, re.IGNORECASE) for pattern in _NOISE_PATTERNS)
+
+
+def clean_text(value: Any) -> str:
+    """Decode HTML entities and remove markup/control artifacts without inventing words."""
+    text = html.unescape(str(value or ""))
+    text = unicodedata.normalize("NFKC", text)
+    text = _ZERO_WIDTH.sub("", text)
+    text = text.replace("\u00a0", " ")
+    text = _HTML_TAG.sub(" ", text)
+    text = _URL.sub(" ", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def is_noise(text: Any) -> bool:
+    value = clean_text(text)
+    if not value:
+        return True
+    return any(pattern.search(value) for pattern in _NOISE_RE)
+
+
+def clean_narration(value: Any) -> str:
+    """Return narration-safe text while preserving the source wording."""
+    text = clean_text(value)
+    text = re.sub(r"[*_`\[\]{}]", "", text)
+    text = re.sub(r"\s+([,.!?])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip(" -:;|\n\t")
+
+
+def _source_text(story_data: dict) -> str:
+    if not isinstance(story_data, dict):
+        return ""
+    values = []
+    for key in ("text", "summary", "description"):
+        value = clean_text(story_data.get(key, ""))
+        if value:
+            values.append(value)
+    return " ".join(values).strip()
+
+
+def _sentences(text: str) -> list[str]:
+    cleaned = clean_text(text)
+    candidates = re.split(r"(?<=[.!?])\s+|\n+", cleaned)
+    result = []
+    for candidate in candidates:
+        value = clean_narration(candidate)
+        if len(re.findall(r"\b\w+\b", value, flags=re.UNICODE)) < 5:
+            continue
+        if is_noise(value):
+            continue
+        result.append(value)
+    return result
+
+
+def _contiguous_chunks(text: str, target: int, minimum_words: int = 8, maximum_words: int = 30) -> list[str]:
+    """Partition source words contiguously; never add filler words."""
+    words = clean_narration(text).split()
+    if len(words) < target * minimum_words:
+        return []
+    target = max(1, target)
+    chunks = []
+    remaining = len(words)
+    cursor = 0
+    for index in range(target):
+        slots_left = target - index
+        ideal = max(minimum_words, min(maximum_words, round(remaining / slots_left)))
+        end = min(len(words), cursor + ideal)
+        if slots_left > 1:
+            max_end = len(words) - minimum_words * (slots_left - 1)
+            end = min(end, max_end)
+        chunk = " ".join(words[cursor:end]).strip()
+        if len(chunk.split()) < minimum_words:
+            return []
+        chunks.append(chunk)
+        cursor = end
+        remaining = len(words) - cursor
+    if cursor < len(words):
+        tail = " ".join(words[cursor:]).strip()
+        if len(chunks[-1].split()) + len(tail.split()) <= maximum_words:
+            chunks[-1] = f"{chunks[-1]} {tail}".strip()
+        else:
+            return []
+    return chunks
+
+
+def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode="regular"):
+    """Build a source-only emergency script, or fail instead of inventing filler."""
+    story_data = story_data if isinstance(story_data, dict) else {}
+    title = clean_narration(story_data.get("title") or story_data.get("topic") or "")
+    source = _source_text(story_data)
+    if not source and title:
+        source = title
+    if not source:
+        raise ValueError("No usable source text is available for emergency script generation.")
+
+    # For Top 5, the selected story data may be JSON. Extract only its textual fields.
+    if format_mode == "top5":
+        try:
+            items = json.loads(str(story_data.get("text", "")))
+            if isinstance(items, list):
+                source_parts = []
+                for item in items:
+                    if isinstance(item, dict):
+                        source_parts.append(clean_narration(item.get("title", "")))
+                        source_parts.append(clean_narration(item.get("text", "")))
+                source = " ".join(part for part in source_parts if part)
+        except Exception:
+            pass
+
+    sentence_text = " ".join(_sentences(source)) or clean_narration(source)
+    target = 7 if str(format_mode).lower() == "top5" else 5
+    chunks = _contiguous_chunks(sentence_text, target)
+    if not chunks:
+        raise ValueError(
+            f"Source-grounded fallback refused to invent narration: need at least {target * 8} usable source words."
+        )
+
+    entity_words = re.findall(r"\b[A-Z][A-Za-z0-9&.'-]{2,}\b", title)
+    entity = " ".join(entity_words[:3]) or title[:80] or "Selected story"
+    category = clean_narration(genre_key or "news").replace("_", " ").title()
+    search_prompt = title or entity
+
+    scenes = [
+        {
+            "voiceover": clean_narration(chunk),
+            "primary_entity": entity,
+            "visual_intent": "news_event",
+            "specific_search_prompt": search_prompt,
+            "sport_or_topic_category": category,
+            "scene_source": "validated_source_fallback",
+            "scene_id": index + 1,
+        }
+        for index, chunk in enumerate(chunks)
+    ]
+    return {
+        "step_1_headline": title,
+        "step_2_data_points": source,
+        "step_3_critique": "Deterministic source-only fallback. No provider instructions or generated facts were used.",
+        "step_4_metadata": entity,
+        "titles": [title, f"{title} | What We Know" if title else "What We Know", f"{title} | Latest Facts" if title else "Latest Facts"],
+        "recommended_title_index": 1,
+        "seo_description": clean_text(source)[:700],
+        "tags": [tag for tag in (entity, category, "Shorts") if tag],
+        "pinned_comment": "What do you make of this development?",
+        "hook_type": "Direct Factual Headline",
+        "hook_style_used": "Direct Factual Headline",
+        "structure_used": "Source-grounded explainer",
+        "persona_used": "Analytical Insider",
+        "script": scenes,
+        "fallback_mode": "strict_source_only",
+        "integrity_version": VERSION,
+    }
+
+
+def _clean_script_result(script_data: dict, story_data: dict) -> dict:
+    result = dict(script_data or {})
+    scenes = result.get("script")
+    if not isinstance(scenes, list):
+        raise ValueError("Script output does not contain a valid scene list.")
+    cleaned = []
+    for index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict):
+            raise ValueError(f"Scene {index} is malformed.")
+        voiceover = clean_narration(scene.get("voiceover", ""))
+        if not voiceover or is_noise(voiceover):
+            raise ValueError(f"Scene {index} contains empty/noise narration.")
+        if len(voiceover.split()) < 3:
+            raise ValueError(f"Scene {index} contains too little narration.")
+        copy = dict(scene)
+        copy["voiceover"] = voiceover
+        copy["primary_entity"] = clean_text(copy.get("primary_entity", ""))
+        copy["visual_intent"] = clean_text(copy.get("visual_intent", ""))
+        copy["specific_search_prompt"] = clean_text(copy.get("specific_search_prompt", ""))
+        copy["sport_or_topic_category"] = clean_text(copy.get("sport_or_topic_category", ""))
+        copy["scene_id"] = index
+        copy["narration_source"] = "validated_script"
+        cleaned.append(copy)
+    result["script"] = cleaned
+    result["integrity_version"] = VERSION
+    result["authoritative_narration"] = True
+    for key in ("step_1_headline", "step_2_data_points", "step_3_critique", "step_4_metadata", "seo_description", "pinned_comment"):
+        if key in result:
+            result[key] = clean_text(result[key])
+    if isinstance(result.get("titles"), list):
+        result["titles"] = [clean_text(title).replace("#shorts", "").strip() for title in result["titles"] if clean_text(title)]
+    return result
+
+
+def _wrap_script_writer(bot):
+    current = getattr(bot, "write_script", None)
+    if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
+        return
+
+    def guarded_write_script(story_data, language_cfg, genre_key, conn, format_mode):
+        try:
+            result = current(story_data, language_cfg, genre_key, conn, format_mode)
+            cleaned = _clean_script_result(result, story_data)
+            # A strict fallback is only used when the existing generator fails
+            # or produces invalid narration; it never silently patches missing facts.
+            return cleaned
+        except Exception as exc:
+            print(f"   [Script Integrity] AI script rejected: {type(exc).__name__}: {exc}", flush=True)
+            fallback = strict_fallback(story_data, language_cfg, genre_key, format_mode)
+            return _clean_script_result(fallback, story_data)
+
+    guarded_write_script._pipeline_integrity_wrapped = True
+    bot.write_script = guarded_write_script
+    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
+        bot.run_robot.__globals__["write_script"] = guarded_write_script
+
+
+def _wrap_audio(bot):
+    current = getattr(bot, "generate_voiceover_and_timestamps", None)
+    if not callable(current) or getattr(current, "_pipeline_script_source_bound", False):
+        return
+
+    async def script_bound_audio(script_data, language_cfg):
+        scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+        if not scenes:
+            raise ValueError("Audio refused: authoritative script contains no scenes.")
+        for index, scene in enumerate(scenes, 1):
+            text = clean_narration(scene.get("voiceover", ""))
+            if not text or is_noise(text):
+                raise ValueError(f"Audio refused: scene {index} has invalid authoritative narration.")
+            scene["voiceover"] = text
+            scene["narration_source"] = "validated_script"
+            scene["scene_id"] = index
+        script_data["authoritative_narration"] = True
+        return await current(script_data, language_cfg)
+
+    script_bound_audio._pipeline_script_source_bound = True
+    bot.generate_voiceover_and_timestamps = script_bound_audio
+    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
+        bot.run_robot.__globals__["generate_voiceover_and_timestamps"] = script_bound_audio
+
+
+def _wrap_visuals(bot):
+    current = getattr(bot, "process_visuals_async", None)
+    if not callable(current) or getattr(current, "_pipeline_script_source_bound", False):
+        return
+
+    async def script_bound_visuals(script_data, language_cfg, format_mode="regular"):
+        scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+        for index, scene in enumerate(scenes, 1):
+            scene["voiceover"] = clean_narration(scene.get("voiceover", ""))
+            scene["scene_id"] = index
+            scene["narration_source"] = "validated_script"
+        packages = await current(script_data, language_cfg, format_mode)
+        for index, package in enumerate(packages or [], 1):
+            if not package:
+                continue
+            for layer in package:
+                if isinstance(layer, dict):
+                    layer["scene_id"] = index
+                    layer["narration_text"] = scenes[index - 1].get("voiceover", "") if index <= len(scenes) else ""
+                    layer["narration_source"] = "validated_script"
+        return packages
+
+    script_bound_visuals._pipeline_script_source_bound = True
+    bot.process_visuals_async = script_bound_visuals
+    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
+        bot.run_robot.__globals__["process_visuals_async"] = script_bound_visuals
+
+
+def _write_endpoint_srt(path: str, word_timings: list[dict], offset: float = 0.0) -> bool:
+    if not word_timings:
+        return False
+    lines = []
+    chunk = []
+    start = None
+    last_end = None
+    for item in word_timings:
+        word = clean_narration(item.get("word", ""))
+        if not word:
+            continue
+        item_start = max(0.0, float(item.get("start", 0.0))) + offset
+        item_end = max(item_start + 0.08, float(item.get("end", item_start + 0.1)) + offset)
+        if start is None:
+            start = item_start
+        chunk.append(word)
+        last_end = item_end
+        if len(chunk) >= 6 or (last_end - start) >= 2.2:
+            lines.append((start, last_end, " ".join(chunk)))
+            chunk, start = [], None
+    if chunk and start is not None and last_end is not None:
+        lines.append((start, last_end, " ".join(chunk)))
+    if not lines:
+        return False
+
+    def stamp(seconds: float) -> str:
+        millis = max(0, int(round(seconds * 1000)))
+        hours, millis = divmod(millis, 3_600_000)
+        minutes, millis = divmod(millis, 60_000)
+        secs, millis = divmod(millis, 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+    with open(path, "w", encoding="utf-8") as handle:
+        for index, (start, end, text) in enumerate(lines, 1):
+            handle.write(f"{index}\n{stamp(start)} --> {stamp(end)}\n{text}\n\n")
+    return True
+
+
+def _add_endpoint_subtitles(video_path: str, audio_paths: list[str], word_timings: list[list[dict]]) -> str:
+    """Add missing hook/outro captions only; middle-scene captions remain untouched."""
+    if not video_path or not os.path.isfile(video_path) or not word_timings:
+        return video_path
+    if len(word_timings) < 1:
+        return video_path
+
+    durations = []
+    for path in audio_paths[: len(word_timings)]:
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            durations.append(max(0.1, float((probe.stdout or "0").strip()) + 0.25))
+        except Exception:
+            durations.append(0.1)
+
+    temp_dir = tempfile.mkdtemp(prefix="shorts_subtitles_", dir=os.path.dirname(video_path) or None)
+    srt_path = os.path.join(temp_dir, "endpoint.srt")
+    try:
+        events = []
+        if _write_endpoint_srt(srt_path, word_timings[0], 0.0):
+            events.append(True)
+        last_index = len(word_timings) - 1
+        last_offset = sum(durations[:last_index]) if durations else 0.0
+        if last_index != 0:
+            with open(srt_path, "a", encoding="utf-8") as handle:
+                second_path = os.path.join(temp_dir, "outro.srt")
+            if _write_endpoint_srt(second_path, word_timings[last_index], last_offset):
+                with open(second_path, "r", encoding="utf-8") as source, open(srt_path, "a", encoding="utf-8") as target:
+                    target.write(source.read())
+                events.append(True)
+        if not events:
+            return video_path
+
+        output = str(Path(video_path).with_name(Path(video_path).stem + "_subtitle_integrity.mp4"))
+        escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+        force_style = "FontName=DejaVu Sans,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=250"
+        command = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", f"subtitles='{escaped}':force_style='{force_style}'",
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", output,
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=240, check=False)
+        if completed.returncode != 0 or not os.path.isfile(output):
+            print(f"   [Subtitle Integrity] Endpoint caption pass skipped: {completed.stderr[-500:]}", flush=True)
+            return video_path
+        os.replace(output, video_path)
+        print("   [Subtitle Integrity] Hook/outro narration captions added from the same word timings as the voiceover.", flush=True)
+        return video_path
+    finally:
+        for candidate in Path(temp_dir).glob("*"):
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        try:
+            Path(temp_dir).rmdir()
+        except OSError:
+            pass
+
+
+def _wrap_compile(bot):
+    current = getattr(bot, "compile_video", None)
+    if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
+        return
+
+    def guarded_compile(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
+        video_path = current(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode)
+        return _add_endpoint_subtitles(video_path, audio_paths, word_timings)
+
+    guarded_compile._pipeline_integrity_wrapped = True
+    bot.compile_video = guarded_compile
+    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
+        bot.run_robot.__globals__["compile_video"] = guarded_compile
+
+
+def patch_pipeline_integrity(bot) -> bool:
+    try:
+        _wrap_script_writer(bot)
+        _wrap_audio(bot)
+        _wrap_visuals(bot)
+        _wrap_compile(bot)
+        # Keep the existing final branding layer active, but make sure the
+        # repository's real .jpg logo variants are accepted by it.
+        try:
+            import branding_runtime
+            original_assets = getattr(branding_runtime, "_assets", None)
+            if callable(original_assets) and not getattr(original_assets, "_integrity_assets", False):
+                def assets_with_variants(active_bot):
+                    root = Path(getattr(active_bot, "BASE_DIR", Path(__file__).resolve().parent)) / "brand_assets"
+                    candidates = [
+                        root / "logo.png",
+                        root / "logo.png.jpg",
+                        root / "channels4_profile.jpg",
+                        root / "channels4_profile.jpg.jpg",
+                    ]
+                    logo = next((candidate for candidate in candidates if candidate.exists()), candidates[-1])
+                    overlay = root / "overlay.png"
+                    return logo, overlay
+                assets_with_variants._integrity_assets = True
+                branding_runtime._assets = assets_with_variants
+        except Exception as exc:
+            print(f"   [Pipeline Integrity] Branding asset compatibility patch skipped: {exc}", flush=True)
+        bot._pipeline_integrity_installed = True
+        print(f"   [Pipeline Integrity] Strict script/narration/subtitle/branding guards installed ({VERSION}).", flush=True)
+        return True
+    except Exception as exc:
+        print(f"   [Pipeline Integrity] Installation failed: {type(exc).__name__}: {exc}", flush=True)
+        return False
