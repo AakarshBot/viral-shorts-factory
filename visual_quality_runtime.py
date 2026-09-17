@@ -4,6 +4,10 @@ This module deliberately does not make API calls. It rejects images that are too
 small, badly shaped, or impractical to crop into a 9:16 Short. It also turns an
 uncertain semantic QA result into a hard rejection so an unverified image can
 never become the fallback winner.
+
+Verified visual caching is intentionally entity-scoped: once an image has been
+verified as representing an entity, narration/context must not force another
+search for that same entity.
 """
 from __future__ import annotations
 
@@ -15,8 +19,6 @@ MIN_SHORT_SIDE = 720
 PREFERRED_SHORT_SIDE = 1080
 MAX_SOURCE_ASPECT = 3.2
 MIN_SOURCE_ASPECT = 0.32
-# A normal 16:9 sports/news photo loses about 68% of its source area when
-# converted to 9:16, so it must remain eligible. Extremely wide banners are not.
 MAX_CROP_LOSS = 0.72
 
 
@@ -52,7 +54,6 @@ def quality_gate(img_bytes: bytes) -> tuple[bool, str, float]:
         return False, f"extreme-aspect:{aspect:.2f}", 0.0
     if crop_loss > MAX_CROP_LOSS:
         return False, f"bad-9x16-crop:{crop_loss:.0%}-loss", 0.0
-
     score = min(35.0, 35.0 * short / PREFERRED_SHORT_SIDE)
     score += max(0.0, 35.0 * (1.0 - crop_loss / MAX_CROP_LOSS))
     score += min(20.0, info["sharpness"] / 18.0)
@@ -74,11 +75,12 @@ def cover_crop(img: Image.Image, size=(1080, 1920)) -> Image.Image:
 
 
 def install(visual_runtime_module):
-    """Install cheap quality gates around the existing visual runtime."""
+    """Install quality gates plus entity-scoped verified visual caching."""
     if visual_runtime_module is None:
         return False
     original_gate = getattr(visual_runtime_module, "_strict_gate", None)
     original_cache = getattr(visual_runtime_module, "get_cached_asset", None)
+    original_save = getattr(visual_runtime_module, "save_to_cache", None)
     if not callable(original_gate):
         return False
     if getattr(visual_runtime_module, "_quality_gate_installed", False):
@@ -90,7 +92,6 @@ def install(visual_runtime_module):
         if not ok:
             print(f"   [Visual Quality] REJECTED | {reason}", flush=True)
             return False, "LOCAL-QUALITY", 0, True
-
         accepted, tier, semantic_score, hard_reject = original_gate(bot, img_bytes, seg, video_title, source=source)
         if not accepted and not hard_reject:
             print(f"   [Visual Quality] REJECTED | semantic verification uncertain | quality={quality_score} | source={source}", flush=True)
@@ -106,7 +107,12 @@ def install(visual_runtime_module):
     if callable(original_cache):
         @functools.wraps(original_cache)
         def gated_cached_asset(bot, entity, visual_type, context=""):
-            image, path = original_cache(bot, entity, visual_type, context)
+            # First use the new entity-scoped cache. This is the important path:
+            # narration, intent and video title must not create separate caches.
+            image, path = original_cache(bot, entity, visual_type, "")
+            if image is None and context:
+                # Read older context-specific caches for backward compatibility.
+                image, path = original_cache(bot, entity, visual_type, context)
             if image is None:
                 return None, None
             try:
@@ -117,9 +123,18 @@ def install(visual_runtime_module):
                     return None, None
             except Exception:
                 return None, None
+            print(f"   [Visual Cache] ENTITY HIT | entity='{entity}' type={visual_type} | context ignored", flush=True)
             return image, path
         visual_runtime_module.get_cached_asset = gated_cached_asset
 
+    if callable(original_save):
+        @functools.wraps(original_save)
+        def entity_scoped_save(bot, img_bytes, entity, visual_type, source_type, context=""):
+            # Always save newly verified assets under context="" so every later
+            # scene mentioning the same entity can reuse the verification.
+            return original_save(bot, img_bytes, entity, visual_type, source_type, "")
+        visual_runtime_module.save_to_cache = entity_scoped_save
+
     visual_runtime_module._quality_gate_installed = True
-    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v3"
+    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v4-entity-cache"
     return True
