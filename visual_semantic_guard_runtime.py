@@ -19,6 +19,7 @@ GENERIC_NOISE = {
     "says", "said", "today", "yesterday", "tomorrow", "editorial", "official",
     "photo", "image", "picture", "real", "high", "resolution", "event", "item",
     "thing", "stuff", "matter", "point", "one", "off", "kind", "way", "part", "time",
+    "next", "year",
 }
 
 DISCOURSE_PREFIXES = {
@@ -40,6 +41,8 @@ AUXILIARY_WORDS = {
     "becomes", "became", "being", "been", "make", "makes", "made", "get", "gets", "got", "go",
     "goes", "went", "come", "comes", "came", "say", "says", "said", "tell", "tells", "told",
     "report", "reports", "reported", "announce", "announces", "announced", "show", "shows", "showed",
+    "host", "hosts", "hosted", "hosting", "return", "returns", "returned", "returning",
+    "hold", "holds", "held", "holding",
 }
 
 ROLE_CUES = {
@@ -122,31 +125,25 @@ def evidence_text(scene: dict, video_title: str = "") -> str:
     return " ".join(parts)
 
 
-def _tokenise_evidence(text: str) -> list[str]:
-    return [token for token in tokens(text)]
-
-
 def _grounded_context(candidate: str, scene: dict, video_title: str = "") -> str:
     candidate_keys = set(meaningful_tokens(candidate))
     if not candidate_keys:
         return ""
-    evidence_words = _tokenise_evidence(evidence_text(scene, video_title))
+    evidence_words = tokens(evidence_text(scene, video_title))
     keyed = [key(word) for word in evidence_words]
     positions = [i for i, item in enumerate(keyed) if item in candidate_keys]
     if not positions:
         return ""
 
-    start = max(0, min(positions) - 2)
-    end = min(len(evidence_words), max(positions) + 3)
+    start = max(0, min(positions) - 3)
+    end = min(len(evidence_words), max(positions) + 4)
     window = evidence_words[start:end]
 
     kept = []
     candidate_original = {key(word): word for word in tokens(candidate)}
     for word in window:
         k = key(word)
-        if not k or k in GENERIC_NOISE or k in STOPWORDS or k in DISCOURSE_PREFIXES:
-            continue
-        if k in AUXILIARY_WORDS:
+        if not k or k in GENERIC_NOISE or k in STOPWORDS or k in DISCOURSE_PREFIXES or k in AUXILIARY_WORDS:
             continue
         if k not in {key(x) for x in kept}:
             kept.append(word)
@@ -211,9 +208,8 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
     contextual = _grounded_context(subject, scene, video_title)
     if contextual and contextual.casefold() != subject.casefold():
         candidate = sanitize_candidate(contextual)
-        if candidate and candidate.casefold() not in {q.casefold() for q in queries}:
-            if len(tokens(candidate)) <= MAX_QUERY_WORDS:
-                queries.append(candidate)
+        if candidate and candidate.casefold() not in {q.casefold() for q in queries} and len(tokens(candidate)) <= MAX_QUERY_WORDS:
+            queries.append(candidate)
     return queries[:3], resolution["visual_type"], resolution
 
 
