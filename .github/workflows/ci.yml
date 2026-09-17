@@ -89,6 +89,13 @@ jobs:
           afghanistan = {'primary_entity': 'Afghanistan', 'visual_intent': 'team players', 'voiceover': 'Afghanistan will face India in the T20 International series in New Delhi.', 'sport_or_topic_category': 'cricket'}
           venue = {'primary_entity': 'New Delhi', 'visual_intent': 'stadium venue', 'voiceover': 'The final match will be played at the stadium in New Delhi.', 'sport_or_topic_category': 'cricket'}
 
+          politics_person = {'primary_entity': 'Narendra Modi', 'visual_intent': 'person portrait', 'voiceover': 'Narendra Modi addressed the gathering.', 'sport_or_topic_category': 'politics'}
+          politics_org = {'primary_entity': 'Indian Parliament', 'visual_intent': 'institution', 'voiceover': 'The Indian Parliament debated the bill.', 'sport_or_topic_category': 'politics'}
+          technology_company = {'primary_entity': 'Apple', 'visual_intent': 'company', 'voiceover': 'Apple announced a new product.', 'sport_or_topic_category': 'technology'}
+          technology_product = {'primary_entity': 'iPhone 17', 'visual_intent': 'product device', 'voiceover': 'The iPhone 17 was announced.', 'sport_or_topic_category': 'technology'}
+          geography = {'primary_entity': 'Afghanistan', 'visual_intent': 'location geography', 'voiceover': 'Afghanistan is the geographic focus of the report.', 'sport_or_topic_category': 'geography'}
+          science = {'primary_entity': 'photosynthesis', 'visual_intent': 'scientific concept', 'voiceover': 'Photosynthesis converts light energy into chemical energy.', 'sport_or_topic_category': 'science'}
+
           assert visual_strategy_runtime.classify_scene(person) == 'PERSON'
           assert visual_strategy_runtime.classify_scene(event) == 'EVENT'
           assert visual_strategy_runtime.classify_scene(bcci) == 'ORGANIZATION'
@@ -97,6 +104,12 @@ jobs:
           assert visual_strategy_runtime.classify_scene(india) == 'ORGANIZATION'
           assert visual_strategy_runtime.classify_scene(afghanistan) == 'ORGANIZATION'
           assert visual_strategy_runtime.classify_scene(venue) == 'LOCATION'
+          assert visual_strategy_runtime.classify_scene(politics_person) == 'PERSON'
+          assert visual_strategy_runtime.classify_scene(politics_org) == 'ORGANIZATION'
+          assert visual_strategy_runtime.classify_scene(technology_company) == 'ORGANIZATION'
+          assert visual_strategy_runtime.classify_scene(technology_product) == 'PRODUCT'
+          assert visual_strategy_runtime.classify_scene(geography) == 'LOCATION'
+          assert visual_strategy_runtime.classify_scene(science) == 'CONCEPT'
 
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
@@ -139,6 +152,21 @@ jobs:
           assert venue_type == 'LOCATION'
           assert venue_queries[0] == 'New Delhi cricket stadium', venue_queries
           assert all('New Delhi cricket team' not in q for q in venue_queries), venue_queries
+
+          cross_genre_cases = [
+              (politics_person, 'Narendra Modi', 'PERSON'),
+              (politics_org, 'Indian Parliament', 'ORGANIZATION'),
+              (technology_company, 'Apple', 'ORGANIZATION'),
+              (technology_product, 'iPhone 17', 'PRODUCT'),
+              (geography, 'Afghanistan', 'LOCATION'),
+              (science, 'photosynthesis', 'CONCEPT'),
+          ]
+          for case, subject, expected_type in cross_genre_cases:
+              case_queries, case_type = visual_strategy_runtime.build_deep_queries(case, 'cross genre regression')
+              assert case_type == expected_type, (case, case_type)
+              assert case_queries and case_queries[0] == subject, case_queries
+              assert len(case_queries) <= 3, case_queries
+              assert all(subject.lower() in q.lower() for q in case_queries), case_queries
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Sachin Tendulkar scored 143 in the match.') is False
