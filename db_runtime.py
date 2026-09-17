@@ -27,13 +27,20 @@ class _CursorProxy:
         upper = sql_text.upper()
 
         # Stale PENDING_QC records are explicitly rejected rather than being
-        # left with a misleading PENDING_QC status.
+        # left with a misleading PENDING_QC status. The rewrite is intentionally
+        # fail-closed if the known legacy statement shape changes.
         if (
             "UPDATE VAULT SET VIDEO_ID = 'REJECTED'" in upper
             and "WHERE VIDEO_ID = 'PENDING_QC'" in upper
         ):
+            pattern = (
+                r"UPDATE\s+vault\s+SET\s+video_id\s*=\s*'REJECTED'\s*,\s*reported\s*=\s*1\s*,\s*"
+                r"rejected_reason\s*=\s*'Stale timeout'"
+            )
+            if not re.search(pattern, sql_text, flags=re.IGNORECASE):
+                raise ValueError("Refusing to rewrite an unexpected stale-run SQL statement.")
             sql_text = re.sub(
-                r"UPDATE\s+vault\s+SET\s+video_id\s*=\s*'REJECTED'\s*,\s*reported\s*=\s*1\s*,\s*rejected_reason\s*=\s*'Stale timeout'",
+                pattern,
                 "UPDATE vault SET video_id = 'REJECTED', reported = 1, rejected_reason = 'Stale timeout', status = 'REJECTED', updated_at = CURRENT_TIMESTAMP",
                 sql_text,
                 count=1,
@@ -42,10 +49,17 @@ class _CursorProxy:
             return self._cursor.execute(sql_text, parameters)
 
         # Create a new row for EVERY production run. Never use INSERT OR IGNORE
-        # here: two runs are allowed to have the same topic.
+        # here: two runs are allowed to have the same topic. Only the exact known
+        # legacy statement is rewritten; a similar statement fails closed.
         if "INSERT OR IGNORE INTO VAULT" in upper and "(TOPIC, DATE_USED, GENRE, VIDEO_ID)" in upper:
+            pattern = (
+                r"INSERT\s+OR\s+IGNORE\s+INTO\s+vault\s*\(topic,\s*date_used,\s*genre,\s*video_id\)\s*"
+                r"VALUES\s*\(\?,\s*\?,\s*\?,\s*\?\)"
+            )
+            if not re.fullmatch(r"\s*" + pattern + r"\s*;?\s*", sql_text, flags=re.IGNORECASE):
+                raise ValueError("Refusing to rewrite an unexpected run-record INSERT statement.")
             sql_text = re.sub(
-                r"INSERT\s+OR\s+IGNORE\s+INTO\s+vault\s*\(topic,\s*date_used,\s*genre,\s*video_id\)\s*VALUES\s*\(\?,\s*\?,\s*\?,\s*\?\)",
+                pattern,
                 "INSERT INTO vault (topic, date_used, genre, video_id, run_id, status) VALUES (?, ?, ?, ?, ?, 'PENDING_QC')",
                 sql_text,
                 count=1,
@@ -57,7 +71,8 @@ class _CursorProxy:
             self._state.inserted = self._state.row_id is not None
             return result
 
-        # Pin the final upload write to the exact row created above.
+        # Pin the final upload write to the exact row created above instead of
+        # the historical topic, which may no longer be unique.
         is_final_update = (
             "UPDATE VAULT SET" in upper
             and "VIDEO_ID=?" in upper
@@ -66,8 +81,11 @@ class _CursorProxy:
             and self._state.row_id is not None
         )
         if is_final_update:
+            pattern = r"\s*WHERE\s+topic\s*=\s*\?"
+            if not re.search(pattern, sql_text, flags=re.IGNORECASE):
+                raise ValueError("Refusing to rewrite an unexpected topic-based final update.")
             sql_text = re.sub(
-                r"\s*WHERE\s+topic\s*=\s*\?",
+                pattern,
                 ", status='UPLOADED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 sql_text,
                 count=1,
