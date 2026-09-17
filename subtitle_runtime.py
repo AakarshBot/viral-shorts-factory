@@ -16,7 +16,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 
 _WINDOWS_REGULAR_FONTS = (
@@ -82,7 +82,6 @@ def _load_font(font_path: str | None, size: int, bold: bool = False):
 def _load_regular_font(font_path: str | None, size: int):
     requested = str(font_path or "").lower()
     if requested.endswith("bold.ttf") or requested.endswith("bd.ttf"):
-        # Language-specific scripts only ship the bold Noto variants.
         return _load_font(font_path, size, bold=True)
     if requested:
         for path in (font_path, *_WINDOWS_REGULAR_FONTS, *_LINUX_REGULAR_FONTS):
@@ -226,8 +225,8 @@ def _glass_surface(base: Image.Image, box, radius: int, tint=(7, 13, 23, 120), b
     highlight_h = max(10, int(panel_h * 0.20))
     highlight = Image.new("RGBA", base.size, (0, 0, 0, 0))
     hmask = Image.new("L", (panel_w, highlight_h), 0)
-    ImageDraw.Draw(hmask).rounded_rectangle((0, 0, panel_w - 1, highlight_h * 2), radius=max(4, int(radius)), fill=255)
-    highlight.paste((255, 255, 255, 22), (x0, y0), hmask.crop((0, 0, panel_w, highlight_h)))
+    ImageDraw.Draw(hmask).rounded_rectangle((0, 0, panel_w - 1, min(highlight_h * 2, highlight_h - 1)), radius=max(4, int(radius)), fill=255)
+    highlight.paste((255, 255, 255, 22), (x0, y0), hmask)
     return Image.alpha_composite(surface, highlight)
 
 
@@ -311,8 +310,9 @@ def generate_readable_karaoke_clip(
     for line in lines:
         text_w = _measure_line(line, font)
         x = (width - text_w) / 2
-        draw.text((x + 2, y + 3), " ".join(line), font=font, fill=shadow, stroke_width=1, stroke_fill=(0, 0, 0, 125))
-        draw.text((x, y), " ".join(line), font=font, fill=normal)
+        text = " ".join(line)
+        draw.text((x + 2, y + 3), text, font=font, fill=shadow, stroke_width=1, stroke_fill=(0, 0, 0, 125))
+        draw.text((x, y), text, font=font, fill=normal)
         y += line_height + line_gap
 
     result = Image.alpha_composite(glass_base.convert("RGBA"), overlay)
@@ -345,7 +345,8 @@ def render_premium_top5_card(
 
     accent = (64, 196, 255, 245)
     num_font = _load_regular_font(font_choice, 88)
-    body_font, lines = _fit_layout(_clean_word(summary_text).split(), 58, font_choice, width - 220, 3)
+    clean_summary = _clean_word(summary_text)
+    body_font, lines = _fit_layout(clean_summary.split(), 58, font_choice, width - 220, 3)
     draw.text((x0 + 54, y0 + 44), f"#{int(item_number)}", font=num_font, fill=accent)
 
     y = y0 + 230
@@ -478,22 +479,36 @@ def _patch_deep_dive_subtitle_condition(bot):
         return False
     try:
         source = inspect.getsource(current)
+        changes = []
         marker = "if not is_outro_scene and not is_hook_scene and idx < len(word_timings):"
         replacement = "if not is_outro_scene and idx < len(word_timings):"
-        if marker not in source:
+        if marker in source:
+            source = source.replace(marker, replacement, 1)
+            changes.append("Deep Dive scene 1 subtitles enabled")
+
+        logo_start = '        logo_file_path = os.path.join(BRAND_ASSETS_DIR, "logo.png")'
+        logo_end = '        print("   [+] Writing video file to disk for Quality Control...")'
+        if logo_start in source and logo_end in source:
+            start = source.index(logo_start)
+            end = source.index(logo_end)
+            source = source[:start] + "        # Final branding_runtime owns the channel logo; do not duplicate it in the compositor.\n" + source[end:]
+            changes.append("legacy compile-time logo removed")
+
+        if not changes:
             return False
-        patched_source = textwrap.dedent(source).replace(marker, replacement, 1)
+        patched_source = textwrap.dedent(source)
         exec(patched_source, namespace)
         patched = namespace.get("compile_video")
         if not callable(patched):
             return False
         patched._deep_dive_subtitles_bound = True
+        patched._premium_compile_logo_bound = True
         bot.compile_video = patched
         namespace["compile_video"] = patched
-        print("   [Subtitle Patch] Deep Dive scene 1 is now included in the normal subtitle pass.", flush=True)
+        print("   [Subtitle Patch] " + "; ".join(changes) + ".", flush=True)
         return True
     except Exception as exc:
-        print(f"   [Subtitle Patch] Could not rebind compile_video for Deep Dive subtitles: {type(exc).__name__}: {exc}", flush=True)
+        print(f"   [Subtitle Patch] Could not rebind compile_video: {type(exc).__name__}: {exc}", flush=True)
         return False
 
 
@@ -510,9 +525,6 @@ def _patch_endpoint_subtitles():
     def premium_endpoint_subtitles(video_path, audio_paths, word_timings):
         if not video_path or not os.path.isfile(video_path) or not word_timings:
             return video_path
-        # The integrity layer owns timing generation. Keep that behavior intact,
-        # but use its existing function when no endpoint captions are required.
-        # A lightweight FFmpeg pass is used here with a translucent caption box.
         try:
             durations = []
             for path in audio_paths[: len(word_timings)]:
@@ -635,14 +647,12 @@ def _premium_branded_finish(bot, video_path: str) -> str:
     temp_paths: list[str] = []
     work_dir = os.path.dirname(video_path) or None
     overlay_asset = None
+    temp_dir = None
     if overlay and overlay.exists():
         try:
             processed = Image.open(overlay).convert("RGBA")
             if processed.size != (source_w, source_h):
                 processed = processed.resize((source_w, source_h), Image.Resampling.LANCZOS)
-            # Preserve the channel overlay, but never let it cover the bottom
-            # subtitle-safe zone. This is less destructive than rejecting the
-            # entire overlay asset.
             safe_y0 = max(0, source_h - 360)
             safe_x0 = int(source_w * 0.08)
             safe_x1 = int(source_w * 0.92)
@@ -650,7 +660,7 @@ def _premium_branded_finish(bot, video_path: str) -> str:
             mask = Image.new("L", processed.size, 0)
             md = ImageDraw.Draw(mask)
             md.rectangle((safe_x0, safe_y0, safe_x1, source_h), fill=255)
-            alpha = Image.eval(ImageChops.subtract(alpha, mask), lambda value: value)
+            alpha = ImageChops.subtract(alpha, mask)
             processed.putalpha(alpha)
             overlay_asset = os.path.join(work_dir, "premium_brand_overlay.png")
             processed.save(overlay_asset, "PNG")
@@ -658,14 +668,7 @@ def _premium_branded_finish(bot, video_path: str) -> str:
         except Exception:
             overlay_asset = None
 
-    try:
-        from PIL import ImageChops
-    except Exception:
-        ImageChops = None
-
     if overlay_asset is None and overlay and overlay.exists():
-        # Fall back to the original asset only when it already passed the
-        # repository's caption-safety validator.
         safe, _ = branding_runtime._overlay_is_caption_safe(overlay, source_w, source_h)
         if safe:
             overlay_asset = str(overlay)
@@ -693,7 +696,8 @@ def _premium_branded_finish(bot, video_path: str) -> str:
 
     if logo_asset:
         inputs += ["-loop", "1", "-i", logo_asset]
-        filters += [f"[2:v]format=rgba[badge];{last}[badge]overlay=W-w-28:24:eof_action=repeat:shortest=0:format=auto[finalv]"]
+        badge_index = 2 if overlay_asset else 1
+        filters += [f"[{badge_index}:v]format=rgba[badge];{last}[badge]overlay=W-w-28:24:eof_action=repeat:shortest=0:format=auto[finalv]"]
         last = "[finalv]"
 
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", last, "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", "-t", f"{source_duration:.3f}", output]
