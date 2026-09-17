@@ -1,9 +1,9 @@
 """Visual-subject preparation for Viral Shorts Factory.
 
-The factual ``primary_entity`` remains immutable. A separate
-``visual_search_subject`` may be derived from scene context (for example,
-``India`` -> ``India cricket team``). This is the key distinction that keeps
-search precise without falling back to vague narration-based queries.
+The factual entity is preserved in ``factual_primary_entity``. The runtime's
+``primary_entity`` is then set to the precise, scene-grounded visual subject so
+retrieval and QA evaluate the same thing. Example: ``India`` becomes
+``India cricket team`` when the scene is explicitly about cricket.
 """
 from __future__ import annotations
 
@@ -59,8 +59,9 @@ def classify_search_subject(subject: str) -> str:
 
 def build_candidate_scene(scene: dict, subject: str) -> dict:
     candidate = dict(scene or {})
-    locked = _clean(subject)
-    candidate["primary_entity"] = locked
+    factual_subject = _clean(subject)
+    candidate["factual_primary_entity"] = factual_subject
+
     try:
         import visual_retrieval_planner as planner
         brief = planner.build_scene_visual_brief(
@@ -68,14 +69,21 @@ def build_candidate_scene(scene: dict, subject: str) -> dict:
             str(candidate.get("video_title", "")),
             str(candidate.get("sport_or_topic_category", "")),
         )
-        visual_subject = _clean(brief.get("subject", "")) or locked
-        candidate["visual_search_subject"] = visual_subject
-        candidate["visual_type"] = brief.get("visual_type") or classify_search_subject(visual_subject)
+        visual_subject = _clean(brief.get("subject", "")) or factual_subject
+        visual_type = brief.get("visual_type") or classify_search_subject(visual_subject)
     except Exception:
-        candidate["visual_search_subject"] = locked
-        candidate["visual_type"] = classify_search_subject(locked)
+        visual_subject = factual_subject
+        visual_type = classify_search_subject(visual_subject)
+
+    # The downstream runtime historically uses primary_entity as its search
+    # identity. Give it the precise visual subject, while retaining the original
+    # factual entity separately for provenance/debugging.
+    candidate["primary_entity"] = visual_subject
+    candidate["visual_search_subject"] = visual_subject
+    candidate["visual_type"] = visual_type
+    candidate["specific_search_prompt"] = visual_subject
     candidate["visual_subject_locked"] = True
-    candidate["visual_subject_lock"] = locked
+    candidate["visual_subject_lock"] = factual_subject
     return candidate
 
 
@@ -85,8 +93,8 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
         return visual_runtime_module._relevant_asset(bot, scene, category, used_urls, used_hashes, video_title)
     candidate = build_candidate_scene(scene, subject)
     print(
-        f"   [Visual Search] Locked factual subject | '{subject}' | "
-        f"visual subject='{candidate.get('visual_search_subject', subject)}' | "
+        f"   [Visual Search] Factual subject='{subject}' | "
+        f"precise visual subject='{candidate.get('visual_search_subject', subject)}' | "
         f"type={candidate['visual_type']}",
         flush=True,
     )
