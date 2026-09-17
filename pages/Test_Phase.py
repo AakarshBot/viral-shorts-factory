@@ -13,7 +13,8 @@ from semantic_runtime import patch_semantic_dedup
 from story_ranker import patch_story_selection
 from visual_qa_runtime import install_visual_qa_bridge
 from visual_runtime import patch_visual_pipeline
-from test_phase_runtime import render_test_phase
+import test_phase_runtime
+from test_phase_patches import install_test_phase_patches
 
 st.set_page_config(page_title="Test Phase", page_icon="🧪", layout="wide")
 
@@ -39,4 +40,5 @@ def _init_runtime() -> None:
 
 
 _init_runtime()
-render_test_phase(ultimate_bot)
+install_test_phase_patches()
+test_phase_runtime.render_test_phase(ultimate_bot)
