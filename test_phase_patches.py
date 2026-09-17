@@ -23,6 +23,7 @@ import script_guard_runtime
 import test_phase_runtime
 import visual_runtime
 from newsroom_dashboard import _collect_visual_items, _script_text
+from visual_policy_runtime import _clean_search_subject
 
 
 def _run_with_progress(label: str, fn: Callable[[], Any]) -> Any:
@@ -64,10 +65,8 @@ def _wrap_for_progress(owner: Any, attr: str, label: str):
 
 
 def _clean_subject(value: Any) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-:;|'\"")
-    text = re.sub(r"^(?:primary entity|visual subject|subject|search term|keyword)\s*[:=-]\s*", "", text, flags=re.I)
-    text = re.sub(r"\s+(?:official(?:\s+photo)?|press\s+photo|editorial\s+photo|news\s+photo|real\s+photo|photo|image)\s*$", "", text, flags=re.I)
-    return text.strip(" ,.-:;|'\"")
+    """Use the same deterministic subject sanitizer as the production visual path."""
+    return _clean_search_subject(value)
 
 
 def _scene_phrase(seg: dict[str, Any]) -> str:
@@ -78,26 +77,47 @@ def _scene_phrase(seg: dict[str, Any]) -> str:
         "had", "will", "would", "could", "should", "just", "been", "were", "was", "are", "our",
         "you", "your", "today", "is", "a", "an", "to", "of", "in", "on", "as", "it", "its",
     }
-    return " ".join(w for w in words if w.lower() not in stop)[:180].strip()
+    sentence_cues = {
+        "every", "each", "because", "given", "since", "but", "or", "so", "if", "although", "though",
+        "we", "try", "tried", "tries", "get", "gets", "got", "getting", "happen", "happens", "happened",
+        "year", "years", "season", "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't",
+    }
+    meaningful = []
+    for word in words:
+        lower = word.lower().strip(".,!?;:")
+        if lower in sentence_cues and meaningful:
+            break
+        if lower not in stop:
+            meaningful.append(word)
+        if len(meaningful) >= 5:
+            break
+    return " ".join(meaningful).strip()
 
 
 def _three_visual_terms(seg: dict[str, Any], video_title: str) -> list[str]:
-    """Produce exactly three clean diagnostic search terms without calling an API."""
+    """Produce exactly three compact diagnostic search terms without calling an API."""
     entity = _clean_subject(seg.get("primary_entity", ""))
     phrase = _scene_phrase(seg)
     title = _clean_subject(video_title)
     intent = _clean_subject(seg.get("visual_intent", ""))
-    candidates = [
-        entity,
-        f"{entity} {phrase}" if entity and phrase else phrase,
-        f"{entity} {intent}" if entity and intent else title,
-        title,
-    ]
-    terms: list[str] = []
-    for value in candidates:
-        clean = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-")
+
+    def add(parts: list[str], terms: list[str]) -> None:
+        clean = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip(" ,.-")
         if clean and clean.lower() not in {t.lower() for t in terms}:
             terms.append(clean)
+
+    terms: list[str] = []
+    # Keep the entity itself as the first term whenever possible.
+    add([entity], terms)
+    add([entity, phrase], terms)
+    add([entity, intent or title], terms)
+
+    # If the scene does not have a usable entity, use compact title/phrase terms
+    # rather than dumping the whole narration sentence into the search field.
+    if not terms:
+        add([phrase], terms)
+    if not terms:
+        add([title], terms)
     while terms and len(terms) < 3:
         terms.append(terms[-1])
     return terms[:3] if terms else ["selected story", "news", "documentary"]
