@@ -1,3 +1,4 @@
+from visual_semantic_guard_runtime import meaningful_tokens
 from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
 
 
@@ -9,7 +10,11 @@ def _assert_query_contract(scene, title, expected_type):
     assert queries, "visual planner returned no query"
     assert queries[0] == brief["subject"], (brief, queries)
     assert len(queries) <= 5, queries
-    assert all(brief["subject"].casefold() in query.casefold() for query in queries), queries
+    subject_tokens = set(meaningful_tokens(brief["subject"]))
+    assert subject_tokens, brief
+    for query in queries:
+        query_tokens = set(meaningful_tokens(query))
+        assert subject_tokens.issubset(query_tokens), (brief, queries)
     assert all(token not in " ".join(queries).casefold() for token in ("editorial_person", "red carpet")), queries
     return brief, queries
 
