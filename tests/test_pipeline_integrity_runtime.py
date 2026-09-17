@@ -1,4 +1,11 @@
-from pipeline_integrity_runtime import _wrap_script_writer, clean_narration, is_noise, strict_fallback
+from pipeline_integrity_runtime import (
+    _wrap_compile,
+    _wrap_script_writer,
+    _write_endpoint_srt,
+    clean_narration,
+    is_noise,
+    strict_fallback,
+)
 from script_runtime import wrap_write_script
 
 
@@ -72,3 +79,65 @@ def test_content_density_marker_survives_integrity_wrapper_order():
     # binding retains both contracts.
     wrap_write_script(bot)
     assert getattr(bot.write_script, "_content_dense_bound", False) is True
+
+
+def test_endpoint_subtitle_srt_uses_word_timings():
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / "endpoint.srt"
+        ok = _write_endpoint_srt(
+            str(path),
+            [
+                {"word": "The", "start": 0.0, "end": 0.3},
+                {"word": "headline", "start": 0.3, "end": 0.8},
+                {"word": "is", "start": 0.8, "end": 1.0},
+                {"word": "confirmed", "start": 1.0, "end": 1.5},
+                {"word": "today", "start": 1.5, "end": 1.9},
+                {"word": "officially", "start": 1.9, "end": 2.2},
+            ],
+        )
+        assert ok is True
+        text = path.read_text(encoding="utf-8")
+        assert "00:00:00,000 --> 00:00:02,200" in text
+        assert "The headline is confirmed today officially" in text
+
+
+def test_compile_integrity_keeps_all_scene_timing_sets(monkeypatch):
+    captured = {}
+
+    def fake_endpoint(video_path, audio_paths, word_timings):
+        captured["video_path"] = video_path
+        captured["audio_paths"] = list(audio_paths)
+        captured["word_timings"] = list(word_timings)
+        return video_path
+
+    monkeypatch.setattr("pipeline_integrity_runtime._add_endpoint_subtitles", fake_endpoint)
+
+    class CompileBot:
+        def __init__(self):
+            def run_robot():
+                return None
+
+            self.run_robot = run_robot
+
+            def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
+                return "final.mp4"
+
+            self.compile_video = compile_video
+
+    bot = CompileBot()
+    _wrap_compile(bot)
+    timings = [
+        [{"word": "hook"}],
+        [{"word": "body"}],
+        [{"word": "body2"}],
+        [{"word": "outro"}],
+    ]
+    result = bot.compile_video(["s1", "s2", "s3", "s4"], ["a1", "a2", "a3", "a4"], timings, {}, "regular")
+
+    assert result == "final.mp4"
+    assert captured["audio_paths"] == ["a1", "a2", "a3", "a4"]
+    assert captured["word_timings"] == timings
+    assert len(captured["word_timings"]) == 4
