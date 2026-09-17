@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import inspect
 import os
-import sqlite3
-import threading
 from typing import Any
 
 
@@ -67,7 +65,13 @@ def _patch_script_pipeline(bot) -> None:
         print(f"   [Script Hardening] Final scene count: {len(repaired.get('script') or [])}", flush=True)
         return repaired
 
+    # Preserve the binding metadata used by diagnostics and later runtime layers.
+    # Scene hardening is an outer guard around the authoritative content-density
+    # writer; it must not hide the fact that research is directly beneath it.
     guarded_write._scene_contract_bound = True
+    guarded_write._content_dense_bound = bool(getattr(current, "_content_dense_bound", False))
+    guarded_write._research_layer_live = bool(getattr(current, "_research_layer_live", False))
+    guarded_write._scene_contract_inner_writer = current
     bot.write_script = guarded_write
     if globals_dict:
         globals_dict["write_script"] = guarded_write
