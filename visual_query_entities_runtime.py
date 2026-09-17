@@ -107,8 +107,7 @@ def _extract_group_subjects(text: str) -> list[str]:
     for i in range(len(tokens)):
         if i + 2 < len(tokens):
             a, b, c = tokens[i], tokens[i + 1], tokens[i + 2]
-            ak, ck = _key(a), _key(c)
-            if ak in _COMMON_STARTERS and ck in {"team", "squad", "board", "association", "government"}:
+            if _key(a) in _COMMON_STARTERS and _key(c) in {"team", "squad", "board", "association", "government"}:
                 first = re.sub(r"['’]s$", "", a, flags=re.IGNORECASE)
                 _append_unique(result, f"{first} {b} {c}")
         if i + 1 < len(tokens):
@@ -190,9 +189,9 @@ def _script_position(script: str, candidate: str) -> int:
 def extract_slide_search_subjects(scene: dict) -> list[str]:
     """Return up to three exact search subjects from the current slide.
 
-    Primary entity is first. Additional subjects come only from the cut
-    slide's voiceover. No title, video-level context, or search-prompt prose is
-    ever converted into a query.
+    Primary entity is first. Additional subjects come only from the cut slide's
+    voiceover. No title, video-level context, or search-prompt prose is ever
+    converted into a query.
     """
     if not isinstance(scene, dict):
         return []
@@ -257,15 +256,20 @@ def build_candidate_scene(scene: dict, subject: str) -> dict:
 
 
 def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title=""):
-    """Try the slide's clean subjects in order; never rewrite a query."""
+    """Try clean slide subjects in order; never rewrite a query."""
     subjects = extract_slide_search_subjects(scene)
     if not subjects:
         return visual_runtime_module._relevant_asset(bot, scene, category, used_urls, used_hashes, video_title)
 
     last_error = None
+    reset_scene_budget = getattr(visual_runtime_module, "start_visual_qa_scene", None)
     for index, subject in enumerate(subjects, 1):
         candidate = build_candidate_scene(scene, subject)
         subject_type = candidate["visual_type"]
+        if callable(reset_scene_budget) and index > 1:
+            # A fallback subject is a new retrieval branch for this slide.
+            # The visual QA module's per-video ceiling still applies globally.
+            reset_scene_budget()
         print(f"   [Visual Search] Subject {index}/{len(subjects)} | '{subject}' | type={subject_type}", flush=True)
         try:
             return visual_runtime_module._relevant_asset(
