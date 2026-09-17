@@ -27,6 +27,16 @@ def patch_audio_direction(bot):
     except Exception as exc:
         print(f"   [Bindings] Pipeline integrity guard unavailable: {type(exc).__name__}: {exc}", flush=True)
 
+    # pipeline_integrity wraps write_script after the research/content-density
+    # layer has already been installed. Re-apply the content-density wrapper
+    # once here so the final public binding retains its lifecycle marker while
+    # still delegating through the strict integrity guard underneath it.
+    try:
+        from script_runtime import wrap_write_script
+        wrap_write_script(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Content-density binding restoration unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     # Branding, final artifact QC and channel intelligence are bound here
     # because this patch is part of the live runtime binding stack; each is
     # explicit and idempotent.
