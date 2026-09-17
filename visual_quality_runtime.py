@@ -7,8 +7,8 @@ never become the fallback winner.
 """
 from __future__ import annotations
 
-import io
 import functools
+import io
 from PIL import Image, ImageFilter, ImageStat
 
 MIN_SHORT_SIDE = 720
@@ -23,17 +23,12 @@ def inspect_image(img_bytes: bytes) -> dict:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         w, h = img.size
         short = min(w, h)
-        long = max(w, h)
         aspect = w / max(1, h)
-        target_aspect = 1080 / 1920
-        # Cover crop: scale until the target frame is filled, then crop the
-        # excess dimension. crop_loss is the fraction of source area discarded.
         scale = max(1080 / max(1, w), 1920 / max(1, h))
         crop_w = 1080 / scale
         crop_h = 1920 / scale
         kept_area = min(1.0, (crop_w * crop_h) / max(1.0, w * h))
         crop_loss = 1.0 - kept_area
-        # Basic sharpness proxy; deliberately cheap and local.
         gray = img.resize((min(256, w), min(256, h))).convert("L")
         edge = gray.filter(ImageFilter.FIND_EDGES)
         sharpness = float(ImageStat.Stat(edge).var)
@@ -41,7 +36,7 @@ def inspect_image(img_bytes: bytes) -> dict:
             "width": w,
             "height": h,
             "short_side": short,
-            "long_side": long,
+            "long_side": max(w, h),
             "aspect": aspect,
             "crop_loss": crop_loss,
             "sharpness": sharpness,
@@ -65,12 +60,8 @@ def quality_gate(img_bytes: bytes) -> tuple[bool, str, float]:
     if crop_loss > MAX_CROP_LOSS:
         return False, f"bad-9x16-crop:{crop_loss:.0%}-loss", 0.0
 
-    score = 0.0
-    score += min(35.0, 35.0 * short / PREFERRED_SHORT_SIDE)
+    score = min(35.0, 35.0 * short / PREFERRED_SHORT_SIDE)
     score += max(0.0, 35.0 * (1.0 - crop_loss / MAX_CROP_LOSS))
-    # Sharpness is only a ranking signal, not a reason by itself to reject a
-    # relevant photograph: different source sizes naturally produce different
-    # variance values.
     score += min(20.0, info["sharpness"] / 18.0)
     score += 10.0 if short >= PREFERRED_SHORT_SIDE else 0.0
     return True, "quality-ok", round(min(100.0, score), 1)
@@ -94,6 +85,7 @@ def install(visual_runtime_module):
     if visual_runtime_module is None:
         return False
     original_gate = getattr(visual_runtime_module, "_strict_gate", None)
+    original_cache = getattr(visual_runtime_module, "get_cached_asset", None)
     if not callable(original_gate):
         return False
     if getattr(visual_runtime_module, "_quality_gate_installed", False):
@@ -109,26 +101,41 @@ def install(visual_runtime_module):
         accepted, tier, semantic_score, hard_reject = original_gate(
             bot, img_bytes, seg, video_title, source=source
         )
-        # An uncertain semantic verdict is not a usable visual. The old runtime
-        # kept such candidates as fallback; that is exactly how wrong-team images
-        # could survive the pipeline.
         if not accepted and not hard_reject:
             print(
                 f"   [Visual Quality] REJECTED | semantic verification uncertain | "
-                f"quality={quality_score} | source={source}",
-                flush=True,
+                f"quality={quality_score} | source={source}", flush=True,
             )
             return False, tier, 0, True
         if accepted:
             combined = round((float(semantic_score) * 0.75) + (quality_score * 0.25), 1)
             print(
-                f"   [Visual Quality] PASS | resolution/crop score={quality_score} | "
-                f"combined={combined}", flush=True,
+                f"   [Visual Quality] PASS | resolution/crop score={quality_score} | combined={combined}",
+                flush=True,
             )
             return True, tier, combined, False
         return accepted, tier, semantic_score, hard_reject
 
     visual_runtime_module._strict_gate = gated_strict_gate
+
+    if callable(original_cache):
+        @functools.wraps(original_cache)
+        def gated_cached_asset(bot, entity, visual_type, context=""):
+            image, path = original_cache(bot, entity, visual_type, context)
+            if image is None:
+                return None, None
+            try:
+                buf = io.BytesIO()
+                image.save(buf, format="JPEG", quality=95)
+                ok, reason, _ = quality_gate(buf.getvalue())
+                if not ok:
+                    print(f"   [Visual Cache] REJECTED stale/low-quality cache | {reason}", flush=True)
+                    return None, None
+            except Exception:
+                return None, None
+            return image, path
+        visual_runtime_module.get_cached_asset = gated_cached_asset
+
     visual_runtime_module._quality_gate_installed = True
-    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v1"
+    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v2"
     return True
