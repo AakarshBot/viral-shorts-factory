@@ -1,75 +1,149 @@
 from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
 
 
-def test_search_uses_exact_locked_slide_entity_only():
+def _assert_query_contract(scene, title, expected_type):
+    brief = build_scene_visual_brief(scene, title, scene.get("sport_or_topic_category", ""))
+    queries, visual_type = build_deep_queries(scene, title)
+
+    assert visual_type == expected_type, (brief, visual_type)
+    assert queries, "visual planner returned no query"
+    assert queries[0] == brief["subject"], (brief, queries)
+    assert len(queries) <= 3, queries
+    assert all(brief["subject"].casefold() in query.casefold() for query in queries), queries
+    assert all(token not in " ".join(queries).casefold() for token in ("editorial_person", "red carpet")), queries
+    return brief, queries
+
+
+def test_person_subject_uses_explicit_role():
     scene = {
-        "primary_entity": "Rishabh Pant",
-        "voiceover": "Rishabh Pant was omitted from India's ODI squad after the selection meeting.",
-        "visual_intent": "press conference person",
-        "specific_search_prompt": "Rishabh Pant ODI players press conference editorial_person",
-        "sport_or_topic_category": "cricket",
+        "primary_entity": "Amina Rahman",
+        "voiceover": "Amina Rahman presented the new documentary.",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "Amina Rahman documentary press conference editorial_person",
+        "sport_or_topic_category": "entertainment",
     }
-    queries, visual_type = build_deep_queries(scene, "Rishabh Pant omission from ODI squad")
-
-    assert visual_type == "PERSON"
-    assert queries == ["Rishabh Pant"]
-    assert all(noise not in queries[0].lower() for noise in ("india", "odi", "players", "press", "conference", "editorial", "squad"))
+    brief, queries = _assert_query_contract(scene, "Amina Rahman documentary", "PERSON")
+    assert brief["subject"] == "Amina Rahman"
+    assert queries[0] == "Amina Rahman"
 
 
-def test_exact_search_preserves_multilingual_subject_text():
+def test_organization_subject_uses_generic_company_role():
+    scene = {
+        "primary_entity": "Northstar Labs",
+        "voiceover": "Northstar Labs announced a new research program.",
+        "visual_intent": "company",
+        "sport_or_topic_category": "technology",
+    }
+    brief, _ = _assert_query_contract(scene, "Northstar Labs announcement", "ORGANIZATION")
+    assert brief["subject"] == "Northstar Labs"
+
+
+def test_product_subject_uses_explicit_device_role():
+    scene = {
+        "primary_entity": "Nova Phone 8",
+        "voiceover": "Nova Phone 8 was announced with a redesigned camera.",
+        "visual_intent": "product device",
+        "sport_or_topic_category": "technology",
+    }
+    brief, _ = _assert_query_contract(scene, "Nova Phone 8 announcement", "PRODUCT")
+    assert brief["subject"] == "Nova Phone 8"
+
+
+def test_location_subject_uses_explicit_place_role():
+    scene = {
+        "primary_entity": "Central City",
+        "voiceover": "Central City hosted the conference.",
+        "visual_intent": "location geography",
+        "sport_or_topic_category": "geography",
+    }
+    brief, _ = _assert_query_contract(scene, "Central City report", "LOCATION")
+    assert brief["subject"] == "Central City"
+
+
+def test_event_subject_uses_explicit_event_role():
+    scene = {
+        "primary_entity": "Global Climate Summit",
+        "voiceover": "The Global Climate Summit opened with a new agreement.",
+        "visual_intent": "event",
+        "sport_or_topic_category": "climate",
+    }
+    brief, _ = _assert_query_contract(scene, "Global Climate Summit", "EVENT")
+    assert brief["subject"] == "Global Climate Summit"
+
+
+def test_concept_subject_uses_explicit_concept_role():
+    scene = {
+        "primary_entity": "quantum computing",
+        "voiceover": "Quantum computing uses quantum states to process information.",
+        "visual_intent": "scientific concept",
+        "sport_or_topic_category": "science",
+    }
+    brief, _ = _assert_query_contract(scene, "Quantum computing explained", "CONCEPT")
+    assert brief["subject"] == "quantum computing"
+
+
+def test_contextual_collective_role_is_generic_not_domain_specific():
+    scene = {
+        "primary_entity": "Aurora",
+        "voiceover": "The Aurora team members presented the research findings.",
+        "visual_intent": "team members",
+        "sport_or_topic_category": "research",
+    }
+    brief, queries = _assert_query_contract(scene, "Aurora research update", "ORGANIZATION")
+    assert brief["subject"] == "Aurora research team"
+    assert queries[0] == "Aurora research team"
+
+
+def test_contextual_venue_role_is_generic_not_domain_specific():
+    scene = {
+        "primary_entity": "Central City",
+        "voiceover": "The conference venue in Central City hosted the announcement.",
+        "visual_intent": "conference venue",
+        "sport_or_topic_category": "business",
+    }
+    brief, queries = _assert_query_contract(scene, "Central City conference", "LOCATION")
+    assert brief["subject"] == "Central City business venue"
+    assert queries[0] == "Central City business venue"
+
+
+def test_multilingual_subjects_are_preserved():
     for entity in ("विराट कोहली", "భారతదేశం", "محمد صلاح"):
         scene = {
             "primary_entity": entity,
             "voiceover": f"{entity} is the subject of this slide.",
-            "visual_intent": "person",
+            "visual_intent": "person portrait",
             "specific_search_prompt": f"{entity} latest news press conference",
-            "sport_or_topic_category": "sports",
+            "sport_or_topic_category": "international",
         }
-        queries, _ = build_deep_queries(scene, "Global sports headline")
-        assert queries == [entity], (entity, queries)
+        brief, queries = _assert_query_contract(scene, "Global story", "PERSON")
+        assert brief["subject"] == entity
+        assert queries[0] == entity
 
 
-def test_search_query_does_not_synthesize_context_for_non_person_subjects():
+def test_entity_types_remain_stable_across_genres():
     cases = [
-        ({"primary_entity": "BCCI", "visual_intent": "organization", "voiceover": "BCCI announced the decision", "sport_or_topic_category": "cricket"}, "BCCI"),
-        ({"primary_entity": "2022 FIFA World Cup Final", "visual_intent": "actual match event", "voiceover": "The final went to penalties", "sport_or_topic_category": "football"}, "2022 FIFA World Cup Final"),
-        ({"primary_entity": "quantum computing", "visual_intent": "technical process", "voiceover": "Quantum computers process information using quantum states", "sport_or_topic_category": "technology"}, "quantum computing"),
+        ({"primary_entity": "City Hall", "voiceover": "City Hall announced the decision", "visual_intent": "institution"}, "ORGANIZATION"),
+        ({"primary_entity": "Mars", "voiceover": "Mars is the geographic focus of the report", "visual_intent": "location geography"}, "LOCATION"),
+        ({"primary_entity": "Dr. Lena Park", "voiceover": "Dr. Lena Park addressed the audience", "visual_intent": "person portrait"}, "PERSON"),
+        ({"primary_entity": "The Solar Forum", "voiceover": "The Solar Forum opened today", "visual_intent": "event"}, "EVENT"),
+        ({"primary_entity": "Gene therapy", "voiceover": "Gene therapy is the scientific concept discussed here", "visual_intent": "scientific concept"}, "CONCEPT"),
+        ({"primary_entity": "Orion Laptop", "voiceover": "Orion Laptop was unveiled", "visual_intent": "product device"}, "PRODUCT"),
     ]
-    for scene, expected in cases:
-        queries, _ = build_deep_queries(scene, "A noisy global story title")
-        assert queries == [expected], (scene, queries)
+    for scene, expected_type in cases:
+        brief, queries = _assert_query_contract(scene, "cross genre story", expected_type)
+        assert brief["subject"] == scene["primary_entity"]
+        assert queries[0] == scene["primary_entity"]
 
 
-def test_india_brief_remains_available_but_is_not_a_search_rewrite():
+def test_query_ladder_is_bounded_and_never_degrades_identity():
     scene = {
-        "primary_entity": "India",
-        "voiceover": "India's white-ball stars move up the latest T20I rankings",
-        "visual_intent": "cricket team",
-        "specific_search_prompt": "India India India's white-ball stars rocket up latest T20I rankings nbsp ICC",
-        "sport_or_topic_category": "cricket",
+        "primary_entity": "Amina Rahman",
+        "voiceover": "Amina Rahman addressed the audience during the documentary premiere.",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "Amina Rahman documentary premiere editorial_person red carpet",
+        "sport_or_topic_category": "entertainment",
     }
-    queries, visual_type = build_deep_queries(scene, "India T20I rankings")
-    brief = build_scene_visual_brief(scene, "India T20I rankings", "cricket")
-
-    assert visual_type == "LOCATION"
-    assert brief["subject"] == "India cricket team"
-    assert queries == ["India"]
-
-
-def test_entity_types_remain_stable():
-    assert classify_scene({"primary_entity": "BCCI", "voiceover": "BCCI announced the decision", "visual_intent": "organization"}, "cricket") == "ORGANIZATION"
-    assert classify_scene({"primary_entity": "Delhi", "voiceover": "Delhi hosted the event", "visual_intent": "location"}, "news") == "LOCATION"
-    assert classify_scene({"primary_entity": "Lionel Messi", "voiceover": "Messi scored the winning goal", "visual_intent": "player"}, "football") == "PERSON"
-
-
-def test_planner_compatibility_surface_stays_clean():
-    scene = {
-        "primary_entity": "Lionel Messi",
-        "voiceover": "Lionel Messi scored the winning goal in the final",
-        "visual_intent": "player portrait",
-        "specific_search_prompt": "Lionel Messi World Cup final editorial_person",
-        "sport_or_topic_category": "football",
-    }
-    queries, visual_type = build_deep_queries(scene, "Messi World Cup final")
-    assert visual_type == "PERSON"
-    assert queries == ["Lionel Messi"]
+    brief, queries = _assert_query_contract(scene, "Noisy title that must never become the search query", "PERSON")
+    assert queries[0] == brief["subject"]
+    assert len(queries) <= 3
+    assert all("Noisy title".casefold() not in q.casefold() for q in queries)
