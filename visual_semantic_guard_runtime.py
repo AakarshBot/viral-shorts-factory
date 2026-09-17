@@ -18,7 +18,7 @@ GENERIC_NOISE = {
     "update", "story", "article", "headline", "reported", "reports", "according",
     "says", "said", "today", "yesterday", "tomorrow", "editorial", "official",
     "photo", "image", "picture", "real", "high", "resolution", "event", "item",
-    "thing", "stuff", "matter", "point", "one", "off", "kind", "way", "part", "time",
+    "thing", "stuff", "matter", "point", "one", "off", "oneoff", "kind", "way", "part", "time",
     "next", "year",
 }
 
