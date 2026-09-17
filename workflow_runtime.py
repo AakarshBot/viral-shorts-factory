@@ -368,6 +368,7 @@ class WorkflowController:
             conn.close()
 
     def start_production(self, web_config: Dict[str, Any], selected_story: Dict[str, Any]):
+        selected_story = _validate_selected_story(selected_story)
         if self.state.thread_alive:
             return
         self._install_production_wrappers()
@@ -487,3 +488,24 @@ class WorkflowController:
         if not result:
             raise RuntimeError("YouTube uploader returned no video ID.")
         return result
+
+
+def _validate_selected_story(selected_story: Dict[str, Any]) -> Dict[str, Any]:
+    """Require production input to come from the explicit three-story selection gate."""
+    if not isinstance(selected_story, dict):
+        raise ValueError("Production is blocked: an explicitly selected discovered story is required.")
+
+    title = str(selected_story.get("title") or "").strip()
+    story_key = str(selected_story.get("story_key") or "").strip()
+    try:
+        discovery_rank = int(selected_story.get("discovery_rank"))
+    except (TypeError, ValueError):
+        discovery_rank = None
+
+    if not title:
+        raise ValueError("Production is blocked: selected story title is missing.")
+    if discovery_rank not in (1, 2, 3) or not story_key:
+        raise ValueError(
+            "Production is blocked: story must be selected from the verified three-candidate discovery set."
+        )
+    return dict(selected_story)
