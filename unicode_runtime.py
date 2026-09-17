@@ -9,15 +9,35 @@ primary entity that the strict visual runtime requires.
 from __future__ import annotations
 
 import re
+import unicodedata
 
-_VERSION = "2026-09-17-v2"
-_WORD_RE = re.compile(r"[^\W_]+(?:['’/-][^\W_]+)*", re.UNICODE)
+_VERSION = "2026-09-17-v3"
 _SPACE_RE = re.compile(r"\s+")
 
 
 def unicode_words(value):
-    """Return Unicode-aware words while keeping Latin apostrophes/hyphens."""
-    return _WORD_RE.findall(str(value or "").casefold())
+    """Return words while preserving base letters plus Unicode combining marks."""
+    text = str(value or "").casefold()
+    words = []
+    current = []
+    for char in text:
+        category = unicodedata.category(char)
+        if char.isalnum() or category.startswith("M"):
+            current.append(char)
+            continue
+        if char in {"'", "’", "-", "/"} and current:
+            current.append(char)
+            continue
+        if current:
+            token = "".join(current).strip("'-/’")
+            if token:
+                words.append(token)
+            current = []
+    if current:
+        token = "".join(current).strip("'-/’")
+        if token:
+            words.append(token)
+    return words
 
 
 def unicode_normalise(value):
@@ -28,11 +48,15 @@ def unicode_normalise(value):
 
 
 def _planner_tokens(text):
-    return _WORD_RE.findall(str(text or "").replace("’", "'").replace("‘", "'").strip())
+    return unicode_words(str(text or "").replace("’", "'").replace("‘", "'"))
 
 
 def _planner_key(token):
-    return re.sub(r"[^\w]", "", str(token or "").casefold())
+    return "".join(
+        char
+        for char in str(token or "").casefold()
+        if char.isalnum() or unicodedata.category(char).startswith("M")
+    )
 
 
 def _planner_normalise(module, text):
