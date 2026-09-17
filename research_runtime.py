@@ -1,7 +1,11 @@
 """Free multi-source research pass for the selected story."""
 from __future__ import annotations
 
+import json
+import os
 import re
+import urllib.error
+import urllib.request
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
@@ -108,6 +112,94 @@ def format_source_brief(sources: List[Dict[str, Any]]) -> str:
     return "\n\n".join(rows)
 
 
+def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, Any], genre_key: str, format_mode: str):
+    """Ask OpenRouter's free router for a script only after the primary writer fails.
+
+    The response is still subjected to the normal script/content-density pipeline;
+    this function never treats provider text as authoritative on its own.
+    """
+    api_key = _clean(os.getenv("OPENROUTER_API_KEY"))
+    if not api_key:
+        return None
+
+    source_text = _clean(story_data.get("text"))
+    if not source_text:
+        source_text = _clean(story_data.get("summary") or story_data.get("description") or story_data.get("title"))
+    if not source_text:
+        return None
+
+    language_instruction = _clean((language_cfg or {}).get("script_instruction"))
+    scene_count = "exactly 7" if str(format_mode).lower() == "top5" else "5 to 8"
+    system_prompt = (
+        "You are a factual YouTube Shorts script writer. Return ONLY a valid JSON object. "
+        "Use only facts present in the supplied evidence. Do not invent quotes, numbers, motives, predictions, "
+        "causal links, or opinions. No prompt text, provider messages, markdown fences, or explanations. "
+        f"Write {scene_count} scenes. Each scene voiceover must contain 8 to 30 natural spoken words. "
+        "Every scene must be useful factual narration. The first scene must begin with the core factual development. "
+        "Do not include subscribe/like/follow requests in voiceover. "
+        "Return keys: step_1_headline, step_2_data_points, step_3_critique, step_4_metadata, titles, "
+        "recommended_title_index, seo_description, tags, pinned_comment, hook_type, hook_style_used, script. "
+        "Each script scene must contain voiceover, primary_entity, visual_intent, specific_search_prompt, "
+        "sport_or_topic_category. " + language_instruction
+    )
+    payload = {
+        "model": "openrouter/free",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "EVIDENCE:\n" + source_text},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.2,
+    }
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/AakarshBot/viral-shorts-factory",
+            "X-Title": "Viral Shorts Factory",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        raw = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if isinstance(raw, dict):
+            result = raw
+        else:
+            text = str(raw or "").strip()
+            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+            result = json.loads(text)
+        if not isinstance(result, dict) or not isinstance(result.get("script"), list):
+            return None
+
+        # Reuse the canonical content-density gate so OpenRouter cannot bypass
+        # the same acceptance rules used by Gemini/Groq output.
+        try:
+            from script_runtime import clean_script_data, validate_content_density
+            cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
+            valid, reason = validate_content_density(cleaned, story_data, format_mode)
+            if not valid:
+                print(f"   [OpenRouter] Response rejected by script validation: {reason}", flush=True)
+                return None
+            cleaned["provider_used"] = "openrouter/free"
+            cleaned["provider_fallback"] = True
+            cleaned["provider_diagnostics"] = diagnostics
+            return cleaned
+        except Exception as exc:
+            print(f"   [OpenRouter] Canonical validation unavailable: {type(exc).__name__}: {exc}", flush=True)
+            return None
+    except urllib.error.HTTPError as exc:
+        print(f"   [OpenRouter] HTTP {exc.code}; falling through to the deterministic fallback.", flush=True)
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        print(f"   [OpenRouter] Request failed: {type(exc).__name__}; falling through safely.", flush=True)
+    except Exception as exc:
+        print(f"   [OpenRouter] Unexpected failure: {type(exc).__name__}; falling through safely.", flush=True)
+    return None
+
+
 def patch_research_pipeline(bot):
     """Install a deterministic research -> content-density wrapper pair.
 
@@ -123,8 +215,6 @@ def patch_research_pipeline(bot):
 
     # The desired externally visible chain is:
     #   content-density wrapper -> research wrapper -> existing writer
-    # The existing writer may itself contain an older wrapper; keeping it
-    # underneath is safe and avoids trying to mutate private closure cells.
     if getattr(current, "_content_dense_bound", False) and getattr(current, "_research_layer_live", False):
         bot._research_pipeline_patch_installed = True
         run_robot.__globals__["write_script"] = current
@@ -150,6 +240,9 @@ def patch_research_pipeline(bot):
         )
         data["text"] = _clean(data.get("text"))
         result = current(data, language_cfg, genre_key, conn, format_mode)
+        if result is None:
+            print("   [Research] Primary script providers exhausted; trying OpenRouter free router.", flush=True)
+            result = _openrouter_script_fallback(data, language_cfg, genre_key, format_mode)
         if isinstance(result, dict):
             result["research_sources"] = sources
             result["research_source_count"] = len(sources)
@@ -158,9 +251,6 @@ def patch_research_pipeline(bot):
         return result
 
     researched_write_script._research_wrapped = True
-    # Do not mark this wrapper as content-dense. We deliberately let the
-    # canonical script wrapper wrap it next, which makes its
-    # _research_layer_live marker authoritative.
     bot.write_script = researched_write_script
     run_robot.__globals__["write_script"] = researched_write_script
 
