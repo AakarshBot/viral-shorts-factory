@@ -190,6 +190,13 @@ def patch_content_first_visuals(bot):
         print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
         return bot
 
+    try:
+        from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
+    except Exception as exc:
+        assign_manual_queries = None
+        parse_manual_visual_queries = lambda _value: []
+        print(f"   [Manual Visual Queries] Optional router unavailable: {type(exc).__name__}: {exc}", flush=True)
+
     install_visual_quality(visual_runtime)
 
     async def process(script_data, language_cfg, format_mode="regular"):
@@ -201,6 +208,32 @@ def patch_content_first_visuals(bot):
         font_choice = language_cfg.get("font")
         packages = [None] * len(scenes)
         used_urls, used_hashes = set(), set()
+
+        # Dashboard manual queries are optional. Blank input preserves the
+        # existing AI/automatic visual-search flow exactly.
+        manual_raw = ""
+        try:
+            active_config = getattr(bot, "_active_web_config", {}) or {}
+            manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
+        except Exception:
+            manual_raw = ""
+
+        manual_assignments = [{} for _ in scenes]
+        manual_queries = parse_manual_visual_queries(manual_raw)
+        if manual_queries and callable(assign_manual_queries):
+            manual_assignments = assign_manual_queries(scenes, manual_queries)
+            print(
+                f"   [Manual Visual Queries] {len(manual_queries)} supplied query/queries; "
+                f"assigned across {len(scenes)} scene(s).",
+                flush=True,
+            )
+            for scene_index, assignment in enumerate(manual_assignments, 1):
+                if assignment.get("query"):
+                    scenes[scene_index - 1]["manual_visual_query"] = assignment["query"]
+                    scenes[scene_index - 1]["manual_visual_query_score"] = assignment.get("score", 0)
+                    scenes[scene_index - 1]["manual_visual_query_index"] = assignment.get("query_index", 0)
+        elif not manual_queries:
+            print("   [Manual Visual Queries] No manual queries supplied; using existing Full AI visual flow.", flush=True)
         ai_count = 0
         verified_count = 0
         rescue_count = 0
@@ -219,6 +252,7 @@ def patch_content_first_visuals(bot):
                     used_urls,
                     used_hashes,
                     video_title,
+                    manual_query=str(seg.get("manual_visual_query", "") or "").strip(),
                 )
             except Exception as exc:
                 subject = str(seg.get("primary_entity") or "Visual rescue").strip()
