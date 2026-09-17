@@ -236,6 +236,22 @@ def _test_manual_visual_queries():
     return "Manual semicolon-separated visual queries are parsed and assigned to the relevant scenes"
 
 
+def _test_factory_function_coverage():
+    from factory_function_coverage import collect_factory_function_coverage
+    report = collect_factory_function_coverage(Path(__file__).resolve().parent)
+    if not report["complete"]:
+        raise AssertionError(
+            f"Factory function coverage is incomplete: unmapped={report['unmapped']}, "
+            f"stale={report['stale_map']}"
+        )
+    if report["total"] < 1:
+        raise AssertionError("No ultimate_bot functions were discovered.")
+    return (
+        f"All {report['total']} ultimate_bot functions are explicitly accounted for "
+        "as Live Factory, Channel Statistics, Demo / Diagnostics, or deliberate Internal."
+    )
+
+
 def _test_dashboard_architecture():
     root = Path(__file__).resolve().parent
     required = ["app.py", "ultimate_bot.py", "workflow_runtime.py", "visual_retrieval_runtime.py", "final_qc_runtime.py"]
@@ -276,6 +292,7 @@ def run_offline_diagnostics():
         ("provider_boundary", _test_provider_boundary),
         ("manual_visual_queries", _test_manual_visual_queries),
         ("dashboard_architecture", _test_dashboard_architecture),
+        ("factory_function_coverage", _test_factory_function_coverage),
     ]
     results = [_run(name, fn) for name, fn in checks]
     passed = sum(item["status"] == "PASS" for item in results)
