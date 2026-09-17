@@ -1,0 +1,134 @@
+"""Cheap, deterministic quality gates for fetched visuals.
+
+This module deliberately does not make API calls. It rejects images that are too
+small, badly shaped, or impractical to crop into a 9:16 Short. It also turns an
+uncertain semantic QA result into a hard rejection so an unverified image can
+never become the fallback winner.
+"""
+from __future__ import annotations
+
+import io
+import functools
+from PIL import Image, ImageFilter, ImageStat
+
+MIN_SHORT_SIDE = 720
+PREFERRED_SHORT_SIDE = 1080
+MAX_SOURCE_ASPECT = 3.2
+MIN_SOURCE_ASPECT = 0.32
+MAX_CROP_LOSS = 0.62
+
+
+def inspect_image(img_bytes: bytes) -> dict:
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        w, h = img.size
+        short = min(w, h)
+        long = max(w, h)
+        aspect = w / max(1, h)
+        target_aspect = 1080 / 1920
+        # Cover crop: scale until the target frame is filled, then crop the
+        # excess dimension. crop_loss is the fraction of source area discarded.
+        scale = max(1080 / max(1, w), 1920 / max(1, h))
+        crop_w = 1080 / scale
+        crop_h = 1920 / scale
+        kept_area = min(1.0, (crop_w * crop_h) / max(1.0, w * h))
+        crop_loss = 1.0 - kept_area
+        # Basic sharpness proxy; deliberately cheap and local.
+        gray = img.resize((min(256, w), min(256, h))).convert("L")
+        edge = gray.filter(ImageFilter.FIND_EDGES)
+        sharpness = float(ImageStat.Stat(edge).var)
+        return {
+            "width": w,
+            "height": h,
+            "short_side": short,
+            "long_side": long,
+            "aspect": aspect,
+            "crop_loss": crop_loss,
+            "sharpness": sharpness,
+            "valid": True,
+        }
+    except Exception:
+        return {"valid": False}
+
+
+def quality_gate(img_bytes: bytes) -> tuple[bool, str, float]:
+    info = inspect_image(img_bytes)
+    if not info.get("valid"):
+        return False, "invalid-image", 0.0
+    short = info["short_side"]
+    aspect = info["aspect"]
+    crop_loss = info["crop_loss"]
+    if short < MIN_SHORT_SIDE:
+        return False, f"resolution-too-low:{info['width']}x{info['height']}", 0.0
+    if not (MIN_SOURCE_ASPECT <= aspect <= MAX_SOURCE_ASPECT):
+        return False, f"extreme-aspect:{aspect:.2f}", 0.0
+    if crop_loss > MAX_CROP_LOSS:
+        return False, f"bad-9x16-crop:{crop_loss:.0%}-loss", 0.0
+
+    score = 0.0
+    score += min(35.0, 35.0 * short / PREFERRED_SHORT_SIDE)
+    score += max(0.0, 35.0 * (1.0 - crop_loss / MAX_CROP_LOSS))
+    # Sharpness is only a ranking signal, not a reason by itself to reject a
+    # relevant photograph: different source sizes naturally produce different
+    # variance values.
+    score += min(20.0, info["sharpness"] / 18.0)
+    score += 10.0 if short >= PREFERRED_SHORT_SIDE else 0.0
+    return True, "quality-ok", round(min(100.0, score), 1)
+
+
+def cover_crop(img: Image.Image, size=(1080, 1920)) -> Image.Image:
+    """Scale-to-cover and crop. Never stretches the source image."""
+    target_w, target_h = size
+    base = img.convert("RGB")
+    scale = max(target_w / base.width, target_h / base.height)
+    new_w = max(target_w, int(round(base.width * scale)))
+    new_h = max(target_h, int(round(base.height * scale)))
+    resized = base.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    left = max(0, (new_w - target_w) // 2)
+    top = max(0, (new_h - target_h) // 2)
+    return resized.crop((left, top, left + target_w, top + target_h))
+
+
+def install(visual_runtime_module):
+    """Install cheap quality gates around the existing visual runtime."""
+    if visual_runtime_module is None:
+        return False
+    original_gate = getattr(visual_runtime_module, "_strict_gate", None)
+    if not callable(original_gate):
+        return False
+    if getattr(visual_runtime_module, "_quality_gate_installed", False):
+        return True
+
+    @functools.wraps(original_gate)
+    def gated_strict_gate(bot, img_bytes, seg, video_title="", source=""):
+        ok, reason, quality_score = quality_gate(img_bytes)
+        if not ok:
+            print(f"   [Visual Quality] REJECTED | {reason}", flush=True)
+            return False, "LOCAL-QUALITY", 0, True
+
+        accepted, tier, semantic_score, hard_reject = original_gate(
+            bot, img_bytes, seg, video_title, source=source
+        )
+        # An uncertain semantic verdict is not a usable visual. The old runtime
+        # kept such candidates as fallback; that is exactly how wrong-team images
+        # could survive the pipeline.
+        if not accepted and not hard_reject:
+            print(
+                f"   [Visual Quality] REJECTED | semantic verification uncertain | "
+                f"quality={quality_score} | source={source}",
+                flush=True,
+            )
+            return False, tier, 0, True
+        if accepted:
+            combined = round((float(semantic_score) * 0.75) + (quality_score * 0.25), 1)
+            print(
+                f"   [Visual Quality] PASS | resolution/crop score={quality_score} | "
+                f"combined={combined}", flush=True,
+            )
+            return True, tier, combined, False
+        return accepted, tier, semantic_score, hard_reject
+
+    visual_runtime_module._strict_gate = gated_strict_gate
+    visual_runtime_module._quality_gate_installed = True
+    visual_runtime_module._visual_quality_gate_version = "2026-09-17-v1"
+    return True
