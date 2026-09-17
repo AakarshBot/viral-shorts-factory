@@ -452,12 +452,6 @@ def factory_function_coverage() -> dict[str, Any]:
     return collect_factory_function_coverage(Path(__file__).resolve().parent)
 
 
-def factory_function_coverage() -> dict[str, Any]:
-    """Return the explicit coverage audit used by Demo Factory and diagnostics."""
-    from factory_function_coverage import collect_factory_function_coverage
-    return collect_factory_function_coverage(Path(__file__).resolve().parent)
-
-
 def run_demo_section(section: str) -> dict[str, Any]:
     """Run one dashboard-visible code section in a no-API demo harness."""
     from diagnostics_runtime import (
