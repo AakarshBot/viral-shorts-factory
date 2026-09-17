@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import html
 import re
 
-VISUAL_RETRIEVAL_PLANNER_VERSION = "2026-09-18-v1-generic-semantic-resolver"
+VISUAL_RETRIEVAL_PLANNER_VERSION = "2026-09-18-v2-generic-semantic-resolver"
 MAX_VISUAL_SEARCH_QUERIES = 3
 MAX_QUERY_WORDS = 10
 
@@ -21,11 +21,8 @@ VISUAL_TYPES = {
     "GENERAL_CONTEXT",
 }
 
-# These are generic linguistic signals, not entity-specific knowledge.
-ORGANIZATION_ACRONYMS = {
-    "WHO", "UN", "UNESCO", "IMF", "WTO", "NASA", "ESA", "ISRO", "IBM",
-    "AMD", "BMW", "BCCI", "FIFA", "NBA", "NFL", "UEFA", "RBI", "SEBI",
-}
+# Generic linguistic signals only. No named-entity catalogue is required for
+# semantic resolution; explicit scene role remains authoritative.
 ORGANIZATION_SUFFIXES = (
     "board", "council", "federation", "association", "committee", "corporation",
     "company", "university", "institute", "foundation", "ministry", "government",
@@ -59,8 +56,6 @@ STOPWORDS = {
     "can", "may", "might",
 }
 
-# Ordered from most specific to most general. These labels are language-level
-# scene roles; the actual domain/category may be anything.
 ROLE_PATTERNS = (
     ("PERSON", (
         "person portrait", "portrait", "headshot", "person", "biography", "speaker",
@@ -129,7 +124,6 @@ def _clean(text):
 
 
 def _tokens(text):
-    # Unicode-aware tokenisation keeps non-Latin entity names intact.
     return re.findall(r"[\w][\w'/-]*", _clean(text).replace("’", "'").replace("‘", "'"), flags=re.UNICODE)
 
 
@@ -155,9 +149,6 @@ def _looks_like_organization(entity):
     raw = _clean(entity)
     if not raw:
         return False
-    upper = raw.upper()
-    if upper in ORGANIZATION_ACRONYMS:
-        return True
     lower = raw.casefold()
     if any(lower == suffix or lower.endswith(" " + suffix) for suffix in ORGANIZATION_SUFFIXES):
         return True
@@ -198,12 +189,14 @@ def classify_subject_text(subject):
 
 
 def _story_text(seg, category=""):
- parts = [
+    parts = [
         seg.get("visual_intent", ""),
         seg.get("specific_search_prompt", ""),
         seg.get("voiceover", ""),
         seg.get("visual_context", ""),
     ]
+    if category:
+        parts.append(category)
     return _clean(" ".join(str(part) for part in parts if part))
 
 
@@ -229,8 +222,6 @@ def _explicit_role(seg):
 
 def _role_noun(intent):
     lower = _clean(intent).casefold()
-    # Preserve a meaningful scene noun from the explicit visual intent. This is
-    # deliberately generic and does not enumerate specific domains.
     candidates = (
         "team", "squad", "group", "crew", "collective", "department", "company",
         "organization", "institution", "venue", "stadium", "arena", "landmark",
@@ -256,9 +247,6 @@ def _subject_for_resolution(entity, seg, role, domain):
     intent = _intent_text(seg)
     role_noun = _role_noun(intent)
 
-    # Contextual composition is generic: a role noun plus an optional domain is
-    # added only when the scene explicitly asks for that role. No named-domain
-    # rules live here.
     if role == "ORGANIZATION" and role_noun in {"team", "squad", "group", "crew", "collective", "department"}:
         if domain and domain not in intent and domain.casefold() not in entity.casefold():
             return _normalise(f"{entity} {domain} {role_noun}")
@@ -339,13 +327,14 @@ def _extract_visual_cues(seg, category=""):
 
 
 def _context_entity(seg, category=""):
-    # Keep a small piece of scene-grounded context only when it is explicitly
-    # present in the visual intent/context. No hardcoded event catalogue.
-    for field in ("visual_context", "specific_search_prompt", "visual_intent"):
+    # Only scene-provided context is eligible. This function never fabricates
+    # entities or maintains a domain catalogue.
+    for field in ("visual_context", "specific_search_prompt"):
         text = _clean(seg.get(field, ""))
         if text:
             cleaned = _normalise(text)
-            if cleaned and cleaned.casefold() not in {_clean(seg.get("primary_entity", "")).casefold(), ""}:
+            subject = _clean(seg.get("primary_entity", ""))
+            if cleaned and cleaned.casefold() != subject.casefold():
                 return cleaned
     return ""
 
@@ -396,12 +385,10 @@ def build_deep_queries(seg, video_title="", visual_type=None):
     queries = []
     _add(queries, subject, subject)
 
-    # Second query adds only the explicit domain, preserving every subject token.
     domain = brief.get("domain", "")
     if domain and domain.casefold() not in subject.casefold():
         _add(queries, subject, subject, domain)
 
-    # Third query adds a bounded role/context phrase, never the narration itself.
     scene_action = brief.get("scene_action", "")
     if scene_action:
         _add(queries, subject, subject, scene_action)
