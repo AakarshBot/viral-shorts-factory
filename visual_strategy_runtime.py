@@ -15,7 +15,7 @@ for _name in dir(_planner):
     if _name.startswith("_") and not _name.startswith("__"):
         globals()[_name] = getattr(_planner, _name)
 
-_VISUAL_STRATEGY_VERSION = "2026-09-17-v17-bounded-semantic-retrieval"
+_VISUAL_STRATEGY_VERSION = "2026-09-17-v18-role-aware-classification"
 
 
 def _exact_slide_subject(scene):
@@ -23,6 +23,36 @@ def _exact_slide_subject(scene):
         return ""
     raw = scene.get("primary_entity", "")
     return str(raw or "").strip()
+
+
+def _infer_scene_category(scene):
+    """Recover domain context when callers omit the explicit category.
+
+    ``build_deep_queries`` already receives the scene's category, while some
+    runtime callers invoke ``classify_scene`` without it. The two paths must
+    resolve the same semantic role, especially for country names used as sports
+    participants rather than geographic locations.
+    """
+    if not isinstance(scene, dict):
+        return ""
+    explicit = str(scene.get("sport_or_topic_category", "") or "").strip()
+    if explicit:
+        return explicit
+    text = _planner._story_text(scene, "")
+    for sport in _planner.SPORT_TERMS:
+        if sport in text:
+            return sport
+    # Cricket formats are strong domain evidence even when the word "cricket"
+    # is absent from the voiceover/intent.
+    if __import__("re").search(r"\b(?:t20i?|odi|test(?:\s+match)?)\b", text):
+        return "cricket"
+    return ""
+
+
+def classify_scene(scene, category=""):
+    """Expose one classification contract to all visual-runtime callers."""
+    resolved_category = str(category or "").strip() or _infer_scene_category(scene)
+    return _planner.classify_scene(scene, resolved_category)
 
 
 def build_deep_queries(scene, video_title="", visual_type=None):
