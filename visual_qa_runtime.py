@@ -16,7 +16,7 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v9-identity-only"
+VISUAL_QA_RUNTIME_VERSION = "2026-09-17-v10-identity-only"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -47,6 +47,26 @@ def get_visual_qa_calls_used():
 def _cache_key(img_bytes, entity, tier, visual_type=""):
     h = hashlib.sha256(img_bytes).hexdigest()
     return (h, str(entity).strip().lower(), str(tier).strip().lower(), str(visual_type).strip().upper())
+
+
+def _tier_for(intent, visual_type, source):
+    """Legacy tier classifier retained for runtime/CI compatibility.
+
+    The active QA decision is identity-only; this helper only preserves the
+    source-routing contract used by older smoke tests and integrations.
+    """
+    intent_text = str(intent or "").strip().lower()
+    visual_type = str(visual_type or "").strip().upper()
+    source_text = str(source or "").strip().lower()
+    if intent_text in {"conceptual", "concept"} or visual_type in {"GENERAL_CONTEXT", "CONCEPT", "PROCESS"} and intent_text == "conceptual":
+        return "SKIPPED_CONCEPTUAL"
+    if visual_type == "PERSON" and source_text == "wikipedia":
+        return "CURATED_PERSON"
+    if visual_type == "PERSON":
+        return "STRICT"
+    if intent_text == "stadium_event" and visual_type == "EVENT":
+        return "GENRE_PLAUSIBLE_EVENT"
+    return "IDENTITY"
 
 
 def _is_conceptual(intent):
@@ -86,11 +106,9 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         print("   [Visual QA] Tier=SKIPPED(conceptual) | Gemini=SKIPPED.", flush=True)
         return True
     if not api_key:
-        print(f"   [Visual QA] Tier=IDENTITY | No Gemini API key; semantic verification unavailable.", flush=True)
+        print("   [Visual QA] Tier=IDENTITY | No Gemini API key; semantic verification unavailable.", flush=True)
         return None
 
-    # Event/news genre is intentionally NOT a different QA standard anymore.
-    # Every real entity is checked by the same identity question.
     tier = "IDENTITY"
     key = _cache_key(img_bytes, entity, tier, visual_type)
     if key in _CACHE:
