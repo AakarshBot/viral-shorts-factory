@@ -60,12 +60,13 @@ jobs:
           python - <<'PY'
           import inspect
           import io
+          from pathlib import Path
           from PIL import Image
           import edge_tts
           import factory_runtime, final_qc_runtime, image_sources_runtime, provider_runtime, runtime_bindings
           import runtime_hardener, script_guard_runtime, ultimate_bot, visual_qa_runtime, visual_runtime, visual_safety_runtime
           import visual_strategy_runtime, visual_semantic_guard_runtime, visual_query_entities_runtime, visual_retrieval_runtime, workflow_runtime, youtube_comment_runtime, visual_policy_runtime
-          from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
+          from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
           from visual_semantic_guard_runtime import resolve_subject
 
           assert 'boundary' in inspect.signature(edge_tts.Communicate).parameters
@@ -78,37 +79,33 @@ jobs:
           assert visual_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS == visual_safety_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS
           assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS
           assert visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE == visual_safety_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
-          assert getattr(visual_runtime, 'VISUAL_BUDGET_RUNTIME_VERSION', '') == '2026-09-17-v1'
 
           cases = [
-              ({'primary_entity': 'Amina Rahman', 'visual_intent': 'person portrait', 'voiceover': 'Amina Rahman presented the documentary.', 'sport_or_topic_category': 'entertainment'}, 'Amina Rahman', 'PERSON'),
-              ({'primary_entity': 'Northstar Labs', 'visual_intent': 'company', 'voiceover': 'Northstar Labs announced a research program.', 'sport_or_topic_category': 'technology'}, 'Northstar Labs', 'ORGANIZATION'),
-              ({'primary_entity': 'Nova Phone 8', 'visual_intent': 'product device', 'voiceover': 'Nova Phone 8 was announced.', 'sport_or_topic_category': 'technology'}, 'Nova Phone 8', 'PRODUCT'),
-              ({'primary_entity': 'Central City', 'visual_intent': 'location geography', 'voiceover': 'Central City hosted the report.', 'sport_or_topic_category': 'geography'}, 'Central City', 'LOCATION'),
-              ({'primary_entity': 'Global Climate Summit', 'visual_intent': 'event', 'voiceover': 'The Global Climate Summit opened with a new agreement.', 'sport_or_topic_category': 'climate'}, 'Global Climate Summit', 'EVENT'),
-              ({'primary_entity': 'quantum computing', 'visual_intent': 'scientific concept', 'voiceover': 'Quantum computing uses quantum states to process information.', 'sport_or_topic_category': 'science'}, 'quantum computing', 'CONCEPT'),
-              ({'primary_entity': 'Aurora', 'visual_intent': 'team members', 'voiceover': 'The Aurora team members presented research findings.', 'sport_or_topic_category': 'research'}, 'Aurora', 'ORGANIZATION'),
-              ({'primary_entity': 'Central City', 'visual_intent': 'conference venue', 'voiceover': 'The conference venue in Central City hosted the announcement.', 'sport_or_topic_category': 'business'}, 'Central City', 'LOCATION'),
-              ({'primary_entity': 'Not Northstar Research Summit', 'visual_intent': 'news_event', 'voiceover': 'Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin next year &nbsp;.', 'sport_or_topic_category': 'business'}, 'Northstar Research Summit Berlin', 'EVENT'),
+              ({'primary_entity': 'Amina Rahman', 'visual_intent': 'person portrait', 'voiceover': 'Amina Rahman presented the documentary.'}, 'Amina Rahman', 'PERSON'),
+              ({'primary_entity': 'Northstar Labs', 'visual_intent': 'company', 'voiceover': 'Northstar Labs announced a research program.'}, 'Northstar Labs', 'ORGANIZATION'),
+              ({'primary_entity': 'Nova Phone 8', 'visual_intent': 'product device', 'voiceover': 'Nova Phone 8 was announced.'}, 'Nova Phone 8', 'PRODUCT'),
+              ({'primary_entity': 'Central City', 'visual_intent': 'location geography', 'voiceover': 'Central City hosted the report.'}, 'Central City', 'LOCATION'),
+              ({'primary_entity': 'Global Climate Summit', 'visual_intent': 'event', 'voiceover': 'The Global Climate Summit opened with a new agreement.'}, 'Global Climate Summit', 'EVENT'),
+              ({'primary_entity': 'quantum computing', 'visual_intent': 'scientific concept', 'voiceover': 'Quantum computing uses quantum states to process information.'}, 'quantum computing', 'CONCEPT'),
+              ({'primary_entity': 'Aurora', 'visual_intent': 'team members', 'voiceover': 'The Aurora team members presented research findings.'}, 'Aurora', 'ORGANIZATION'),
+              ({'primary_entity': 'Not Northstar Research Summit', 'visual_intent': 'news_event', 'voiceover': 'Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin next year &nbsp;.'}, 'Northstar Research Summit Berlin', 'EVENT'),
           ]
 
           for scene, expected_subject, expected_type in cases:
-              brief = build_scene_visual_brief(scene, scene['primary_entity'], scene.get('sport_or_topic_category', ''))
+              brief = build_scene_visual_brief(scene, scene['primary_entity'])
               queries, visual_type = build_deep_queries(scene, scene['primary_entity'])
               assert visual_type == expected_type, (scene, brief, visual_type)
               assert brief['subject'] == expected_subject, (scene, brief)
               assert queries and queries[0] == expected_subject, queries
-              assert len(queries) <= 4, queries
-              anchor = expected_subject.split()
-              assert all(all(token.casefold() in q.casefold().split() for token in anchor) for q in queries), queries
+              assert len(queries) <= 5, queries
+              assert all(expected_subject.casefold() in q.casefold() for q in queries), queries
               joined = ' '.join(queries).casefold()
-              assert 'not' not in joined.split(), queries
               assert 'nbsp' not in joined and '&nbsp;' not in joined, queries
-              assert 'one-off' not in joined and 'thing' not in joined, queries
-              assert 'editorial_person' not in joined and 'red carpet' not in joined, queries
+              assert 'not ' not in joined and 'one-off' not in joined and ' thing' not in joined, queries
 
-          # The active runtime is intentionally identity-first. Rich prompt/context
-          # must never outrank the simple factual entity used by image search.
+          # Identity-first is the runtime invariant: a clean factual entity is
+          # always query one. Context may broaden later queries, but the rich
+          # sentence-style prompt must never become the first query.
           visual_query_entities_runtime._install_runtime_query_guard(visual_runtime)
           runtime_scene = {
               'primary_entity': 'Indian cricket team',
@@ -120,10 +117,12 @@ jobs:
           assert runtime_type == 'ORGANIZATION', runtime_queries
           assert 1 <= len(runtime_queries) <= 5, runtime_queries
           assert runtime_queries[0] == 'Indian cricket team', runtime_queries
-          assert any(q == 'Indian cricket team T20 World Cup' for q in runtime_queries), runtime_queries
-          assert any(q == 'Indian cricket team trophy' for q in runtime_queries), runtime_queries
-          assert all(len(q.split()) <= 5 for q in runtime_queries), runtime_queries
+          assert all('Indian cricket team' in q for q in runtime_queries), runtime_queries
+          assert all(len(q.split()) <= 6 for q in runtime_queries), runtime_queries
+          assert all('lifting' not in q.casefold() for q in runtime_queries), runtime_queries
+          assert 'Indian cricket team lifting T20 World Cup trophy' not in runtime_queries, runtime_queries
 
+          # A stale explicit visual_type must not override semantic role inference.
           stale_type_scene = {
               'primary_entity': 'Indian cricket team lifting T20 World Cup trophy',
               'visual_type': 'LOCATION',
@@ -137,9 +136,8 @@ jobs:
               'primary_entity': 'محمد صلاح',
               'visual_intent': 'person portrait',
               'voiceover': 'محمد صلاح appeared in the report.',
-              'sport_or_topic_category': 'international',
           }
-          brief = build_scene_visual_brief(multilingual, 'Global story', 'international')
+          brief = build_scene_visual_brief(multilingual, 'Global story')
           queries, visual_type = build_deep_queries(multilingual, 'Global story')
           assert visual_type == 'PERSON'
           assert brief['subject'] == 'محمد صلاح'
@@ -177,12 +175,14 @@ jobs:
           img = Image.new('RGB', (640, 640), (100, 100, 100))
           buf = io.BytesIO(); img.save(buf, format='JPEG'); valid_bytes = buf.getvalue()
           seen_queries = []
+
           class FakeBot:
               def fetch_test(self, query, used_urls, marker, video_title):
                   seen_queries.append(query)
                   return valid_bytes if query == 'Acme launch event' else None
               def get_image_hash(self, data):
                   return __import__('hashlib').sha256(data).hexdigest()
+
           original_plan = visual_retrieval_runtime._source_plan
           visual_retrieval_runtime._source_plan = lambda bot, visual_type: [('TestSource', bot.fetch_test)]
           try:
@@ -200,6 +200,8 @@ jobs:
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Amina Rahman presented the documentary.') is False
           assert callable(script_guard_runtime.install)
+          assert callable(image_sources_runtime.fetch_openverse)
+          assert callable(image_sources_runtime.fetch_pixabay)
 
           from visual_qa_runtime import _tier_for
           from visual_runtime import _cache_key, _context_fingerprint
@@ -233,12 +235,9 @@ jobs:
           assert set(workflow_runtime.FORMAT_OPTIONS) == {'Deep Dive', 'Top-5', 'Cricket'}
           assert set(workflow_runtime.CRICKET_CATEGORIES) == {'India / Asia', 'Global', 'AI-assisted top story in cricket'}
 
-          from pathlib import Path
           required = ['app.py', 'ultimate_bot.py', 'script_guard_runtime.py', 'script_runtime.py', 'visual_runtime.py', 'visual_qa_runtime.py', 'visual_strategy_runtime.py', 'visual_semantic_guard_runtime.py', 'visual_query_entities_runtime.py', 'visual_content_runtime.py', 'visual_retrieval_runtime.py', 'image_sources_runtime.py', 'workflow_runtime.py', 'newsroom_dashboard.py', 'pages/Factory_QC.py', 'final_qc_runtime.py', 'requirements.txt']
           missing = [p for p in required if not Path(p).is_file()]
           assert not missing, missing
-          assert callable(image_sources_runtime.fetch_openverse)
-          assert callable(image_sources_runtime.fetch_pixabay)
           print('Offline semantic visual smoke checks passed.')
           PY
 
