@@ -4,7 +4,7 @@ import visual_provider_boundary_runtime as boundary
 import visual_retrieval_runtime as retrieval
 
 
-def test_person_source_plan_uses_raw_adapters_not_bot_fetchers():
+def test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers():
     plan = retrieval._source_plan(object(), "PERSON")
     names = [name for name, _fetcher in plan]
     assert names[:2] == ["Wikipedia", "Commons"]
@@ -40,8 +40,58 @@ def test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods():
     assert len(plan) >= 7
 
 
+def test_commons_candidate_adapter_is_bounded():
+    assert 1 <= boundary.MAX_PROVIDER_CANDIDATES <= 6
+    assert callable(boundary.fetch_commons_candidates)
+    assert callable(boundary.fetch_duckduckgo_candidates)
+    assert callable(boundary.fetch_wikipedia_person_candidates)
+
+
+def test_retrieval_accepts_multi_candidate_provider_payloads(monkeypatch):
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 4
+
+        def _build_search_variants(self, seg, video_title=""):
+            return ["Northstar Research Summit"], "EVENT"
+
+        def _verification_tier(self, seg, visual_type, source):
+            return "SKIPPED(conceptual)"
+
+        def _call_fetcher_with_timeout(self, fetcher, args, source, query):
+            return fetcher(*args)
+
+        def get_cached_asset(self, *args, **kwargs):
+            return None, None
+
+        def save_to_cache(self, *args, **kwargs):
+            return None
+
+        def _strict_gate(self, *args, **kwargs):
+            return True, "STRICT(event)", 100, False
+
+    first = __import__("io").BytesIO()
+    from PIL import Image
+    Image.new("RGB", (600, 600), "white").save(first, format="JPEG")
+    second = __import__("io").BytesIO()
+    Image.new("RGB", (600, 600), "black").save(second, format="JPEG")
+
+    class ProviderRuntime(FakeRuntime):
+        pass
+
+    monkeypatch.setattr(retrieval, "_source_plan", lambda _bot, _visual_type: [("Commons", lambda *args: [first.getvalue(), second.getvalue()])])
+    monkeypatch.setattr(retrieval, "_hash_image", lambda _bot, data: __import__("hashlib").sha256(data).hexdigest())
+
+    seg = {"primary_entity": "Northstar Research Summit", "specific_search_prompt": "Northstar Research Summit", "voiceover": "Northstar Research Summit opened today"}
+    image, used_ai, source = retrieval.run_visual_retrieval(ProviderRuntime(), object(), seg, "business", set(), set(), "Northstar Research Summit")
+    assert image.size == (600, 600)
+    assert used_ai is False
+    assert source == "Commons"
+    assert seg["visual_verified"] is True
+
+
 if __name__ == "__main__":
-    test_person_source_plan_uses_raw_adapters_not_bot_fetchers()
+    test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers()
     test_raw_person_adapters_have_no_legacy_quality_gate_dependency()
     test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods()
+    test_commons_candidate_adapter_is_bounded()
     print("Visual provider boundary regression checks passed.")
