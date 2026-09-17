@@ -87,20 +87,16 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # Thin identity rails replace the old heavy top/bottom bars.
     draw.rectangle([28, 28, width - 28, 33], fill=accent + (190,))
     draw.rectangle([28, height - 33, width - 28, height - 28], fill=secondary + (150,))
     draw.rectangle([28, 28, 33, height - 28], fill=accent + (105,))
 
-    # Use the same bold-font family as the main renderer so small editorial
-    # labels stay legible on a 1080x1920 canvas.
     marker_font = _load_brand_font(bot, 30, font_name)
     type_label = _human_label(visual_type)
     type_font = _fit_font(bot, type_label, min(430, width - 120), 30, 20, font_name)
     source_text = _source_label(source_type)
     source_font = _fit_font(bot, source_text, min(470, width - 160), 28, 18, font_name)
 
-    # Small scene marker: useful for consistency while staying visually quiet.
     marker = f"{int(scene_number):02d} / {int(total_scenes):02d}"
     marker_w, marker_h = _text_size(draw, marker, marker_font)
     marker_box = [48, 62, 48 + marker_w + 40, max(112, 62 + marker_h + 24)]
@@ -108,36 +104,21 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
     draw.text((marker_box[0] + 20, marker_box[1] + 10), marker, font=marker_font,
               fill=(255, 255, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
-    # Visual-type label tells the viewer what the image is doing editorially.
     type_w, type_h = _text_size(draw, type_label, type_font)
     type_box = [48, height - 62 - type_h - 24, min(width - 48, 48 + type_w + 40), height - 62]
-    draw.rounded_rectangle(
-        type_box,
-        radius=18,
-        fill=(5, 9, 16, 175),
-        outline=accent + (150,),
-        width=2,
-    )
+    draw.rounded_rectangle(type_box, radius=18, fill=(5, 9, 16, 175), outline=accent + (150,), width=2)
     draw.text((type_box[0] + 20, type_box[1] + 10), type_label, font=type_font,
               fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
-    # Source badge is compact and never competes with the subtitle layer.
     source_w, source_h = _text_size(draw, source_text, source_font)
     source_box_w = min(width - 96, source_w + 36)
     source_box_h = source_h + 24
     sx = width - source_box_w - 48
     source_box = [sx, 62, width - 48, 62 + source_box_h]
-    draw.rounded_rectangle(
-        source_box,
-        radius=18,
-        fill=(5, 9, 16, 175),
-        outline=(255, 255, 255, 80),
-        width=1,
-    )
+    draw.rounded_rectangle(source_box, radius=18, fill=(5, 9, 16, 175), outline=(255, 255, 255, 80), width=1)
     draw.text((sx + 18, 62 + 10), source_text, font=source_font,
               fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
 
-    # Facts/numbers get one restrained emphasis chip instead of a generic effect.
     fact_match = re.search(r"(?:₹|\$|€|£)?\b\d+(?:[.,]\d+)?%?\b", str(voiceover or ""))
     if fact_match:
         fact = fact_match.group(0)
@@ -157,6 +138,7 @@ def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, s
 def patch_content_first_visuals(bot):
     try:
         import visual_runtime
+        from visual_query_entities_runtime import search_slide_visual
     except Exception as exc:
         print(f"   [Visual Content] Could not load strict visual runtime: {exc}", flush=True)
         return bot
@@ -173,15 +155,19 @@ def patch_content_first_visuals(bot):
         used_urls, used_hashes = set(), set()
         ai_count = 0
 
-        print("\n🎨 Rendering content-first visual package (deep search + strict QA)...", flush=True)
+        print("\n🎨 Rendering content-first visual package (slide subjects + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
-            # One visual path only. This deliberately avoids the old curated
-            # person shortcut that narrowed queries to portrait/photo variants.
-            bg_img, used_ai, source_type = visual_runtime._relevant_asset(
-                bot, seg, category, used_urls, used_hashes, video_title
+            bg_img, used_ai, source_type = search_slide_visual(
+                visual_runtime,
+                bot,
+                seg,
+                category,
+                used_urls,
+                used_hashes,
+                video_title,
             )
 
             ai_count += int(used_ai)
