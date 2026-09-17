@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 from typing import Any
 
 
@@ -13,6 +14,56 @@ _MAX_SCENES = {"regular": 8, "trending": 8, "tech_reviews": 8, "top5": 7, "crick
 def _scene_count(format_mode: str) -> tuple[int, int]:
     mode = str(format_mode or "regular").lower()
     return _MIN_SCENES.get(mode, 5), _MAX_SCENES.get(mode, 8)
+
+
+def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
+    """Give the deterministic fallback enough real evidence to form distinct scenes."""
+    enriched = dict(story_data or {})
+    existing_text = str(
+        enriched.get("text")
+        or enriched.get("summary")
+        or enriched.get("description")
+        or ""
+    ).strip()
+
+    # The normal research layer may already have attached source snippets.
+    # Reuse them directly when present so fallback generation remains cheap.
+    sources = enriched.get("research_sources")
+    snippets: list[str] = []
+    if isinstance(sources, list):
+        for source in sources:
+            if isinstance(source, dict):
+                snippet = re.sub(r"\s+", " ", str(source.get("snippet") or "")).strip()
+                if len(snippet.split()) >= 5:
+                    snippets.append(snippet)
+
+    # If the current story object does not carry the research pack, make one
+    # free DDG pass here. This is a recovery path only, not the normal flow.
+    if not snippets:
+        try:
+            from research_runtime import collect_source_bundle
+            collected = collect_source_bundle(bot, enriched, max_sources=5)
+            for source in collected:
+                if isinstance(source, dict):
+                    snippet = re.sub(r"\s+", " ", str(source.get("snippet") or "")).strip()
+                    if len(snippet.split()) >= 5:
+                        snippets.append(snippet)
+            if collected:
+                enriched["research_sources"] = collected
+        except Exception as exc:
+            print(
+                f"   [Script Hardening] Emergency research enrichment unavailable: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+
+    if snippets:
+        evidence_text = " ".join(dict.fromkeys(snippets))
+        if existing_text:
+            enriched["text"] = f"{existing_text} {evidence_text}".strip()
+        else:
+            enriched["text"] = evidence_text
+
+    return enriched
 
 
 def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any], language_cfg: dict[str, Any], genre_key: str, format_mode: str) -> dict[str, Any]:
@@ -29,8 +80,10 @@ def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any],
     )
     try:
         from script_runtime import _extractive_script_fallback, clean_script_data, validate_content_density
-        fallback = _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode)
-        fallback, _diag = clean_script_data(fallback, story_data, format_mode)
+
+        repair_story = _enrich_emergency_story(bot, story_data)
+        fallback = _extractive_script_fallback(repair_story, language_cfg, genre_key, format_mode)
+        fallback, _diag = clean_script_data(fallback, repair_story, format_mode)
         ok, reason = validate_content_density(fallback, story_data, format_mode)
         if not ok:
             raise ValueError(reason)
@@ -40,6 +93,7 @@ def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any],
                 fallback_scenes = fallback_scenes[:maximum]
             fallback["script"] = fallback_scenes
             fallback["fallback_reason"] = "scene_count_contract"
+            fallback["fallback_source_enrichment"] = bool(repair_story.get("research_sources"))
             return fallback
     except Exception as exc:
         print(f"   [Script Hardening] Source-grounded repair failed: {type(exc).__name__}: {exc}", flush=True)
