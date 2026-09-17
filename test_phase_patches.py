@@ -3,14 +3,18 @@
 Production functions are not changed here. The Test Phase gets:
 - visible progress bars around long-running checks;
 - an offline source-grounded script test with zero model/API calls;
+- a local topic-selection diagnostic with zero discovery API calls;
+- reuse of the latest output audio with zero voice API calls;
 - three planned visual search terms for every slide, while executing exactly one
-  real visual fetch for one randomly selected slide (3 or 4 when available).
+  real visual fetch for one randomly selected slide.
 """
 from __future__ import annotations
 
 import os
 import random
 import re
+import subprocess
+from pathlib import Path
 from typing import Any, Callable
 
 import streamlit as st
@@ -203,7 +207,7 @@ def _render_test(bot) -> None:
         visuals = st.session_state.get("tp_visuals") or []
         audio = st.session_state.get("tp_audio")
         if not script or not visuals or audio is None:
-            st.warning("This test needs a script, sourced visuals, and generated audio. Complete steps 2–4 first.")
+            st.warning("This test needs a script, sourced visuals, and reused previous-run audio. Complete steps 2–4 first.")
             return
         st.caption(
             "This calls the same compile_video() function used by the factory. "
@@ -229,26 +233,178 @@ def _render_test(bot) -> None:
             st.caption("Nothing has been rendered yet.")
 
 
-def _topic_test_progress(bot) -> None:
-    """Keep the original topic UI but wrap its actual discovery call with progress."""
-    original_discovery = test_phase_runtime.discover_three_candidates
-    restore = _wrap_for_progress(test_phase_runtime, "discover_three_candidates", "Topic discovery test")
+def _local_topic_candidates(bot) -> None:
+    """Exercise topic UI/state locally without any network discovery call."""
+    with st.expander("1. Topic choosing — offline / no-API test", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            format_options = ["Deep Dive", "Top 5", "Cricket"]
+            format_label = st.selectbox("Format", format_options, key="tp_format")
+            labels = [cfg["label"] for cfg in bot.LANGUAGES.values()]
+            lang_label = st.selectbox("Language", labels, key="tp_language")
+        with c2:
+            category_options = [
+                ("National & Global Affairs", "national_global_affairs"),
+                ("Technology", "technology"),
+                ("Sports", "sports"),
+                ("Business & Finance", "business_finance"),
+                ("Entertainment", "entertainment"),
+            ]
+            category_label = st.selectbox("Category", [label for label, _ in category_options], key="tp_category")
+            requested_topic = st.text_input("Local test topic", key="tp_topic", placeholder="Example: India's next big AI breakthrough")
+
+        language_key = next((key for key, cfg in bot.LANGUAGES.items() if cfg["label"] == lang_label), "english")
+        format_mode = {"Deep Dive": "regular", "Top 5": "top5", "Cricket": "cricket"}[format_label]
+        category_key = dict(category_options)[category_label]
+        if format_label == "Cricket":
+            category_key = "sports_stories_of_day"
+
+        config = {
+            "format_mode": format_mode,
+            "display_format": format_label,
+            "category": category_key,
+            "language": language_key,
+            "cricket_pipeline": format_label == "Cricket",
+            "cricket_category": "Offline diagnostic",
+            "requested_topic": requested_topic.strip(),
+            "language_label": lang_label,
+        }
+        st.session_state.tp_config = config
+
+        topic_seed = requested_topic.strip() or {
+            "national_global_affairs": "India's latest major policy change",
+            "technology": "The next major AI breakthrough",
+            "sports": "A major sports moment everyone is discussing",
+            "business_finance": "A major business or market development",
+            "entertainment": "The biggest entertainment story today",
+            "sports_stories_of_day": "The biggest cricket story today",
+        }.get(category_key, "A major story worth knowing")
+
+        candidates = [
+            {"title": topic_seed, "source_label": "Offline diagnostic topic", "discovery_reason": "Deterministic local seed — no discovery API called.", "discovery_rank": 1},
+            {"title": f"{topic_seed} — what changed", "source_label": "Offline diagnostic variant", "discovery_reason": "Local angle variant — no discovery API called.", "discovery_rank": 2},
+            {"title": f"{topic_seed} — what it means", "source_label": "Offline diagnostic variant", "discovery_reason": "Local impact variant — no discovery API called.", "discovery_rank": 3},
+        ]
+        st.session_state.tp_candidates = candidates
+
+        labels = [f"#{item['discovery_rank']} — {item['title']}" for item in candidates]
+        picked = st.selectbox("Test story", labels, key="tp_story_choice")
+        item = candidates[labels.index(picked)]
+        st.info(f"**Source:** {item['source_label']}\n\n**Reason:** {item['discovery_reason']}")
+        if st.button("✅ Use this topic for the next test", key="tp_use_story"):
+            st.session_state.tp_story = dict(item)
+            st.success("Topic locked into the test workspace. Zero discovery API calls were used.")
+
+
+def _latest_output_audio(bot) -> list[str]:
+    """Find the newest usable voiceover set from the local output folder."""
+    base = Path(getattr(bot, "ASSETS_DIR", "output"))
+    if not base.exists():
+        return []
+    candidates = []
+    for path in base.rglob("voiceover_*.mp3"):
+        try:
+            if path.is_file() and path.stat().st_size > 500:
+                candidates.append(path)
+        except OSError:
+            continue
+    if not candidates:
+        for suffix in ("*.wav", "*.m4a", "*.mp4"):
+            for path in base.rglob(suffix):
+                if path.name.lower().startswith("voiceover_"):
+                    try:
+                        if path.is_file() and path.stat().st_size > 500:
+                            candidates.append(path)
+                    except OSError:
+                        continue
+    groups: dict[str, list[Path]] = {}
+    for path in candidates:
+        groups.setdefault(str(path.parent), []).append(path)
+    if not groups:
+        return []
+    latest_group = max(groups.values(), key=lambda paths: max(p.stat().st_mtime for p in paths))
+
+    def scene_num(path: Path) -> int:
+        match = re.search(r"voiceover_(\d+)", path.stem, re.I)
+        return int(match.group(1)) if match else 9999
+
+    return [str(p) for p in sorted(latest_group, key=scene_num)]
+
+
+def _audio_duration(path: str) -> float:
     try:
-        return test_phase_runtime._original_topic_test(bot)
-    finally:
-        restore()
+        completed = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        return max(0.0, float((completed.stdout or "").strip()))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
+
+
+def _approximate_timings(text: str, duration: float) -> list[dict[str, Any]]:
+    """Build local-only word timings for reused audio when the previous run did not persist timings."""
+    words = re.findall(r"\S+", str(text or "").strip())
+    if not words or duration <= 0:
+        return []
+    slot = duration / len(words)
+    return [
+        {"word": word, "start": round(i * slot, 3), "end": round((i + 1) * slot, 3)}
+        for i, word in enumerate(words)
+    ]
+
+
+def _reuse_previous_audio(bot) -> None:
+    """Load the latest local voiceover set; never call the voice provider."""
+    paths = _latest_output_audio(bot)
+    if not paths:
+        st.error("No previous-run voiceover files were found in the output folder. The audio test will not make an API call as a fallback.")
+        return
+
+    script = st.session_state.get("tp_script") or {}
+    scenes = script.get("script", []) if isinstance(script, dict) else []
+    timings: list[list[dict[str, Any]]] = []
+    usable_paths = []
+    for index, path in enumerate(paths):
+        duration = _audio_duration(path)
+        text = ""
+        if isinstance(scenes, list) and index < len(scenes) and isinstance(scenes[index], dict):
+            text = str(scenes[index].get("voiceover", ""))
+        local_timings = _approximate_timings(text, duration)
+        if duration <= 0:
+            continue
+        usable_paths.append(path)
+        timings.append(local_timings)
+
+    if not usable_paths:
+        st.error("Previous-run audio files were found, but none had a readable duration.")
+        return
+
+    st.session_state.tp_audio = (usable_paths, timings)
+    st.session_state.tp_audio_source = "Previous successful run — local output files"
+    st.success(f"Reused {len(usable_paths)} local audio track(s). Zero audio API calls were made.")
+    for index, path in enumerate(usable_paths, 1):
+        st.audio(path, format="audio/mp3")
+        st.caption(f"Scene {index}: {path}")
 
 
 def _audio_test_progress(bot) -> None:
-    original = getattr(bot, "generate_voiceover_and_timestamps", None)
-    if callable(original):
-        restore = _wrap_for_progress(bot, "generate_voiceover_and_timestamps", "Audio generation test")
-    else:
-        restore = lambda: None
-    try:
-        return test_phase_runtime._original_audio_test(bot)
-    finally:
-        restore()
+    with st.expander("3. Audio — reuse previous run / no-API test", expanded=True):
+        script = st.session_state.get("tp_script")
+        if not script:
+            st.warning("Generate a script first.")
+            return
+        st.info("The test does **not** call Edge-TTS. It reuses the latest voiceover files already present in the local output folder.")
+        if st.button("▶ Load previous-run audio", key="tp_run_audio", type="primary", use_container_width=True):
+            _run_with_progress("Loading previous-run audio", lambda: _reuse_previous_audio(bot))
+        audio = st.session_state.get("tp_audio")
+        if audio is None:
+            st.caption("Nothing has been loaded yet.")
+            return
+        paths, timings = audio
+        st.success(f"Audio test ready: {len(paths)} reused track(s), zero audio API calls.")
+        st.caption(f"Source: {st.session_state.get('tp_audio_source', 'Local output folder')}")
+        st.caption("Word timings are local diagnostic timings derived from the reused audio duration; no voice service was contacted.")
 
 
 def _metadata_test_progress(bot) -> None:
@@ -295,13 +451,12 @@ def install_test_phase_patches() -> None:
     test_phase_runtime._original_metadata_test = test_phase_runtime._metadata_test
     test_phase_runtime._original_upload_test = test_phase_runtime._upload_test
 
-    test_phase_runtime._topic_test = _topic_test_progress
+    test_phase_runtime._topic_test = _local_topic_candidates
     test_phase_runtime._audio_test = _audio_test_progress
-    test_phase_runtime._metadata_test = _metadata_test_progress
-    test_phase_runtime._upload_test = _upload_test_progress
 
     # Test Phase-only replacements.
     test_phase_runtime._script_test = _offline_script_test
     test_phase_runtime._visual_test = _visual_test_limited
     test_phase_runtime._render_test = _render_test
+    test_phase_runtime._topic_test = _local_topic_candidates
     test_phase_runtime._enhanced_test_phase_patches_installed = True
