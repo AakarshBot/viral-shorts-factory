@@ -1,15 +1,16 @@
 """Unicode-safe text compatibility for multilingual Shorts production.
 
 The factory supports English, Hindi and Telugu, but several historical helpers
-used ASCII-only tokenisation.  This module patches those helpers centrally so
+used ASCII-only tokenisation. This module patches those helpers centrally so
 validation, deduplication and visual query generation preserve non-Latin text.
-It is deliberately deterministic and has no network side effects.
+It also hardens the legacy visual repeat-limit wrapper so it cannot blank the
+primary entity that the strict visual runtime requires.
 """
 from __future__ import annotations
 
 import re
 
-_VERSION = "2026-09-17-v1"
+_VERSION = "2026-09-17-v2"
 _WORD_RE = re.compile(r"[^\W_]+(?:['’/-][^\W_]+)*", re.UNICODE)
 _SPACE_RE = re.compile(r"\s+")
 
@@ -55,8 +56,60 @@ def _script_guard_sentences(module, text):
     ]
 
 
-def _story_key(text):
-    return re.sub(r"\W+", " ", str(text or "").casefold(), flags=re.UNICODE).strip()
+def _safe_subject_limit_wrapper(module, original_builder):
+    """Build a repeat-limited visual wrapper that never blanks primary_entity."""
+    def limited_relevant_asset(original):
+        def wrapped(bot, seg, category, used_urls, used_hashes, video_title=""):
+            entity = str(seg.get("primary_entity", "") or "").strip()
+            key = re.sub(r"\s+", " ", entity.casefold()).strip()
+            chosen_seg = seg
+            run_key = id(used_hashes)
+            if key:
+                with module._SUBJECT_LOCK:
+                    run_counts = module._SUBJECT_RUNS.setdefault(run_key, module.defaultdict(int))
+                    count = run_counts[key]
+                    if count < 2:
+                        run_counts[key] += 1
+                    else:
+                        # Keep the true entity. Vary the retrieval context instead
+                        # of manufacturing a different entity or an empty one.
+                        chosen_seg = dict(seg)
+                        intent = str(seg.get("visual_intent", "") or "").strip()
+                        prompt = str(seg.get("specific_search_prompt", "") or "").strip()
+                        scene_no = str(seg.get("scene_index") or seg.get("scene_number") or "").strip()
+                        context = " ".join(x for x in (prompt, intent, f"scene {scene_no}" if scene_no else "") if x)
+                        chosen_seg["specific_search_prompt"] = context or entity
+            try:
+                return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
+            finally:
+                with module._SUBJECT_LOCK:
+                    if len(module._SUBJECT_RUNS) > 32:
+                        module._SUBJECT_RUNS.pop(next(iter(module._SUBJECT_RUNS)), None)
+
+        wrapped._subject_limit_bound = True
+        return wrapped
+    return limited_relevant_asset(original_builder)
+
+
+def _patch_subject_limit_before_install():
+    """Replace the legacy wrapper factory before it can create blank entities."""
+    try:
+        import visual_policy_runtime as policy
+        if getattr(policy, "_unicode_safe_subject_policy", False):
+            return
+
+        original_builder = getattr(policy, "_subject_limit_wrapper", None)
+        if not callable(original_builder):
+            return
+
+        def safe_builder(original):
+            return _safe_subject_limit_wrapper(policy, original)
+
+        policy._subject_limit_wrapper = safe_builder
+        policy._unicode_safe_subject_policy = True
+        print("   [Unicode Runtime] Visual repeat-limit wrapper hardened: primary_entity is always preserved.", flush=True)
+    except Exception as exc:
+        print(f"   [Unicode Runtime] Visual repeat-limit hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
 
 
 def install() -> bool:
@@ -66,6 +119,8 @@ def install() -> bool:
 
     patched = []
     try:
+        _patch_subject_limit_before_install()
+
         import script_runtime
         script_runtime._words = unicode_words
         script_runtime._normalise = unicode_normalise
@@ -79,7 +134,11 @@ def install() -> bool:
         import story_ranker
         story_ranker._tokens = lambda value: {
             word for word in unicode_words(value)
-            if len(word) > 2 and word not in getattr(story_ranker, "STOPWORDS", set())
+            if len(word) > 2 and word not in {
+                "the", "and", "for", "with", "from", "this", "that", "into", "after", "before",
+                "over", "under", "what", "how", "why", "world", "news", "latest", "today", "just",
+                "will", "says", "said", "new", "breaking", "report", "reports", "official", "update",
+            }
         }
         patched.append("story_ranker._tokens")
 
