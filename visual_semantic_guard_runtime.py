@@ -23,6 +23,16 @@ GENERIC_NOISE = {
     "next", "year",
 }
 
+# These describe how a subject is visually represented. They are not factual
+# identity, so they may be removed only for a later fallback query.
+VISUAL_DESCRIPTORS = {
+    "logo", "logos", "portrait", "portraits", "headshot", "headshots", "icon", "icons",
+    "badge", "badges", "emblem", "emblems", "symbol", "symbols", "seal", "seals",
+    "map", "maps", "chart", "charts", "graph", "graphs", "diagram", "diagrams",
+    "infographic", "infographics", "screenshot", "screenshots", "poster", "posters",
+    "flag", "flags",
+}
+
 DISCOURSE_PREFIXES = {
     "not", "just", "only", "also", "still", "now", "really", "actually", "basically",
     "clearly", "simply", "perhaps", "maybe", "apparently", "reportedly", "even",
@@ -97,6 +107,38 @@ def sanitize_candidate(value: object) -> str:
     return " ".join(words[:MAX_SUBJECT_WORDS]).strip(" ,.;:|\"'")
 
 
+def _strip_visual_descriptors(value: str) -> str:
+    """Remove only trailing visual-presentation words, preserving factual identity."""
+    words = tokens(value)
+    while len(words) > 1 and key(words[-1]) in VISUAL_DESCRIPTORS:
+        words.pop()
+    return sanitize_candidate(" ".join(words))
+
+
+def _descriptor_present(value: str) -> bool:
+    words = tokens(value)
+    return bool(words) and any(key(word) in VISUAL_DESCRIPTORS for word in words[1:])
+
+
+def _subject_role_hint(value: str) -> str:
+    """Infer a factual role from the subject itself, including generic descriptors."""
+    core = _strip_visual_descriptors(value)
+    core_words = {key(word) for word in tokens(core)}
+    if not core_words:
+        return ""
+
+    # Generic uppercase acronyms are a useful organization signal (e.g. ABC),
+    # but are only used when a presentation descriptor made the identity clear.
+    core_text = clean_text(core)
+    if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,12}(?:\s+[A-Z][A-Z0-9&.-]{1,12})*", core_text):
+        return "ORGANIZATION"
+
+    for role, cues in ROLE_CUES.items():
+        if core_words & cues:
+            return role
+    return ""
+
+
 def _intent_words(scene: dict) -> list[str]:
     raw = clean_text(scene.get("visual_intent", ""))
     # Compound labels such as news_event, news-event and person/portrait are
@@ -110,11 +152,17 @@ def infer_role(scene: dict) -> str:
     explicit = clean_text(scene.get("visual_type", "")).upper().replace("-", "_").replace(" ", "_")
     if explicit in ROLE_CUES:
         return explicit
+
+    candidate = sanitize_candidate(scene.get("primary_entity", ""))
+    subject_hint = _subject_role_hint(candidate)
+    if subject_hint and _descriptor_present(candidate):
+        return subject_hint
+
     intent_words = set(_intent_words(scene))
     for role, cues in ROLE_CUES.items():
         if intent_words & cues:
             return role
-    return "GENERAL_CONTEXT"
+    return subject_hint or "GENERAL_CONTEXT"
 
 
 def evidence_text(scene: dict, video_title: str = "") -> str:
@@ -207,7 +255,9 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
 
 def _anchor_for_resolution(resolution: dict) -> str:
     """Return the cleaned factual identity that every fallback must preserve."""
-    return sanitize_candidate(resolution.get("factual_entity") or resolution.get("original_entity") or "")
+    factual = sanitize_candidate(resolution.get("factual_entity") or resolution.get("original_entity") or "")
+    core = _strip_visual_descriptors(factual)
+    return core or factual
 
 
 def _reduce_subject_once(subject: str, anchor: str) -> str:
@@ -224,8 +274,6 @@ def _reduce_subject_once(subject: str, anchor: str) -> str:
     if not words or not anchor_keys:
         return ""
 
-    # Mark anchor occurrences in their left-to-right order so duplicate words in
-    # the contextual suffix do not become accidentally protected.
     protected = set()
     next_anchor = 0
     for index, word in enumerate(words):
@@ -257,15 +305,10 @@ def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], s
     anchor = _anchor_for_resolution(resolution)
     queries = [subject]
 
-    # First fallback removes only one scene-specific suffix/modifier. This is
-    # enough to recover from exact-but-over-specific prompts without broadening
-    # into genre/category terms or free-form narration.
     reduced = _reduce_subject_once(subject, anchor)
     if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
         queries.append(reduced)
 
-    # Final fallback is the factual identity itself. It is never a synonym or a
-    # category; it is the same grounded identity supplied by the scene.
     if anchor and anchor.casefold() not in {q.casefold() for q in queries}:
         queries.append(anchor)
 
