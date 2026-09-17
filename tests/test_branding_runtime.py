@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from branding_runtime import _assets, apply_branded_finish, patch_branding_pipeline
 
 
