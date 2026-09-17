@@ -4,83 +4,126 @@ from visual_query_entities_runtime import (
     lock_visual_subject,
     search_slide_visual,
 )
-from visual_strategy_runtime import build_deep_queries
+from visual_semantic_guard_runtime import build_query_ladder, clean_text, resolve_subject
+from visual_strategy_runtime import build_deep_queries, classify_scene
 
 
-def test_slide_subject_is_locked_and_script_noise_is_ignored():
+def test_person_subject_is_preserved_without_prompt_padding():
     scene = {
-        "primary_entity": "India",
-        "voiceover": "India is being discussed, with Rashid Khan also mentioned. The Indian cricket team remains part of the story.",
-        "specific_search_prompt": "India cricket team Rashid Khan interview press conference 2024 person",
-        "visual_intent": "press conference person",
-        "sport_or_topic_category": "cricket",
+        "primary_entity": "Amina Rahman",
+        "voiceover": "Amina Rahman presented the documentary at the festival.",
+        "specific_search_prompt": "Amina Rahman latest press conference person",
+        "visual_intent": "person portrait",
+        "sport_or_topic_category": "entertainment",
+    }
+    assert lock_visual_subject(scene) == "Amina Rahman"
+    queries, visual_type = build_deep_queries(scene, "Amina Rahman documentary")
+    assert queries == ["Amina Rahman"]
+    assert visual_type == "PERSON"
+    assert all(
+        token not in queries[0].lower()
+        for token in ("press", "conference", "latest", "person", "entertainment")
+    )
+
+
+def test_malformed_leading_negation_is_removed_and_context_grounded():
+    scene = {
+        "primary_entity": "Not Northstar Research Summit",
+        "voiceover": "Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin next year.",
+        "specific_search_prompt": "news_event",
+        "visual_intent": "news_event",
+        "sport_or_topic_category": "business",
     }
 
-    assert lock_visual_subject(scene) == "India"
-    assert extract_slide_search_subjects(scene) == ["India"]
-    queries, visual_type = build_deep_queries(scene, "India Rashid Khan noisy title")
-    assert queries == ["India"]
-    assert visual_type == "LOCATION"
+    resolution = resolve_subject(scene, "Northstar Research Summit")
+    assert resolution["visual_type"] == "EVENT"
+    assert "not" not in resolution["subject"].lower().split()
+    assert "nbsp" not in resolution["subject"].lower()
+    assert "one-off" not in resolution["subject"].lower()
+    assert "thing" not in resolution["subject"].lower()
+    assert "northstar" in resolution["subject"].lower()
+    assert "summit" in resolution["subject"].lower()
+
+    queries, visual_type, _ = build_query_ladder(scene, "Northstar Research Summit")
+    assert visual_type == "EVENT"
+    assert queries
+    assert queries[0] == resolution["subject"]
+    assert all("business" not in q.lower() for q in queries)
+    assert all("event" not in q.lower() or "summit" in q.lower() for q in queries)
+    assert all("not" not in q.lower().split() for q in queries)
 
 
-def test_search_query_contains_no_context_noise():
+def test_html_noise_is_removed_from_visual_subject_and_query():
     scene = {
-        "primary_entity": "Rishabh Pant",
-        "voiceover": "Rishabh Pant was omitted from India's ODI squad after a selection meeting.",
-        "specific_search_prompt": "Rishabh Pant ODI players press conference 2024 person",
-        "visual_intent": "press conference person",
-        "sport_or_topic_category": "cricket",
+        "primary_entity": "Not Aurora",
+        "voiceover": "Not just a one-off thing — Aurora returned to the exhibition hall in Berlin &nbsp;.",
+        "specific_search_prompt": "news_event",
+        "visual_intent": "news_event",
     }
+    resolution = resolve_subject(scene, "Aurora exhibition")
+    assert clean_text("Aurora &nbsp; &amp;") == "Aurora &"
+    assert "nbsp" not in resolution["subject"].lower()
+    queries, _type, _ = build_query_ladder(scene, "Aurora exhibition")
+    assert all("nbsp" not in q.lower() for q in queries)
+    assert all("&nbsp;" not in q.lower() for q in queries)
+    assert all("not" not in q.lower().split() for q in queries)
 
-    assert extract_slide_search_subjects(scene) == ["Rishabh Pant"]
-    assert build_deep_queries(scene)[0] == ["Rishabh Pant"]
-    query = build_deep_queries(scene)[0][0].lower()
-    assert all(noise not in query for noise in ("odi", "players", "press", "conference", "2024", "person"))
 
-
-def test_candidate_scene_locks_subject_without_rewriting_narration():
+def test_candidate_scene_rewrites_only_visual_runtime_metadata():
     source = {
-        "primary_entity": "India",
-        "voiceover": "India and Rashid Khan are part of the same cricket story.",
-        "specific_search_prompt": "India Rashid Khan press conference",
-        "visual_intent": "press conference person",
-        "sport_or_topic_category": "cricket",
+        "primary_entity": "Not Northstar Research Summit",
+        "voiceover": "Not just a one-off thing — Northstar Research Summit could return to Berlin &nbsp;.",
+        "specific_search_prompt": "news_event",
+        "visual_intent": "news_event",
     }
 
-    candidate = build_candidate_scene(source, "Rashid Khan")
-    assert candidate["primary_entity"] == "Rashid Khan"
-    assert candidate["specific_search_prompt"] == "Rashid Khan"
-    assert candidate["voiceover"] == source["voiceover"]
+    candidate = build_candidate_scene(source, source["primary_entity"], "Northstar Research Summit")
+    assert candidate["primary_entity"] != source["primary_entity"]
+    assert candidate["specific_search_prompt"] == candidate["primary_entity"]
+    assert candidate["voiceover"] == candidate["primary_entity"]
+    assert candidate["factual_voiceover"] == source["voiceover"]
+    assert "&nbsp;" not in candidate["voiceover"]
     assert candidate["visual_subject_locked"] is True
-    assert candidate["visual_subject_lock"] == "Rashid Khan"
-    assert candidate["visual_type"] == "PERSON"
 
 
-def test_visual_search_does_not_fall_back_to_another_subject():
+def test_visual_search_does_not_fall_back_to_raw_narration_or_category():
     calls = []
 
     class FakeVisualRuntime:
+        VISUAL_MAX_SEARCH_QUERIES = 3
+
         @staticmethod
         def _relevant_asset(bot, scene, category, used_urls, used_hashes, video_title):
-            calls.append(scene["primary_entity"])
+            calls.append(
+                {
+                    "entity": scene["primary_entity"],
+                    "query_prompt": scene["specific_search_prompt"],
+                    "voiceover": scene["voiceover"],
+                }
+            )
             raise RuntimeError("locked subject rejected")
 
     scene = {
-        "primary_entity": "India",
-        "voiceover": "India is discussed with Rashid Khan in the same slide.",
-        "specific_search_prompt": "India Rashid Khan press conference",
-        "visual_intent": "press conference person",
-        "sport_or_topic_category": "cricket",
+        "primary_entity": "Not Northstar Research Summit",
+        "voiceover": "Not just a one-off thing — Northstar Research Summit could continue hosting in Berlin &nbsp;.",
+        "specific_search_prompt": "news_event",
+        "visual_intent": "news_event",
     }
 
     try:
-        search_slide_visual(FakeVisualRuntime, object(), scene, "cricket", set(), set(), "noisy title")
+        search_slide_visual(FakeVisualRuntime, object(), scene, "business", set(), set(), "Northstar Research Summit")
     except RuntimeError:
         pass
     else:
         raise AssertionError("Visual search should fail after the locked subject is rejected")
 
-    assert calls == ["India"]
+    assert len(calls) == 1
+    call = calls[0]
+    assert "not" not in call["entity"].lower().split()
+    assert "not" not in call["query_prompt"].lower().split()
+    assert "&nbsp;" not in call["voiceover"]
+    assert "one-off" not in call["voiceover"].lower()
+    assert "thing" not in call["voiceover"].lower()
 
 
 def test_unicode_primary_subject_is_preserved():
@@ -88,8 +131,9 @@ def test_unicode_primary_subject_is_preserved():
         scene = {
             "primary_entity": entity,
             "voiceover": f"{entity} is the subject of this slide.",
-            "specific_search_prompt": f"{entity} latest press conference",
+            "specific_search_prompt": f"{entity} latest interview",
             "visual_intent": "person",
         }
         assert extract_slide_search_subjects(scene) == [entity]
         assert build_deep_queries(scene)[0] == [entity]
+        assert classify_scene(scene) == "PERSON"
