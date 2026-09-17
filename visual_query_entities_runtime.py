@@ -95,7 +95,7 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
         return queries
 
     # First use the simplest visual-intent combination. This remains ahead of
-    # any prompt-derived phrase and is intentionally capped at three terms.
+    # any richer prompt-derived phrase and is intentionally capped at three terms.
     compact = clean_text(" ".join([anchor, *terms[:3]]))
     if compact and compact.casefold() != anchor.casefold():
         queries.append(compact)
@@ -106,20 +106,6 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
             queries.append(query)
         if len(queries) >= _MAX_QUERY_BUDGET:
             break
-
-    # Only if budget remains, add one compact phrase from the explicit search
-    # prompt. Never copy the prompt sentence; keep at most three useful terms.
-    if len(queries) < _MAX_QUERY_BUDGET:
-        prompt_terms = []
-        for context in (seg.get("factual_search_prompt"), seg.get("specific_search_prompt")):
-            candidate_terms = _simple_context_terms(clean_text(context), anchor)
-            if candidate_terms:
-                prompt_terms = candidate_terms
-                break
-        if prompt_terms:
-            prompt_compact = clean_text(" ".join([anchor, *prompt_terms[:3]]))
-            if prompt_compact and prompt_compact.casefold() not in {q.casefold() for q in queries}:
-                queries.append(prompt_compact)
 
     return queries[:_MAX_QUERY_BUDGET]
 
@@ -217,9 +203,21 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     prepared["factual_visual_intent"] = original_intent
     prepared["factual_search_prompt"] = original_prompt
 
-    subject_role = infer_role({"primary_entity": visual_subject, "visual_type": prepared.get("visual_type", "")})
-    if subject_role != "GENERAL_CONTEXT":
-        prepared["visual_type"] = subject_role
+    # Explicit visual_type is treated as a hint, not an authority. First infer
+    # the role from the actual subject + visual intent; only fall back to the
+    # pre-existing type when the generic evidence cannot identify a role.
+    inferred_role = infer_role({
+        "primary_entity": visual_subject,
+        "visual_intent": original_intent,
+    })
+    if inferred_role == "GENERAL_CONTEXT":
+        inferred_role = infer_role({
+            "primary_entity": visual_subject,
+            "visual_intent": original_intent,
+            "visual_type": prepared.get("visual_type", ""),
+        })
+    if inferred_role != "GENERAL_CONTEXT":
+        prepared["visual_type"] = inferred_role
 
     prepared["primary_entity"] = factual_entity or visual_subject
     prepared["visual_search_subject"] = visual_subject
