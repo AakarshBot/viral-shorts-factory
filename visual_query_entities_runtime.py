@@ -57,9 +57,15 @@ def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
     # using grounded scene evidence (for example, adding a verified location).
     # In that one case the repaired subject is the factual identity we should
     # search first. Do not use a concrete search prompt this way: prompts stay
-    # context only and never outrank the simple identity.
-    original_entity = clean_text(resolution.get("original_entity", ""))
-    resolved_factual = clean_text(resolution.get("factual_entity", ""))
+    # context only and never outrank the simple identity. Scene preparation
+    # preserves both original_primary_entity and factual_primary_entity so the
+    # repair can still be detected after it locks primary_entity to the subject.
+    original_entity = clean_text(
+        seg.get("original_primary_entity") or resolution.get("original_entity", "")
+    )
+    resolved_factual = clean_text(
+        seg.get("factual_primary_entity") or resolution.get("factual_entity", "")
+    )
     grounded_subject = clean_text(resolution.get("subject", ""))
     was_grounded = bool(
         original_entity
