@@ -44,14 +44,31 @@ def _simple_context_terms(text: str, anchor: str) -> list[str]:
 
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
     """Search the simplest factual identity first, then a few simple context variants."""
-    anchor = clean_text(
+    factual_anchor = clean_text(
         seg.get("factual_primary_entity")
         or resolution.get("factual_entity")
         or seg.get("primary_entity")
         or resolution.get("subject")
     )
-    if not anchor:
+    if not factual_anchor:
         return []
+
+    # A malformed/discourse-heavy entity may be repaired by resolve_subject()
+    # using grounded scene evidence (for example, adding a verified location).
+    # In that one case the repaired subject is the factual identity we should
+    # search first. Do not use a concrete search prompt this way: prompts stay
+    # context only and never outrank the simple identity.
+    original_entity = clean_text(resolution.get("original_entity", ""))
+    resolved_factual = clean_text(resolution.get("factual_entity", ""))
+    grounded_subject = clean_text(resolution.get("subject", ""))
+    was_grounded = bool(
+        original_entity
+        and resolved_factual
+        and original_entity.casefold() != resolved_factual.casefold()
+        and grounded_subject
+        and grounded_subject.casefold() != resolved_factual.casefold()
+    )
+    anchor = grounded_subject if was_grounded else factual_anchor
 
     queries = [anchor]
     contexts = (
