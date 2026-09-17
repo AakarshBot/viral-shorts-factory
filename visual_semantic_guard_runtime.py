@@ -205,18 +205,70 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
     }
 
 
+def _anchor_for_resolution(resolution: dict) -> str:
+    """Return the cleaned factual identity that every fallback must preserve."""
+    return sanitize_candidate(resolution.get("factual_entity") or resolution.get("original_entity") or "")
+
+
+def _reduce_subject_once(subject: str, anchor: str) -> str:
+    """Remove one trailing scene-specific modifier while preserving identity.
+
+    This is intentionally positional rather than genre-driven. It handles
+    phrases such as ``Indian athletes Nagoya Asian Games arrival`` by producing
+    ``Indian athletes Nagoya Asian Games`` while keeping the factual anchor.
+    For a damaged compound such as ``BBL season-opener Chennai`` with anchor
+    ``BBL Chennai``, it removes the non-anchor modifier and yields ``BBL Chennai``.
+    """
+    words = tokens(subject)
+    anchor_keys = meaningful_tokens(anchor)
+    if not words or not anchor_keys:
+        return ""
+
+    # Mark anchor occurrences in their left-to-right order so duplicate words in
+    # the contextual suffix do not become accidentally protected.
+    protected = set()
+    next_anchor = 0
+    for index, word in enumerate(words):
+        if next_anchor < len(anchor_keys) and key(word) == anchor_keys[next_anchor]:
+            protected.add(index)
+            next_anchor += 1
+    if next_anchor < len(anchor_keys):
+        return ""
+
+    removable = [i for i in range(len(words) - 1, -1, -1) if i not in protected]
+    if not removable:
+        return ""
+    reduced = " ".join(word for i, word in enumerate(words) if i != removable[0])
+    reduced = sanitize_candidate(reduced)
+    if not reduced:
+        return ""
+    reduced_keys = set(meaningful_tokens(reduced))
+    if not all(item in reduced_keys for item in anchor_keys):
+        return ""
+    return reduced
+
+
 def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], str, dict]:
     resolution = resolve_subject(scene, video_title)
     subject = resolution["subject"]
     if not subject:
         return [], resolution["visual_type"], resolution
 
+    anchor = _anchor_for_resolution(resolution)
     queries = [subject]
-    contextual = _grounded_context(subject, scene, video_title) if resolution["original_entity"].casefold() != subject.casefold() else ""
-    if contextual and contextual.casefold() != subject.casefold():
-        candidate = sanitize_candidate(contextual)
-        if candidate and candidate.casefold() not in {q.casefold() for q in queries} and len(tokens(candidate)) <= MAX_QUERY_WORDS:
-            queries.append(candidate)
+
+    # First fallback removes only one scene-specific suffix/modifier. This is
+    # enough to recover from exact-but-over-specific prompts without broadening
+    # into genre/category terms or free-form narration.
+    reduced = _reduce_subject_once(subject, anchor)
+    if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
+        queries.append(reduced)
+
+    # Final fallback is the factual identity itself. It is never a synonym or a
+    # category; it is the same grounded identity supplied by the scene.
+    if anchor and anchor.casefold() not in {q.casefold() for q in queries}:
+        queries.append(anchor)
+
     return queries[:3], resolution["visual_type"], resolution
 
 
