@@ -97,20 +97,26 @@ def _safe_font(size: int):
     return ImageFont.load_default()
 
 
-def _safe_rounded_rectangle(draw, coords, width: int, height: int, radius: int, fill=None, outline=None):
+def _safe_rounded_rectangle(draw, coords, canvas_width: int, canvas_height: int, radius: int, fill=None, outline=None, stroke_width: int = 1):
     """Draw a rounded rectangle only after normalizing/clamping its geometry."""
     try:
         x0, y0, x1, y1 = [float(value) for value in coords]
         left, right = sorted((x0, x1))
         top, bottom = sorted((y0, y1))
-        left = max(0.0, min(left, max(0, width - 1)))
-        right = max(0.0, min(right, max(0, width - 1)))
-        top = max(0.0, min(top, max(0, height - 1)))
-        bottom = max(0.0, min(bottom, max(0, height - 1)))
+        left = max(0.0, min(left, max(0, canvas_width - 1)))
+        right = max(0.0, min(right, max(0, canvas_width - 1)))
+        top = max(0.0, min(top, max(0, canvas_height - 1)))
+        bottom = max(0.0, min(bottom, max(0, canvas_height - 1)))
         if right <= left or bottom <= top:
             return
         safe_radius = max(0, min(int(radius), int((right - left) / 2), int((bottom - top) / 2)))
-        draw.rounded_rectangle([left, top, right, bottom], radius=safe_radius, fill=fill, outline=outline, width=max(1, int(width and 1)))
+        draw.rounded_rectangle(
+            [left, top, right, bottom],
+            radius=safe_radius,
+            fill=fill,
+            outline=outline,
+            width=max(1, int(stroke_width)),
+        )
     except Exception:
         return
 
@@ -121,8 +127,8 @@ def make_contextual_fallback(subject: str, visual_type: str, size=(1080, 1920)) 
     image = Image.new("RGB", (width, height), (12, 18, 28))
     draw = ImageDraw.Draw(image)
 
-    # Keep the decorative geometry inside the canvas. Previously the fixed
-    # twelve-ring loop eventually produced x0 > x1 on normal portrait frames.
+    # Keep decorative geometry inside the canvas. The old fixed twelve-ring
+    # loop eventually produced x0 > x1 on normal portrait frames.
     inner_limit = max(1, (min(width, height) - 20) // 2)
     for index in range(12):
         inset = 70 + index * 55
@@ -131,14 +137,20 @@ def make_contextual_fallback(subject: str, visual_type: str, size=(1080, 1920)) 
         _safe_rounded_rectangle(
             draw,
             [inset, inset, width - inset, height - inset],
-            width=12 - index // 2,
-            height=height,
+            canvas_width=width,
+            canvas_height=height,
             radius=42,
             outline=(20 + index * 7, 28 + index * 7, 38 + index * 7),
+            stroke_width=max(2, 12 - index // 2),
         )
     for angle_index in range(10):
         x0 = int(width * 0.08 + angle_index * width * 0.095)
-        draw.line([(x0, min(120, height // 4)), (max(0, width - x0), max(0, height - min(120, height // 4)))], fill=(24, 44, 64), width=max(1, min(5, width // 100)))
+        draw.line(
+            [(x0, min(120, height // 4)),
+             (max(0, width - x0), max(0, height - min(120, height // 4)))],
+            fill=(24, 44, 64),
+            width=max(1, min(5, width // 100)),
+        )
 
     subject = re.sub(r"\s+", " ", str(subject or "")).strip() or "Visual unavailable"
     if len(subject) > 90:
@@ -161,11 +173,12 @@ def make_contextual_fallback(subject: str, visual_type: str, size=(1080, 1920)) 
         _safe_rounded_rectangle(
             draw,
             [90, y - 70, width - 90, y + text_h + 70],
-            width=3,
-            height=height,
+            canvas_width=width,
+            canvas_height=height,
             radius=38,
             fill=(7, 12, 20),
             outline=(78, 108, 136),
+            stroke_width=3,
         )
         draw.text((min(width - 1, x + 4), min(height - 1, y + 5)), subject, font=font, fill=(0, 0, 0))
         draw.text((min(width - 1, x), min(height - 1, y)), subject, font=font, fill=(236, 241, 246))
@@ -189,13 +202,19 @@ def make_contextual_fallback(subject: str, visual_type: str, size=(1080, 1920)) 
     _safe_rounded_rectangle(
         draw,
         [badge_left, badge_top, badge_right, badge_bottom],
-        width=2,
-        height=height,
+        canvas_width=width,
+        canvas_height=height,
         radius=16,
         fill=(22, 34, 48),
         outline=(72, 104, 132),
+        stroke_width=2,
     )
-    draw.text((min(width - 1, badge_left + 17), min(height - 1, badge_top + 12)), badge_text, font=badge, fill=(188, 208, 224))
+    draw.text(
+        (min(width - 1, badge_left + 17), min(height - 1, badge_top + 12)),
+        badge_text,
+        font=badge,
+        fill=(188, 208, 224),
+    )
     return image.filter(ImageFilter.GaussianBlur(radius=0.15))
 
 
