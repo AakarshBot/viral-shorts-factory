@@ -317,6 +317,8 @@ def patch_content_first_visuals(bot):
                 "visual_rescue_reason": seg.get("visual_rescue_reason", ""),
                 "visual_fallback_reason": "",
                 "visual_query_used": seg.get("visual_query_used", ""),
+                "manual_visual_query": seg.get("manual_visual_query", ""),
+                "manual_visual_query_score": seg.get("manual_visual_query_score", 0),
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
