@@ -37,6 +37,11 @@ def patch_audio_direction(bot):
         install_channel_intelligence_dialog()
     except Exception as exc:
         print(f"   [Bindings] Channel intelligence runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    try:
+        from production_hardening_runtime import install_production_hardening
+        install_production_hardening(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Production hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
 
     if getattr(bot, "_audio_direction_patch_installed", False):
         return bot
