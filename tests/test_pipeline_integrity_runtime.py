@@ -53,7 +53,7 @@ def test_strict_fallback_uses_only_source_words():
     for scene in result["script"]:
         assert 8 <= len(scene["voiceover"].split()) <= 30
         assert "nbsp" not in scene["voiceover"].lower()
-        assert scene["narration_source"] == "validated_source_fallback"
+        assert scene["scene_source"] == "validated_source_fallback"
 
 
 def test_strict_fallback_refuses_thin_source_instead_of_inventing_text():
