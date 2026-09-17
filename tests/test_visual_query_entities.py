@@ -137,6 +137,9 @@ def test_candidate_scene_keeps_provenance_but_locks_clean_visual_subject():
 def test_visual_search_does_not_fall_back_to_raw_narration_or_category(monkeypatch):
     calls = []
 
+    class FakeVisualRuntime:
+        pass
+
     def fake_retrieval(runtime, bot, seg, category, used_urls, used_hashes, video_title):
         calls.append(
             {
@@ -157,7 +160,7 @@ def test_visual_search_does_not_fall_back_to_raw_narration_or_category(monkeypat
     }
 
     try:
-        search_slide_visual(object(), object(), scene, "business", set(), set(), "Northstar Research Summit")
+        search_slide_visual(FakeVisualRuntime(), object(), scene, "business", set(), set(), "Northstar Research Summit")
     except RuntimeError:
         pass
     else:
