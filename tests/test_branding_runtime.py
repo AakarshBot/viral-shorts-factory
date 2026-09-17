@@ -1,6 +1,4 @@
-from pathlib import Path
-
-from branding_runtime import _assets, patch_branding_pipeline
+from branding_runtime import _assets, apply_branded_finish, patch_branding_pipeline
 
 
 class _Bot:
@@ -59,3 +57,35 @@ def test_branding_compile_wrapper_is_installed_once(tmp_path, monkeypatch):
 
     patch_branding_pipeline(bot)
     assert len(calls) == 1
+
+
+def test_logo_asset_is_passed_to_final_ffmpeg_finish(tmp_path, monkeypatch):
+    brand = tmp_path / "brand_assets"
+    brand.mkdir()
+    logo = brand / "logo.png.jpg"
+    logo.write_bytes(b"logo")
+
+    video = tmp_path / "rendered.mp4"
+    video.write_bytes(b"source-video")
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        output = Path(command[-1])
+        output.write_bytes(b"branded-video")
+        return type("Completed", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr("branding_runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("branding_runtime._probe", lambda path: (1080, 1920, 10.0, 1))
+    monkeypatch.setattr("branding_runtime._artifact_qc", lambda *args, **kwargs: (True, "ok"))
+    monkeypatch.setattr("branding_runtime._overlay_is_caption_safe", lambda *args, **kwargs: (False, "no overlay"))
+
+    result = apply_branded_finish(_Bot(tmp_path), str(video))
+
+    assert result == str(video)
+    assert len(commands) == 1
+    command = commands[0]
+    assert "-i" in command
+    assert str(logo) in command
+    assert "-map" in command
+    assert "0:a?" in command
