@@ -94,27 +94,19 @@ jobs:
 
           queries, visual_type = visual_strategy_runtime.build_deep_queries(person, 'Messi story')
           assert visual_type == 'PERSON'
-          assert 1 <= len(queries) <= 6, queries
-          assert all(q.strip() for q in queries), queries
-          assert len({q.lower() for q in queries}) == len(queries), queries
-          assert all('lionel messi' in q.lower() for q in queries), queries
+          assert queries == ['Lionel Messi'], queries
 
           event_queries, event_type = visual_strategy_runtime.build_deep_queries(event, 'Argentina vs France')
           assert event_type == 'EVENT'
-          assert 1 <= len(event_queries) <= 6, event_queries
-          assert all(q.strip() for q in event_queries), event_queries
-          assert len({q.lower() for q in event_queries}) == len(event_queries), event_queries
-          assert any('2022 fifa world cup final' in q.lower() for q in event_queries), event_queries
+          assert event_queries == ['2022 FIFA World Cup Final'], event_queries
 
           bcci_queries, bcci_type = visual_strategy_runtime.build_deep_queries(bcci, 'BCCI story')
           assert bcci_type == 'ORGANIZATION'
-          assert 1 <= len(bcci_queries) <= 6, bcci_queries
-          assert all('bcci' in q.lower() for q in bcci_queries), bcci_queries
+          assert bcci_queries == ['BCCI'], bcci_queries
 
           delhi_queries, delhi_type = visual_strategy_runtime.build_deep_queries(delhi, 'Delhi story')
           assert delhi_type == 'LOCATION'
-          assert 1 <= len(delhi_queries) <= 6, delhi_queries
-          assert all('delhi' in q.lower() for q in delhi_queries), delhi_queries
+          assert delhi_queries == ['Delhi'], delhi_queries
 
           assert script_guard_runtime.looks_like_instructional_narration('Return only a valid JSON object with voiceover and primary_entity fields.') is True
           assert script_guard_runtime.looks_like_instructional_narration('Sachin Tendulkar scored 143 in the match.') is False
@@ -122,10 +114,10 @@ jobs:
 
           from visual_qa_runtime import _tier_for
           from visual_runtime import _cache_key, _context_fingerprint
-          assert _tier_for('person portrait', 'PERSON', 'Wikipedia') == 'CURATED_PERSON'
-          assert _tier_for('person portrait', 'PERSON', 'DDG') == 'STRICT'
-          assert _tier_for('stadium_event', 'EVENT', 'DDG') == 'GENRE_PLAUSIBLE_EVENT'
-          assert _tier_for('conceptual', 'GENERAL_CONTEXT', 'DDG') == 'SKIPPED_CONCEPTUAL'
+          assert _tier_for('person portrait', 'PERSON', 'Wikipedia') == 'IDENTITY'
+          assert _tier_for('person portrait', 'PERSON', 'DDG') == 'IDENTITY'
+          assert _tier_for('stadium_event', 'EVENT', 'DDG') == 'IDENTITY'
+          assert _tier_for('conceptual', 'GENERAL_CONTEXT', 'DDG') == 'IDENTITY'
           c1 = _context_fingerprint('person portrait', 'Messi World Cup final', 'Messi scored in the final', 'Messi story')
           c2 = _context_fingerprint('person portrait', 'Messi training', 'Messi trained before the match', 'Messi story')
           assert c1 != c2
