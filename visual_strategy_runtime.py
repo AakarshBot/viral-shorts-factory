@@ -15,6 +15,7 @@ from visual_semantic_guard_runtime import (
     MAX_QUERY_WORDS,
     build_query_ladder,
     clean_text,
+    infer_role,
     prepare_scene,
     resolve_subject,
 )
@@ -45,10 +46,18 @@ def _prepare(scene, video_title=""):
     return prepared
 
 
+def _authoritative_role(prepared, resolved_type=""):
+    """Prefer strong factual cues in the resolved subject over stale metadata."""
+    subject = clean_text(prepared.get("primary_entity", "")) if isinstance(prepared, dict) else ""
+    role = infer_role({"primary_entity": subject}) if subject else "GENERAL_CONTEXT"
+    return role if role != "GENERAL_CONTEXT" else (resolved_type or "GENERAL_CONTEXT")
+
+
 def classify_scene(scene, category=""):
     """Expose the generic semantic role classifier."""
     prepared = _prepare(scene)
-    return resolve_subject(prepared, "").get("visual_type") or "GENERAL_CONTEXT"
+    resolved = resolve_subject(prepared, "").get("visual_type") or "GENERAL_CONTEXT"
+    return _authoritative_role(prepared, resolved)
 
 
 def build_scene_visual_brief(scene, video_title="", category=""):
@@ -57,15 +66,16 @@ def build_scene_visual_brief(scene, video_title="", category=""):
     if category:
         prepared["sport_or_topic_category"] = category
     resolution = resolve_subject(prepared, video_title)
+    resolved_type = _authoritative_role(prepared, resolution["visual_type"])
     return {
         "subject": resolution["subject"],
-        "visual_type": resolution["visual_type"],
+        "visual_type": resolved_type,
         "scene_action": "",
         "scene_context": clean_text(prepared.get("visual_context", "")),
         "scene_index": clean_text(prepared.get("scene_index", prepared.get("scene_number", ""))),
         "factual_entity": resolution["factual_entity"],
         "base_type": "GENERAL_CONTEXT",
-        "scene_role": resolution["visual_type"],
+        "scene_role": resolved_type,
         "domain": _scene_category(prepared, category),
         "confidence": resolution["confidence"],
     }
@@ -77,6 +87,7 @@ def build_deep_queries(scene, video_title="", visual_type=None):
         return [], visual_type or "GENERAL_CONTEXT"
     prepared = _prepare(scene, video_title)
     queries, resolved_type, _resolution = build_query_ladder(prepared, video_title)
+    resolved_type = _authoritative_role(prepared, resolved_type)
     return queries[:3], (visual_type or resolved_type or "GENERAL_CONTEXT")
 
 
