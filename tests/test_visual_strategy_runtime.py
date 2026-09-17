@@ -1,7 +1,7 @@
 from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief, classify_scene
 
 
-def test_india_cricket_entity_resolution_and_clean_queries():
+def test_india_cricket_entity_resolution_and_progressive_queries():
     scene = {
         "primary_entity": "India",
         "voiceover": "India's white-ball stars rocket up the latest T20I rankings",
@@ -14,13 +14,16 @@ def test_india_cricket_entity_resolution_and_clean_queries():
 
     assert visual_type == "LOCATION"
     assert brief["subject"] == "India cricket team"
-    assert 1 <= len(queries) <= 6
+    assert 1 <= len(queries) <= 3
     assert len({q.lower() for q in queries}) == len(queries)
     assert all("nbsp" not in q.lower() for q in queries)
-    assert all(len(q.split()) <= 12 for q in queries)
+    assert all(len(q.split()) <= 10 for q in queries)
     assert all("india cricket team" in q.lower() for q in queries)
     assert not any("india india" in q.lower() for q in queries)
     assert not any("white-ball stars rocket up latest" in q.lower() for q in queries)
+    assert queries[0].lower() == "india cricket team"
+    assert any("t20" in q.lower() for q in queries[1:])
+    assert not any("rankings" in q.lower() for q in queries)
 
 
 def test_entity_types_remain_stable():
@@ -42,3 +45,4 @@ def test_planner_never_returns_internal_labels_or_duplicates():
     assert all("editorial_person" not in q.lower() for q in queries)
     assert len({q.lower() for q in queries}) == len(queries)
     assert all("lionel messi" in q.lower() for q in queries)
+    assert queries[0].lower() == "lionel messi"
