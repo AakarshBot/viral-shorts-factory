@@ -31,6 +31,10 @@ class DashboardWorkflowController(WorkflowController):
         self._last_dashboard_message = ""
 
     def reset(self):
+        # Wake an active production thread before clearing the gate state.
+        if getattr(self, "state", None) is not None and self.state.thread_alive and self.state.stage == "visual_approval":
+            self._visual_rejected = True
+            self._visual_approval_event.set()
         self._visual_approval_event.clear()
         self._visual_approved = False
         self._visual_rejected = False
@@ -251,14 +255,17 @@ def _run_synthetic_renderer_demo() -> dict[str, Any]:
     top5.save(top5_path, "PNG")
 
     logo = None
+    brand_root = Path(getattr(__import__("ultimate_bot"), "BRAND_ASSETS_DIR", ""))
     logo_candidates = [
-        Path(getattr(__import__("ultimate_bot"), "BRAND_ASSETS_DIR", "")) / "logo.png",
-        Path(getattr(__import__("ultimate_bot"), "BRAND_ASSETS_DIR", "")) / "channels4_profile.jpg",
+        brand_root / "logo.png",
+        brand_root / "channels4_profile.jpg",
+        brand_root / "logo.png.jpg",
     ]
     for candidate in logo_candidates:
         if candidate.exists():
             logo = create_glossy_logo_watermark(str(candidate), size=128)
             break
+
     logo_path = None
     if logo is not None:
         logo_path = os.path.join(temp_dir, "logo_badge.png")
