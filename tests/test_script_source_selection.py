@@ -1,3 +1,5 @@
+import json
+
 from research_runtime import _prepare_primary_writer_data
 
 
@@ -12,7 +14,7 @@ def test_cricket_mode_preserves_selected_story_evidence_for_legacy_writer():
 
     assert prepared is not story
     assert prepared["text"] != story["text"]
-    payload = __import__("json").loads(prepared["text"])
+    payload = json.loads(prepared["text"])
     assert isinstance(payload, list) and len(payload) == 1
     assert payload[0]["title"] == story["title"]
     assert "Pakistan were sanctioned twice" in payload[0]["text"]
