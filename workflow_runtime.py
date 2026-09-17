@@ -14,6 +14,7 @@ from db_runtime import run_robot_with_exact_identity
 from db_architecture import migrate_vault, update_run_record
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
+MAX_DISCOVERY_CANDIDATES = 12
 
 FORMAT_OPTIONS = {
     "Deep Dive": "regular",
@@ -158,7 +159,7 @@ def _apply_sports_diversity_bonus(stories: List[Dict[str, Any]]) -> None:
 
 
 def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dict[str, Any]]:
-    """Run discovery only. No script, TTS, image or render calls happen here."""
+    """Run one discovery pass and return a stable pool of up to 12 candidates."""
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
@@ -202,13 +203,22 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
         key=lambda s: _num(s.get("candidate_score"), _num(s.get("velocity_score")) + _num(s.get("trend_bonus"))),
         reverse=True,
     )
-    top = _diverse_top_three(stories)
-    if len(top) != 3:
+
+    first_three = _diverse_top_three(stories)
+    if len(first_three) != 3:
         raise ValueError(
-            f"Discovery produced only {len(top)} strong diverse candidate(s); production is blocked until exactly 3 are available."
+            f"Discovery produced only {len(first_three)} strong diverse candidate(s); production is blocked until exactly 3 are available."
         )
 
-    for rank, story in enumerate(top, 1):
+    pool = list(first_three)
+    for story in stories:
+        if story in pool:
+            continue
+        pool.append(story)
+        if len(pool) >= MAX_DISCOVERY_CANDIDATES:
+            break
+
+    for rank, story in enumerate(pool, 1):
         story["discovery_rank"] = rank
         story["discovery_reason"] = _candidate_reason(story)
         if story.get("sports_niche_bonus"):
@@ -217,8 +227,11 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
         story["story_url"] = _story_url(story)
         story["story_key"] = _story_key(story)
 
-    print(f"   [Workflow] Discovery finished: {len(top)} candidate(s). No production APIs were called.", flush=True)
-    return top
+    print(
+        f"   [Workflow] Discovery finished: {len(pool)} candidate(s) available; first 3 shown initially. No production APIs were called.",
+        flush=True,
+    )
+    return pool
 
 
 @dataclass
@@ -491,7 +504,7 @@ class WorkflowController:
 
 
 def _validate_selected_story(selected_story: Dict[str, Any]) -> Dict[str, Any]:
-    """Require production input to come from the explicit three-story selection gate."""
+    """Require production input to come from the explicit discovery selection gate."""
     if not isinstance(selected_story, dict):
         raise ValueError("Production is blocked: an explicitly selected discovered story is required.")
 
@@ -504,8 +517,8 @@ def _validate_selected_story(selected_story: Dict[str, Any]) -> Dict[str, Any]:
 
     if not title:
         raise ValueError("Production is blocked: selected story title is missing.")
-    if discovery_rank not in (1, 2, 3) or not story_key:
+    if discovery_rank not in range(1, MAX_DISCOVERY_CANDIDATES + 1) or not story_key:
         raise ValueError(
-            "Production is blocked: story must be selected from the verified three-candidate discovery set."
+            f"Production is blocked: story must be selected from the verified {MAX_DISCOVERY_CANDIDATES}-candidate discovery pool."
         )
     return dict(selected_story)
