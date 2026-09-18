@@ -254,6 +254,111 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, manu
     return None
 
 
+
+_RELATED_POOL_LIMIT_PER_SUBJECT = 3
+_RELATED_REUSE_LIMIT_PER_SUBJECT = 2
+
+
+def _related_subject_key(value) -> str:
+    text = re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _register_related_assets(pool: list[dict], assets) -> None:
+    """Add only trusted, unused alternatives, capped per subject."""
+    for asset in assets or []:
+        if not isinstance(asset, dict) or not asset.get("bytes"):
+            continue
+        subject_key = _related_subject_key(asset.get("subject"))
+        if not subject_key:
+            continue
+        if any(
+            str(item.get("hash") or "") == str(asset.get("hash") or "")
+            for item in pool
+        ):
+            continue
+        same_subject = sum(
+            1
+            for item in pool
+            if _related_subject_key(item.get("subject")) == subject_key
+        )
+        if same_subject >= _RELATED_POOL_LIMIT_PER_SUBJECT:
+            continue
+        pool.append(dict(asset))
+
+
+def _scene_subject_keys(scene: dict) -> set[str]:
+    return {
+        item
+        for item in (
+            _related_subject_key(scene.get("factual_primary_entity")),
+            _related_subject_key(scene.get("primary_entity")),
+            _related_subject_key(scene.get("visual_search_subject")),
+            _related_subject_key(scene.get("manual_visual_query")),
+        )
+        if item
+    }
+
+
+def _related_asset_score(asset: dict, scene: dict) -> int:
+    score = 0
+    scene_genre = str(scene.get("visual_genre") or "").strip().upper()
+    scene_type = str(scene.get("visual_type") or "").strip().upper()
+    asset_genre = str(asset.get("visual_genre") or "").strip().upper()
+    asset_type = str(asset.get("visual_type") or "").strip().upper()
+
+    if scene_genre and asset_genre == scene_genre:
+        score += 50
+    if scene_type and asset_type == scene_type:
+        score += 25
+
+    person_genres = {"PERSON_PORTRAIT", "PERSON_ACTION"}
+    if scene_genre in person_genres and asset_genre in person_genres:
+        score += 12
+
+    sport_genres = {"SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION"}
+    if scene_genre in sport_genres and asset_genre in sport_genres:
+        score += 10
+
+    return score
+
+
+def _select_related_asset(
+    pool: list[dict],
+    scene: dict,
+    used_hashes: set[str],
+    reuse_counts: dict[str, int],
+):
+    """Return the strongest same-subject verified alternative without forcing reuse."""
+    subject_keys = _scene_subject_keys(scene)
+    candidates = []
+
+    for asset in pool:
+        if not isinstance(asset, dict) or asset.get("used"):
+            continue
+        image_hash = str(asset.get("hash") or "").strip()
+        if image_hash and image_hash in used_hashes:
+            continue
+        subject_key = _related_subject_key(asset.get("subject"))
+        if not subject_key or subject_key not in subject_keys:
+            continue
+        if reuse_counts.get(subject_key, 0) >= _RELATED_REUSE_LIMIT_PER_SUBJECT:
+            continue
+
+        score = _related_asset_score(asset, scene)
+        if score < 25:
+            continue
+        candidates.append((score, asset))
+
+    candidates.sort(
+        key=lambda item: (
+            -item[0],
+            str(item[1].get("source") or "").casefold(),
+            str(item[1].get("query") or "").casefold(),
+        )
+    )
+    return candidates[0][1] if candidates else None
+
 def patch_content_first_visuals(bot):
     try:
         import visual_runtime
@@ -283,6 +388,8 @@ def patch_content_first_visuals(bot):
         font_choice = language_cfg.get("font")
         packages = [None] * len(scenes)
         used_urls, used_hashes = set(), set()
+        related_pool: list[dict] = []
+        related_reuse_counts: dict[str, int] = {}
 
         # Dashboard manual queries are optional. Blank input preserves the
         # existing AI/automatic visual-search flow exactly.
@@ -388,6 +495,11 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
+            _register_related_assets(
+                related_pool,
+                seg.get("_verified_subject_assets") or [],
+            )
+
             if source_type != "news_source":
                 source_credit = source_credit_for_type(source_type)
             scene_verified = bool(seg.get("visual_verified", False))
@@ -445,15 +557,130 @@ def patch_content_first_visuals(bot):
             seg["visual_verified"] = scene_verified
             seg["visual_source"] = source_type
 
+        # Second pass: only unverified/failed scenes may borrow an already-
+        # verified alternative for the same factual subject. Successful
+        # contextual retrievals are never replaced merely for variety.
+        related_reused = 0
+        for idx, seg in enumerate(scenes):
+            if bool(seg.get("visual_verified", False)):
+                continue
+
+            asset = _select_related_asset(
+                related_pool,
+                seg,
+                used_hashes,
+                related_reuse_counts,
+            )
+            if asset is None:
+                continue
+
+            try:
+                related_img = Image.open(io.BytesIO(asset["bytes"])).convert("RGBA")
+            except Exception as exc:
+                asset["used"] = True
+                print(
+                    f"   [Visual Rescue] Scene {idx + 1} related asset decode failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                continue
+
+            video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
+            category = str(seg.get("sport_or_topic_category", "")).lower()
+            related_img = cover_crop(related_img, target_size).convert("RGBA")
+
+            try:
+                from visual_strategy_runtime import classify_scene
+                visual_type = classify_scene(seg, category)
+            except Exception:
+                visual_type = str(seg.get("visual_type", "GENERAL_CONTEXT"))
+
+            if format_mode == "top5" and idx == 0:
+                rendered = visual_runtime._render_image_slide(
+                    bot,
+                    related_img,
+                    video_title or seg.get("voiceover", "Top 5"),
+                    "TODAY'S TOP 5",
+                    font_choice,
+                )
+            elif format_mode == "top5":
+                clean = re.sub(
+                    r"(number\s*\d+|story\s*#?\d+|#\d+)",
+                    "",
+                    str(seg.get("voiceover", "")),
+                    flags=re.IGNORECASE,
+                ).strip()
+                rendered = bot.render_top5_card(
+                    related_img,
+                    max(1, 6 - idx),
+                    5,
+                    clean or seg.get("voiceover", ""),
+                    font_choice=font_choice,
+                )
+            else:
+                rendered = related_img
+
+            img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
+            rendered.convert("RGBA").convert("RGB").save(img_path, "JPEG", quality=95)
+
+            old_source = str(packages[idx][0].get("source_type") or "").lower()
+            if old_source == "visual-rescue":
+                rescue_count = max(0, rescue_count - 1)
+
+            source_type = "related-verified"
+            related_source = str(asset.get("source") or "").strip()
+            seg["visual_type"] = visual_type
+            seg["visual_verified"] = True
+            seg["visual_rescue_reason"] = "related-verified-subject-asset"
+            seg["visual_fallback_reason"] = ""
+            seg["visual_query_used"] = f"related:{str(asset.get('query') or '').strip()}"
+
+            packages[idx][0].update(
+                {
+                    "source_type": source_type,
+                    "visual_type": visual_type,
+                    "visual_genre": seg.get("visual_genre", "GENERAL_CONTEXT"),
+                    "visual_verified": True,
+                    "visual_rescue_reason": seg["visual_rescue_reason"],
+                    "visual_fallback_reason": "",
+                    "visual_query_used": seg["visual_query_used"],
+                    "source_credit": source_credit_for_type(related_source),
+                    "source_image_url": "",
+                    "related_reuse": True,
+                    "related_subject": str(asset.get("subject") or "").strip(),
+                    "related_source_type": related_source,
+                    "related_query": str(asset.get("query") or "").strip(),
+                }
+            )
+            seg["visual_source"] = source_type
+
+            image_hash = str(asset.get("hash") or "").strip()
+            if image_hash:
+                used_hashes.add(image_hash)
+            asset["used"] = True
+            subject_key = _related_subject_key(asset.get("subject"))
+            related_reuse_counts[subject_key] = related_reuse_counts.get(subject_key, 0) + 1
+            related_reused += 1
+            verified_count += 1
+
+            print(
+                f"   [Visual Rescue] Scene {idx + 1} reused verified same-subject asset | "
+                f"subject='{asset.get('subject', '')}' source={related_source} "
+                f"genre={asset.get('visual_genre', '')}",
+                flush=True,
+            )
+
         total = len(scenes)
         script_data["ai_image_ratio"] = round(ai_count / max(1, total), 2)
         script_data["visual_coverage"] = round(verified_count / max(1, total), 2)
         script_data["visuals_verified"] = verified_count == total
         script_data["visual_fallback_count"] = rescue_count
         script_data["visual_rescue_count"] = rescue_count
+        script_data["visual_related_reuse_count"] = related_reused
         print(
             f"   [+] Content-first visual pass complete: {verified_count}/{total} scenes have verified visuals; "
-            f"AI images={ai_count}; renderer rescues={rescue_count}.",
+            f"AI images={ai_count}; renderer rescues={rescue_count}; "
+            f"related verified reuse={related_reused}.",
             flush=True,
         )
         return packages
