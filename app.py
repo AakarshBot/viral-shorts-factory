@@ -1204,6 +1204,38 @@ def render_factory_function_coverage() -> None:
         with st.expander(f"{label} ({len(names)})", expanded=(label != "Internal")):
             st.code("\\n".join(names), language="text") if names else st.caption("None")
 
+def render_final_branding_preview() -> None:
+    """Expose the canonical final branding compositor as a first-class dashboard preview."""
+    st.markdown(
+        "<div class='section-kicker'>Branding approval</div>"
+        "<h2 style='margin-top:0'>Final Branding Preview</h2>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "This preview uses the same canonical branding overlay path as the final compositor. "
+        "It is a synthetic 1080×1920 frame, so it never renders or modifies a production video."
+    )
+
+    if st.button("▶ Render final branding preview", type="primary", use_container_width=True):
+        with st.spinner("Rendering the canonical branding overlay..."):
+            result = run_demo_section("scene_branding")
+        st.session_state.last_demo_results["scene_branding"] = result
+
+    result = (st.session_state.get("last_demo_results") or {}).get("scene_branding")
+    if not result:
+        st.info("Run the preview to inspect the final logo and source overlay.")
+        return
+
+    if result.get("status") == "PASS":
+        st.success(result.get("detail", "Final branding preview rendered."))
+    else:
+        st.error(result.get("detail", "Final branding preview failed."))
+
+    preview_path = (result.get("artifacts") or {}).get("final_branding_preview")
+    if preview_path and os.path.isfile(preview_path):
+        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", use_container_width=True)
+
+
 def render_demo_page() -> None:
     st.markdown("<div class='section-kicker'>Engineering lab</div><h2 style='margin-top:0'>Demo Factory</h2><h4>Component-by-component factory tests</h4>", unsafe_allow_html=True)
     st.caption(
@@ -1278,7 +1310,7 @@ def main() -> None:
     with st.sidebar.expander("Engineering & analytics", expanded=False):
         utility = st.selectbox(
             "Utility",
-            ["None", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"],
+            ["None", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory", "Final Branding Preview"],
             key="dashboard_utility",
         )
     if utility == "Channel Statistics":
@@ -1287,6 +1319,8 @@ def main() -> None:
         render_offline_page()
     elif utility == "Demo Factory":
         render_demo_page()
+    elif utility == "Final Branding Preview":
+        render_final_branding_preview()
 
     st.divider()
     st.caption(
