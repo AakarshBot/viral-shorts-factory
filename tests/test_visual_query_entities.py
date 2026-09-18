@@ -216,3 +216,22 @@ def test_unicode_primary_subject_is_preserved():
         assert extract_slide_search_subjects(scene) == [entity]
         assert build_deep_queries(scene)[0][0] == entity
         assert classify_scene(scene) == "PERSON"
+
+
+def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkeypatch):
+    class FakeRuntime:
+        pass
+
+    runtime = FakeRuntime()
+    query_runtime._install_runtime_query_guard(runtime)
+
+    scene = {
+        "primary_entity": "Rishabh Pant",
+        "voiceover": "Rishabh Pant was omitted from India's ODI squad.",
+        "specific_search_prompt": "Rishabh Pant ODI players press conference editorial_person latest news",
+        "visual_intent": "press conference person",
+    }
+
+    queries, visual_type = runtime._build_search_variants(scene, "Noisy title")
+    assert queries == ["Rishabh Pant"]
+    assert visual_type == "PERSON"

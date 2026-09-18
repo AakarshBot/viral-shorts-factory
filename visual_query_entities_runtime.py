@@ -1,117 +1,22 @@
-"""Visual-subject preparation and identity-first multi-source retrieval binding."""
+"""Visual-subject preparation and identity-first retrieval binding."""
 from __future__ import annotations
 
-from visual_semantic_guard_runtime import (
-    AUXILIARY_WORDS,
-    DISCOURSE_PREFIXES,
-    GENERIC_NOISE,
-    STOPWORDS,
-    VISUAL_DESCRIPTORS,
-    clean_text,
-    infer_role,
-    key,
-    resolve_subject,
-    tokens,
-)
-from visual_retrieval_runtime import _source_plan, run_visual_retrieval
+from visual_semantic_guard_runtime import clean_text, infer_role, resolve_subject
+from visual_retrieval_runtime import run_visual_retrieval
 from visual_taxonomy_runtime import classify_visual_genre
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
-_MAX_QUERY_BUDGET = 5
-_SEARCH_ACTIONS = {"lift", "lifts", "lifted", "lifting", "celebrate", "celebrates", "celebrated", "celebrating", "discuss", "discusses", "discussed", "discussing", "appear", "appears", "appeared", "show", "shows", "showed"}
-_ROLE_LABELS = {
-    "person", "organization", "organisation", "company", "corporation", "product", "device",
-    "location", "geography", "concept", "process", "event", "document", "quote", "quotation",
-    "statistic", "comparison", "timeline", "scientific", "technical", "abstract", "team", "members",
-    "venue", "conference",
-}
-
-
-def _simple_context_terms(text: str, anchor: str) -> list[str]:
-    """Extract a few simple context words; never turn the prompt into identity."""
-    anchor_keys = {key(word) for word in tokens(anchor)}
-    terms = []
-    for word in tokens(text):
-        token_key = key(word)
-        if (
-            not token_key
-            or token_key in anchor_keys
-            or token_key in GENERIC_NOISE
-            or token_key in STOPWORDS
-            or token_key in DISCOURSE_PREFIXES
-            or token_key in AUXILIARY_WORDS
-            or token_key in _SEARCH_ACTIONS
-            or token_key in VISUAL_DESCRIPTORS
-            or token_key in _ROLE_LABELS
-        ):
-            continue
-        if token_key not in {key(item) for item in terms}:
-            terms.append(word)
-    return terms
 
 
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
-    """Search the simplest factual identity first, then a few simple context variants."""
-    factual_anchor = clean_text(
-        seg.get("factual_primary_entity")
+    """Compatibility helper: one clean identity query, never a blind ladder."""
+    anchor = clean_text(
+        resolution.get("subject")
+        or seg.get("factual_primary_entity")
         or resolution.get("factual_entity")
         or seg.get("primary_entity")
-        or resolution.get("subject")
     )
-    if not factual_anchor:
-        return []
-
-    original_entity = clean_text(
-        seg.get("original_primary_entity") or resolution.get("original_entity", "")
-    )
-    resolved_factual = clean_text(
-        seg.get("factual_primary_entity") or resolution.get("factual_entity", "")
-    )
-    grounded_subject = clean_text(resolution.get("subject", ""))
-    was_grounded = bool(
-        original_entity
-        and resolved_factual
-        and original_entity.casefold() != resolved_factual.casefold()
-        and grounded_subject
-        and grounded_subject.casefold() != resolved_factual.casefold()
-    )
-    anchor = grounded_subject if was_grounded else factual_anchor
-
-    queries = [anchor]
-    contexts = (
-        seg.get("factual_visual_intent"),
-        seg.get("visual_intent"),
-        seg.get("factual_search_prompt"),
-        seg.get("specific_search_prompt"),
-        seg.get("visual_context"),
-    )
-    terms = []
-    for context in contexts:
-        candidate_terms = _simple_context_terms(clean_text(context), anchor)
-        if candidate_terms:
-            terms = candidate_terms
-            break
-
-    if terms:
-        compact = clean_text(" ".join([anchor, *terms[:3]]))
-        if compact and compact.casefold() != anchor.casefold():
-            queries.append(compact)
-
-        for term in (terms[-1], terms[0]):
-            query = clean_text(f"{anchor} {term}")
-            if query and query.casefold() not in {q.casefold() for q in queries}:
-                queries.append(query)
-            if len(queries) >= _MAX_QUERY_BUDGET:
-                break
-
-    core_anchor_words = tokens(anchor)
-    while len(core_anchor_words) > 1 and key(core_anchor_words[-1]) in VISUAL_DESCRIPTORS:
-        core_anchor_words.pop()
-    core_anchor = clean_text(" ".join(core_anchor_words))
-    if core_anchor and core_anchor.casefold() not in {q.casefold() for q in queries} and len(queries) < _MAX_QUERY_BUDGET:
-        queries.append(core_anchor)
-
-    return queries[:_MAX_QUERY_BUDGET]
+    return [anchor] if anchor else []
 
 
 def _install_runtime_query_guard(visual_runtime_module):
@@ -132,8 +37,6 @@ def _install_runtime_query_guard(visual_runtime_module):
         if not visual_intent.subject or not visual_intent.query:
             raise RuntimeError("No grounded visual search intent could be resolved from the scene.")
 
-        # Store the canonical contract so retrieval and QA consume the exact
-        # same subject/type/query instead of independently re-classifying it.
         if isinstance(seg, dict):
             seg["_visual_search_intent"] = visual_intent
             seg["visual_genre"] = visual_intent.visual_genre
@@ -176,7 +79,6 @@ def _install_runtime_query_guard(visual_runtime_module):
         )
 
     visual_runtime_module._build_search_variants = guarded_build_search_variants
-    visual_runtime_module._source_plan = _source_plan
     visual_runtime_module._verification_tier = generic_verification_tier
     visual_runtime_module._relevant_asset = robust_relevant_asset
     visual_runtime_module._generic_semantic_query_guard = True
@@ -192,6 +94,7 @@ def lock_visual_subject(scene: dict, video_title: str = "") -> str:
 
 
 def extract_slide_search_subjects(scene: dict) -> list[str]:
+    """Return the one automatic subject used by the current retrieval contract."""
     subject = lock_visual_subject(scene)
     return [subject] if subject else []
 
@@ -222,9 +125,6 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     prepared["factual_visual_intent"] = original_intent
     prepared["factual_search_prompt"] = original_prompt
 
-    # Explicit visual_type is treated as a hint, not an authority. First infer
-    # the role from the actual subject + visual intent; only fall back to the
-    # pre-existing type when the generic evidence cannot identify a role.
     inferred_role = infer_role({
         "primary_entity": visual_subject,
         "visual_intent": original_intent,
@@ -238,9 +138,11 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     if inferred_role != "GENERAL_CONTEXT":
         prepared["visual_type"] = inferred_role
 
-    # Primary retrieval identity is cleaned/grounded, while the original model
-    # output remains available under original_primary_entity and factual_voiceover.
-    prepared["visual_genre"] = classify_visual_genre(prepared, visual_subject or factual_entity, prepared.get("visual_type", "GENERAL_CONTEXT"))
+    prepared["visual_genre"] = classify_visual_genre(
+        prepared,
+        visual_subject or factual_entity,
+        prepared.get("visual_type", "GENERAL_CONTEXT"),
+    )
     prepared["primary_entity"] = visual_subject or factual_entity
     prepared["visual_search_subject"] = visual_subject or factual_entity
     prepared["visual_subject_locked"] = True
@@ -251,49 +153,65 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
     return prepared
 
 
-def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, used_hashes, video_title="", manual_query=""):
+def search_slide_visual(
+    visual_runtime_module,
+    bot,
+    scene,
+    category,
+    used_urls,
+    used_hashes,
+    video_title="",
+    manual_query="",
+):
+    """Use one canonical manual/automatic query path for the scene."""
     _install_runtime_query_guard(visual_runtime_module)
-    candidate = build_candidate_scene(scene, lock_visual_subject(scene, video_title), video_title)
+    candidate = build_candidate_scene(
+        scene,
+        lock_visual_subject(scene, video_title),
+        video_title,
+    )
     manual_query = clean_text(manual_query)
-    if not manual_query and candidate.get('visual_entity_grounded') is False:
+    if not manual_query and candidate.get("visual_entity_grounded") is False:
         raise RuntimeError(
-            'Automatic visual identity is not grounded in story evidence; '
-            'refusing to search the ungrounded entity.'
+            "Automatic visual identity is not grounded in story evidence; "
+            "refusing to search the ungrounded entity."
         )
     if manual_query:
-        # Manual input is an explicit visual identity. It becomes the canonical
-        # retrieval subject; story facts remain available as context only.
         candidate["manual_visual_query"] = manual_query
 
     from visual_search_intent_runtime import resolve_visual_search_intent
+
     visual_intent = resolve_visual_search_intent(candidate, video_title)
     if not visual_intent.subject or not visual_intent.query:
         raise RuntimeError("Visual search refused the scene because no grounded visual intent could be resolved.")
+
     candidate["_visual_search_intent"] = visual_intent
     candidate["primary_entity"] = visual_intent.subject
     candidate["visual_search_subject"] = visual_intent.subject
     candidate["visual_type"] = visual_intent.visual_type
     candidate["visual_genre"] = visual_intent.visual_genre
-    subject = visual_intent.subject
-    context = clean_text(candidate.get("specific_search_prompt", "") or candidate.get("visual_context", ""))
-    if not subject:
-        raise RuntimeError("Visual search refused the scene because no grounded visual identity could be resolved.")
 
     candidate["sport_or_topic_category"] = category or candidate.get("sport_or_topic_category", "")
     print(
-        f"   [Visual Search] Factual subject='{subject}' | "
-        f"search context='{context}' | type={candidate.get('visual_type', 'GENERAL_CONTEXT')} "
-        f"| genre={candidate.get('visual_genre', 'GENERAL_CONTEXT')}",
+        f"   [Visual Search] Factual subject='{visual_intent.subject}' | "
+        f"query='{visual_intent.query}' | type={visual_intent.visual_type} "
+        f"| genre={visual_intent.visual_genre}",
         flush=True,
     )
+
     result = visual_runtime_module._relevant_asset(
         bot, candidate, category, used_urls, used_hashes, video_title
     )
 
     if isinstance(scene, dict):
         for key_name in (
-            "visual_verified", "visual_rescue_reason", "visual_fallback_reason", "visual_query_used",
-            "visual_verification_attempts", "visual_type", "visual_genre",
+            "visual_verified",
+            "visual_rescue_reason",
+            "visual_fallback_reason",
+            "visual_query_used",
+            "visual_verification_attempts",
+            "visual_type",
+            "visual_genre",
         ):
             if key_name in candidate:
                 scene[key_name] = candidate[key_name]
