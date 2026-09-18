@@ -197,7 +197,7 @@ def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch
     assert source == "Commons"
 
 
-def test_generic_provider_semantic_no_is_deprioritized_not_hard_rejected(monkeypatch):
+def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
     image_bytes = _jpeg_bytes()
 
     class FakeBot:
@@ -252,6 +252,6 @@ def test_generic_provider_semantic_no_is_deprioritized_not_hard_rejected(monkeyp
         "Sanju Samson story",
     )
 
-    assert image.size == (900, 1200)
+    assert image.size == (1080, 1920)
     assert used_ai is False
-    assert source == "DDG"
+    assert source == "visual-rescue"
