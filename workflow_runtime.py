@@ -525,8 +525,9 @@ def _validate_selected_story(selected_story: Dict[str, Any]) -> Dict[str, Any]:
 
     if not title:
         raise ValueError("Production is blocked: selected story title is missing.")
-    if discovery_rank not in range(1, MAX_DISCOVERY_CANDIDATES + 1) or not story_key:
+    max_rank = 20 if bool(selected_story.get("dashboard_discovery_pool")) else MAX_DISCOVERY_CANDIDATES
+    if discovery_rank not in range(1, max_rank + 1) or not story_key:
         raise ValueError(
-            f"Production is blocked: story must be selected from the verified {MAX_DISCOVERY_CANDIDATES}-candidate discovery pool."
+            f"Production is blocked: story must be selected from the verified {max_rank}-candidate discovery pool."
         )
     return dict(selected_story)
