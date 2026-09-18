@@ -19,6 +19,16 @@ from PIL import Image
 from workflow_runtime import WorkflowController
 
 
+def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
+    """Return True only when a completed, idle render is ready for upload visibility selection."""
+    video_path = str(snapshot.get("video_path") or "").strip()
+    return (
+        bool(snapshot.get("completed"))
+        and not bool(snapshot.get("thread_alive"))
+        and bool(video_path)
+    )
+
+
 def build_discovery_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
     """Return a compact, explainable evidence profile for one event candidate."""
     dimensions = candidate.get("discovery_dimensions") or {}
