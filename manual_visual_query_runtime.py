@@ -29,42 +29,65 @@ def _tokens(value: Any) -> list[str]:
 
 
 def parse_manual_visual_queries(raw: Any) -> list[str]:
-    """Parse manual visual queries from semicolons, newlines, or quoted commas.
+    """Parse dashboard visual queries using semicolons, newlines, or commas.
 
-    The dashboard historically documented semicolon-separated values, but users
-    can also paste a Python/JSON-like list such as:
-        'Saurav Ganguly', 'BCCI logo', 'Indian Cricket Team'
-    Quoted comma-separated values are split only when the quote is closed at a
-    comma/end boundary, so ordinary commas and apostrophes inside unquoted
-    queries remain intact.
+    The dashboard commonly receives either:
+      Saurav Ganguly, BCCI logo, Indian Cricket Team
+    or:
+      'Saurav Ganguly', 'BCCI logo', 'Indian Cricket Team'
+
+    Lists/tuples are accepted directly so callers do not accidentally turn an
+    already-parsed list back into one string.
     """
     if raw is None:
         return []
 
-    text = re.sub(r"\s+", " ", str(raw)).strip()
-    if not text:
+    if isinstance(raw, (list, tuple, set)):
+        values: list[str] = []
+        for item in raw:
+            value = re.sub(r"\\s+", " ", str(item or "")).strip().strip(",").strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1].strip()
+            if value and value not in values:
+                values.append(value[:300])
+        return values
+
+    raw_text = str(raw)
+    if not raw_text.strip():
         return []
 
     values: list[str] = []
 
     def add(value: str) -> None:
-        value = re.sub(r"\s+", " ", str(value or "")).strip().strip(",").strip()
+        value = re.sub(r"\\s+", " ", str(value or "")).strip().strip(",").strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1].strip()
         if value and value not in values:
             values.append(value[:300])
 
-    if ";" in text or "\n" in str(raw):
-        for item in re.split(r";|\n+", str(raw)):
+    # Semicolon/newline remain explicit high-confidence delimiters.
+    if ";" in raw_text or "\n" in raw_text or "\r" in raw_text:
+        for item in re.split(r";|\\r?\\n+", raw_text):
             add(item)
         return values
 
+    text = re.sub(r"\\s+", " ", raw_text).strip()
+
+    # First support quoted comma-separated input.
     quoted = re.findall(
-        r"""(?:^|,\s*)['"]([^'"]+)['"](?=\s*(?:,|$))""",
+        r"""(?:^|,\\s*)['"]([^'"]+)['"](?=\\s*(?:,|$))""",
         text,
     )
     if quoted:
         for item in quoted:
+            add(item)
+        return values
+
+    # The dashboard also accepts plain comma-separated query lists. Split only
+    # on commas that are surrounded by whitespace; this preserves commas used
+    # as punctuation inside compact tokens while handling the normal UI form.
+    if re.search(r",\\s+", text):
+        for item in re.split(r",\\s+", text):
             add(item)
         return values
 
