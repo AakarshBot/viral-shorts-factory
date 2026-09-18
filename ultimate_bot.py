@@ -47,6 +47,7 @@ if IMAGEMAGICK_BINARY_PATH:
 os.environ["IMAGEIO_FFMPEG_EXE"] = "ffmpeg"
 
 from PIL import Image, UnidentifiedImageError, ImageFilter, ImageDraw, ImageFont
+from news_source_image_runtime import extract_news_source_image, compose_news_source_image, apply_source_credit
 import PIL
 try:
     import edge_tts
@@ -835,7 +836,7 @@ def gather_and_filter_stories(conn, genre_key, genre_cfg, trend_keyword=None, cu
         if resp.status_code == 200:
             for article in resp.json().get('articles', []):
                 if article.get('title'): 
-                    genre_stories.append({"title": article['title'], "text": article.get('description', ''), "source": "GNews", "genre": genre_key, "publishedAt": article.get('publishedAt')})
+                    genre_stories.append({"title": article['title'], "text": article.get('description', ''), "source": (article.get("source") or {}).get("name") or "GNews", "url": article.get("url") or "", "genre": genre_key, "publishedAt": article.get('publishedAt')})
         else:
             print(f"   [!] GNews API returned status code {resp.status_code}. Falling back to RSS.")
     except Exception as e:
@@ -855,7 +856,9 @@ def gather_and_filter_stories(conn, genre_key, genre_cfg, trend_keyword=None, cu
                     d_text = description.text if description is not None else t_text
                     p_text = pubdate.text if pubdate is not None else None
                     if t_text:
-                        genre_stories.append({"title": t_text, "text": d_text, "source": "GoogleRSS", "genre": genre_key, "publishedAt": p_text})
+                        link = item.find("link")
+                    link_text = link.text.strip() if link is not None and link.text else ""
+                    genre_stories.append({"title": t_text, "text": d_text, "source": "GoogleRSS", "url": link_text, "genre": genre_key, "publishedAt": p_text})
         except Exception as e:
             pass
 
@@ -1465,24 +1468,82 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
         category = seg.get('sport_or_topic_category', '').lower()
         video_title = script_data.get('title', '')
         
-        bg_img, used_ai, source_type = await loop.run_in_executor(None, fetch_scene_asset, seg, category, used_urls, used_image_hashes, video_title)
+        # Canonical selected-news image: use the actual image exposed by the
+        # article chosen during discovery for the opening scene. This is a
+        # separate, isolated path and does not alter the existing visual
+        # provider/QA routing for the remaining scenes.
+        source_image_used = False
+        source_credit = ""
+        source_image = None
+        if idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:
+            try:
+                source_url = str(script_data.get("source_article_url") or "").strip()
+                source_publisher = str(script_data.get("source_article_publisher") or "").strip()
+                if source_url:
+                    source_pack = await loop.run_in_executor(
+                        None, extract_news_source_image, source_url, source_publisher
+                    )
+                    if isinstance(source_pack, dict) and source_pack.get("bytes"):
+                        source_image = Image.open(io.BytesIO(source_pack["bytes"])).convert("RGB")
+                        source_image_used = True
+                        source_credit = str(
+                            source_pack.get("credit")
+                            or f"Source: {source_pack.get('publisher') or source_publisher or 'News source'}"
+                        ).strip()
+                        print(
+                            f"   [News Source Image] extracted canonical article image | "
+                            f"publisher={source_pack.get('publisher') or source_publisher or 'unknown'}",
+                            flush=True,
+                        )
+            except Exception as exc:
+                print(f"   [News Source Image] unavailable; preserving normal visual routing: {type(exc).__name__}: {exc}", flush=True)
+
+        if source_image_used:
+            # Dedicated crop path for the article photograph. Existing provider
+            # assets continue through their original resize path unchanged.
+            bg_img = compose_news_source_image(source_image, target_size)
+            used_ai, source_type = False, "news_source"
+        else:
+            bg_img, used_ai, source_type = await loop.run_in_executor(
+                None, fetch_scene_asset, seg, category, used_urls, used_image_hashes, video_title
+            )
         
-        if used_ai: ai_count += 1
-        bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
+        if used_ai:
+            ai_count += 1
+        if not source_image_used:
+            bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
+        else:
+            bg_img = bg_img.convert("RGBA")
+
+        # Attribution is applied AFTER any scene card/text composition so the
+        # credit cannot be covered by the hook/top-five overlays.
+        if source_image_used and source_credit:
+            scene_credit = source_credit
+        elif used_ai:
+            scene_credit = "Source: AI-generated visual"
+        elif source_type == "news_source":
+            scene_credit = "Source: News source"
+        else:
+            scene_credit = "Source: Editorial visual"
 
         if format_mode == "top5":
             clean_vo = re.sub(r'(number\s*\d+|story\s*#?\d+|#\d+)', '', seg.get("voiceover", ""), flags=re.IGNORECASE).strip()
-            render_top5_card(bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
+            rendered = render_top5_card(
+                bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice
+            ).convert("RGB")
+            apply_source_credit(rendered, scene_credit).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
         elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:
-            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
+            rendered = render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB")
+            apply_source_credit(rendered, scene_credit).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
         else:
             overlay = Image.new("RGBA", target_size, (0,0,0,0))
             draw_bars = ImageDraw.Draw(overlay)
             draw_bars.rectangle([0, 0, width, 40], fill=PALETTE["accent_primary"] + (200,))
             draw_bars.rectangle([0, height - 40, width, height], fill=PALETTE["accent_secondary"] + (200,))
-            Image.alpha_composite(bg_img, overlay).convert("RGB").save(img_path, "JPEG", quality=95)
+            rendered = Image.alpha_composite(bg_img, overlay).convert("RGB")
+            apply_source_credit(rendered, scene_credit).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": seg.get("voiceover", ""), "ai_generated": used_ai, "source_type": source_type}]
 
     tasks = [fetch_task(idx, seg) for idx, seg in enumerate(script_scenes)]
@@ -2220,6 +2281,22 @@ def run_robot(web_config=None):
             print("   [!] Error: Script generation returned None.")
             return
 
+        # Preserve the exact article selected by discovery. The visual pipeline
+        # uses this URL only for the canonical source-image attempt; all other
+        # visual providers remain unchanged.
+        source_article_url = str(
+            story_payload.get("url")
+            or story_payload.get("link")
+            or ""
+        ).strip()
+        source_article_publisher = str(
+            story_payload.get("source")
+            or story_payload.get("publisher")
+            or ""
+        ).strip()
+        script_data["source_article_url"] = source_article_url
+        script_data["source_article_publisher"] = source_article_publisher
+
         titles = script_data.get("titles") or [main_topic]
         if not isinstance(titles, list):
             titles = [safe_text(titles, main_topic)]
@@ -2310,11 +2387,22 @@ def run_robot(web_config=None):
                 safe_cleanup(ASSETS_DIR)
                 return
 
-        # Assign publishing mode
-        if web_config or is_headless:
-            pub_mode = web_config.get("publish_mode", "private") if web_config else "private"
+        # Dashboard mode must stop after rendering. The dashboard owns the
+        # explicit Public/Private release gate and calls upload_manual() only
+        # after the user confirms visibility. Never silently upload from here.
+        if web_config:
+            print("   [+] Render complete. Waiting for the dashboard Public/Private upload decision.")
+            return
+
+        # Headless Auto-Pilot remains intentionally private. Interactive CLI
+        # mode explicitly asks for the upload visibility.
+        if is_headless:
+            pub_mode = "private"
         else:
-            pub_mode = "private" if input("  [1] Public\n  [2] Private\nChoice: ").strip() == "2" else "now"
+            choice = input(
+                "  [1] Public\n  [2] Private\nChoice: "
+            ).strip()
+            pub_mode = "public" if choice == "1" else "private"
 
         vid_id = upload_to_youtube(
             video_path,
