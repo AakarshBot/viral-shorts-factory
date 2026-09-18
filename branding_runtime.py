@@ -156,10 +156,11 @@ def _static_brand_overlay(logo_path: str, width: int, height: int) -> np.ndarray
         width=2,
     )
 
-    logo = _contain_logo(Path(logo_path), LOGO_INNER_SIZE)
-    lx = x + (LOGO_BOX_SIZE - logo.width) // 2
-    ly = y + (LOGO_BOX_SIZE - logo.height) // 2
-    canvas.alpha_composite(logo, (lx, ly))
+    if logo_path:
+        logo = _contain_logo(Path(logo_path), LOGO_INNER_SIZE)
+        lx = x + (LOGO_BOX_SIZE - logo.width) // 2
+        ly = y + (LOGO_BOX_SIZE - logo.height) // 2
+        canvas.alpha_composite(logo, (lx, ly))
 
     return np.asarray(canvas)
 
@@ -219,11 +220,10 @@ def build_scene_branding_overlays(bot, width: int, height: int, source_credit: s
     logo_path = _assets(bot)
     if logo_path is None:
         print("   [Branding] Logo asset missing; frame signature remains active.", flush=True)
-        return [_static_brand_overlay("", int(width), int(height))]
 
     label = source_credit_for_type("", source_credit)
     return [
-        _static_brand_overlay(str(logo_path), int(width), int(height)),
+        _static_brand_overlay(str(logo_path or ""), int(width), int(height)),
         _source_overlay(label, int(width), int(height)),
     ]
 
