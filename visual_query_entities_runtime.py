@@ -212,6 +212,7 @@ def search_slide_visual(
             "visual_verification_attempts",
             "visual_type",
             "visual_genre",
+            "_verified_subject_assets",
         ):
             if key_name in candidate:
                 scene[key_name] = candidate[key_name]
