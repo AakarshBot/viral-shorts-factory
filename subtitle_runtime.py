@@ -149,14 +149,6 @@ def _fit_layout(words: list[str], base_font_size: int, font_path: str | None, ma
     return font, _split_lines(words, font, max_width)[:max_lines]
 
 
-def _validate_active_index(active_index: int, word_count: int) -> int:
-    try:
-        value = int(active_index)
-    except (TypeError, ValueError):
-        return -1
-    return value if 0 <= value < word_count else -1
-
-
 def _rgba_logo_without_edge_white(logo: Image.Image) -> Image.Image:
     """Remove white JPEG background only where it touches the image edge."""
     rgba = logo.convert("RGBA")
@@ -391,34 +383,6 @@ def create_glossy_logo_watermark(logo_path, size=128):
         return badge
     except Exception:
         return None
-
-
-def _soften_frame_bars(image_path: str) -> bool:
-    """Keep scene edges restrained so the final branding can add the premium finish."""
-    if not image_path or not os.path.isfile(image_path):
-        return False
-    try:
-        image = Image.open(image_path).convert("RGB")
-        width, height = image.size
-        band = min(52, max(12, height // 36))
-        if height < band * 3:
-            return False
-        top = image.crop((0, band, width, band * 2)).resize((width, band), Image.Resampling.BICUBIC)
-        bottom = image.crop((0, height - band * 2, width, height - band)).resize((width, band), Image.Resampling.BICUBIC)
-        edge = Image.new("RGB", (width, height), (0, 0, 0))
-        edge.paste(top, (0, 0))
-        edge.paste(image.crop((0, band, width, height - band)), (0, band))
-        edge.paste(bottom, (0, height - band))
-        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        draw.rectangle((0, 0, width, max(0, band - 1)), fill=(7, 13, 23, 32))
-        draw.rectangle((0, height - band, width, height - 1), fill=(7, 13, 23, 38))
-        draw.rectangle((0, band - 2, width, band), fill=(64, 196, 255, 105))
-        draw.rectangle((0, height - band - 2, width, height - band + 1), fill=(255, 255, 255, 72))
-        Image.alpha_composite(edge.convert("RGBA"), overlay).convert("RGB").save(image_path, "JPEG", quality=95)
-        return True
-    except Exception:
-        return False
 
 
 def patch_subtitle_pipeline(bot):
