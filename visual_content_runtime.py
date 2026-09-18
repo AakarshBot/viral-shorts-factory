@@ -260,8 +260,8 @@ _RELATED_REUSE_LIMIT_PER_SUBJECT = 2
 
 
 def _related_subject_key(value) -> str:
-    text = re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
-    return re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w]+", " ", str(value or "").casefold(), flags=re.UNICODE).strip()
+    return re.sub(r"[_\s]+", " ", text)
 
 
 def _register_related_assets(pool: list[dict], assets) -> None:
