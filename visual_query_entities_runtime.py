@@ -255,6 +255,11 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
     _install_runtime_query_guard(visual_runtime_module)
     candidate = build_candidate_scene(scene, lock_visual_subject(scene, video_title), video_title)
     manual_query = clean_text(manual_query)
+    if not manual_query and candidate.get('visual_entity_grounded') is False:
+        raise RuntimeError(
+            'Automatic visual identity is not grounded in story evidence; '
+            'refusing to search the ungrounded entity.'
+        )
     if manual_query:
         # Manual input is an explicit visual identity. It becomes the canonical
         # retrieval subject; story facts remain available as context only.
