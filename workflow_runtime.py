@@ -195,7 +195,6 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
         custom_rss,
     )
 
-    stories = _remove_near_duplicates(stories or [], _load_used_topics(conn))
     if category == "sports":
         _apply_sports_diversity_bonus(stories)
     stories = sorted(
