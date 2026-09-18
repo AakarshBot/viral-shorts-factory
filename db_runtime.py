@@ -4,6 +4,7 @@ The production pipeline still lives in ultimate_bot.py. This bridge makes its
 legacy topic-based INSERT/UPDATE safe without requiring a risky rewrite of the
 large production file.
 """
+import json
 import os
 import re
 
@@ -146,6 +147,39 @@ class _ConnectionProxy:
         return getattr(self._conn, name)
 
 
+def _discovery_snapshot(web_config):
+    if not isinstance(web_config, dict):
+        return None
+    story = web_config.get("selected_story")
+    if not isinstance(story, dict):
+        return None
+
+    dimensions = story.get("discovery_dimensions") or {}
+    keys = (
+        "event_article_count", "event_source_count", "event_entities", "event_actions",
+        "event_momentum_score", "independent_corroboration_score", "freshness_score",
+        "visual_potential", "originality_score", "social_signal",
+        "google_trends_signal", "source_quality_score", "risk_signal_count",
+    )
+    snapshot = {key: story.get(key) for key in keys if key in story}
+    snapshot["discovery_dimensions"] = dict(dimensions)
+    snapshot["event_evidence_publishers"] = list(story.get("event_evidence_publishers") or [])
+    snapshot["event_source_domains"] = list(story.get("event_source_domains") or [])
+    snapshot["discovery_rank"] = story.get("discovery_rank")
+    return json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+
+
+def _persist_discovery_snapshot(raw_conn, row_id, web_config):
+    snapshot = _discovery_snapshot(web_config)
+    if row_id is None or not snapshot:
+        return
+    raw_conn.execute(
+        "UPDATE vault SET discovery_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (snapshot, row_id),
+    )
+    raw_conn.commit()
+
+
 def run_robot_with_exact_identity(bot, web_config=None):
     """Run the factory and guarantee that a created run cannot remain pending."""
     original_connect = bot.sqlite3.connect
@@ -174,6 +208,7 @@ def run_robot_with_exact_identity(bot, web_config=None):
             try:
                 raw = original_connect(bot.DB_PATH)
                 migrate_vault(raw)
+                _persist_discovery_snapshot(raw, state.row_id, web_config)
                 update_run_record(
                     raw,
                     state.row_id,
@@ -190,6 +225,15 @@ def run_robot_with_exact_identity(bot, web_config=None):
 
     bot._last_run_row_id = state.row_id
     bot._last_run_run_id = state.run_id
+
+    if state.row_id is not None:
+        try:
+            raw = original_connect(bot.DB_PATH)
+            migrate_vault(raw)
+            _persist_discovery_snapshot(raw, state.row_id, web_config)
+            raw.close()
+        except Exception as db_exc:
+            print(f"   [DB] Could not persist discovery snapshot: {db_exc}")
 
     # A normal return can still mean the legacy pipeline stopped early.
     # Dashboard/headless runs never use the interactive QC rejection gate.
