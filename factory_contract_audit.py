@@ -139,8 +139,14 @@ def dashboard_architecture_audit() -> list[str]:
     for token in forbidden_tokens:
         if token in source:
             errors.append(f"app.py: obsolete dashboard token remains: {token}")
-    if "See next " not in source or "candidate_next_page" not in source:
-        errors.append("app.py: candidate paging UI is missing")
+    legacy_paging_ui = "See next " in source and "candidate_next_page" in source
+    ranked_headline_ui = (
+        "Ranked headlines ·" in source
+        and "discovery_headline_selection" in source
+        and "Use selected headline" in source
+    )
+    if not (legacy_paging_ui or ranked_headline_ui):
+        errors.append("app.py: discovery topic-selection UI is missing")
     for artifact in OBSOLETE_REPOSITORY_ARTIFACTS:
         if (root / artifact).exists():
             errors.append(f"obsolete repository artifact remains: {artifact}")
