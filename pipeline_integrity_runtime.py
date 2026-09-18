@@ -7,6 +7,7 @@ and refuses to manufacture emergency narration when source material is too thin.
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 import subprocess
