@@ -261,6 +261,48 @@ def _prompt_can_define_subject(role: str, candidate: str, prompt: str) -> bool:
     return _prompt_is_concrete(prompt, candidate)
 
 
+def _stable_identity_from_prompt(candidate: str, prompt: str, role: str) -> str:
+    """Recover a clean stable entity when the model appended headline/context text.
+
+    Stable identities (person, organisation, product, location) must not inherit
+    headline clauses such as "dropped over ...", "amid ...", dates, or actions.
+    When the original candidate is noisy, use only the contiguous candidate words
+    that are actually evidenced by the concrete search prompt. This is generic
+    and deliberately conservative: if the prompt does not corroborate a shorter
+    identity, keep the original candidate rather than guessing.
+    """
+    if role not in _STABLE_IDENTITY_ROLES:
+        return candidate
+    candidate_words = tokens(candidate)
+    prompt_words = tokens(prompt)
+    if len(candidate_words) <= 2 or not prompt_words:
+        return candidate
+
+    prompt_keys = [key(word) for word in prompt_words]
+    candidate_keys = [key(word) for word in candidate_words]
+    best: list[str] = []
+    current: list[str] = []
+    for word, token_key in zip(candidate_words, candidate_keys):
+        if token_key and token_key in prompt_keys:
+            current.append(word)
+        else:
+            if len(current) > len(best):
+                best = current
+            current = []
+    if len(current) > len(best):
+        best = current
+
+    if not best:
+        return candidate
+
+    # A one-word stable identity is acceptable only when the prompt explicitly
+    # corroborates it; this handles names such as "Macklemore" without guessing.
+    recovered = sanitize_candidate(" ".join(best))
+    if recovered and len(meaningful_tokens(recovered)) >= 1:
+        return recovered
+    return candidate
+
+
 def _contextual_query_variant(subject: str, anchor: str) -> str:
     """Build a shorter context-rich query while preserving the factual anchor."""
     subject_words = tokens(subject)
@@ -294,6 +336,7 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
     candidate = sanitize_candidate(original)
     role = infer_role(scene)
     prompt = sanitize_candidate(scene.get("specific_search_prompt", ""))
+    candidate = _stable_identity_from_prompt(candidate, prompt, role)
     prompt_is_explicit = bool(prompt and _prompt_can_define_subject(role, candidate, prompt))
     subject = prompt if prompt_is_explicit else candidate
 
