@@ -1,7 +1,13 @@
 from datetime import datetime, timezone
 
 from event_discovery_runtime import cluster_news_events
-from story_ranker import _cheap_filter, _fact_source_stage, _originality_stage
+from story_ranker import (
+    _cheap_filter,
+    _fact_source_stage,
+    _originality_stage,
+    _discovery_lane_queries,
+    diversity_rerank,
+)
 
 
 def test_cheap_filter_evaluates_full_intake_before_truncating(monkeypatch):
@@ -146,3 +152,54 @@ def test_adaptive_queries_do_not_expand_single_subject_query():
     from story_ranker import _adaptive_query_candidates
 
     assert _adaptive_query_candidates("Artificial Intelligence", [], max_queries=2) == []
+
+
+def test_cricket_discovery_uses_complementary_free_lanes():
+    lanes = _discovery_lane_queries(
+        "sports_stories_of_day",
+        "Cricket OR ICC OR BCCI OR Test Cricket OR T20 Cricket",
+    )
+
+    assert len(lanes) == 4
+    assert any("women" in lane.lower() for lane in lanes)
+    assert any("bcci" in lane.lower() for lane in lanes)
+    assert any("sponsorship" in lane.lower() for lane in lanes)
+
+
+def test_custom_non_cricket_query_does_not_get_forced_cricket_lanes():
+    assert _discovery_lane_queries(
+        "sports_stories_of_day",
+        "Formula 1 OR MotoGP",
+    ) == []
+
+
+def test_diversity_reranker_separates_repeated_subjects():
+    stories = [
+        {
+            "title": "Rishabh Pant omitted from India squad",
+            "candidate_score": 100,
+            "event_search_text": "Rishabh Pant omitted from India squad",
+            "event_entities": ["Rishabh Pant", "India"],
+            "event_actions": ["announce"],
+        },
+        {
+            "title": "Rishabh Pant selection debate grows",
+            "candidate_score": 98,
+            "event_search_text": "Rishabh Pant selection debate India squad",
+            "event_entities": ["Rishabh Pant", "India"],
+            "event_actions": ["announce"],
+        },
+        {
+            "title": "Major satellite mission launches",
+            "candidate_score": 90,
+            "event_search_text": "Major satellite mission launches",
+            "event_entities": ["Satellite Mission"],
+            "event_actions": ["launch"],
+        },
+    ]
+
+    selected = diversity_rerank(stories, max_items=3)
+
+    assert selected[0]["title"] == "Rishabh Pant omitted from India squad"
+    assert selected[1]["title"] == "Major satellite mission launches"
+    assert len(selected) == 3
