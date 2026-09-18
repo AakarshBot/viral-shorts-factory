@@ -224,87 +224,73 @@ def _patch_script_pipeline(bot) -> None:
         globals_dict["write_script"] = guarded_write
 
 
-def _patch_progress_wrappers(bot) -> None:
-    """Replace the legacy dashboard wrappers with async-correct production wrappers."""
-    try:
-        from workflow_runtime import WorkflowController
-    except Exception as exc:
-        print(f"   [Progress Hardening] WorkflowController unavailable: {type(exc).__name__}: {exc}", flush=True)
+def install_production_wrappers(controller) -> None:
+    """Install the canonical live workflow wrappers for one controller."""
+    if controller._patched:
         return
+    run_robot = getattr(controller.bot, "run_robot", None)
+    if run_robot is None:
+        raise RuntimeError("Legacy run_robot() is not available.")
+    globals_dict = getattr(run_robot, "__globals__", {})
 
-    if getattr(WorkflowController, "_async_progress_bound", False):
-        return
+    original_write = globals_dict.get("write_script")
+    if callable(original_write):
+        def write_wrapper(*args, **kwargs):
+            controller._reporter("script", 28, "Writing and checking the selected story…")
+            result = original_write(*args, **kwargs)
+            if isinstance(result, dict):
+                with controller._lock:
+                    controller.state.script_data = result
+                count = len(result.get("script") or [])
+                controller._reporter("script", 38, f"Script complete — {count} scenes passed the production contract.")
+            return result
+        globals_dict["write_script"] = write_wrapper
 
-    def _install(self):
-        if self._patched:
-            return
-        run_robot = getattr(self.bot, "run_robot", None)
-        if run_robot is None:
-            raise RuntimeError("Legacy run_robot() is not available.")
-        globals_dict = getattr(run_robot, "__globals__", {})
+    original_audio = globals_dict.get("generate_voiceover_and_timestamps")
+    if callable(original_audio):
+        async def audio_wrapper(*args, **kwargs):
+            controller._reporter("audio", 42, "Generating narration and word timings…")
+            result = await original_audio(*args, **kwargs) if inspect.iscoroutinefunction(original_audio) else original_audio(*args, **kwargs)
+            audio_paths = result[0] if isinstance(result, tuple) and result else []
+            controller._reporter("audio", 53, f"Narration complete — {len(audio_paths) if isinstance(audio_paths, list) else 0} scene audio files ready.")
+            return result
+        globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
 
-        original_write = globals_dict.get("write_script")
-        if callable(original_write):
-            def write_wrapper(*args, **kwargs):
-                self._reporter("script", 28, "Writing and checking the selected story…")
-                result = original_write(*args, **kwargs)
-                if isinstance(result, dict):
-                    with self._lock:
-                        self.state.script_data = result
-                    count = len(result.get("script") or [])
-                    self._reporter("script", 38, f"Script complete — {count} scenes passed the production contract.")
-                return result
-            globals_dict["write_script"] = write_wrapper
+    original_visuals = globals_dict.get("process_visuals_async")
+    if callable(original_visuals):
+        async def visuals_wrapper(*args, **kwargs):
+            script_data = args[0] if args else kwargs.get("script_data") or {}
+            total = len(script_data.get("script") or []) if isinstance(script_data, dict) else 0
+            controller._reporter("visuals", 56, f"Sourcing and verifying visuals for {total} scenes…")
+            result = await original_visuals(*args, **kwargs) if inspect.iscoroutinefunction(original_visuals) else original_visuals(*args, **kwargs)
+            controller._reporter("visuals", 75, f"Visual package complete — {len(result) if isinstance(result, list) else 0} scene packages ready.")
+            return result
+        globals_dict["process_visuals_async"] = visuals_wrapper
 
-        original_audio = globals_dict.get("generate_voiceover_and_timestamps")
-        if callable(original_audio):
-            async def audio_wrapper(*args, **kwargs):
-                self._reporter("audio", 42, "Generating narration and word timings…")
-                result = await original_audio(*args, **kwargs) if inspect.iscoroutinefunction(original_audio) else original_audio(*args, **kwargs)
-                audio_paths = result[0] if isinstance(result, tuple) and result else []
-                self._reporter("audio", 53, f"Narration complete — {len(audio_paths) if isinstance(audio_paths, list) else 0} scene audio files ready.")
-                return result
-            globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
+    original_compile = globals_dict.get("compile_video")
+    if callable(original_compile):
+        def compile_wrapper(*args, **kwargs):
+            controller._reporter("render", 78, "Rendering scenes, subtitles and branding…")
+            result = original_compile(*args, **kwargs)
+            controller._reporter("render", 94, "Final video rendered. Preparing final QC…")
+            if isinstance(result, str) and os.path.isfile(result):
+                with controller._lock:
+                    controller.state.video_path = result
+            return result
+        globals_dict["compile_video"] = compile_wrapper
 
-        original_visuals = globals_dict.get("process_visuals_async")
-        if callable(original_visuals):
-            async def visuals_wrapper(*args, **kwargs):
-                script_data = args[0] if args else kwargs.get("script_data") or {}
-                total = len(script_data.get("script") or []) if isinstance(script_data, dict) else 0
-                self._reporter("visuals", 56, f"Sourcing and verifying visuals for {total} scenes…")
-                result = await original_visuals(*args, **kwargs) if inspect.iscoroutinefunction(original_visuals) else original_visuals(*args, **kwargs)
-                self._reporter("visuals", 75, f"Visual package complete — {len(result) if isinstance(result, list) else 0} scene packages ready.")
-                return result
-            globals_dict["process_visuals_async"] = visuals_wrapper
+    real_upload = getattr(controller.bot, "upload_to_youtube", None)
+    if callable(real_upload):
+        controller._real_uploader = real_upload
+        def production_blocked_upload(*args, **kwargs):
+            controller._reporter("qc", 98, "Video ready. Waiting for your final QC and upload decision.")
+            print("   [Workflow] Automatic upload blocked. Manual QC is required.", flush=True)
+            return "PENDING_MANUAL_UPLOAD"
+        globals_dict["upload_to_youtube"] = production_blocked_upload
 
-        original_compile = globals_dict.get("compile_video")
-        if callable(original_compile):
-            def compile_wrapper(*args, **kwargs):
-                self._reporter("render", 78, "Rendering scenes, subtitles and branding…")
-                result = original_compile(*args, **kwargs)
-                self._reporter("render", 94, "Final video rendered. Preparing final QC…")
-                if isinstance(result, str) and os.path.isfile(result):
-                    with self._lock:
-                        self.state.video_path = result
-                return result
-            globals_dict["compile_video"] = compile_wrapper
-
-        real_upload = getattr(self.bot, "upload_to_youtube", None)
-        if callable(real_upload):
-            self._real_uploader = real_upload
-            def production_blocked_upload(*args, **kwargs):
-                self._reporter("qc", 98, "Video ready. Waiting for your final QC and upload decision.")
-                print("   [Workflow] Automatic upload blocked. Manual QC is required.", flush=True)
-                return "PENDING_MANUAL_UPLOAD"
-            globals_dict["upload_to_youtube"] = production_blocked_upload
-        self._patched = True
-
-    WorkflowController._install_production_wrappers = _install
-    WorkflowController._async_progress_bound = True
-    print("   [Progress Hardening] Async-aware production progress wrappers installed.", flush=True)
-
+    controller._patched = True
 
 def install_production_hardening(bot) -> None:
     _install_authoritative_visual_query_planner()
     _patch_script_pipeline(bot)
-    _patch_progress_wrappers(bot)
+    # Progress wrappers are installed by WorkflowController when production starts.
