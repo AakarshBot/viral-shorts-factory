@@ -166,13 +166,14 @@ def test_automatic_initial_query_never_uses_noisy_search_prompt():
 
     intent = resolve_visual_search_intent(scene, "Rishabh Pant omission story")
     assert intent.query == "Rishabh Pant"
+    assert intent.queries[0] == "Rishabh Pant"
     assert "press" not in intent.query.lower()
     assert "latest" not in intent.query.lower()
     assert "editorial" not in intent.query.lower()
 
 
-def test_automatic_retry_is_one_compact_evidence_based_refinement():
-    from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
+def test_automatic_query_ladder_is_bounded_and_evidence_based():
+    from visual_search_intent_runtime import resolve_visual_search_intent
 
     scene = {
         "primary_entity": "India",
@@ -182,13 +183,12 @@ def test_automatic_retry_is_one_compact_evidence_based_refinement():
     }
 
     intent = resolve_visual_search_intent(scene)
-    retry = reformulate_visual_query(intent, "no candidates")
-
-    assert retry == "India cricket New Delhi"
-    assert "press" not in retry.lower()
-    assert "conference" not in retry.lower()
-    assert "story" not in retry.lower()
-
+    assert intent.queries[0] == "India"
+    assert len(intent.queries) <= 5
+    assert intent.queries[1] == "India cricket New Delhi"
+    assert all("press" not in q.lower() for q in intent.queries)
+    assert all("conference" not in q.lower() for q in intent.queries)
+    assert all("story" not in q.lower() for q in intent.queries)
 
 def test_manual_visual_query_never_gets_automatic_retry():
     from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
