@@ -1,9 +1,9 @@
 """Canonical visual-search intent for the Shorts factory.
 
-One scene gets one authoritative retrieval intent. The first automatic query is
-the clean visual subject itself. If that exact query genuinely fails to produce
-a usable candidate, retrieval may perform at most one deterministic,
-evidence-based refinement. Manual queries remain exact and authoritative.
+Each automatic scene gets one factual identity plus a compact scene-specific
+visual query. The exact identity remains available as the first fallback, and
+retrieval may use at most one additional evidence-based refinement. Manual
+queries remain exact and authoritative.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ class VisualSearchIntent:
     visual_type: str
     visual_genre: str
     query: str
+    queries: tuple[str, ...]
     intent: str
     context: str
     confidence: float
@@ -40,11 +41,21 @@ def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
-def _context_terms(text: str, subject: str) -> list[str]:
-    """Extract only a few useful refinement terms; never copy the prompt."""
+def _context_terms(text: str, subject: str, limit: int = 3) -> list[str]:
+    """Extract a few concrete scene terms without copying editorial prose."""
     subject_keys = {key(word) for word in tokens(subject)}
     seen = set()
     terms: list[str] = []
+    generic_terms = {
+        "person", "people", "organization", "organisation", "company", "product",
+        "device", "location", "geography", "concept", "process", "event",
+        "document", "quote", "quotation", "statistic", "comparison", "timeline",
+        "scientific", "technical", "abstract", "team", "members", "venue",
+        "conference", "show", "showing", "scene", "visual", "image", "photo",
+        "picture", "editorial", "footage", "moment", "shot", "view", "looks",
+        "look", "appears", "appearing", "depict", "depicting", "someone",
+        "individual", "realistic",
+    }
     for word in tokens(text):
         token_key = key(word)
         if (
@@ -55,21 +66,34 @@ def _context_terms(text: str, subject: str) -> list[str]:
             or token_key in DISCOURSE_PREFIXES
             or token_key in AUXILIARY_WORDS
             or token_key in VISUAL_DESCRIPTORS
-            or token_key in {
-                "person", "people", "organization", "organisation", "company",
-                "product", "device", "location", "geography", "concept",
-                "process", "event", "document", "quote", "quotation",
-                "statistic", "comparison", "timeline", "scientific",
-                "technical", "abstract", "team", "members", "venue",
-                "conference",
-            }
+            or token_key in generic_terms
         ):
             continue
         if token_key not in seen:
             seen.add(token_key)
             terms.append(word)
-        if len(terms) >= 3:
+        if len(terms) >= limit:
             break
+    return terms
+
+
+def _scene_terms(scene: dict, subject: str) -> list[str]:
+    """Prefer explicit visual semantics, then grounded context, then voiceover."""
+    seen = set()
+    terms: list[str] = []
+    fields = (
+        "factual_visual_intent", "visual_intent", "visual_context",
+        "factual_search_prompt", "specific_search_prompt",
+        "factual_voiceover", "voiceover",
+    )
+    for field in fields:
+        for term in _context_terms(_clean(scene.get(field, "")), subject, limit=3):
+            token_key = key(term)
+            if token_key not in seen:
+                seen.add(token_key)
+                terms.append(term)
+            if len(terms) >= 3:
+                return terms
     return terms
 
 
@@ -88,15 +112,26 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
         confidence = 1.0
         query = manual
+        queries = [manual]
     else:
         resolution = resolve_subject(base, video_title)
         subject = clean_text(resolution.get("subject") or resolution.get("factual_entity", ""))
         visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
         confidence = float(resolution.get("confidence") or 0.0)
-        # The automatic first query is intentionally exact. Retrieval quality is
-        # improved by provider fan-out and candidate selection, not by stuffing
-        # narration, titles or model prompts into the opening search.
-        query = subject
+        # Keep the factual identity mandatory, but use this slide's
+        # concrete visual evidence so different scenes do not collapse to the
+        # same entity-only query. The bare identity remains the first fallback.
+        scene_terms = _scene_terms(scene, subject)
+        query = _clean(" ".join([subject, *scene_terms]))
+        queries = [query]
+        if query.casefold() != subject.casefold():
+            queries.append(subject)
+        for term in scene_terms:
+            candidate = _clean(f"{subject} {term}")
+            if candidate.casefold() not in {item.casefold() for item in queries}:
+                queries.append(candidate)
+            if len(queries) >= 3:
+                break
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(
