@@ -22,6 +22,7 @@ import re
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from visual_taxonomy_runtime import classify_visual_genre, genre_allows_ai
 
 
 ABSTRACT_TYPES = {"PROCESS", "CONCEPT", "GENERAL_CONTEXT"}
@@ -50,10 +51,10 @@ def _hash_image(bot, img_bytes: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _source_plan(_bot, visual_type: str):
+def _source_plan(_bot, visual_type: str, visual_genre: str = ""):
     """Compatibility boundary backed only by the authoritative raw provider plan."""
     from visual_provider_boundary_runtime import build_raw_source_plan
-    return build_raw_source_plan(visual_type)
+    return build_raw_source_plan(visual_type, visual_genre)
 
 
 def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
@@ -196,7 +197,7 @@ _VISUAL_DESCRIPTOR_WORDS = {
 }
 
 
-def _trusted_source_evidence(source: str, visual_type: str, query: str) -> tuple[bool, str, float]:
+def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_genre: str = "") -> tuple[bool, str, float]:
     """Return source-level identity evidence before spending semantic-QA budget.
 
     The factory should not make a multimodal model prove facts that are already
@@ -208,12 +209,13 @@ def _trusted_source_evidence(source: str, visual_type: str, query: str) -> tuple
     visual_l = str(visual_type or "").strip().upper()
     query_tokens = {re.sub(r"[^a-z0-9]+", "", token.casefold()) for token in re.findall(r"[A-Za-z0-9]+", str(query or ""))}
 
-    if visual_l == "PERSON" and source_l in {"wikipedia", "commons"}:
+    genre_l = str(visual_genre or "").strip().upper()
+    if genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"} and source_l in {"wikipedia", "commons"}:
         return True, "SOURCE-IDENTITY", REAL_SOURCE_SCORES.get(source_l, 95.0)
-
-    if visual_l == "ORGANIZATION" and source_l == "commons" and query_tokens & _VISUAL_DESCRIPTOR_WORDS:
+    if genre_l in {"ORG_BRANDING", "TEAM_BRANDING"} and source_l == "commons" and query_tokens & _VISUAL_DESCRIPTOR_WORDS:
         return True, "SOURCE-BRANDED", REAL_SOURCE_SCORES.get(source_l, 96.0)
-
+    if genre_l in {"MONEY_CURRENCY", "FLAG_SYMBOL", "TROPHY_AWARD"} and source_l == "commons":
+        return True, "SOURCE-ASSET", REAL_SOURCE_SCORES.get(source_l, 94.0)
     return False, "", 0.0
 
 
@@ -233,6 +235,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
     visual_anchor = str(visual_intent.subject or "").strip()
     visual_type = str(visual_intent.visual_type or visual_type or "GENERAL_CONTEXT").upper()
+    visual_genre = str(visual_intent.visual_genre or classify_visual_genre(seg, visual_anchor, visual_type) or "GENERAL_CONTEXT").upper()
+    seg["visual_genre"] = visual_genre
     if not visual_anchor or not queries:
         rescue = make_visual_rescue(visual_anchor or factual_entity, visual_type)
         seg["visual_verified"] = False
@@ -263,7 +267,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     verification_attempts = 0
     hard_rejections = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))
-    source_plan = _source_plan(bot, visual_type)
+    source_plan = _source_plan(bot, visual_type, visual_genre)
     max_provider_checks = max(1, min(40, 2 * max(1, len(source_plan))))
     provider_checks = 0
     best_uncertain = None
@@ -275,6 +279,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     qa_scene["specific_search_prompt"] = visual_intent.query
     qa_scene["voiceover"] = voice
     qa_scene["visual_type"] = visual_intent.visual_type
+    qa_scene["visual_genre"] = visual_genre
 
     print(
         f"   [Visual Strategy] entity='{cache_entity}' type={visual_type} "
@@ -329,7 +334,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     print(f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'", flush=True)
                     continue
 
-                trusted, trusted_tier, trusted_score = _trusted_source_evidence(source, visual_type, query)
+                trusted, trusted_tier, trusted_score = _trusted_source_evidence(source, visual_type, query, visual_genre)
                 if trusted:
                     # Canonical-source evidence is stronger than a generic
                     # multimodal YES/NO gate. Do not waste a Gemini request on
@@ -441,7 +446,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             )
             return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
 
-    if visual_type in ABSTRACT_TYPES and callable(getattr(bot, "fetch_hf_ai_image", None)):
+    if (visual_type in ABSTRACT_TYPES or genre_allows_ai(visual_genre)) and callable(getattr(bot, "fetch_hf_ai_image", None)):
         prompt_text = _ai_prompt(entity, visual_type)
         print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{prompt_text[:180]}'", flush=True)
         ai = runtime._call_fetcher_with_timeout(bot.fetch_hf_ai_image, (prompt_text,), "HF-AI", prompt_text)
@@ -494,7 +499,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     seg["visual_verification_attempts"] = verification_attempts
     print(
         f"   [Visual Rescue] Real sources exhausted; generated guaranteed non-blank visual | "
-        f"type={visual_type} phrases={len(queries)} provider_checks={provider_checks} "
+        f"type={visual_type} genre={visual_genre} phrases={len(queries)} provider_checks={provider_checks} "
         f"qa={verification_attempts}/{max_verification}",
         flush=True,
     )
