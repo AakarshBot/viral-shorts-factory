@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -387,6 +388,56 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
     return pool
 
 
+class _DashboardStreamCapture:
+    """Capture only the active factory worker's stdout/stderr without hiding it from the console."""
+    def __init__(self, original):
+        self.original = original
+        self._lock = threading.Lock()
+        self._sinks: dict[int, Callable[[str], None]] = {}
+
+    def register(self, thread_id: int, sink: Callable[[str], None]) -> None:
+        with self._lock:
+            self._sinks[thread_id] = sink
+
+    def unregister(self, thread_id: int) -> None:
+        with self._lock:
+            self._sinks.pop(thread_id, None)
+
+    def write(self, data) -> int:
+        written = self.original.write(data)
+        if not data:
+            return written
+        with self._lock:
+            sink = self._sinks.get(threading.get_ident())
+        if sink is not None:
+            try:
+                sink(str(data))
+            except Exception:
+                pass
+        return written
+
+    def flush(self) -> None:
+        self.original.flush()
+
+
+_DASHBOARD_STDOUT = _DashboardStreamCapture(sys.stdout)
+_DASHBOARD_STDERR = _DashboardStreamCapture(sys.stderr)
+_DASHBOARD_STREAMS_INSTALLED = False
+
+
+def _install_dashboard_stream_capture() -> None:
+    global _DASHBOARD_STREAMS_INSTALLED
+    if _DASHBOARD_STREAMS_INSTALLED:
+        return
+    if sys.stdout is not _DASHBOARD_STDOUT:
+        _DASHBOARD_STDOUT.original = sys.stdout
+        sys.stdout = _DASHBOARD_STDOUT
+    if sys.stderr is not _DASHBOARD_STDERR:
+        _DASHBOARD_STDERR.original = sys.stderr
+        sys.stderr = _DASHBOARD_STDERR
+    _DASHBOARD_STREAMS_INSTALLED = True
+
+
 class DashboardWorkflowController(WorkflowController):
     """WorkflowController with a dashboard-side visual approval checkpoint."""
 
@@ -399,7 +450,10 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_logs: list[str] = []
         self._activity_events: list[dict[str, Any]] = []
         self._audio_paths: list[str] = []
+        self._console_lines: list[str] = []
+        self._console_partial: str = ""
         self._last_dashboard_message = ""
+        _install_dashboard_stream_capture()
 
     def reset(self):
         # Do not reset a live worker out from under its synchronization state.
@@ -414,6 +468,8 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_logs = []
         self._activity_events = []
         self._audio_paths = []
+        self._console_lines = []
+        self._console_partial = ""
         self._last_dashboard_message = ""
         super().reset()
 
@@ -455,6 +511,25 @@ class DashboardWorkflowController(WorkflowController):
                 })
                 self._activity_events = self._activity_events[-24:]
                 self._last_dashboard_message = friendly
+
+    def _capture_console(self, data: str) -> None:
+        text = self._console_partial + str(data or "")
+        text = text.replace("\r", "\n")
+        parts = text.split("\n")
+        self._console_partial = parts.pop() if parts else ""
+        lines = [line.rstrip() for line in parts if line.strip()]
+        if not lines:
+            return
+        with self._lock:
+            self._console_lines.extend(lines)
+            self._console_lines = self._console_lines[-160:]
+
+    def console_lines(self) -> list[str]:
+        with self._lock:
+            lines = list(self._console_lines)
+            if self._console_partial.strip():
+                lines.append(self._console_partial.rstrip())
+            return lines[-120:]
 
     def _install_production_wrappers(self):
         super()._install_production_wrappers()
@@ -526,6 +601,7 @@ class DashboardWorkflowController(WorkflowController):
                     "dashboard_logs": list(self._dashboard_logs),
                     "activity_events": list(self._activity_events),
                     "audio_paths": list(self._audio_paths),
+                    "console_lines": self.console_lines(),
                 }
             )
         return data
