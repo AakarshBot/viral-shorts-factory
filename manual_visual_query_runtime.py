@@ -161,17 +161,27 @@ def assign_manual_queries(scenes: list[dict[str, Any]], raw_queries: Any) -> lis
         return [{} for _ in scenes]
 
     assignments = [[] for _ in scenes]
-    unused = set(range(len(queries)))
 
-    # Global greedy matching is deliberately simple and deterministic.
+    # HARD CONTRACT: when the user supplies any manual queries, query #1 is
+    # always the visual query for scene/frame #1. It is never semantically
+    # reassigned to another scene. This makes the first manual query a direct
+    # control for the opening frame while preserving automatic routing for the
+    # remaining queries.
+    assignments[0].append((queries[0], 10000.0))
+
+    # Remaining queries use the existing semantic router. Query #1 is removed
+    # from the candidate pool so it cannot leak into another scene.
+    remaining_queries = queries[1:]
+    remaining_scene_indices = range(1, len(scenes))
+
     pairs = []
-    for si, scene in enumerate(scenes):
-        for qi, query in enumerate(queries):
-            pairs.append((_score(query, scene, si, qi, len(scenes), len(queries)), si, qi))
+    for si in remaining_scene_indices:
+        for local_qi, query in enumerate(remaining_queries, start=1):
+            pairs.append((_score(query, scenes[si], si, local_qi, len(scenes), len(queries)), si, local_qi))
     pairs.sort(reverse=True)
 
-    used_scenes = set()
-    used_queries = set()
+    used_scenes = {0}
+    used_queries = {0}
     for score, si, qi in pairs:
         if si in used_scenes or qi in used_queries:
             continue
@@ -196,7 +206,7 @@ def assign_manual_queries(scenes: list[dict[str, Any]], raw_queries: Any) -> lis
         result.append({
             "query": query,
             "score": round(float(item[1]), 2),
-            "query_index": (queries.index(query) + 1) if query else 0,
+            "query_index": (queries.index(query) + 1) if query else 0,\n            "strict_first_frame": bool(query and queries.index(query) == 0 and si == 0),
             "total_queries": len(queries),
         })
     return result
