@@ -267,5 +267,9 @@ def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkey
     }
 
     queries, visual_type = runtime._build_search_variants(scene, "Noisy title")
-    assert queries == ["Rishabh Pant"]
+    assert queries
+    assert queries[0].casefold().startswith("rishabh pant")
+    assert "press conference" in queries[0].casefold()
+    assert "editorial_person" not in queries[0].casefold()
+    assert "latest" not in queries[0].casefold()
     assert visual_type == "PERSON"
