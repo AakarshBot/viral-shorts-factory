@@ -213,38 +213,6 @@ def patch_dashboard_runtime(bot):
         return sorted(out,key=lambda x:x["composite_score"],reverse=True) or []
     bot.process_scored_candidates=score
 
-    original_gather=bot.gather_and_filter_stories
-    def gather(conn,genre_key,genre_cfg,trend_keyword=None,custom_gnews_q=None,custom_rss_url=None):
-        stories=original_gather(conn,genre_key,genre_cfg,trend_keyword,custom_gnews_q,custom_rss_url)
-        recent=[r[0] for r in conn.execute("SELECT topic FROM vault WHERE date_used >= ?",(datetime.now()-timedelta(days=30),)).fetchall()]
-        return semantic_duplicate_filter(stories,recent,.82)
-    bot.gather_and_filter_stories=gather
-
-    # The newsroom contract requires genuinely diverse candidates. The legacy
-    # selector used to backfill from rejected near-duplicates, which defeated
-    # the exact-three gate in workflow_runtime. Replace that selector at the
-    # live module boundary; direct discovery imports still see the canonical
-    # function, while production receives the strict version after dashboard
-    # runtime installation.
-    try:
-        import workflow_runtime
-        if not getattr(workflow_runtime, "_strict_diversity_bound", False):
-            def strict_diverse_top_three(stories):
-                selected=[]
-                for story in stories or []:
-                    if not selected:
-                        selected.append(story)
-                        continue
-                    if all(workflow_runtime._overlap(story.get("title",""), old.get("title","")) < 0.55 for old in selected):
-                        selected.append(story)
-                    if len(selected)==3:
-                        return selected
-                return selected[:3]
-            workflow_runtime._diverse_top_three = strict_diverse_top_three
-            workflow_runtime._strict_diversity_bound = True
-    except Exception as exc:
-        print(f"   [Dashboard] Strict discovery diversity binding unavailable: {type(exc).__name__}: {exc}", flush=True)
-
     original_editorial=bot.editorial_gate_batch
     def editorial(stories,bonuses,last_genre,fmt): return original_editorial(preselect_candidates(stories,15),bonuses,last_genre,fmt) if stories else None
     bot.editorial_gate_batch=editorial
