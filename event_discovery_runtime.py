@@ -207,12 +207,18 @@ def cluster_news_events(
             for item in cluster
             if _clean(item.get("publisher_normalized"))
         })
+        evidence_publishers = sorted({
+            _clean(item.get("publisher_normalized"))
+            for item in cluster
+            if _clean(item.get("publisher_normalized"))
+            and _clean(item.get("collection_source")).lower() not in {"reddit", "social"}
+        })
         domains = sorted({
             urlparse(item["url"]).netloc.lower().removeprefix("www.")
             for item in cluster if item.get("url")
         })
         article_count = len(cluster)
-        source_count = len(publishers or domains)
+        source_count = len(evidence_publishers or domains)
 
         evidence = []
         for article in cluster[:max_articles_per_event]:
@@ -236,7 +242,9 @@ def cluster_news_events(
             "event_clustered": True,
             "event_article_count": article_count,
             "event_source_count": source_count,
+            "event_total_publisher_count": len(publishers),
             "event_publishers": publishers,
+            "event_evidence_publishers": evidence_publishers,
             "event_source_domains": domains,
             "event_evidence": evidence,
             "event_cluster_size": article_count,
