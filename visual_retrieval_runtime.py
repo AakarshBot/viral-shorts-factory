@@ -219,6 +219,60 @@ def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_g
     return False, "", 0.0
 
 
+
+_RELATED_SUBJECT_ASSET_LIMIT = 3
+
+
+def _record_trusted_related_assets(
+    seg: dict,
+    bot,
+    candidates: list[Any],
+    accepted_index: int,
+    source: str,
+    query: str,
+    visual_type: str,
+    visual_genre: str,
+    used_hashes: set[str],
+) -> None:
+    """Keep a tiny pool of trusted unused alternatives from the accepted source."""
+    existing = list(seg.get("_verified_subject_assets") or [])
+    existing_hashes = {str(item.get("hash") or "") for item in existing if isinstance(item, dict)}
+
+    for data in candidates[accepted_index:]:
+        if len(existing) >= _RELATED_SUBJECT_ASSET_LIMIT:
+            break
+        valid, _reason, normalized = _preflight_image(data)
+        if not valid or normalized is None:
+            continue
+        image_hash = _hash_image(bot, normalized)
+        if image_hash in used_hashes or image_hash in existing_hashes:
+            continue
+
+        trusted, _tier, _score = _trusted_source_evidence(
+            source,
+            visual_type,
+            query,
+            visual_genre,
+        )
+        if not trusted:
+            continue
+
+        existing.append(
+            {
+                "subject": str(seg.get("primary_entity") or "").strip(),
+                "bytes": normalized,
+                "hash": image_hash,
+                "source": str(source or "").strip(),
+                "query": str(query or "").strip(),
+                "visual_type": str(visual_type or "").strip().upper(),
+                "visual_genre": str(visual_genre or "").strip().upper(),
+            }
+        )
+        existing_hashes.add(image_hash)
+
+    if existing:
+        seg["_verified_subject_assets"] = existing
+
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
@@ -382,6 +436,20 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         runtime.save_to_cache(bot, normalized, cache_entity, visual_type, source, context)
                     except Exception:
                         pass
+
+                    if trusted and candidate_index < len(candidates):
+                        _record_trusted_related_assets(
+                            seg,
+                            bot,
+                            candidates,
+                            candidate_index,
+                            source,
+                            query,
+                            visual_type,
+                            visual_genre,
+                            used_hashes,
+                        )
+
                     used_hashes.add(image_hash)
                     seg["visual_verified"] = True
                     seg["visual_rescue_reason"] = ""
