@@ -313,6 +313,14 @@ class WorkflowController:
             def audio_wrapper(*args, **kwargs):
                 self._reporter("audio", 42, "Generating narration and word timings…")
                 result = original_audio(*args, **kwargs)
+                audio_paths = result[0] if isinstance(result, (tuple, list)) and result else result
+                if isinstance(audio_paths, (list, tuple)):
+                    with self._lock:
+                        self._audio_paths = [
+                            os.path.abspath(os.fspath(path))
+                            for path in audio_paths
+                            if path and os.path.isfile(os.fspath(path))
+                        ]
                 self._reporter("audio", 52, "Narration complete. Building visual package…")
                 return result
             if globals_dict.get("generate_audio_for_script") is not None:
