@@ -378,6 +378,12 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     subject_words = _tokens(subject)
     vt = str(visual_type or scene.get("visual_type", "")).upper()
 
+    # Specific asset identities must outrank generic presentation context. A logo
+    # mentioned as appearing "on screen" is still branding, not a UI screenshot.
+    if _has(words, "logo", "logos", "crest", "emblem", "badge", "seal", "branding", "brand mark"):
+        if vt in {"ORGANIZATION", "EVENT"} or _has(words, "team", "club", "federation", "company", "brand"):
+            return "ORG_BRANDING" if not _has(words, "team", "club", "squad") else "TEAM_BRANDING"
+        return "ORG_BRANDING"
     if _has(words, "screenshot", "screen", "interface", "dashboard", "app", "website", "ui"):
         return "SCREENSHOT_UI"
     if _has(words, "document", "documents", "report", "filing", "filings", "pdf", "paperwork", "contract"):
@@ -388,11 +394,6 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
         return "MAP"
     if _has(words, "diagram", "schematic", "blueprint", "flowchart"):
         return "DIAGRAM"
-    if _has(words, "logo", "logos", "crest", "emblem", "badge", "seal", "branding", "brand mark"):
-        if vt in {"ORGANIZATION", "EVENT"} or _has(words, "team", "club", "federation", "company", "brand"):
-            return "ORG_BRANDING" if not _has(words, "team", "club", "squad") else "TEAM_BRANDING"
-        return "ORG_BRANDING"
-
     if _has(words, "flag", "flags", "national flag", "symbol"):
         return "FLAG_SYMBOL"
     if _has(words, "currency", "banknote", "banknotes", "coin", "coins", "rupee", "dollar", "euro", "pound", "yen"):
