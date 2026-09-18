@@ -22,7 +22,7 @@ def test_logo_watermark_removes_edge_white_background(tmp_path):
     assert result.getpixel((56, 56))[3] > 0
 
 
-def test_deep_dive_subtitle_clip_is_simple_glass(tmp_path):
+def test_subtitle_clip_is_simple_caption_card(tmp_path):
     background = tmp_path / "scene.png"
     Image.new("RGB", (1080, 1920), (30, 50, 75)).save(background)
     output = tmp_path / "subtitle.png"
@@ -39,9 +39,11 @@ def test_deep_dive_subtitle_clip_is_simple_glass(tmp_path):
 
     rendered = Image.open(path).convert("RGBA")
     alpha = rendered.getchannel("A")
-    assert rendered.size == (1080, 300)
+    assert rendered.size == (1080, 220)
     assert alpha.getbbox() is not None
-    assert rendered.getpixel((540, 150))[3] > 0
+    assert rendered.getpixel((540, 110))[3] > 0
+    # The active subtitle renderer no longer draws the old gloss/accent border.
+    assert rendered.getpixel((20, 20))[3] == 0
 
 
 def test_top5_card_uses_same_glass_language():
