@@ -909,8 +909,8 @@ def diversity_rerank(stories, max_items=28):
 
 
 
-def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False):
-    """Collect a broad article pool, then collapse it into distinct event candidates."""
+def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False, discover_lanes=None):
+    """Collect a broad article pool, then collapse it into distinct event candidates.\n\n    ``discover_lanes`` is a legacy compatibility keyword. The current\n    collector uses one canonical intake path, so the value is intentionally\n    ignored; accepting it prevents stale dashboard runtimes from crashing\n    during rolling deployments.\n    """
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
     raw = []
