@@ -308,7 +308,7 @@ class WorkflowController:
                 return result
             globals_dict["write_script"] = write_wrapper
 
-        original_audio = globals_dict.get("generate_voiceover_and_timestamps") or globals_dict.get("generate_audio_for_script") or globals_dict.get("generate_audio")
+        original_audio = globals_dict.get("generate_voiceover_and_timestamps")
         if callable(original_audio):
             async def audio_wrapper(*args, **kwargs):
                 self._reporter("audio", 42, "Generating narration and word timings…")
@@ -323,12 +323,27 @@ class WorkflowController:
                         ]
                 self._reporter("audio", 52, "Narration complete. Building visual package…")
                 return result
-            if globals_dict.get("generate_voiceover_and_timestamps") is not None:
-                globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
-            elif globals_dict.get("generate_audio_for_script") is not None:
-                globals_dict["generate_audio_for_script"] = audio_wrapper
-            else:
-                globals_dict["generate_audio"] = audio_wrapper
+            globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
+        else:
+            original_audio = globals_dict.get("generate_audio_for_script") or globals_dict.get("generate_audio")
+            if callable(original_audio):
+                def audio_wrapper(*args, **kwargs):
+                    self._reporter("audio", 42, "Generating narration and word timings…")
+                    result = original_audio(*args, **kwargs)
+                    audio_paths = result[0] if isinstance(result, (tuple, list)) and result else result
+                    if isinstance(audio_paths, (list, tuple)):
+                        with self._lock:
+                            self._audio_paths = [
+                                os.path.abspath(os.fspath(path))
+                                for path in audio_paths
+                                if path and os.path.isfile(os.fspath(path))
+                            ]
+                    self._reporter("audio", 52, "Narration complete. Building visual package…")
+                    return result
+                if globals_dict.get("generate_audio_for_script") is not None:
+                    globals_dict["generate_audio_for_script"] = audio_wrapper
+                else:
+                    globals_dict["generate_audio"] = audio_wrapper
 
         original_visuals = globals_dict.get("process_visuals_async")
         if callable(original_visuals):
