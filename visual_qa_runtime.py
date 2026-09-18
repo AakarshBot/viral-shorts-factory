@@ -13,6 +13,8 @@ import threading
 
 from PIL import Image
 
+from visual_taxonomy_runtime import genre_acceptance_rule
+
 GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "16")))
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "16")))
 GEMINI_VISUAL_RETRIES = 0
@@ -45,9 +47,9 @@ def get_visual_qa_calls_used():
         return _VIDEO_CALLS
 
 
-def _cache_key(img_bytes, entity, tier, visual_type=""):
+def _cache_key(img_bytes, entity, tier, visual_type="", visual_genre=""):
     h = hashlib.sha256(img_bytes).hexdigest()
-    return (h, str(entity).strip().lower(), str(tier).strip().upper(), str(visual_type).strip().upper())
+    return (h, str(entity).strip().lower(), str(tier).strip().upper(), str(visual_type).strip().upper(), str(visual_genre).strip().upper())
 
 
 def _tier_for(intent, visual_type, source):
@@ -58,13 +60,16 @@ def _is_conceptual(intent):
     return False
 
 
-def _identity_prompt(entity, visual_type="", intent="", search_prompt=""):
+def _identity_prompt(entity, visual_type="", intent="", search_prompt="", visual_genre=""):
+    genre_rule = genre_acceptance_rule(visual_genre)
     return f"""Look at this image and answer one question only.
 
 Does this image visibly represent the requested visual subject and visual intent?
 
 Locked visual subject: {entity}
 Subject type: {visual_type}
+Visual genre: {visual_genre}
+Genre-specific acceptance target: {genre_rule}
 Visual intent/context: {intent}
 Search phrase used: {search_prompt}
 
@@ -79,18 +84,19 @@ Rules:
 8. For a LOCATION or LANDMARK, the image must visibly depict that place or landmark.
 9. For an EVENT or TOURNAMENT, the image must visibly correspond to that named event/tournament, rather than merely a generic event of the same type.
 10. Reject memes, unrelated stock imagery, generic illustrations, search-page screenshots, or images where the requested subject cannot actually be identified.
-11. If the image is genuinely ambiguous or the subject cannot be established from visible evidence, return NO.
+11. If the image is genuinely ambiguous or the subject cannot be established from visible evidence, return UNCERTAIN rather than guessing.
+12. A valid contextual representation is acceptable when it matches the genre-specific acceptance target, even when it is not a literal portrait.
 
-Return exactly YES or NO followed by one short reason."""
+Return exactly YES, NO, or UNCERTAIN followed by one short reason."""
 
 
-def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="IDENTITY", visual_type=""):
+def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="IDENTITY", visual_type="", visual_genre=""):
     global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN
     if not api_key:
         print("   [Visual QA] IDENTITY | Gemini unavailable (no API key); candidate remains uncertain.", flush=True)
         return None
 
-    key = _cache_key(img_bytes, entity, tier, visual_type)
+    key = _cache_key(img_bytes, entity, tier, visual_type, visual_genre)
     if key in _CACHE:
         cached = _CACHE[key]
         print(f"   [Visual QA] IDENTITY | cached verdict={'YES' if cached is True else 'NO'}", flush=True)
@@ -117,7 +123,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         response = client.models.generate_content(
             model=GEMINI_VISUAL_MODEL,
-            contents=[_identity_prompt(entity, visual_type, intent, prompt), image],
+            contents=[_identity_prompt(entity, visual_type, intent, prompt, visual_genre), image],
         )
         raw_text = str(getattr(response, "text", "") or "").strip()
         display_text = raw_text if len(raw_text) <= 1000 else raw_text[:1000] + "...[truncated]"
