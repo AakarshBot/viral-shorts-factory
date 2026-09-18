@@ -267,7 +267,12 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     verification_attempts = 0
     hard_rejections = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))
-    source_plan = _source_plan(bot, visual_type, visual_genre)
+    try:
+        source_plan = _source_plan(bot, visual_type, visual_genre)
+    except TypeError:
+        # Preserve compatibility with legacy test/runtime shims that only
+        # accepted the original (bot, visual_type) source-plan signature.
+        source_plan = _source_plan(bot, visual_type)
     max_provider_checks = max(1, min(40, 2 * max(1, len(source_plan))))
     provider_checks = 0
     best_uncertain = None
