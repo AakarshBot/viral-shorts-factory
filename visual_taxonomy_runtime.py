@@ -410,10 +410,13 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     if vt == "PERSON":
         if _has(_tokens(intent_lower), "portrait", "headshot"):
             return "PERSON_PORTRAIT"
-        if _has(
-            _tokens(intent_lower),
+        action_phrases = (
             "press conference", "interview", "speaking", "speaks", "appearing",
             "on stage", "podium", "media interaction",
+        )
+        if any(
+            re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", intent_lower)
+            for phrase in action_phrases
         ):
             return "PERSON_ACTION"
 
