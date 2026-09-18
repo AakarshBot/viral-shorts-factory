@@ -1,87 +1,44 @@
-from pathlib import Path
+from PIL import Image
 
-from branding_runtime import _assets, apply_branded_finish, patch_branding_pipeline
+from branding_runtime import (
+    LOGO_BOX_SIZE,
+    LOGO_INNER_SIZE,
+    build_scene_branding_overlays,
+    source_credit_for_type,
+)
 
 
 class _Bot:
-    def __init__(self, root):
-        self.BASE_DIR = root
-
-        def run_robot():
-            return None
-
-        self.run_robot = run_robot
+    BASE_DIR = "."
 
 
-def test_branding_accepts_primary_logo_filename(tmp_path):
+def test_source_credit_is_normalized():
+    assert source_credit_for_type("commons") == "SOURCE · Wikimedia Commons"
+    assert source_credit_for_type("news_source", "Source: Reuters") == "SOURCE · Reuters"
+
+
+def test_final_branding_has_fixed_shorts_geometry(tmp_path):
     brand = tmp_path / "brand_assets"
     brand.mkdir()
-    primary = brand / "logo.png.jpg"
-    primary.write_bytes(b"logo")
+    logo = Image.new("RGB", (800, 500), "white")
+    logo.save(brand / "channels4_profile.jpg")
 
-    assert _assets(_Bot(tmp_path)) == primary
+    bot = _Bot()
+    bot.BASE_DIR = tmp_path
 
+    layers = build_scene_branding_overlays(bot, 1080, 1920, "SOURCE · Reuters")
 
-def test_branding_falls_back_to_channel_profile_logo(tmp_path):
-    brand = tmp_path / "brand_assets"
-    brand.mkdir()
-    fallback = brand / "channels4_profile.jpg"
-    fallback.write_bytes(b"logo")
+    assert len(layers) == 2
+    assert layers[0].shape == (1920, 1080, 4)
+    assert layers[1].shape == (1920, 1080, 4)
 
-    assert _assets(_Bot(tmp_path)) == fallback
-
-
-def test_branding_compile_wrapper_is_installed_once(tmp_path, monkeypatch):
-    bot = _Bot(tmp_path)
-    calls = []
-
-    def compile_video(*args, **kwargs):
-        return "/tmp/rendered.mp4"
-
-    def finish(target_bot, video_path):
-        calls.append((target_bot, video_path))
-        return video_path
-
-    bot.run_robot.__globals__["compile_video"] = compile_video
-    monkeypatch.setattr("branding_runtime.apply_branded_finish", finish)
-
-    patch_branding_pipeline(bot)
-    result = bot.run_robot.__globals__["compile_video"]("scene-data")
-
-    assert result == "/tmp/rendered.mp4"
-    assert calls == [(bot, "/tmp/rendered.mp4")]
-    assert getattr(bot.run_robot.__globals__["compile_video"], "_branding_wrapped", False) is True
-
-    patch_branding_pipeline(bot)
-    assert len(calls) == 1
+    # The logo badge is fixed-size and positioned inside the 36 px safe margin.
+    alpha = layers[0][:, :, 3]
+    assert alpha[36:36 + LOGO_BOX_SIZE, 1080 - 36 - LOGO_BOX_SIZE:1080 - 36].max() > 0
+    assert LOGO_INNER_SIZE < LOGO_BOX_SIZE
 
 
-def test_logo_asset_is_passed_to_final_ffmpeg_finish(tmp_path, monkeypatch):
-    brand = tmp_path / "brand_assets"
-    brand.mkdir()
-    logo = brand / "logo.png.jpg"
-    logo.write_bytes(b"logo")
-
-    video = tmp_path / "rendered.mp4"
-    video.write_bytes(b"source-video")
-    commands = []
-
-    def fake_run(command, **kwargs):
-        commands.append(command)
-        output = Path(command[-1])
-        output.write_bytes(b"branded-video")
-        return type("Completed", (), {"returncode": 0, "stderr": ""})()
-
-    monkeypatch.setattr("branding_runtime.subprocess.run", fake_run)
-    monkeypatch.setattr("branding_runtime._probe", lambda path: (1080, 1920, 10.0, 1))
-    monkeypatch.setattr("branding_runtime._artifact_qc", lambda *args, **kwargs: (True, "ok"))
-
-    result = apply_branded_finish(_Bot(tmp_path), str(video))
-
-    assert result == str(video)
-    assert len(commands) == 1
-    command = commands[0]
-    assert "-i" in command
-    assert str(logo) in command
-    assert "-map" in command
-    assert "0:a?" in command
+def test_source_badge_is_bottom_right():
+    layers = build_scene_branding_overlays(_Bot(), 1080, 1920, "SOURCE · Reuters")
+    alpha = layers[1][:, :, 3]
+    assert alpha[-100:, -420:].max() > 0

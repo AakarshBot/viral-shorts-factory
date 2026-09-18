@@ -149,76 +149,6 @@ def _fit_layout(words: list[str], base_font_size: int, font_path: str | None, ma
     return font, _split_lines(words, font, max_width)[:max_lines]
 
 
-def _rgba_logo_without_edge_white(logo: Image.Image) -> Image.Image:
-    """Remove white JPEG background only where it touches the image edge."""
-    rgba = logo.convert("RGBA")
-    width, height = rgba.size
-    pixels = rgba.load()
-    near_white = set()
-    for y in range(height):
-        for x in range(width):
-            r, g, b, _ = pixels[x, y]
-            if r >= 244 and g >= 244 and b >= 244:
-                near_white.add((x, y))
-
-    stack = []
-    for x in range(width):
-        if (x, 0) in near_white:
-            stack.append((x, 0))
-        if (x, height - 1) in near_white:
-            stack.append((x, height - 1))
-    for y in range(height):
-        if (0, y) in near_white:
-            stack.append((0, y))
-        if (width - 1, y) in near_white:
-            stack.append((width - 1, y))
-
-    visited = set()
-    while stack:
-        point = stack.pop()
-        if point in visited or point not in near_white:
-            continue
-        visited.add(point)
-        x, y = point
-        if x > 0:
-            stack.append((x - 1, y))
-        if x + 1 < width:
-            stack.append((x + 1, y))
-        if y > 0:
-            stack.append((x, y - 1))
-        if y + 1 < height:
-            stack.append((x, y + 1))
-
-    for x, y in visited:
-        r, g, b, _ = pixels[x, y]
-        pixels[x, y] = (r, g, b, 0)
-    return rgba
-
-
-def _glass_surface(base: Image.Image, box, radius: int, tint=(7, 13, 23, 120), blur_radius: int = 20):
-    """Build a frosted panel from the underlying image, not a flat opaque card."""
-    x0, y0, x1, y1 = [int(v) for v in box]
-    surface = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    panel_w = max(1, x1 - x0)
-    panel_h = max(1, y1 - y0)
-    crop = base.crop((x0, y0, x1, y1)).convert("RGBA")
-    crop = crop.filter(ImageFilter.GaussianBlur(max(2, int(blur_radius))))
-    crop = Image.blend(crop, Image.new("RGBA", crop.size, tint), 0.62)
-
-    mask = Image.new("L", (panel_w, panel_h), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, panel_w - 1, panel_h - 1), radius=max(4, int(radius)), fill=255)
-    surface.paste(crop, (x0, y0), mask)
-
-    draw = ImageDraw.Draw(surface)
-    draw.rounded_rectangle((x0, y0, x1 - 1, y1 - 1), radius=max(4, int(radius)), outline=(255, 255, 255, 90), width=2)
-    highlight_h = max(10, int(panel_h * 0.20))
-    highlight = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    hmask = Image.new("L", (panel_w, highlight_h), 0)
-    ImageDraw.Draw(hmask).rounded_rectangle((0, 0, panel_w - 1, min(highlight_h * 2, highlight_h - 1)), radius=max(4, int(radius)), fill=255)
-    highlight.paste((255, 255, 255, 22), (x0, y0), hmask)
-    return Image.alpha_composite(surface, highlight)
-
-
 def generate_readable_karaoke_clip(
     chunk,
     active_index,
@@ -332,40 +262,6 @@ def render_premium_top5_card(
     return result.convert("RGBA")
 
 
-def create_glossy_logo_watermark(logo_path, size=128):
-    """Create a dark frosted glass channel badge and remove JPEG white borders."""
-    if not logo_path or not os.path.exists(logo_path):
-        return None
-    try:
-        size = max(88, min(150, int(size or 128)))
-        radius = max(20, int(size * 0.22))
-        logo = _rgba_logo_without_edge_white(Image.open(logo_path))
-        logo.thumbnail((size - 28, size - 28), Image.Resampling.LANCZOS)
-
-        badge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        shadow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(shadow)
-        sd.rounded_rectangle((7, 9, size - 2, size - 1), radius=radius, fill=(0, 0, 0, 145))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(max(5, size // 10)))
-        badge = Image.alpha_composite(badge, shadow)
-
-        panel = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        pd = ImageDraw.Draw(panel)
-        pd.rounded_rectangle((2, 2, size - 4, size - 4), radius=radius, fill=(7, 13, 23, 178), outline=(255, 255, 255, 105), width=2)
-        pd.rounded_rectangle((7, 7, size - 9, max(16, int(size * 0.38))), radius=max(10, radius - 6), fill=(255, 255, 255, 24))
-        pd.line((size * 0.22, 4, size * 0.78, 4), fill=(255, 255, 255, 110), width=2)
-        badge = Image.alpha_composite(badge, panel)
-
-        x = (size - logo.width) // 2
-        y = (size - logo.height) // 2
-        mask = Image.new("L", logo.size, 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, logo.width - 1, logo.height - 1), radius=max(8, int(radius * 0.65)), fill=255)
-        badge.paste(logo, (x, y), mask)
-        return badge
-    except Exception:
-        return None
-
-
 def patch_subtitle_pipeline(bot):
     if getattr(bot, "_subtitle_pipeline_patch_installed", False):
         return bot
@@ -377,9 +273,7 @@ def patch_subtitle_pipeline(bot):
     namespace["render_top5_card"] = render_premium_top5_card
     bot.render_top5_card = render_premium_top5_card
     namespace["generate_karaoke_clip"] = generate_readable_karaoke_clip
-    namespace["create_glossy_logo_watermark"] = create_glossy_logo_watermark
     bot.generate_karaoke_clip = generate_readable_karaoke_clip
-    bot.create_glossy_logo_watermark = create_glossy_logo_watermark
     bot._subtitle_pipeline_patch_installed = True
     print("   [Subtitle Patch] Clean glass captions + matching Top-5 cards installed.", flush=True)
     return bot

@@ -1518,31 +1518,6 @@ def render_hook_card(bg_img, hook_text, width=1080, height=1920, font_choice=Non
         y_text += (bbox[3] - bbox[1]) + 20
     return base
 
-def create_glossy_logo_watermark(logo_path, size=140):
-    if not os.path.exists(logo_path): return None
-    try:
-        # Resize logo to perfectly fit 100% of the container size
-        logo = Image.open(logo_path).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
-        base = Image.new("RGBA", (size, size), (0,0,0,0))
-        
-        # Create a perfectly fitted rounded mask (like a clean TV channel bug)
-        mask = Image.new("L", (size, size), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.rounded_rectangle([0, 0, size, size], radius=24, fill=255)
-        
-        # Paste logo using the mask so there is no awkward background gap
-        base.paste(logo, (0, 0), mask)
-        
-        # Subtle glossy overlay
-        highlight = Image.new("RGBA", (size, size), (0,0,0,0))
-        h_draw = ImageDraw.Draw(highlight)
-        h_draw.ellipse([-20, -20, size + 20, size // 2], fill=(255, 255, 255, 45))
-        base = Image.alpha_composite(base, highlight)
-        
-        return base
-    except Exception:
-        pass
-
 def generate_karaoke_clip(chunk, active_index, font_path, video_width, output_path, bg_img_path=None, source_type="bg"):
     # Made canvas taller to support massive text
     canvas_w, canvas_h = int(video_width * 0.95), 450
@@ -1619,7 +1594,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
     audio_clips = []
     text_clips_all = []
     bgm_clip = None
-    logo_clip = None
 
     sfx_files = [
         f for f in os.listdir(SFX_DIR)
@@ -1759,7 +1733,25 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                     text_clips.append(txt_clip)
                     text_clips_all.append(txt_clip)
 
-            scene_layers = [bg_anim] + text_clips
+            # Canonical final branding is composited here, inside the existing
+            # MoviePy render. This avoids a second full-video FFmpeg encode.
+            from branding_runtime import build_scene_branding_overlays
+
+            source_credit = str(
+                layer_paths[0].get("source_credit")
+                or layer_paths[0].get("source_type")
+                or ""
+            ).strip()
+            branding_layers = [
+                ImageClip(rgba).with_duration(scene_duration)
+                for rgba in build_scene_branding_overlays(
+                    None,
+                    width,
+                    height,
+                    source_credit,
+                )
+            ]
+            scene_layers = [bg_anim] + text_clips + branding_layers
             scene = CompositeVideoClip(
                 scene_layers, size=(width, height)
             ).with_duration(scene_duration)

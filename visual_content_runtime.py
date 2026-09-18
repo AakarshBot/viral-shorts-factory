@@ -12,24 +12,7 @@ import os
 import re
 from PIL import Image, ImageDraw, ImageFont
 
-
-def _human_label(value, fallback="EDITORIAL"):
-    text = re.sub(r"[_-]+", " ", str(value or "")).strip()
-    text = re.sub(r"\s+", " ", text)
-    return text.upper() if text else fallback
-
-
-def _source_label(source_type):
-    source = str(source_type or "").strip()
-    if not source:
-        return "VISUAL"
-    if source.lower() == "ai-generated":
-        return "AI ILLUSTRATION"
-    if source.lower() == "cached":
-        return "VERIFIED CACHE"
-    if source.lower() == "visual-rescue":
-        return "VISUAL RESCUE"
-    return f"SOURCE · {_human_label(source)}"
+from branding_runtime import source_credit_for_type
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
@@ -76,16 +59,6 @@ def _fit_font(bot, text, max_width, base_size, min_size=20, custom_font_name=Non
         if width <= max_width:
             return font
     return _load_brand_font(bot, int(min_size), custom_font_name)
-
-
-def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, source_type, voiceover, font_name=None):
-    """Return the raw scene image.
-
-    Scene numbers, source/type labels, fact chips and other editorial text cards
-    are intentionally not baked into the visual anymore. The final branding
-    stage is the single owner of the channel logo and border treatment.
-    """
-    return image.convert("RGBA")
 
 
 def _render_hook_card(bot, image, hook_text, font_name=None):
@@ -379,7 +352,6 @@ def patch_content_first_visuals(bot):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
-            source_credit = ""
             if idx == news_source_scene_index and isinstance(news_source_candidate, dict):
                 bg_img = news_source_candidate["image"]
                 used_ai = False
@@ -416,6 +388,8 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
+            if source_type != "news_source":
+                source_credit = source_credit_for_type(source_type)
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
                 verified_count += 1
@@ -447,27 +421,9 @@ def patch_content_first_visuals(bot):
                 # Deep Dive never receives the legacy opaque hook-card treatment.
                 # First scenes use the same content-first visual treatment as all
                 # subsequent Deep Dive scenes; Top-5 retains its dedicated cards.
-                rendered = _render_scene_overlay(
-                    bot,
-                    bg_img,
-                    idx + 1,
-                    len(scenes),
-                    visual_type,
-                    source_type,
-                    seg.get("voiceover", ""),
-                    font_name=font_choice,
-                )
+                rendered = bg_img.convert("RGBA")
 
             rendered = rendered.convert("RGBA")
-            if source_type == "news_source" and source_credit:
-                try:
-                    from news_source_image_runtime import apply_source_credit
-                    rendered = apply_source_credit(rendered, source_credit)
-                except Exception as exc:
-                    print(
-                        f"   [News Source Image] Attribution render failed: {type(exc).__name__}: {exc}",
-                        flush=True,
-                    )
             rendered.convert("RGB").save(img_path, "JPEG", quality=95)
             packages[idx] = [{
                 "image": img_path,

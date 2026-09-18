@@ -312,11 +312,6 @@ def bind_dashboard_patches(bot):
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
     try:
-        from branding_runtime import patch_branding_pipeline
-        patch_branding_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-    try:
         from final_qc_runtime import patch_workflow_qc
         patch_workflow_qc(bot)
     except Exception as exc:
