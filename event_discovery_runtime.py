@@ -383,8 +383,19 @@ def cluster_news_events(
                 "collection_source": _clean(article.get("collection_source")),
             })
 
+        event_genres = sorted({
+            _clean(item.get("genre"))
+            for item in cluster
+            if _clean(item.get("genre"))
+        })
         representative.update({
             "event_id": _event_id(cluster),
+            "event_genres": event_genres,
+            "primary_genre": (
+                event_genres[0]
+                if len(event_genres) == 1
+                else _clean(representative.get("genre"))
+            ),
             "event_search_text": " ".join(
                 _clean(item.get("title")) for item in cluster[:max_articles_per_event]
             ),
