@@ -484,7 +484,7 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
             "announced", "signing", "signs", "celebration", "celebrating",
         )
         if any(
-            re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", " ".join(_tokens(intent_lower)))
+            re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", intent_lower)
             for phrase in organisation_action_phrases
         ):
             return "EVENT_SCENE"
