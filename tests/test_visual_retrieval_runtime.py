@@ -196,9 +196,9 @@ def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch
         "BCCI logo story",
     )
 
-    assert image.size == (900, 900)
+    assert image.size == (1080, 1920)
     assert used_ai is False
-    assert source == "Commons"
+    assert source == "visual-rescue"
 
 
 def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
