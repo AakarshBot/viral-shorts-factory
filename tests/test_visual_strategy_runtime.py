@@ -204,3 +204,42 @@ def test_manual_visual_query_never_gets_automatic_retry():
     assert intent.manual is True
     assert intent.query == "Mohammad Rizwan"
     assert reformulate_visual_query(intent, "no candidates") == ""
+
+
+def test_same_entity_gets_scene_specific_queries():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    slide_one = {
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_intent": "young batsman batting",
+        "visual_context": "cricket match action",
+    }
+    slide_two = {
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_intent": "young player receiving award",
+        "visual_context": "trophy presentation ceremony",
+    }
+
+    first = resolve_visual_search_intent(slide_one)
+    second = resolve_visual_search_intent(slide_two)
+
+    assert first.subject == second.subject == "Vaibhav Sooryavanshi"
+    assert first.query != second.query
+    assert "batting" in first.query.lower()
+    assert "award" in second.query.lower()
+    assert first.queries[-1] == first.subject
+    assert second.queries[-1] == second.subject
+
+
+def test_manual_visual_query_stays_exact():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent({
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "manual_visual_query": "Vaibhav Sooryavanshi batting",
+        "visual_intent": "trophy presentation",
+    })
+
+    assert intent.manual is True
+    assert intent.query == "Vaibhav Sooryavanshi batting"
+    assert intent.queries == ("Vaibhav Sooryavanshi batting",)
