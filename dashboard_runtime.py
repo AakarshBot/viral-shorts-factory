@@ -324,7 +324,6 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
             and str(web_config.get("cricket_category", ""))
             == "AI-assisted top story in cricket"
         ),
-        discover_lanes=not bool(requested_topic),
     )
 
     relevance_filtered = []
