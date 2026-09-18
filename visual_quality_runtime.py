@@ -119,30 +119,11 @@ def cover_crop(img: Image.Image, size=(1080, 1920)) -> Image.Image:
     new_h = max(target_h, int(round(base.height * scale)))
     resized = base.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-    crop_is_heavy = (
-        source_aspect / max(target_aspect, 1e-6) > 1.25
-        or source_aspect < target_aspect / 1.25
-    )
-    focal_x, focal_y = 0.5, 0.5
-    if crop_is_heavy:
-        focal_x, focal_y, confidence = _estimate_crop_focus(base)
-        if confidence < 0.05:
-            focal_x, focal_y = 0.5, 0.5
-        elif abs(focal_x - 0.5) <= 0.04 and abs(focal_y - 0.5) <= 0.04:
-            focal_x, focal_y = 0.5, 0.5
-        else:
-            print(
-                f"   [Visual Framing] FOCAL-CROP | focus=({focal_x:.2f},{focal_y:.2f}) "
-                f"confidence={confidence:.2f}",
-                flush=True,
-            )
-
-    max_left = max(0, new_w - target_w)
-    max_top = max(0, new_h - target_h)
-    desired_left = int(round(focal_x * new_w - target_w / 2.0))
-    desired_top = int(round(focal_y * new_h - target_h / 2.0))
-    left = max(0, min(max_left, desired_left))
-    top = max(0, min(max_top, desired_top))
+    # Keep standard fetched images centred when converting to the Shorts canvas.
+    # The previous edge-density focal-point heuristic could shift the crop toward
+    # unrelated high-contrast details and produce visibly bad framing.
+    left = max(0, (new_w - target_w) // 2)
+    top = max(0, (new_h - target_h) // 2)
     return resized.crop((left, top, left + target_w, top + target_h))
 
 def install(visual_runtime_module):
