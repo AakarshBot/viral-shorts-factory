@@ -62,7 +62,7 @@ ROLE_CUES = {
     "LOCATION": {"location", "geography", "map", "landmark", "address", "venue", "stadium", "arena", "ground", "place", "cityscape"},
     "CONCEPT": {"concept", "theory", "principle", "mechanism", "abstract", "idea", "diagram", "technical", "scientific"},
     "PROCESS": {"process", "workflow", "pipeline", "steps", "procedure", "mechanism", "how"},
-    "EVENT": {"event", "competition", "tournament", "summit", "conference", "festival", "ceremony", "election", "launch", "opening", "closing", "meeting", "final"},
+    "EVENT": {"event", "competition", "tournament", "summit", "conference", "forum", "festival", "ceremony", "election", "launch", "opening", "closing", "meeting", "final"},
     "DOCUMENT": {"document", "report", "filing", "paper", "study", "contract", "record"},
     "QUOTE": {"quote", "quotation", "statement"},
     "STATISTIC": {"statistic", "data", "metric", "percentage", "figure"},
