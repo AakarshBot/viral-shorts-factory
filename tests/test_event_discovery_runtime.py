@@ -81,3 +81,63 @@ def test_cluster_news_events_does_not_merge_unrelated_headlines():
     events = cluster_news_events(articles)
 
     assert len(events) == 2
+
+
+def test_entity_aware_clustering_merges_different_wording_for_same_event():
+    articles = [
+        _article(
+            "NASA launches Artemis mission from Florida",
+            "https://example.com/nasa-launch-1",
+            "Example One",
+        ),
+        _article(
+            "Artemis lifts off as NASA begins lunar journey",
+            "https://example.org/nasa-launch-2",
+            "Example Two",
+            "2026-09-18T07:45:00+00:00",
+        ),
+    ]
+
+    events = cluster_news_events(articles)
+
+    assert len(events) == 1
+    assert set(events[0]["event_entities"]) >= {"nasa", "artemis"}
+    assert events[0]["event_actions"]
+
+
+def test_entity_aware_clustering_does_not_merge_same_company_different_event():
+    articles = [
+        _article(
+            "NASA launches Artemis mission from Florida",
+            "https://example.com/artemis",
+            "Example One",
+        ),
+        _article(
+            "NASA launches weather satellite from California",
+            "https://example.org/weather",
+            "Example Two",
+        ),
+    ]
+
+    events = cluster_news_events(articles)
+
+    assert len(events) == 2
+
+
+def test_entity_aware_clustering_blocks_conflicting_actions_for_same_entities():
+    articles = [
+        _article(
+            "NASA launches Artemis mission from Florida",
+            "https://example.com/launch",
+            "Example One",
+        ),
+        _article(
+            "NASA delays Artemis mission in Florida",
+            "https://example.org/delay",
+            "Example Two",
+        ),
+    ]
+
+    events = cluster_news_events(articles)
+
+    assert len(events) == 2
