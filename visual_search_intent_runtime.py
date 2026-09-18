@@ -234,15 +234,20 @@ def _scene_terms(scene: dict, subject: str) -> list[str]:
 
 
 def _query_clean(parts: list[str], max_words: int = 8) -> str:
-    """Build a compact query while preserving the supplied phrase order."""
+    """Build a compact query without damaging the locked factual identity."""
     words = []
     seen = set()
-    for part in parts:
+    for part_index, part in enumerate(parts):
         for word in tokens(part):
             token_key = key(word)
             if not token_key or token_key in seen:
                 continue
-            if token_key in GENERIC_NOISE or token_key in STOPWORDS:
+            # The first part is the locked identity. Preserve its real function
+            # words (for example "The" in "The Weeknd") instead of applying the
+            # retrieval stopword filter to an entity name.
+            if token_key in GENERIC_NOISE:
+                continue
+            if part_index > 0 and token_key in STOPWORDS:
                 continue
             seen.add(token_key)
             words.append(word)
