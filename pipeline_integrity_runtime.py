@@ -396,7 +396,8 @@ def patch_pipeline_integrity(bot) -> bool:
         _wrap_script_writer(bot)
         _wrap_audio(bot)
         _wrap_visuals(bot)
-        _wrap_compile(bot)
+        # compile_video remains owned by the canonical renderer and workflow
+        # progress wrapper; the compatibility helper _wrap_compile is not installed.
         bot._pipeline_integrity_installed = True
         print(f"   [Pipeline Integrity] Strict script/narration/subtitle/branding guards installed ({VERSION}).", flush=True)
         return True
