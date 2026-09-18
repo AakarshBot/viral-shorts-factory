@@ -206,7 +206,8 @@ def assign_manual_queries(scenes: list[dict[str, Any]], raw_queries: Any) -> lis
         result.append({
             "query": query,
             "score": round(float(item[1]), 2),
-            "query_index": (queries.index(query) + 1) if query else 0,\n            "strict_first_frame": bool(query and queries.index(query) == 0 and si == 0),
+            "query_index": (queries.index(query) + 1) if query else 0,
+            "strict_first_frame": bool(query and queries.index(query) == 0 and si == 0),
             "total_queries": len(queries),
         })
     return result
