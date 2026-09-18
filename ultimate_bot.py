@@ -2387,11 +2387,22 @@ def run_robot(web_config=None):
                 safe_cleanup(ASSETS_DIR)
                 return
 
-        # Assign publishing mode
-        if web_config or is_headless:
-            pub_mode = web_config.get("publish_mode", "private") if web_config else "private"
+        # Dashboard mode must stop after rendering. The dashboard owns the
+        # explicit Public/Private release gate and calls upload_manual() only
+        # after the user confirms visibility. Never silently upload from here.
+        if web_config:
+            print("   [+] Render complete. Waiting for the dashboard Public/Private upload decision.")
+            return
+
+        # Headless Auto-Pilot remains intentionally private. Interactive CLI
+        # mode explicitly asks for the upload visibility.
+        if is_headless:
+            pub_mode = "private"
         else:
-            pub_mode = "private" if input("  [1] Public\n  [2] Private\nChoice: ").strip() == "2" else "now"
+            choice = input(
+                "  [1] Public\n  [2] Private\nChoice: "
+            ).strip()
+            pub_mode = "public" if choice == "1" else "private"
 
         vid_id = upload_to_youtube(
             video_path,
