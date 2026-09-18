@@ -68,18 +68,25 @@ def test_dashboard_controller_captures_generated_audio_paths(tmp_path):
     audio_two = tmp_path / "voiceover_2.mp3"
     audio_one.write_bytes(b"audio")
     audio_two.write_bytes(b"audio")
-    bot.run_robot.__globals__["generate_audio_for_script"] = lambda *_args, **_kwargs: (
-        [str(audio_one), str(audio_two)],
-        [[{"word": "one"}], [{"word": "two"}]],
-    )
+
+    async def fake_voiceover(*_args, **_kwargs):
+        return (
+            [str(audio_one), str(audio_two)],
+            [[{"word": "one"}], [{"word": "two"}]],
+        )
+
+    bot.run_robot.__globals__["generate_voiceover_and_timestamps"] = fake_voiceover
 
     controller = DashboardWorkflowController(bot)
     WorkflowController._install_production_wrappers(controller)
 
-    result = bot.run_robot.__globals__["generate_audio_for_script"]()
+    result = asyncio.run(
+        bot.run_robot.__globals__["generate_voiceover_and_timestamps"]()
+    )
 
     assert result[0] == [str(audio_one), str(audio_two)]
     assert controller.snapshot()["audio_paths"] == [str(audio_one.resolve()), str(audio_two.resolve())]
+    assert controller.snapshot()["stage"] == "audio"
 
 
 def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
