@@ -668,7 +668,7 @@ def _premium_branded_finish(bot, video_path: str) -> str:
 
     logo, _legacy_overlay = assets(bot)
     glass_logo = create_glossy_logo_watermark(logo, size=132) if logo and logo.exists() else None
-    if glass_logo is None and (not overlay or not overlay.exists()):
+    if glass_logo is None:
         return video_path
 
     temp_paths: list[str] = []
@@ -720,7 +720,7 @@ def _premium_branded_finish(bot, video_path: str) -> str:
             raise RuntimeError(f"Final premium branding QC failed: {reason}")
         os.replace(output, video_path)
         print(
-            f"   [Branding] Premium glass finish applied: frame + {'channel overlay + ' if overlay_asset else ''}glass logo; "
+            f"   [Branding] Premium glass finish applied: frame + glass logo (legacy overlay disabled); "
             f"{source_w}x{source_h}, {source_duration:.2f}s, audio_streams={source_audio_count}.",
             flush=True,
         )
