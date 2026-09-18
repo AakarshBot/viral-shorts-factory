@@ -403,23 +403,6 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     if _has(words, "poster", "album art", "album cover", "film poster", "movie poster", "artwork", "cover art"):
         return "MEDIA_ARTWORK"
 
-    # Explicit portrait/action wording in the visual intent outranks noisy
-    # search-prompt context. This prevents a portrait slide that merely mentions
-    # a press conference from being routed as an event/action search.
-    intent_lower = intent.casefold()
-    if vt == "PERSON":
-        if _has(_tokens(intent_lower), "portrait", "headshot"):
-            return "PERSON_PORTRAIT"
-        action_phrases = (
-            "press conference", "interview", "speaking", "speaks", "appearing",
-            "on stage", "podium", "media interaction",
-        )
-        if any(
-            re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", intent_lower)
-            for phrase in action_phrases
-        ):
-            return "PERSON_ACTION"
-
     sports_action = _has(
         words,
         "batting", "bowling", "batsman", "batter", "wicket", "goal", "scoring",
@@ -476,19 +459,7 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     if vt == "ORGANIZATION":
         if _has(words, "headquarters", "office", "campus"):
             return "ORG_HEADQUARTERS"
-        if _has(words, "official", "logo", "brand"):
-            return "ORG_BRANDING"
-        organisation_action_phrases = (
-            "press conference", "conference", "summit", "meeting", "launch",
-            "launched", "launches", "unveil", "unveiled", "announcement",
-            "announced", "signing", "signs", "celebration", "celebrating",
-        )
-        if any(
-            re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", intent_lower)
-            for phrase in organisation_action_phrases
-        ):
-            return "EVENT_SCENE"
-        return "ORG_HEADQUARTERS"
+        return "ORG_BRANDING" if _has(words, "official", "logo", "brand") else "ORG_HEADQUARTERS"
     if vt == "LOCATION":
         return "LANDMARK" if _has(words, "landmark", "monument") else ("ARCHITECTURE" if _has(words, "building", "stadium", "arena") else "PLACE_SCENE")
     if vt == "EVENT":

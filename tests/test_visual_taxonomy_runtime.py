@@ -62,25 +62,6 @@ def test_visual_taxonomy_resolves_specific_assets_before_broad_roles():
         "LOCATION",
     ) == "SPACE_VISUAL"
 
-    assert classify_visual_genre(
-        {"primary_entity": "Rishabh Pant", "visual_intent": "press conference person", "specific_search_prompt": "Rishabh Pant latest press conference"},
-        "Rishabh Pant",
-        "PERSON",
-    ) == "PERSON_ACTION"
-
-    # Explicit portrait intent outranks noisy event context in the search prompt.
-    assert classify_visual_genre(
-        {"primary_entity": "Amina Rahman", "visual_intent": "person portrait", "specific_search_prompt": "Amina Rahman documentary press conference"},
-        "Amina Rahman",
-        "PERSON",
-    ) == "PERSON_PORTRAIT"
-
-    assert classify_visual_genre(
-        {"primary_entity": "OpenAI", "visual_intent": "company product launch"},
-        "OpenAI",
-        "ORGANIZATION",
-    ) == "EVENT_SCENE"
-
 
 def test_visual_taxonomy_distinguishes_real_photo_and_explanatory_visuals():
     assert classify_visual_genre(

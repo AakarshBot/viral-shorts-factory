@@ -2,12 +2,12 @@
 
 Automatic queries are built for image retrieval rather than prose. The factual
 identity is mandatory; scene evidence is ranked for searchable visual anchors
-such as named organisations/events, concrete actions, locations and
-photographable contexts. Manual queries remain exact and authoritative.
+such as named organizations/events, concrete actions, and photographable
+contexts. Manual queries remain exact and authoritative.
 
-Automatic retrieval uses a small set of evidence-backed reformulations rather
-than a blind query ladder: a primary identity+scene query, a distinct
-identity+context variant when available, and the exact identity fallback.
+Retrieval is intentionally bounded to one primary query plus the exact factual
+identity fallback. Query construction never invents facts or fan-outs into a
+blind ladder.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from visual_semantic_guard_runtime import (
     resolve_subject,
     tokens,
 )
-from visual_taxonomy_runtime import classify_visual_genre, genre_query_hints
+from visual_taxonomy_runtime import classify_visual_genre
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,6 @@ class VisualSearchIntent:
     context: str
     confidence: float
     manual: bool = False
-    query_strategy: str = "automatic"
 
 
 def _clean(value) -> str:
@@ -70,9 +69,9 @@ _SEARCH_STRONG = {
     "factory", "office", "stage", "podium", "court", "parliament", "museum",
     "landmark", "building", "street", "hospital", "airport", "campus", "camp",
     "vehicle", "aircraft", "rocket", "satellite", "product", "device", "screen",
-    "map", "chart", "diagram", "document", "signing", "testing", "research",
-    "experiment", "performance", "concert", "festival", "parade", "exhibition",
-    "premiere", "celebration", "celebrating", "victory", "winning",
+    "map", "chart", "diagram", "document", "signing", "signing", "testing",
+    "research", "experiment", "demonstration", "performance", "concert",
+    "festival", "parade", "exhibition", "premiere", "ceremony",
 }
 
 _GENERIC_TERMS = {
@@ -86,12 +85,12 @@ _GENERIC_TERMS = {
 }
 
 _FIELDS = (
-    ("factual_visual_intent", 6),
-    ("visual_context", 6),
-    ("visual_intent", 5),
-    ("factual_search_prompt", 3),
-    ("specific_search_prompt", 3),
-    ("factual_voiceover", 2),
+    ("factual_visual_intent", 5),
+    ("visual_context", 5),
+    ("visual_intent", 4),
+    ("factual_search_prompt", 2),
+    ("specific_search_prompt", 2),
+    ("factual_voiceover", 1),
     ("voiceover", 1),
 )
 
@@ -126,32 +125,13 @@ def _capitalized_phrases(text: str, subject_keys: set[str]) -> list[tuple[str, f
             if len(current) >= 2 and not all(item in subject_keys for item in keys):
                 results.append((phrase, 8.0 + min(4, len(current))))
             current = []
+        # A single capitalized token is too easily just a sentence start.
     if current and len(current) >= 2:
         results.append((" ".join(current), 8.0 + min(4, len(current))))
     return results
 
 
-def _location_phrases(text: str, subject_keys: set[str]) -> list[tuple[str, float]]:
-    """Recover compact place anchors that are often useful in image search."""
-    words = re.findall(r"[A-Za-z][A-Za-z0-9'/-]*", str(text or ""))
-    results: list[tuple[str, float]] = []
-    lowered = [key(word) for word in words]
-    for index, token in enumerate(lowered):
-        if token not in {"in", "at", "near", "outside", "inside", "from"}:
-            continue
-        collected = []
-        for candidate in words[index + 1:index + 5]:
-            if not re.match(r"^[A-Z][A-Za-z0-9'/-]*$", candidate):
-                break
-            if _blocked(candidate, subject_keys):
-                break
-            collected.append(candidate)
-        if collected:
-            results.append((" ".join(collected), 10.0 + min(3.0, len(collected))))
-    return results
-
-
-def _ranked_scene_terms(scene: dict, subject: str, limit: int = 6) -> list[str]:
+def _ranked_scene_terms(scene: dict, subject: str, limit: int = 5) -> list[str]:
     """Rank compact searchable anchors from the scene's actual evidence."""
     subject_keys = {key(word) for word in tokens(subject)}
     candidates: dict[str, tuple[float, str]] = {}
@@ -161,17 +141,10 @@ def _ranked_scene_terms(scene: dict, subject: str, limit: int = 6) -> list[str]:
         if not text:
             continue
 
+        # Named multi-word anchors are especially useful for image indexes.
         for phrase, score in _capitalized_phrases(text, subject_keys):
             normalized = key(phrase)
             if normalized:
-                value = score + field_weight
-                prior = candidates.get(normalized)
-                if prior is None or value > prior[0]:
-                    candidates[normalized] = (value, phrase)
-
-        for phrase, score in _location_phrases(text, subject_keys):
-            normalized = key(phrase)
-            if normalized and normalized not in subject_keys:
                 value = score + field_weight
                 prior = candidates.get(normalized)
                 if prior is None or value > prior[0]:
@@ -186,18 +159,20 @@ def _ranked_scene_terms(scene: dict, subject: str, limit: int = 6) -> list[str]:
             if token_key in _SEARCH_WEAK:
                 continue
             if token_key in _SEARCH_STRONG:
-                score += 7.0
+                score += 6.0
             elif re.search(r"(?:ing|tion|ment|ance|ence|al|ary|ism|ity)$", token_key):
                 score += 1.5
 
+            # A concrete adjacent pair is preferable to two unrelated terms.
             if index + 1 < len(raw_words):
                 nxt = raw_words[index + 1]
                 if not _blocked(nxt, subject_keys):
                     nxt_key = key(nxt)
-                    if nxt_key in _SEARCH_STRONG:
+                    if nxt_key in _SEARCH_WEAK:
+                        pass
+                    elif nxt_key in _SEARCH_STRONG:
                         phrase = f"{word} {nxt}"
-                        phrase_key = key(phrase)
-                        candidates[phrase_key] = (
+                        candidates[key(phrase)] = (
                             score + field_weight + 4.0,
                             phrase,
                         )
@@ -206,10 +181,7 @@ def _ranked_scene_terms(scene: dict, subject: str, limit: int = 6) -> list[str]:
             if prior is None or score > prior[0]:
                 candidates[token_key] = (score, word)
 
-    ranked = sorted(
-        candidates.values(),
-        key=lambda item: (-item[0], -len(item[1].split()), item[1].casefold()),
-    )
+    ranked = sorted(candidates.values(), key=lambda item: (-item[0], len(item[1].split()), item[1].casefold()))
     terms: list[str] = []
     seen = set()
     for _, term in ranked:
@@ -230,142 +202,62 @@ def _context_terms(text: str, subject: str, limit: int = 4) -> list[str]:
 
 def _scene_terms(scene: dict, subject: str) -> list[str]:
     """Return the strongest evidence-backed visual anchors for this slide."""
-    return _ranked_scene_terms(scene, subject, limit=6)
-
-
-def _query_clean(parts: list[str], max_words: int = 8) -> str:
-    """Build a compact query without damaging the locked factual identity."""
-    words = []
-    seen = set()
-    for part_index, part in enumerate(parts):
-        for word in tokens(part):
-            token_key = key(word)
-            if not token_key or token_key in seen:
-                continue
-            # The first part is the locked identity. Preserve its real function
-            # words (for example "The" in "The Weeknd") instead of applying the
-            # retrieval stopword filter to an entity name.
-            if token_key in GENERIC_NOISE:
-                continue
-            if part_index > 0 and token_key in STOPWORDS:
-                continue
-            seen.add(token_key)
-            words.append(word)
-            if len(words) >= max_words:
-                return " ".join(words)
-    return " ".join(words)
-
-
-def _query_contains_subject(query: str, subject: str) -> bool:
-    query_keys = {key(word) for word in tokens(query)}
-    subject_keys = {key(word) for word in tokens(subject)}
-    return bool(subject_keys) and subject_keys.issubset(query_keys)
-
-
-def _append_query(queries: list[str], subject: str, parts: list[str]) -> None:
-    query = _query_clean([subject, *parts], max_words=8)
-    if not query or not _query_contains_subject(query, subject):
-        return
-    normalized = key(query)
-    if normalized and normalized not in {key(item) for item in queries}:
-        queries.append(query)
-
-
-def _genre_strategy(genre: str) -> tuple[str, tuple[str, ...]]:
-    """Return the query construction mode plus safe visual descriptors."""
-    hints = tuple(str(item).strip() for item in genre_query_hints(genre) if str(item).strip())
-    if genre in {"PERSON_PORTRAIT", "ORG_BRANDING", "TEAM_BRANDING", "TROPHY_AWARD",
-                 "SCREENSHOT_UI", "CHART_GRAPH", "MAP", "DIAGRAM", "DOCUMENT",
-                 "MONEY_CURRENCY", "FLAG_SYMBOL", "HISTORICAL_ARTIFACT", "MEDIA_ARTWORK"}:
-        return "asset", hints
-    if genre in {"PERSON_ACTION", "TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH",
-                 "EVENT_SCENE", "ORG_HEADQUARTERS", "PRODUCT_LAUNCH", "PLACE_SCENE",
-                 "LANDMARK", "ARCHITECTURE", "VEHICLE", "ANIMAL", "FOOD",
-                 "SCIENCE_VISUAL", "SPACE_VISUAL", "NATURE_LANDSCAPE", "HISTORICAL_PHOTO",
-                 "GENERAL_PHOTO"}:
-        return "scene", hints
-    return "context", hints
-
-
-def _automatic_queries(scene: dict, subject: str, visual_genre: str) -> tuple[str, ...]:
-    """Create a small, evidence-backed set of useful reformulations."""
-    scene_terms = _scene_terms(scene, subject)
-    strategy, hints = _genre_strategy(visual_genre)
-    queries: list[str] = []
-
-    # Exact visual asset genres benefit from an explicit asset descriptor when
-    # the taxonomy provides one. This is safe because it describes the target
-    # visual form rather than inventing a fact.
-    if visual_genre == "PERSON_PORTRAIT":
-        # A portrait slide should stay a portrait search even when the narration
-        # mentions a related event. This keeps the identity precise and avoids
-        # turning a clean headshot request into an event-scene query.
-        _append_query(queries, subject, [*hints[:1]])
-    elif strategy == "asset":
-        _append_query(queries, subject, [*hints[:1], *scene_terms[:1]])
-        _append_query(queries, subject, [*hints[:1]])
-    elif strategy == "scene":
-        # For action/event slides, the first query should reflect the actual
-        # scene evidence instead of collapsing to identity-only retrieval.
-        _append_query(queries, subject, scene_terms[:2])
-        _append_query(queries, subject, [scene_terms[2], *hints[:1]] if len(scene_terms) >= 3 else list(hints[:1]))
-    else:
-        _append_query(queries, subject, scene_terms[:3])
-
-    # Every automatic query set ends with an identity fallback. This keeps
-    # retrieval resilient when a contextual query is too restrictive for a
-    # provider's index.
-    _append_query(queries, subject, [])
-
-    return tuple(queries[:3])
+    return _ranked_scene_terms(scene, subject, limit=4)
 
 
 def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSearchIntent:
-    """Resolve one factual identity and a compact adaptive retrieval strategy."""
+    """Resolve one factual identity and one compact retrieval query."""
     scene = scene if isinstance(scene, dict) else {}
-    manual = str(scene.get("manual_visual_query") or "").strip()
+    manual = _clean(scene.get("manual_visual_query", ""))
     base = dict(scene)
 
     if manual:
         scene_resolution = resolve_subject(base, video_title)
-        manual_resolution = resolve_subject(
-            {
-                "primary_entity": manual,
-                "visual_intent": scene.get("visual_intent", ""),
-                "visual_context": scene.get("visual_context", ""),
-            },
-            video_title,
-        )
-        visual_type = str(
-            manual_resolution.get("visual_type")
-            if manual_resolution.get("visual_type") != "GENERAL_CONTEXT"
-            else scene_resolution.get("visual_type")
-            or "GENERAL_CONTEXT"
-        ).upper()
         subject = manual
-        visual_genre = classify_visual_genre(
-            {
-                **scene,
-                "primary_entity": manual,
-                "visual_type": visual_type,
-                "specific_search_prompt": manual,
-            },
-            manual,
-            visual_type,
-        )
+        visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
         confidence = 1.0
         query = manual
         queries = [manual]
-        query_strategy = "manual-exact"
     else:
         resolution = resolve_subject(base, video_title)
         subject = clean_text(resolution.get("subject") or resolution.get("factual_entity", ""))
         visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
-        visual_genre = classify_visual_genre(scene, subject, visual_type)
         confidence = float(resolution.get("confidence") or 0.0)
-        queries = list(_automatic_queries(scene, subject, visual_genre))
-        query = queries[0] if queries else subject
-        query_strategy = f"automatic-{visual_genre.lower()}"
+        scene_terms = _scene_terms(scene, subject)
+
+        # Person portrait/press-conference retrieval is identity-sensitive:
+        # adding prompt/context terms can turn a precise person search into a
+        # different editorial scene search. Keep the locked person identity
+        # exact for this path. Person action scenes still use evidence-backed
+        # context so the same person can retrieve materially different frames.
+        evidence_text = " ".join(
+            _clean(scene.get(field, ""))
+            for field in (
+                "factual_visual_intent",
+                "visual_intent",
+                "visual_context",
+                "specific_search_prompt",
+            )
+        ).casefold()
+        exact_person_query = (
+            visual_type == "PERSON"
+            and (
+                "press conference" in evidence_text
+                or classify_visual_genre(scene, subject, visual_type) == "PERSON_PORTRAIT"
+            )
+        )
+
+        if exact_person_query:
+            query = subject
+            queries = [subject] if subject else []
+        else:
+            # Query order is intentional: factual identity first, then only the
+            # highest-value searchable anchors. Do not copy a natural-language
+            # visual prompt or invent an event/context that is absent from evidence.
+            query = _clean(" ".join([subject, *scene_terms[:3]]))
+            queries = [query] if query else []
+            if subject and query.casefold() != subject.casefold():
+                queries.append(subject)
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(" ".join(
@@ -381,15 +273,13 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
     return VisualSearchIntent(
         subject=subject,
         visual_type=visual_type,
-        visual_genre=visual_genre,
+        visual_genre=classify_visual_genre(scene, subject, visual_type),
         query=query,
         queries=tuple(queries),
         intent=intent,
         context=context,
         confidence=confidence,
         manual=bool(manual),
-        query_strategy=query_strategy,
     )
-
 
 __all__ = ["VisualSearchIntent", "resolve_visual_search_intent"]
