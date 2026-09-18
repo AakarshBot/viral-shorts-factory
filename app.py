@@ -141,6 +141,7 @@ def _init_state() -> None:
         "production_started": False,
         "final_qc": False,
         "upload_result": "",
+        "confirm_public_upload": False,
         "candidate_page": 0,
         "selected_channel": _channel_options()[0],
         "last_demo_results": {},
@@ -163,6 +164,7 @@ def reset_run() -> None:
         "production_started": False,
         "final_qc": False,
         "upload_result": "",
+        "confirm_public_upload": False,
         "candidate_page": 0,
         "final_title": "",
         "final_description": "",
@@ -532,8 +534,16 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
 
 
 def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
-    if snapshot.get("stage") != "qc" or not snapshot.get("completed"):
+    video_path = str(snapshot.get("video_path") or "").strip()
+    ready_for_upload = (
+        bool(snapshot.get("completed"))
+        and not bool(snapshot.get("thread_alive"))
+        and bool(video_path)
+    )
+    if not ready_for_upload:
         return
+
+    st.session_state.setdefault("confirm_public_upload", False)
 
     st.markdown("---")
     st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
@@ -550,7 +560,6 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     st.markdown("### Final video")
     st.success("The Short is rendered, branded and ready for your upload decision.", icon="✅")
 
-    video_path = str(snapshot.get("video_path") or "").strip()
     if video_path and os.path.isfile(video_path):
         st.video(video_path)
     else:
@@ -567,7 +576,10 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     comment = st.text_area("Creator comment", value=default_comment, height=110, key="final_comment")
 
     st.markdown("#### Choose upload visibility")
-    st.caption("Private keeps the video hidden. Public publishes it immediately and posts the creator comment below the video.")
+    st.info(
+        "Choose **Private** to keep the video hidden, or **Public** to publish it immediately. "
+        "Public uploads require a second confirmation before anything is published."
+    )
     public_col, private_col = st.columns(2)
     with public_col:
         if st.button("🌐 Upload Publicly", type="primary", use_container_width=True, key="upload_public"):
