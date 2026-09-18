@@ -12,7 +12,7 @@ import html
 import re
 
 VISUAL_RETRIEVAL_PLANNER_VERSION = "2026-09-18-v2-generic-semantic-resolver"
-MAX_VISUAL_SEARCH_QUERIES = 3
+MAX_VISUAL_SEARCH_QUERIES = 5
 MAX_QUERY_WORDS = 10
 
 VISUAL_TYPES = {
@@ -379,18 +379,9 @@ def _add(queries, subject, *parts):
 
 
 def build_deep_queries(seg, video_title="", visual_type=None):
-    category = _clean(seg.get("sport_or_topic_category", "")) if isinstance(seg, dict) else ""
-    brief = build_scene_visual_brief(seg, video_title, category)
-    subject = brief["subject"]
-    resolved_type = visual_type or brief["visual_type"]
-    queries = []
-    _add(queries, subject, subject)
-
-    domain = brief.get("domain", "")
-    if domain and domain.casefold() not in subject.casefold():
-        _add(queries, subject, subject, domain)
-
-    scene_action = brief.get("scene_action", "")
-    if scene_action:
-        _add(queries, subject, subject, scene_action)
-    return queries[:MAX_VISUAL_SEARCH_QUERIES], resolved_type
+    """Compatibility entry point delegated to the canonical visual intent."""
+    if not isinstance(seg, dict):
+        return [], visual_type or "GENERAL_CONTEXT"
+    from visual_search_intent_runtime import resolve_visual_search_intent
+    intent = resolve_visual_search_intent(seg, video_title)
+    return list(intent.queries), (visual_type or intent.visual_type or "GENERAL_CONTEXT")
