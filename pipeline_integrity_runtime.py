@@ -7,6 +7,7 @@ and refuses to manufacture emergency narration when source material is too thin.
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 import subprocess
@@ -249,21 +250,55 @@ def _wrap_script_writer(bot):
         bot.run_robot.__globals__["write_script"] = guarded_write_script
 
 
+def _prepare_audio_handoff(script_data):
+    """Normalize the one known source-grounded scene-count repair handoff."""
+    if not isinstance(script_data, dict):
+        return script_data
+    if script_data.get("authoritative_narration") is True:
+        return script_data
+    if script_data.get("fallback_reason") != "scene_count_contract":
+        return script_data
+    candidate = dict(script_data)
+    scenes = candidate.get("script")
+    if not isinstance(scenes, list) or not scenes:
+        return script_data
+    normalized = []
+    for index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict):
+            return script_data
+        voiceover = clean_narration(scene.get("voiceover", ""))
+        if not voiceover or is_noise(voiceover):
+            return script_data
+        copy = dict(scene)
+        copy["voiceover"] = voiceover
+        copy["scene_id"] = index
+        copy["narration_source"] = "validated_script"
+        normalized.append(copy)
+    candidate["script"] = normalized
+    candidate["authoritative_narration"] = True
+    candidate["integrity_version"] = VERSION
+    return candidate
+
+
 def _wrap_audio(bot):
     current = getattr(bot, "generate_voiceover_and_timestamps", None)
     if not callable(current) or getattr(current, "_pipeline_script_source_bound", False):
         return
 
     async def script_bound_audio(script_data, language_cfg):
+        script_data = _prepare_audio_handoff(script_data)
         scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+        if not isinstance(script_data, dict) or not script_data.get("authoritative_narration") is True:
+            raise ValueError("Audio refused: narration must come from the validated generated script.")
         if not scenes:
             raise ValueError("Audio refused: authoritative script contains no scenes.")
         for index, scene in enumerate(scenes, 1):
+            if not isinstance(scene, dict) or scene.get("narration_source") != "validated_script":
+                raise ValueError(f"Audio refused: scene {index} is not sourced from the validated script.")
             text = clean_narration(scene.get("voiceover", ""))
             if not text or is_noise(text):
                 raise ValueError(f"Audio refused: scene {index} has invalid authoritative narration.")
             scene["voiceover"] = text
-            scene["narration_source"] = "validated_script"
             scene["scene_id"] = index
         script_data["authoritative_narration"] = True
         return await current(script_data, language_cfg)
