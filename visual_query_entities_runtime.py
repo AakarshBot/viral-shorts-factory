@@ -44,14 +44,16 @@ def _install_runtime_query_guard(visual_runtime_module):
         if visual_intent.manual:
             print(
                 f"   [Visual Semantic Guard] MANUAL subject='{visual_intent.subject}' "
-                f"type={visual_intent.visual_type} genre={visual_intent.visual_genre} query='{visual_intent.query}'",
+                f"type={visual_intent.visual_type} genre={visual_intent.visual_genre} "
+                f"query='{visual_intent.query}' strategy={visual_intent.query_strategy}",
                 flush=True,
             )
         else:
             print(
                 f"   [Visual Semantic Guard] subject='{visual_intent.subject}' "
-                f"type={visual_intent.visual_type} genre={visual_intent.visual_genre} query='{visual_intent.query}' "
-                f"confidence={visual_intent.confidence:.2f}",
+                f"type={visual_intent.visual_type} genre={visual_intent.visual_genre} "
+                f"query='{visual_intent.query}' strategy={visual_intent.query_strategy} "
+                f"candidates={len(visual_intent.queries)} confidence={visual_intent.confidence:.2f}",
                 flush=True,
             )
 
@@ -194,10 +196,12 @@ def search_slide_visual(
     candidate["sport_or_topic_category"] = category or candidate.get("sport_or_topic_category", "")
     print(
         f"   [Visual Search] Factual subject='{visual_intent.subject}' | "
-        f"query='{visual_intent.query}' | type={visual_intent.visual_type} "
+        f"query='{visual_intent.query}' | strategy={visual_intent.query_strategy} "
+        f"| candidates={len(visual_intent.queries)} | type={visual_intent.visual_type} "
         f"| genre={visual_intent.visual_genre}",
         flush=True,
     )
+    candidate["visual_query_strategy"] = visual_intent.query_strategy
 
     result = visual_runtime_module._relevant_asset(
         bot, candidate, category, used_urls, used_hashes, video_title
