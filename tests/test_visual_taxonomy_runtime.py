@@ -75,6 +75,12 @@ def test_visual_taxonomy_resolves_specific_assets_before_broad_roles():
         "PERSON",
     ) == "PERSON_PORTRAIT"
 
+    assert classify_visual_genre(
+        {"primary_entity": "OpenAI", "visual_intent": "company product launch"},
+        "OpenAI",
+        "ORGANIZATION",
+    ) == "EVENT_SCENE"
+
 
 def test_visual_taxonomy_distinguishes_real_photo_and_explanatory_visuals():
     assert classify_visual_genre(
