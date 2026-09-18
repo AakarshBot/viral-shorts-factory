@@ -438,101 +438,6 @@ def _patch_top5_card(bot):
     namespace["render_top5_card"] = premium_top5
 
 
-def _premium_branded_finish(bot, video_path: str) -> str:
-    """Apply the final premium glass branding layer without changing media geometry."""
-    try:
-        import branding_runtime
-        probe = branding_runtime._probe
-        artifact_qc = branding_runtime._artifact_qc
-        assets = branding_runtime._assets
-    except Exception as exc:
-        print(f"   [Branding Patch] Premium finish unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return video_path
-
-    if not video_path or not os.path.isfile(video_path):
-        return video_path
-
-    source_w, source_h, source_duration, source_audio_count = probe(video_path)
-    valid, reason = artifact_qc(
-        video_path,
-        expected_width=source_w or None,
-        expected_height=source_h or None,
-        expected_duration=source_duration or None,
-        expected_audio_count=source_audio_count or None,
-    )
-    if not valid:
-        raise RuntimeError(f"Final render QC failed before premium branding: {reason}")
-
-    logo = assets(bot)
-    glass_logo = create_glossy_logo_watermark(logo, size=132) if logo and logo.exists() else None
-    if glass_logo is None:
-        return video_path
-
-    temp_paths: list[str] = []
-    work_dir = os.path.dirname(video_path) or None
-    logo_asset = None
-    if glass_logo is not None:
-        logo_asset = os.path.join(work_dir, "premium_glass_logo.png")
-        glass_logo.save(logo_asset, "PNG")
-        temp_paths.append(logo_asset)
-
-    output = str(Path(video_path).with_name(Path(video_path).stem + "_premium.mp4"))
-    filters = [
-        "[0:v]drawbox=x=10:y=10:w=iw-20:h=ih-20:color=0x40C4FF@0.58:t=3[frame1]",
-        "[frame1]drawbox=x=16:y=16:w=iw-32:h=ih-32:color=white@0.16:t=1[frame2]",
-    ]
-    last = "[frame2]"
-    inputs = ["-i", video_path]
-
-    if logo_asset:
-        inputs += ["-loop", "1", "-i", logo_asset]
-        filters += [f"[1:v]format=rgba[badge];{last}[badge]overlay=W-w-28:24:eof_action=repeat:shortest=0:format=auto[finalv]"]
-        last = "[finalv]"
-
-    cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", last, "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", "-t", f"{source_duration:.3f}", output]
-
-    try:
-        completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=240)
-        if completed.returncode != 0 or not os.path.isfile(output):
-            raise RuntimeError(f"FFmpeg premium branding finish failed: {completed.stderr[-800:]}")
-        out_w, out_h, out_duration, out_audio_count = probe(output)
-        valid, reason = artifact_qc(
-            output,
-            expected_width=source_w,
-            expected_height=source_h,
-            expected_duration=source_duration,
-            expected_audio_count=source_audio_count,
-        )
-        if not valid or (out_w, out_h) != (source_w, source_h) or abs(out_duration - source_duration) > 0.15 or out_audio_count != source_audio_count:
-            try:
-                os.remove(output)
-            except OSError:
-                pass
-            raise RuntimeError(f"Final premium branding QC failed: {reason}")
-        os.replace(output, video_path)
-        print(
-            f"   [Branding] Premium glass finish applied: frame + glass logo; "
-            f"{source_w}x{source_h}, {source_duration:.2f}s, audio_streams={source_audio_count}.",
-            flush=True,
-        )
-        return video_path
-    finally:
-        for candidate in temp_paths:
-            try:
-                os.remove(candidate)
-            except OSError:
-                pass
-
-
-def _patch_premium_branding(bot):
-    try:
-        import branding_runtime
-        branding_runtime.apply_branded_finish = lambda active_bot, video_path: _premium_branded_finish(active_bot, video_path)
-        branding_runtime.BRANDING_VERSION = "2026-09-18-premium-glass-v1"
-    except Exception as exc:
-        print(f"   [Branding Patch] Could not install premium final finish: {type(exc).__name__}: {exc}", flush=True)
-
-
 def patch_subtitle_pipeline(bot):
     if getattr(bot, "_subtitle_pipeline_patch_installed", False):
         return bot
@@ -542,14 +447,11 @@ def patch_subtitle_pipeline(bot):
         return bot
 
     _patch_top5_card(bot)
-    # Do not run the legacy endpoint subtitle pass: it creates a second caption layer
-    # with an opaque subtitle box on the hook/outro. The normal compositor owns subtitles.
-    _patch_premium_branding(bot)
 
     namespace["generate_karaoke_clip"] = generate_readable_karaoke_clip
     namespace["create_glossy_logo_watermark"] = create_glossy_logo_watermark
     bot.generate_karaoke_clip = generate_readable_karaoke_clip
     bot.create_glossy_logo_watermark = create_glossy_logo_watermark
     bot._subtitle_pipeline_patch_installed = True
-    print("   [Subtitle Patch] Clean glass captions + matching Top-5 cards + premium glass branding installed.", flush=True)
+    print("   [Subtitle Patch] Clean glass captions + matching Top-5 cards installed.", flush=True)
     return bot
