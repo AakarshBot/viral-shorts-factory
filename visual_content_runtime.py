@@ -313,6 +313,7 @@ def patch_content_first_visuals(bot):
                 "ai_generated": used_ai,
                 "source_type": source_type,
                 "visual_type": visual_type,
+                "visual_genre": seg.get("visual_genre", "GENERAL_CONTEXT"),
                 "visual_verified": scene_verified,
                 "visual_rescue_reason": seg.get("visual_rescue_reason", ""),
                 "visual_fallback_reason": "",
