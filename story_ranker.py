@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from event_discovery_runtime import discover_event_pool, cluster_news_events
+from event_discovery_runtime import discover_event_pool, cluster_news_events, fetch_gdelt_articles
 
 
 SAFETY_BLOCKLIST = {
@@ -818,6 +818,116 @@ def _candidate_reason(story):
 
 
 
+DISCOVERY_LANE_QUERIES = {
+    "sports_stories_of_day": (
+        "India cricket BCCI squad selection injury player",
+        "ICC cricket Test ODI T20 record milestone",
+        "women cricket domestic cricket emerging players",
+        "cricket league franchise business sponsorship controversy",
+    ),
+}
+
+
+def _discovery_lane_queries(genre_key, base_query=""):
+    """Return complementary free discovery lanes for the selected newsroom section."""
+    key = str(genre_key or "").strip()
+    if key not in DISCOVERY_LANE_QUERIES:
+        return []
+    base = _clean(base_query).lower()
+    if base and not any(token in base for token in ("cricket", "icc", "bcci", "t20", "odi", "ipl", "psl")):
+        return []
+    return list(DISCOVERY_LANE_QUERIES[key])
+
+
+def _topic_entities(story):
+    """Return lightweight subject/entity tokens for diversity-aware selection."""
+    generic = {
+        "india", "indian", "cricket", "icc", "bcci", "pcb", "t20", "odi", "test",
+        "ipl", "psl", "team", "teams", "player", "players", "match", "matches",
+        "series", "tournament", "league", "sports", "sport", "news", "latest",
+        "today", "world", "global", "official",
+    }
+    entities = set()
+    for value in story.get("event_entities") or []:
+        entities.update(token for token in _tokens(value) if token not in generic)
+    if not entities:
+        entities = {
+            token for token in _tokens(story.get("title", ""))
+            if token not in generic
+        }
+    return entities
+
+
+def _story_theme_similarity(left, right):
+    """Estimate whether two candidates are materially the same editorial subject."""
+    title_similarity = _topic_overlap(
+        left.get("event_search_text") or left.get("title", ""),
+        right.get("event_search_text") or right.get("title", ""),
+    )
+    left_entities = _topic_entities(left)
+    right_entities = _topic_entities(right)
+    if left_entities and right_entities:
+        entity_similarity = len(left_entities & right_entities) / max(
+            1, len(left_entities | right_entities)
+        )
+    else:
+        entity_similarity = 0.0
+
+    left_actions = set(left.get("event_actions") or [])
+    right_actions = set(right.get("event_actions") or [])
+    action_similarity = 1.0 if left_actions and right_actions and left_actions & right_actions else 0.0
+
+    return round(
+        min(1.0, title_similarity * 0.60 + entity_similarity * 0.30 + action_similarity * 0.10),
+        4,
+    )
+
+
+def diversity_rerank(stories, max_items=28):
+    """Select a high-quality but materially diverse dashboard portfolio."""
+    candidates = [item for item in (stories or []) if isinstance(item, dict)]
+    candidates.sort(
+        key=lambda item: (
+            _safe_float(item.get("candidate_score")) or -9999.0,
+            _safe_float(item.get("freshness_score")) or 0.0,
+        ),
+        reverse=True,
+    )
+
+    selected = []
+    remaining = list(candidates)
+    while remaining and len(selected) < max(0, int(max_items or 0)):
+        best_index = 0
+        best_adjusted = -999999.0
+
+        for index, candidate in enumerate(remaining):
+            base_score = _safe_float(candidate.get("candidate_score")) or -9999.0
+            max_similarity = max(
+                (_story_theme_similarity(candidate, old) for old in selected),
+                default=0.0,
+            )
+            novelty_bonus = 1.5 if selected and max_similarity < 0.20 else 0.0
+            repetition_penalty = max_similarity * 10.0
+            adjusted = base_score + novelty_bonus - repetition_penalty
+
+            if adjusted > best_adjusted:
+                best_adjusted = adjusted
+                best_index = index
+
+        winner = remaining.pop(best_index)
+        winner["diversity_max_similarity"] = round(
+            max(
+                (_story_theme_similarity(winner, old) for old in selected),
+                default=0.0,
+            ),
+            3,
+        )
+        winner["discovery_adjusted_score"] = round(best_adjusted, 3)
+        selected.append(winner)
+
+    return selected
+
+
 def _adaptive_query_candidates(base_query, events, max_queries=2):
     """Return underrepresented OR-clauses when the current event pool is thin."""
     if not base_query or max_queries <= 0:
@@ -840,7 +950,7 @@ def _adaptive_query_candidates(base_query, events, max_queries=2):
     return [clause for coverage, _, clause in scored[:max_queries] if coverage < 0.75]
 
 
-def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False):
+def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False, discover_lanes=True):
     """Collect a broad article pool, then collapse it into distinct event candidates."""
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
@@ -879,6 +989,23 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         max_gdelt_records=75,
     )
     events = event_pool["events"]
+
+    lane_queries = _discovery_lane_queries(genre_key, base_query) if discover_lanes else []
+    lane_article_count = 0
+    for lane_query in lane_queries:
+        extra = fetch_gdelt_articles(
+            lane_query,
+            timespan="48h",
+            max_records=50,
+        )
+        if not extra:
+            continue
+        raw.extend(extra)
+        lane_article_count += len(extra)
+
+    if lane_article_count:
+        compact = compact_items(raw)
+        events = cluster_news_events(compact)
     # Preserve the initial GDELT intake across adaptive expansions. Re-running
     # the same base GDELT query for every refinement adds duplicate network work
     # without adding new base-query evidence.
@@ -946,6 +1073,67 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
         flush=True,
     )
     return ranked[:3]
+
+
+def rank_discovery_candidates(
+    stories,
+    conn=None,
+    target_category="",
+    target_format="",
+    target_language="",
+    social_titles=None,
+    ai_cricket=False,
+    max_candidates=28,
+):
+    """Build the dashboard pool: score broadly, then rerank for diversity."""
+    stories = list(stories or [])
+    rows = _load_history(conn)
+    used_topics = _load_used_topics(conn)
+    social_titles = social_titles or []
+
+    stage80 = _cheap_filter(
+        stories,
+        max_items=80,
+        max_age_hours=24 if ai_cricket else 48,
+    )
+    stage60 = _deduplicate_stage(stage80, max_items=60)
+    stage45 = _fact_source_stage(stage60, max_items=45)
+    stage40 = _originality_stage(stage45, used_topics, max_items=40)
+
+    ranked = [
+        _editorial_score(
+            item,
+            rows,
+            target_category,
+            target_format,
+            target_language,
+            social_titles,
+            ai_cricket,
+        )
+        for item in stage40
+    ]
+    ranked.sort(
+        key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0,
+        reverse=True,
+    )
+
+    selected = diversity_rerank(ranked, max_items=max_candidates)
+    for story in selected:
+        story["discovery_reason"] = _candidate_reason(story)
+
+    print(
+        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
+        % (
+            len(stories),
+            len(stage80),
+            len(stage60),
+            len(stage45),
+            len(stage40),
+            len(selected),
+        ),
+        flush=True,
+    )
+    return selected
 
 
 def patch_story_selection(bot):
