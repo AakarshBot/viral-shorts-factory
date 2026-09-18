@@ -68,7 +68,7 @@ def test_top5_card_uses_same_glass_language():
     assert rendered.getpixel((540, 600))[3] == 255
 
 
-def test_compile_patch_enables_deep_dive_scene_one_and_removes_duplicate_logo():
+def test_compile_patch_keeps_deep_dive_scene_one_clean_and_removes_duplicate_logo():
     def compile_video():
         idx = 0
         is_outro_scene = False
@@ -105,10 +105,9 @@ def test_compile_patch_enables_deep_dive_scene_one_and_removes_duplicate_logo():
     bot.run_robot.__globals__["create_glossy_logo_watermark"] = fail_if_logo_called
 
     assert _patch_deep_dive_subtitle_condition(bot) is True
-    assert bot.compile_video() == "subtitle-enabled"
+    assert bot.compile_video() == "not-enabled"
 
     bot.run_robot.__globals__["format_mode"] = "top5"
     assert bot.compile_video() == "not-enabled"
 
-    assert getattr(bot.compile_video, "_deep_dive_subtitles_bound", False) is True
     assert getattr(bot.compile_video, "_premium_compile_logo_bound", False) is True
