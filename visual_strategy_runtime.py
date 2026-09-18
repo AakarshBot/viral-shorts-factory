@@ -92,7 +92,7 @@ def build_deep_queries(scene, video_title="", visual_type=None):
     return list(intent.queries), (visual_type or intent.visual_type or "GENERAL_CONTEXT")
 
 
-build_deep_queries._authoritative_locked_subject_planner = True
+build_deep_queries._authoritative_bounded_query_planner = True
 
 
 def _exact_slide_subject(scene):
