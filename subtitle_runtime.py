@@ -666,19 +666,13 @@ def _premium_branded_finish(bot, video_path: str) -> str:
     if not valid:
         raise RuntimeError(f"Final render QC failed before premium branding: {reason}")
 
-    logo, _legacy_overlay = assets(bot)
+    logo = assets(bot)
     glass_logo = create_glossy_logo_watermark(logo, size=132) if logo and logo.exists() else None
     if glass_logo is None:
         return video_path
 
     temp_paths: list[str] = []
     work_dir = os.path.dirname(video_path) or None
-    # The legacy overlay.png is intentionally not rendered here. It is a
-    # composite layer from the old branding system and was the second branding
-    # layer responsible for the duplicate-overlay appearance. The final finish
-    # owns the frame and channel logo exactly once.
-    overlay_asset = None
-
     logo_asset = None
     if glass_logo is not None:
         logo_asset = os.path.join(work_dir, "premium_glass_logo.png")
