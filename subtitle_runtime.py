@@ -433,6 +433,35 @@ def _patch_scene_overlay(bot):
     if current is None or getattr(current, "_soft_frame_overlay_bound", False):
         return bool(current)
 
+    try:
+        source = inspect.getsource(current)
+        marker = 'elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:'
+        if marker in source:
+            # The first slide must use the normal scene treatment. Top-5 remains special.
+            source = source.replace(
+                marker,
+                'elif format_mode == "top5" and idx == 0:',
+                1,
+            )
+            # This branch is retained only as a harmless fall-through guard; the normal
+            # scene branch below is what regular/trending/tech-review first slides use.
+            source = source.replace(
+                'render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)',
+                'render_top5_card(bg_img, 6 - idx, 5, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)',
+                1,
+            )
+            patched_source = textwrap.dedent(source)
+            exec(patched_source, namespace)
+            patched = namespace.get("process_visuals_async")
+            if callable(patched):
+                patched._soft_frame_overlay_bound = True
+                namespace["process_visuals_async"] = patched
+                bot.process_visuals_async = patched
+                print("   [Overlay Patch] Removed the opaque first-slide hook card for all non-Top-5 formats.", flush=True)
+                return True
+    except Exception as exc:
+        print(f"   [Overlay Patch] Could not remove first-slide hook card: {type(exc).__name__}: {exc}", flush=True)
+
     async def polished_process_visuals(*args, **kwargs):
         packages = await current(*args, **kwargs)
         changed = 0
@@ -481,7 +510,7 @@ def _patch_deep_dive_subtitle_condition(bot):
         source = inspect.getsource(current)
         changes = []
         marker = "if not is_outro_scene and not is_hook_scene and idx < len(word_timings):"
-        replacement = "if not is_outro_scene and idx < len(word_timings):"
+        replacement = "if format_mode != \"top5\" and not is_outro_scene and idx < len(word_timings):"
         if marker in source:
             source = source.replace(marker, replacement, 1)
             changes.append("Deep Dive scene 1 subtitles enabled")
@@ -755,7 +784,8 @@ def patch_subtitle_pipeline(bot):
     _patch_top5_card(bot)
     _patch_scene_overlay(bot)
     _patch_deep_dive_subtitle_condition(bot)
-    _patch_endpoint_subtitles()
+    # Do not run the legacy endpoint subtitle pass: it creates a second caption layer
+    # with an opaque subtitle box on the hook/outro. The normal compositor owns subtitles.
     _patch_premium_branding(bot)
 
     namespace["generate_karaoke_clip"] = generate_readable_karaoke_clip
