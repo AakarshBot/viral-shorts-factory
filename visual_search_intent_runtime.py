@@ -21,7 +21,7 @@ from visual_semantic_guard_runtime import (
     resolve_subject,
     tokens,
 )
-from visual_taxonomy_runtime import classify_visual_genre, genre_query_hints
+from visual_taxonomy_runtime import classify_visual_genre
 
 
 @dataclass(frozen=True)
@@ -150,37 +150,5 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         manual=bool(manual),
     )
 
-def reformulate_visual_query(intent: VisualSearchIntent, reason: str) -> str:
-    """Return at most one compact, evidence-based refinement.
 
-    This is deliberately not a generic query ladder. The fallback may only add
-    a few concrete terms already present in the scene evidence, and manual
-    queries never reach this path.
-    """
-    subject = _clean(intent.subject)
-    reason = _clean(reason).casefold()
-    if not subject or intent.manual:
-        return ""
-
-    if "no candidate" in reason or "no candidates" in reason:
-        terms = _context_terms(intent.context, subject)
-        if terms:
-            query = _clean(" ".join([subject, *terms]))
-            if query.casefold() != intent.query.casefold():
-                return query[:240]
-
-    if "mismatch" in reason or "ambiguous" in reason or "unverified" in reason:
-        # Genre hints are used only when they are short, generic visual
-        # descriptors and do not invent a factual identity.
-        hints = genre_query_hints(intent.visual_genre)
-        if hints:
-            terms = _context_terms(" ".join(hints), subject)
-            if terms:
-                query = _clean(" ".join([subject, *terms[:2]]))
-                if query.casefold() != intent.query.casefold():
-                    return query[:240]
-
-    return ""
-
-
-__all__ = ["VisualSearchIntent", "resolve_visual_search_intent", "reformulate_visual_query"]
+__all__ = ["VisualSearchIntent", "resolve_visual_search_intent"]
