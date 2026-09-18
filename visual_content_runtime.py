@@ -186,6 +186,7 @@ def patch_content_first_visuals(bot):
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import cover_crop, install as install_visual_quality
         from visual_retrieval_runtime import make_visual_rescue
+        from visual_entity_grounding_runtime import apply_grounding
     except Exception as exc:
         print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
         return bot
@@ -234,6 +235,30 @@ def patch_content_first_visuals(bot):
                     scenes[scene_index - 1]["manual_visual_query_index"] = assignment.get("query_index", 0)
         elif not manual_queries:
             print("   [Manual Visual Queries] No manual queries supplied; using existing Full AI visual flow.", flush=True)
+        # Ground automatic visual identities against the selected story evidence.
+        # Manual queries remain untouched and authoritative.
+        for scene_index, scene in enumerate(scenes, 1):
+            grounded = apply_grounding(scene, script_data)
+            scenes[scene_index - 1] = grounded
+            original_entity = str(grounded.get('visual_entity_original') or '').strip()
+            current_entity = str(grounded.get('primary_entity') or '').strip()
+            reason = str(grounded.get('visual_entity_grounding_reason') or '').strip()
+            if grounded.get('visual_entity_grounding') == 'MANUAL_LOCK':
+                print(
+                    f"   [Visual Grounding] Scene {scene_index} | MANUAL_LOCK | query='{grounded.get('manual_visual_query', '')}'",
+                    flush=True,
+                )
+            elif original_entity and original_entity != current_entity:
+                print(
+                    f"   [Visual Grounding] Scene {scene_index} | REPAIRED | '{original_entity}' -> '{current_entity}' | {reason}",
+                    flush=True,
+                )
+            elif not grounded.get('visual_entity_grounded', False):
+                print(
+                    f"   [Visual Grounding] Scene {scene_index} | UNGROUNDED | entity='{current_entity}' | {reason}",
+                    flush=True,
+                )
+
         ai_count = 0
         verified_count = 0
         rescue_count = 0
