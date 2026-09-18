@@ -1,25 +1,24 @@
 import inspect
 
-from PIL import Image
+import numpy as np
 
 from dashboard_runtime import upload_ready_for_manual_decision
 from pipeline_integrity_runtime import _wrap_compile
-from visual_content_runtime import _render_scene_overlay
+from branding_runtime import build_scene_branding_overlays
 
 
-def test_scene_overlay_contains_no_editorial_text_or_cards():
-    image = Image.new("RGBA", (108, 192), (20, 30, 40, 255))
-    rendered = _render_scene_overlay(
+def test_canonical_branding_overlays_are_rgba_and_scene_sized():
+    overlays = build_scene_branding_overlays(
         None,
-        image,
-        scene_number=1,
-        total_scenes=6,
-        visual_type="GENERAL_CONTEXT",
-        source_type="Reuters",
-        voiceover="A factual sentence with 42 percent.",
+        108,
+        192,
+        source_credit="Reuters",
     )
-    assert rendered.size == image.size
-    assert rendered.tobytes() == image.tobytes()
+
+    assert len(overlays) == 2
+    assert all(isinstance(overlay, np.ndarray) for overlay in overlays)
+    assert all(overlay.shape == (192, 108, 4) for overlay in overlays)
+    assert all(overlay.dtype == np.uint8 for overlay in overlays)
 
 
 def test_pipeline_integrity_no_longer_has_endpoint_subtitle_layer():
