@@ -38,10 +38,15 @@ def reassert_live_bindings(bot) -> None:
     try:
         from autopilot_runtime import select_auto_pilot
 
-        def authoritative_auto_pilot(conn):
-            return select_auto_pilot(bot, conn)
+        existing = getattr(bot, "auto_pilot_selection", None)
+        if callable(existing) and getattr(existing, "_authoritative_autopilot", False):
+            authoritative_auto_pilot = existing
+        else:
+            def authoritative_auto_pilot(conn):
+                return select_auto_pilot(bot, conn)
 
-        authoritative_auto_pilot._authoritative_autopilot = True
+            authoritative_auto_pilot._authoritative_autopilot = True
+
         bot.auto_pilot_selection = authoritative_auto_pilot
         if isinstance(namespace, dict):
             namespace["auto_pilot_selection"] = authoritative_auto_pilot
