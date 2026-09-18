@@ -64,7 +64,6 @@ SURFACE_MAP: dict[str, str] = {
     "create_glossy_logo_watermark": "Live Factory",
     "generate_karaoke_clip": "Live Factory",
     "compile_video": "Live Factory",
-    "generate_thumbnail_frame": "Live Factory",
     "upload_to_youtube": "Live Factory",
     "font_preflight_check": "Live Factory",
     "run_robot": "Live Factory",
