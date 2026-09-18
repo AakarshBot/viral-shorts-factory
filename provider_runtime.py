@@ -73,6 +73,13 @@ def _local_quality_gate(img_data, search_prompt="", video_title=""):
         ratio = width / max(1, height)
         if ratio > 2.5 or ratio < 0.4:
             return False
+        # Preserve the original local blur rejection without reintroducing
+        # a second semantic/Gemini quality owner.
+        import cv2
+        import numpy as np
+        cv_img = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)
+        if cv2.Laplacian(cv_img, cv2.CV_64F).var() < 25.0:
+            return False
         return True
     except Exception:
         return False
