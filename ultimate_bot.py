@@ -1745,7 +1745,7 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             branding_layers = [
                 ImageClip(rgba).with_duration(scene_duration)
                 for rgba in build_scene_branding_overlays(
-                    globals().get("bot", None) or globals().get("ultimate_bot", None),
+                    None,
                     width,
                     height,
                     source_credit,
