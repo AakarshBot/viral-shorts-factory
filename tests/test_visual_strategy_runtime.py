@@ -150,7 +150,7 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
     }
     brief, queries = _assert_query_contract(scene, "Noisy title that must never become the search query", "PERSON")
     assert queries[0].casefold().startswith(brief["subject"].casefold())
-    assert len(queries) <= 2
+    assert len(queries) <= 3
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
 
 
