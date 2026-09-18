@@ -114,16 +114,11 @@ def _local_visual_sanity(img_bytes):
 
 
 def _verification_tier(seg, visual_type, source):
-    intent = str(seg.get("visual_intent", "")).strip().lower()
-    source_l = str(source or "").strip().lower()
-    if visual_type == "PERSON" and source_l in {"wikipedia", "commons"}:
-        return "STRICT(person)"
-    if intent == "conceptual":
-        return "SKIPPED(conceptual)"
-    event_text = f"{intent} {visual_type}".lower()
-    if visual_type == "EVENT" or any(x in event_text for x in ("news_event", "stadium_event", "news event", "stadium event", "ceremony", "match", "red carpet", "press conference")):
-        return "GENRE-PLAUSIBLE(event)"
-    return "STRICT"
+    """Compatibility boundary to the single authoritative verification tier."""
+    from visual_query_entities_runtime import _install_runtime_query_guard
+    # Resolve the canonical guard on this module and use the installed tier.
+    _install_runtime_query_guard(__import__(__name__))
+    return __import__(__name__)._verification_tier(seg, visual_type, source)
 
 
 def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="STRICT", visual_type=""):
@@ -168,15 +163,12 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
 
 
 def _build_search_variants(seg, video_title=""):
-    try:
-        from visual_strategy_runtime import build_deep_queries
-        queries, visual_type = build_deep_queries(seg, video_title)
-        return queries[:VISUAL_MAX_SEARCH_QUERIES], visual_type
-    except Exception as exc:
-        print(f"   [Visual Strategy] fallback query builder: {exc}", flush=True)
-        entity, intent, prompt, voice, title = _entity_context(seg, video_title)
-        values = [prompt, f"{entity} {intent}", f"{entity} {title}", f"{entity} {voice[:180]}"]
-        return [re.sub(r"\s+", " ", v).strip() for v in values if str(v).strip()], "GENERAL_CONTEXT"
+    """Compatibility boundary to the canonical exact-first search intent."""
+    from visual_search_intent_runtime import resolve_visual_search_intent
+    intent = resolve_visual_search_intent(seg, video_title)
+    if not intent.subject or not intent.query:
+        raise RuntimeError("No grounded visual search intent could be resolved from the scene.")
+    return [intent.query], intent.visual_type
 
 
 def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETCH_TIMEOUT_SECONDS):
@@ -197,127 +189,16 @@ def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETC
     return result["value"]
 
 
-def _source_plan(bot, visual_type, category):
-    editorial = any(k in f"{category} {visual_type}".lower() for k in ("sport", "football", "cricket", "news", "politics", "entertainment", "movie", "event"))
-    plan = []
-    if visual_type == "PERSON":
-        plan += [("Wikipedia", getattr(bot, "fetch_wiki_person_image", None)), ("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
-    elif visual_type in {"EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
-        plan += [("Commons", getattr(bot, "fetch_wikimedia_commons", None))]
-    if editorial:
-        plan += [("DDG", getattr(bot, "fetch_duckduckgo", None))]
-    plan += [("Pexels", getattr(bot, "fetch_pexels", None)), ("Unsplash", getattr(bot, "fetch_unsplash", None))]
-    if not editorial:
-        plan += [("DDG", getattr(bot, "fetch_duckduckgo", None))]
-    return [(name, fn) for name, fn in plan if callable(fn)]
+def _source_plan(bot, visual_type, category=""):
+    """Compatibility boundary to the authoritative provider plan."""
+    from visual_provider_boundary_runtime import build_raw_source_plan
+    return build_raw_source_plan(visual_type, category)
 
 
 def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
-    entity = str(seg.get("primary_entity", "")).strip()
-    if not entity or entity.lower() in {"none", "unknown", "n/a"}:
-        raise RuntimeError("Visual pipeline requires a specific primary_entity for every scene.")
-    queries, visual_type = _build_search_variants(seg, video_title)
-    intent, prompt, voice = str(seg.get("visual_intent", "")), str(seg.get("specific_search_prompt", "")), str(seg.get("voiceover", ""))
-    context = _context_fingerprint(intent, prompt, voice, video_title)
-    print(f"   [Visual Strategy] entity='{entity}' type={visual_type} deep_searches={len(queries)}", flush=True)
-
-    cached_img, cache_path = get_cached_asset(bot, entity, visual_type, context)
-    if cached_img is not None:
-        cached_bytes = io.BytesIO(); cached_img.save(cached_bytes, format="JPEG", quality=95); cached_data = cached_bytes.getvalue()
-        try:
-            img_hash = bot.get_image_hash(cached_data)
-        except Exception:
-            img_hash = hashlib.sha256(cached_data).hexdigest()
-        if img_hash not in used_hashes:
-            used_hashes.add(img_hash)
-            print(f"   [Visual Cache] VERIFIED context-specific cache hit | entity='{entity}' type={visual_type} context={context} | Gemini calls=0", flush=True)
-            return cached_img, False, "cached"
-
-    best = None
-    verification_attempts = 0
-    hard_rejections = 0
-
-    def try_bytes(data, source, query):
-        nonlocal best, verification_attempts, hard_rejections
-        if not data:
-            return None
-        try:
-            h = bot.get_image_hash(data)
-            if h in used_hashes:
-                return None
-            tier = _verification_tier(seg, visual_type, source)
-            needs_semantic = tier not in {"STRICT(person)", "SKIPPED(conceptual)"}
-            if needs_semantic and verification_attempts >= VISUAL_MAX_VERIFICATION_ATTEMPTS:
-                return None
-            if needs_semantic:
-                verification_attempts += 1
-            accepted, tier_name, score, hard_reject = _strict_gate(bot, data, seg, video_title, source=source)
-            if hard_reject:
-                hard_rejections += 1
-            if not accepted and not hard_reject:
-                candidate = (score, data, source)
-                if best is None or score > best[0]:
-                    best = candidate
-            if accepted:
-                used_hashes.add(h)
-                cache_path = save_to_cache(bot, data, entity, visual_type, source, context)
-                print(f"   [Visual Source] {source} | VERIFIED | tier={tier_name} | type={visual_type} | query='{query}'", flush=True)
-                if cache_path:
-                    print(f"   [Visual Cache] Saved verified context-specific asset for entity='{entity}' type={visual_type} context={context}.", flush=True)
-                return Image.open(io.BytesIO(data)).convert("RGB"), False, source
-        except Exception as exc:
-            print(f"   [Visual Source] {source} | candidate rejected: {exc}", flush=True)
-        return None
-
-    stop_real_search = False
-    for query_index, query in enumerate(queries, 1):
-        if stop_real_search:
-            break
-        print(f"   [Visual Search] {query_index}/{len(queries)} | '{query}'", flush=True)
-        for name, fetcher in _source_plan(bot, visual_type, category):
-            if verification_attempts >= VISUAL_MAX_VERIFICATION_ATTEMPTS and name not in {"Wikipedia", "Commons"} and visual_type not in {"PERSON"}:
-                stop_real_search = True
-                break
-            args = (entity, used_urls, query, video_title) if name == "Wikipedia" else (query, used_urls, query, video_title)
-            data = _call_fetcher_with_timeout(fetcher, args, name, query)
-            result = try_bytes(data, name, query)
-            if result:
-                return result
-
-    if best is not None:
-        score, data, source = best
-        try:
-            h = bot.get_image_hash(data)
-        except Exception:
-            h = hashlib.sha256(data).hexdigest()
-        if h not in used_hashes:
-            used_hashes.add(h)
-            cache_path = save_to_cache(bot, data, entity, visual_type, source, context)
-            print(f"   [Visual QA] ACCEPT-BEST | tier={_verification_tier(seg, visual_type, source)} | score={score} | verification_attempts={verification_attempts}/{VISUAL_MAX_VERIFICATION_ATTEMPTS}", flush=True)
-            if cache_path:
-                print(f"   [Visual Cache] Saved best-available context-specific asset for entity='{entity}' type={visual_type} context={context}.", flush=True)
-            return Image.open(io.BytesIO(data)).convert("RGB"), False, source
-
-    if visual_type in AI_ALLOWED_TYPES:
-        ai_prompts = [
-            f"Photorealistic documentary illustration of {entity}. {seg.get('visual_intent','')}. {seg.get('voiceover','')[:220]}",
-            f"High-quality editorial concept image showing {entity} in context. {video_title}",
-            f"Clear technical/editorial illustration of {entity}. No logos, no invented people, no fake documents. {seg.get('visual_intent','')}",
-        ]
-        for ai_prompt in ai_prompts:
-            print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{ai_prompt[:160]}'", flush=True)
-            ai = _call_fetcher_with_timeout(bot.fetch_hf_ai_image, (ai_prompt,), "HF-AI", ai_prompt)
-            if ai is None:
-                continue
-            try:
-                buf = io.BytesIO(); ai.convert("RGB").save(buf, format="JPEG", quality=95)
-                result = try_bytes(buf.getvalue(), "AI-generated", ai_prompt)
-                if result:
-                    return result[0], True, "AI-generated"
-            except Exception as exc:
-                print(f"   [Visual Source] AI candidate rejected: {exc}", flush=True)
-
-    raise RuntimeError(f"No usable visual could be verified for '{entity}' after bounded visual search (type={visual_type}, verification_attempts={verification_attempts}/{VISUAL_MAX_VERIFICATION_ATTEMPTS}, hard_rejections={hard_rejections}).")
+    """Compatibility boundary to the single active retrieval implementation."""
+    from visual_retrieval_runtime import run_visual_retrieval
+    return run_visual_retrieval(__import__(__name__), bot, seg, category, used_urls, used_hashes, video_title)
 
 
 def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=None, accent=None):
