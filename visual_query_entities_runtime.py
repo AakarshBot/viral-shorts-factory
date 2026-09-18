@@ -125,27 +125,32 @@ def _install_runtime_query_guard(visual_runtime_module):
         print(f"   [Visual Safety] Runtime installation deferred: {type(exc).__name__}: {exc}", flush=True)
 
     def guarded_build_search_variants(seg, video_title=""):
-        resolution = resolve_subject(seg, video_title)
-        manual_query = clean_text(seg.get("manual_visual_query", ""))
-        if manual_query:
-            queries = [manual_query]
+        from visual_search_intent_runtime import resolve_visual_search_intent
+
+        visual_intent = resolve_visual_search_intent(seg, video_title)
+        if not visual_intent.subject or not visual_intent.query:
+            raise RuntimeError("No grounded visual search intent could be resolved from the scene.")
+
+        # Store the canonical contract so retrieval and QA consume the exact
+        # same subject/type/query instead of independently re-classifying it.
+        if isinstance(seg, dict):
+            seg["_visual_search_intent"] = visual_intent
+
+        if visual_intent.manual:
             print(
-                f"   [Visual Semantic Guard] MANUAL query='{manual_query}' "
-                f"factual='{resolution.get('factual_entity', '')}'",
+                f"   [Visual Semantic Guard] MANUAL subject='{visual_intent.subject}' "
+                f"type={visual_intent.visual_type} query='{visual_intent.query}'",
                 flush=True,
             )
         else:
-            queries = _build_identity_first_queries(seg, resolution)
             print(
-                f"   [Visual Semantic Guard] factual='{queries[0] if queries else ''}' "
-                f"context_variants={max(0, len(queries) - 1)} type={resolution.get('visual_type', 'GENERAL_CONTEXT')}",
+                f"   [Visual Semantic Guard] subject='{visual_intent.subject}' "
+                f"type={visual_intent.visual_type} query='{visual_intent.query}' "
+                f"confidence={visual_intent.confidence:.2f}",
                 flush=True,
             )
 
-        visual_type = str(resolution.get("visual_type") or seg.get("visual_type") or "GENERAL_CONTEXT").upper()
-        if not queries:
-            raise RuntimeError("No grounded visual identity could be derived from the scene.")
-        return queries, visual_type
+        return [visual_intent.query], visual_intent.visual_type
 
     def generic_verification_tier(seg, visual_type, source):
         source_l = str(source or "").strip().lower()
@@ -248,10 +253,19 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
     candidate = build_candidate_scene(scene, lock_visual_subject(scene, video_title), video_title)
     manual_query = clean_text(manual_query)
     if manual_query:
-        # Manual input controls retrieval vocabulary, but never disables the
-        # existing factual identity/semantic safety checks.
+        # Manual input is an explicit visual identity. It becomes the canonical
+        # retrieval subject; story facts remain available as context only.
         candidate["manual_visual_query"] = manual_query
-    subject = clean_text(candidate.get("factual_primary_entity", "") or candidate.get("primary_entity", ""))
+
+    from visual_search_intent_runtime import resolve_visual_search_intent
+    visual_intent = resolve_visual_search_intent(candidate, video_title)
+    if not visual_intent.subject or not visual_intent.query:
+        raise RuntimeError("Visual search refused the scene because no grounded visual intent could be resolved.")
+    candidate["_visual_search_intent"] = visual_intent
+    candidate["primary_entity"] = visual_intent.subject
+    candidate["visual_search_subject"] = visual_intent.subject
+    candidate["visual_type"] = visual_intent.visual_type
+    subject = visual_intent.subject
     context = clean_text(candidate.get("specific_search_prompt", "") or candidate.get("visual_context", ""))
     if not subject:
         raise RuntimeError("Visual search refused the scene because no grounded visual identity could be resolved.")
