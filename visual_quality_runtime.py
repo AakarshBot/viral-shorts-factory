@@ -126,7 +126,7 @@ def cover_crop(img: Image.Image, size=(1080, 1920)) -> Image.Image:
     focal_x, focal_y = 0.5, 0.5
     if crop_is_heavy:
         focal_x, focal_y, confidence = _estimate_crop_focus(base)
-        if confidence < 0.08:
+        if confidence < 0.05:
             focal_x, focal_y = 0.5, 0.5
         elif abs(focal_x - 0.5) <= 0.04 and abs(focal_y - 0.5) <= 0.04:
             focal_x, focal_y = 0.5, 0.5
