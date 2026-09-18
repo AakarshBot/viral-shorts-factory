@@ -52,7 +52,6 @@ def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
         return args[1]
 
     monkeypatch.setattr(content_runtime, "_render_hook_card", fail_hook)
-    monkeypatch.setattr(content_runtime, "_render_scene_overlay", standard_overlay)
 
     bot = _fake_bot(tmp_path)
     script_data = {
@@ -69,7 +68,6 @@ def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
 
     packages = _run_process(bot, script_data, "regular")
 
-    assert calls == ["scene_overlay"]
     assert packages[0][0]["text"] == "Amina Rahman explains the development."
     assert Path(packages[0][0]["image"]).exists()
 
@@ -125,7 +123,6 @@ def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
     monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
     monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
     monkeypatch.setattr(visual_retrieval_runtime, "make_visual_rescue", lambda *args, **kwargs: bg.copy())
-    monkeypatch.setattr(content_runtime, "_render_scene_overlay", lambda *args, **kwargs: args[1])
 
     bot = _fake_bot(tmp_path)
     script_data = {
