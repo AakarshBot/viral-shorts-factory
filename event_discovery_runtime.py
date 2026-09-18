@@ -30,6 +30,31 @@ STOPWORDS = {
 
 GDELT_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
+EVENT_ACTIONS = {
+    "launch", "launched", "launches", "unveil", "unveiled", "unveils",
+    "announce", "announced", "announces", "approve", "approved", "approves",
+    "ban", "banned", "bans", "sign", "signed", "signs", "acquire", "acquired",
+    "acquires", "win", "won", "wins", "defeat", "defeats", "beat", "beats",
+    "appoint", "appointed", "appoints", "resign", "resigned", "resigns",
+    "arrest", "arrested", "arrests", "die", "dies", "died", "injure", "injured",
+    "qualify", "qualified", "qualifies", "eliminate", "eliminated",
+    "release", "released", "releases", "delay", "delayed", "delays",
+    "cancel", "cancelled", "cancels", "signing", "join", "joins", "joined",
+    "open", "opened", "opens", "close", "closed", "closes",
+}
+
+GENERIC_ENTITY_TOKENS = {
+    "india", "indian", "world", "global", "government", "minister", "president",
+    "prime", "state", "city", "country", "company", "group", "team", "market",
+    "court", "police", "officials", "people", "agency", "official",
+}
+
+ENTITY_NOISE = {
+    "today", "latest", "breaking", "update", "news", "report", "reports",
+    "says", "said", "after", "before", "new", "first", "major", "live",
+    "watch", "here", "just", "now", "this", "that",
+}
+
 
 def _clean(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
@@ -46,6 +71,65 @@ def _token_overlap(left: object, right: object) -> float:
     if not a or not b:
         return 0.0
     return len(a & b) / max(1, len(a | b))
+
+
+def _salient_entities(value: object) -> set[str]:
+    """Extract cheap, deterministic named-entity proxies from headlines/text."""
+    text = _clean(value)
+    entities: set[str] = set()
+
+    # Acronyms and proper-case words/phrases are useful without a heavyweight
+    # NLP dependency. Keep these conservative to avoid treating every noun as
+    # an entity.
+    for match in re.findall(r"\b[A-Z]{2,}(?:[-&][A-Z]{2,})?\b", text):
+        token = match.lower().strip()
+        if token not in ENTITY_NOISE:
+            entities.add(token)
+
+    for match in re.findall(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){0,2}\b", text):
+        phrase = re.sub(r"\s+", " ", match).strip().lower()
+        words = phrase.split()
+        if any(word not in ENTITY_NOISE for word in words):
+            entities.add(phrase)
+
+    for token in _tokens(text):
+        if token in EVENT_ACTIONS or token in GENERIC_ENTITY_TOKENS:
+            continue
+        # Long, distinctive tokens act as weak entity/topic anchors.
+        if len(token) >= 7:
+            entities.add(token)
+
+    return entities
+
+
+def _event_actions(value: object) -> set[str]:
+    return {token for token in _tokens(value) if token in EVENT_ACTIONS}
+
+
+def _entity_context(story: dict) -> set[str]:
+    return _salient_entities(
+        " ".join(
+            str(story.get(key) or "")
+            for key in ("title", "description", "summary", "snippet", "text")
+        )
+    )
+
+
+def _action_context(story: dict) -> set[str]:
+    return _event_actions(
+        " ".join(
+            str(story.get(key) or "")
+            for key in ("title", "description", "summary", "snippet", "text")
+        )
+    )
+
+
+def _identity_features(story: dict) -> dict:
+    return {
+        "entities": sorted(_entity_context(story)),
+        "actions": sorted(_action_context(story)),
+        "tokens": sorted(_tokens(story.get("title"))),
+    }
 
 
 def normalize_url(value: object) -> str:
@@ -120,8 +204,24 @@ def _published_datetime(story: dict) -> datetime | None:
 
 
 def _cluster_compatible(left: dict, right: dict) -> bool:
-    """Conservative and explainable headline similarity rule."""
+    """Decide whether two articles likely describe the same real-world event."""
     overlap = _token_overlap(left.get("title"), right.get("title"))
+    left_entities = set(left.get("identity_entities") or _entity_context(left))
+    right_entities = set(right.get("identity_entities") or _entity_context(right))
+    shared_entities = left_entities & right_entities
+
+    left_actions = set(left.get("identity_actions") or _action_context(left))
+    right_actions = set(right.get("identity_actions") or _action_context(right))
+    shared_actions = left_actions & right_actions
+
+    # A strong entity match plus compatible event action is our best
+    # no-LLM signal for differently worded reporting of the same event.
+    if len(shared_entities) >= 2 and shared_actions:
+        return True
+    if len(shared_entities) >= 3:
+        return True
+
+    # Preserve the existing high-confidence headline matching path.
     if overlap >= 0.62:
         return True
 
@@ -132,11 +232,15 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
         return False
 
     smaller = min(len(left_tokens), len(right_tokens))
-    if smaller and len(shared) / smaller >= 0.78:
+    if smaller and len(shared) / smaller >= 0.78 and (
+        not left_actions or not right_actions or shared_actions
+    ):
         return True
 
     meaningful = {token for token in shared if len(token) >= 5 and not token.isdigit()}
-    return len(meaningful) >= 4 and overlap >= 0.42
+    return len(meaningful) >= 4 and overlap >= 0.42 and (
+        not left_actions or not right_actions or shared_actions
+    )
 
 
 def _event_id(articles: list[dict]) -> str:
@@ -167,6 +271,10 @@ def cluster_news_events(
         item["title"] = title
         item["url"] = normalize_url(item.get("url") or item.get("link"))
         item["publisher_normalized"] = normalize_publisher(item)
+        identity = _identity_features(item)
+        item["identity_entities"] = identity["entities"]
+        item["identity_actions"] = identity["actions"]
+        item["identity_title_tokens"] = identity["tokens"]
         if item["url"]:
             if item["url"] in seen_urls:
                 continue
@@ -239,6 +347,16 @@ def cluster_news_events(
             "event_search_text": " ".join(
                 _clean(item.get("title")) for item in cluster[:max_articles_per_event]
             ),
+            "event_entities": sorted({
+                entity
+                for item in cluster
+                for entity in (item.get("identity_entities") or [])
+            }),
+            "event_actions": sorted({
+                action
+                for item in cluster
+                for action in (item.get("identity_actions") or [])
+            }),
             "event_clustered": True,
             "event_article_count": article_count,
             "event_source_count": source_count,
@@ -368,4 +486,6 @@ __all__ = [
     "fetch_gdelt_articles",
     "normalize_publisher",
     "normalize_url",
+    "_cluster_compatible",
+    "_identity_features",
 ]
