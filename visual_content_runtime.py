@@ -388,7 +388,8 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
-            source_credit = source_credit_for_type(source_type)
+            if source_type != "news_source":
+                source_credit = source_credit_for_type(source_type)
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
                 verified_count += 1
