@@ -534,6 +534,24 @@ class DashboardWorkflowController(WorkflowController):
         if not isinstance(namespace, dict):
             return
 
+        current_audio = namespace.get("generate_voiceover_and_timestamps")
+        if callable(current_audio) and not getattr(current_audio, "_dashboard_audio_capture", False):
+            async def dashboard_audio_capture(*args, **kwargs):
+                result = await current_audio(*args, **kwargs)
+                audio_paths = result[0] if isinstance(result, (tuple, list)) and result else result
+                if isinstance(audio_paths, (list, tuple)):
+                    with self._lock:
+                        self._audio_paths = [
+                            os.path.abspath(os.fspath(path))
+                            for path in audio_paths
+                            if path and os.path.isfile(os.fspath(path))
+                        ]
+                self.update("audio", 52, "Narration complete. Building visual package…")
+                return result
+            dashboard_audio_capture._dashboard_audio_capture = True
+            namespace["generate_voiceover_and_timestamps"] = dashboard_audio_capture
+            self.bot.generate_voiceover_and_timestamps = dashboard_audio_capture
+
         current = namespace.get("process_visuals_async")
         if not callable(current):
             return
