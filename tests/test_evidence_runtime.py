@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from evidence_runtime import (
-    _source_tier,
+    source_tier,
     build_evidence_pack,
     claims_conflict,
     format_evidence_pack_for_script,
@@ -26,15 +26,15 @@ def _source(url, publisher, text, tier=None):
 
 
 def test_source_hierarchy_keeps_reddit_at_discovery_only():
-    assert _source_tier({
+    assert source_tier({
         "url": "https://www.reddit.com/r/news/comments/1",
         "source_kind": "event_source",
     }) == "C"
-    assert _source_tier({
+    assert source_tier({
         "url": "https://nasa.gov/news/example",
         "collection_source": "official",
     }) == "A"
-    assert _source_tier({"url": "https://reuters.com/world/example"}) == "B"
+    assert source_tier({"url": "https://reuters.com/world/example"}) == "B"
 
 
 def test_claim_conflict_detects_incompatible_numbers():
