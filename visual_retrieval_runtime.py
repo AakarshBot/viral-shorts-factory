@@ -196,23 +196,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     manual_query = str(seg.get("manual_visual_query") or "").strip()
     queries, visual_type = runtime._build_search_variants(seg, video_title)
 
-    # A supplied manual query is an explicit visual identity override. It must
-    # not be QA-checked against the scene's unrelated factual entity (for
-    # example, a scene about the Pakistan Cricket Board may intentionally use
-    # "Mohammad Rizwan" as the requested visual). Keep the story entity for
-    # narration/context, but route, cache, source-plan and semantic QA through
-    # the manual visual anchor.
-    visual_anchor = manual_query or entity
-    if manual_query:
-        try:
-            from visual_strategy_runtime import classify_scene
-            manual_visual_type = classify_scene({"primary_entity": manual_query}, "")
-            if manual_visual_type:
-                visual_type = manual_visual_type
-        except Exception:
-            pass
-    visual_type = str(visual_type or "GENERAL_CONTEXT").upper()
+    # _build_search_variants resolves the single canonical intent. Reuse it;
+    # never independently classify the manual subject here.
+    from visual_search_intent_runtime import resolve_visual_search_intent
+    visual_intent = seg.get("_visual_search_intent")
+    if visual_intent is None:
+        visual_intent = resolve_visual_search_intent(seg, video_title)
 
+    visual_anchor = str(visual_intent.subject or "").strip()
+    visual_type = str(visual_intent.visual_type or visual_type or "GENERAL_CONTEXT").upper()
     if not visual_anchor or not queries:
         rescue = make_visual_rescue(visual_anchor or factual_entity, visual_type)
         seg["visual_verified"] = False
@@ -225,7 +217,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     prompt = str(seg.get("specific_search_prompt") or entity).strip()
     voice = str(seg.get("factual_voiceover") or seg.get("voiceover") or "").strip()
     context = _context_fingerprint(intent, prompt, voice, video_title)
-    cache_entity = manual_query or factual_entity or entity
+    cache_entity = visual_anchor
 
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
     if cached_img is not None:
@@ -244,16 +236,17 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     hard_rejections = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))
     source_plan = _source_plan(bot, visual_type)
-    max_provider_checks = max(1, min(40, len(queries) * max(1, len(source_plan))))
+    max_provider_checks = max(1, min(40, 2 * max(1, len(source_plan))))
     provider_checks = 0
     best_uncertain = None
 
     qa_scene = dict(seg)
-    qa_scene["primary_entity"] = cache_entity
-    qa_scene["factual_primary_entity"] = cache_entity
-    qa_scene["visual_intent"] = intent
-    qa_scene["specific_search_prompt"] = manual_query or prompt
+    qa_scene["primary_entity"] = visual_intent.subject
+    qa_scene["factual_primary_entity"] = visual_intent.subject
+    qa_scene["visual_intent"] = visual_intent.intent or intent
+    qa_scene["specific_search_prompt"] = visual_intent.query
     qa_scene["voiceover"] = voice
+    qa_scene["visual_type"] = visual_intent.visual_type
 
     print(
         f"   [Visual Strategy] entity='{cache_entity}' type={visual_type} "
@@ -262,7 +255,10 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         flush=True,
     )
 
-    for query_index, query in enumerate(queries, 1):
+    query_index = 0
+    while query_index < len(queries):
+        query = queries[query_index]
+        query_index += 1
         print(f"   [Visual Search] {query_index}/{len(queries)} | '{query}'", flush=True)
         for source, fetcher in source_plan:
             if provider_checks >= max_provider_checks:
@@ -357,6 +353,23 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 )
         if provider_checks >= max_provider_checks:
             break
+
+        # Adaptive retry: only reformulate after the complete first retrieval
+        # pass fails. A successful/uncertain candidate is not discarded just to
+        # consume another query. This is deliberately capped at one retry.
+        if query_index == 1 and len(queries) == 1:
+            saw_hard_mismatch = hard_rejections > 0
+            saw_candidate = best_uncertain is not None
+            if not saw_candidate or saw_hard_mismatch:
+                from visual_search_intent_runtime import reformulate_visual_query
+                reason = "semantic mismatch" if saw_hard_mismatch else "no candidates"
+                retry_query = reformulate_visual_query(visual_intent, reason)
+                if retry_query and retry_query.casefold() != query.casefold():
+                    queries.append(retry_query)
+                    print(
+                        f"   [Visual Search] Adaptive retry | reason={reason} | query='{retry_query}'",
+                        flush=True,
+                    )
 
     if best_uncertain is not None:
         score, normalized, source, query = best_uncertain
