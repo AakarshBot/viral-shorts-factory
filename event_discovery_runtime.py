@@ -488,7 +488,7 @@ def fetch_gdelt_articles(
             _GDELT_FAILURE_LOGGED = True
         return []
     except requests.RequestException as exc:
-        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        _GDELT_FAILURE_UNTIL = time.time() + GDELT_FAILURE_COOLDOWN_SECONDS
         if not _GDELT_FAILURE_LOGGED:
             print(
                 f"   [Discovery] GDELT unavailable (HTTP/network {type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
@@ -497,7 +497,7 @@ def fetch_gdelt_articles(
             _GDELT_FAILURE_LOGGED = True
         return []
     except (ValueError, TypeError) as exc:
-        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        _GDELT_FAILURE_UNTIL = time.time() + GDELT_FAILURE_COOLDOWN_SECONDS
         if not _GDELT_FAILURE_LOGGED:
             print(
                 f"   [Discovery] GDELT returned an invalid response ({type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
@@ -506,7 +506,7 @@ def fetch_gdelt_articles(
             _GDELT_FAILURE_LOGGED = True
         return []
     except Exception as exc:
-        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        _GDELT_FAILURE_UNTIL = time.time() + GDELT_FAILURE_COOLDOWN_SECONDS
         if not _GDELT_FAILURE_LOGGED:
             print(
                 f"   [Discovery] GDELT failed ({type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
