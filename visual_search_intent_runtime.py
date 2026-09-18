@@ -205,8 +205,82 @@ def _scene_terms(scene: dict, subject: str) -> list[str]:
     return _ranked_scene_terms(scene, subject, limit=4)
 
 
+def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
+    """Compose a compact image-search query without rewriting the locked subject."""
+    subject = _clean(subject)
+    if not subject:
+        return ""
+
+    subject_keys = {key(word) for word in tokens(subject)}
+    words = list(tokens(subject))
+    remaining = max(0, int(max_words) - len(words))
+    if remaining <= 0:
+        return _clean(" ".join(words))
+
+    added: set[str] = set()
+    for anchor in anchors:
+        for word in tokens(anchor):
+            token_key = key(word)
+            if not token_key or token_key in subject_keys or token_key in added:
+                continue
+            words.append(word)
+            added.add(token_key)
+            remaining -= 1
+            if remaining <= 0:
+                break
+        if remaining <= 0:
+            break
+
+    return _clean(" ".join(words))
+
+
+def _primary_visual_anchor(scene_terms: list[str]) -> str:
+    """Prefer one concrete multi-word visual anchor over scattered prose."""
+    if not scene_terms:
+        return ""
+
+    def strength(term: str) -> tuple[int, int, float]:
+        parts = tokens(term)
+        keys = [key(part) for part in parts]
+        strong_count = sum(item in _SEARCH_STRONG for item in keys)
+        weak_count = sum(item in _SEARCH_WEAK for item in keys)
+        # Multi-word concrete phrases such as "press conference" should beat
+        # isolated terms such as "announcement" or "players".
+        phrase_bonus = 3 if len(parts) >= 2 and strong_count >= 2 else 0
+        return (phrase_bonus, strong_count, -float(weak_count))
+
+    ranked = sorted(scene_terms, key=lambda term: strength(term), reverse=True)
+    for term in ranked:
+        keys = {key(part) for part in tokens(term)}
+        if keys & _SEARCH_STRONG:
+            return term
+    return ""
+
+
+def _genre_hint_anchor(genre: str, scene_terms: list[str]) -> str:
+    """Use a visual-form hint only when the genre itself calls for one."""
+    hints = {
+        "PERSON_PORTRAIT": ("portrait",),
+        "ORG_BRANDING": ("logo",),
+        "TEAM_BRANDING": ("logo",),
+        "ORG_HEADQUARTERS": ("headquarters",),
+        "LANDMARK": ("landmark",),
+        "ARCHITECTURE": ("building",),
+        "MAP": ("map",),
+        "CHART_GRAPH": ("chart",),
+        "DIAGRAM": ("diagram",),
+        "SCREENSHOT_UI": ("screenshot",),
+        "TROPHY_AWARD": ("trophy",),
+        "HISTORICAL_PHOTO": ("historical",),
+    }
+    for hint in hints.get(str(genre or "").upper(), ()):
+        if hint:
+            return hint
+    return _primary_visual_anchor(scene_terms)
+
+
 def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSearchIntent:
-    """Resolve one factual identity and one compact retrieval query."""
+    """Resolve one compact visual query plus one exact-identity fallback."""
     scene = scene if isinstance(scene, dict) else {}
     manual = _clean(scene.get("manual_visual_query", ""))
     base = dict(scene)
@@ -224,40 +298,23 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
         confidence = float(resolution.get("confidence") or 0.0)
         scene_terms = _scene_terms(scene, subject)
+        visual_genre = classify_visual_genre(scene, subject, visual_type)
+        anchor = _primary_visual_anchor(scene_terms)
 
-        # Person portrait/press-conference retrieval is identity-sensitive:
-        # adding prompt/context terms can turn a precise person search into a
-        # different editorial scene search. Keep the locked person identity
-        # exact for this path. Person action scenes still use evidence-backed
-        # context so the same person can retrieve materially different frames.
-        evidence_text = " ".join(
-            _clean(scene.get(field, ""))
-            for field in (
-                "factual_visual_intent",
-                "visual_intent",
-                "visual_context",
-                "specific_search_prompt",
-            )
-        ).casefold()
-        exact_person_query = (
-            visual_type == "PERSON"
-            and (
-                "press conference" in evidence_text
-                or classify_visual_genre(scene, subject, visual_type) == "PERSON_PORTRAIT"
-            )
-        )
+        # Keep image queries short and photographic. For a person/action slide,
+        # the best query is normally "identity + concrete scene anchor" rather
+        # than the entire natural-language prompt.
+        if visual_genre == "PERSON_ACTION":
+            anchor = anchor or _primary_visual_anchor(scene_terms)
+        elif visual_genre == "PERSON_PORTRAIT":
+            anchor = _genre_hint_anchor(visual_genre, scene_terms)
+        elif not anchor:
+            anchor = _genre_hint_anchor(visual_genre, scene_terms)
 
-        if exact_person_query:
-            query = subject
-            queries = [subject] if subject else []
-        else:
-            # Query order is intentional: factual identity first, then only the
-            # highest-value searchable anchors. Do not copy a natural-language
-            # visual prompt or invent an event/context that is absent from evidence.
-            query = _clean(" ".join([subject, *scene_terms[:3]]))
-            queries = [query] if query else []
-            if subject and query.casefold() != subject.casefold():
-                queries.append(subject)
+        query = _compose_query(subject, anchor)
+        queries = [query] if query else []
+        if subject and query.casefold() != subject.casefold():
+            queries.append(subject)
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(" ".join(
