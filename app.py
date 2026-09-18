@@ -897,8 +897,6 @@ def _render_live_monitor_fragment(controller: DashboardWorkflowController) -> No
 
     render_upload_panel(controller, snapshot)
 
-    _fragment()
-
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
