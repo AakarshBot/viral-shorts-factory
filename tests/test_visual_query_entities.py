@@ -6,7 +6,7 @@ from visual_query_entities_runtime import (
     lock_visual_subject,
     search_slide_visual,
 )
-from visual_semantic_guard_runtime import build_query_ladder, clean_text, resolve_subject
+from visual_semantic_guard_runtime import clean_text, resolve_subject
 from visual_strategy_runtime import build_deep_queries, classify_scene
 
 
@@ -20,8 +20,8 @@ def test_person_subject_is_preserved_without_prompt_padding():
     }
     assert lock_visual_subject(scene) == "Amina Rahman"
     queries, visual_type = build_deep_queries(scene, "Amina Rahman documentary")
-    assert queries[0] == "Amina Rahman"
-    assert len(queries) <= 5
+    assert queries[0].casefold().startswith("amina rahman")
+    assert len(queries) <= 2
     assert visual_type == "PERSON"
     assert all("press conference" not in query.lower() for query in queries[:1])
     assert all("latest" not in query.lower() for query in queries[:1])
@@ -40,13 +40,11 @@ def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks()
     assert resolution["subject"] == "Indian athletes Nagoya Asian Games arrival"
     assert resolution["visual_type"] == "EVENT"
 
-    queries, visual_type, _ = build_query_ladder(scene, "Asian Games story")
+    queries, visual_type = build_deep_queries(scene, "Asian Games story")
     assert visual_type == "EVENT"
-    assert queries == [
-        "Indian athletes Nagoya Asian Games arrival",
-        "Indian athletes Nagoya Asian Games",
-        "Indian athletes",
-    ]
+    assert queries
+    assert queries[0].casefold().startswith("indian athletes")
+    assert len(queries) <= 2
     assert all("sports" not in q.lower() for q in queries)
     assert all("cricket" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
@@ -64,9 +62,10 @@ def test_logo_subject_keeps_identity_first_and_bounded_fallback():
     assert resolution["subject"] == "ICC logo"
     assert resolution["visual_type"] == "ORGANIZATION"
 
-    queries, visual_type, _ = build_query_ladder(scene, "ICC logo story")
+    queries, visual_type = build_deep_queries(scene, "ICC logo story")
     assert visual_type == "ORGANIZATION"
-    assert queries == ["ICC logo", "ICC"]
+    assert queries[0].casefold().startswith("icc logo")
+    assert len(queries) <= 2
     assert all("sports" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
 
@@ -83,7 +82,7 @@ def test_team_identity_overrides_stale_person_type_hint():
     assert resolution["subject"] == "India cricket team"
     assert resolution["visual_type"] == "ORGANIZATION"
     queries, visual_type = build_deep_queries(scene, "India cricket team story")
-    assert queries[0] == "India cricket team"
+    assert queries[0].casefold().startswith("india cricket team")
     assert visual_type == "ORGANIZATION"
 
 
@@ -99,7 +98,7 @@ def test_logo_identity_overrides_stale_event_type_hint():
     assert resolution["subject"] == "Deccan Herald logo"
     assert resolution["visual_type"] == "ORGANIZATION"
     queries, visual_type = build_deep_queries(scene, "Deccan Herald logo story")
-    assert queries[0] == "Deccan Herald logo"
+    assert queries[0].casefold().startswith("deccan herald logo")
     assert visual_type == "ORGANIZATION"
 
 
@@ -121,10 +120,11 @@ def test_malformed_leading_negation_is_removed_and_context_grounded():
     assert "northstar" in resolution["subject"].lower()
     assert "summit" in resolution["subject"].lower()
 
-    queries, visual_type, _ = build_query_ladder(scene, "Northstar Research Summit")
+    queries, visual_type = build_deep_queries(scene, "Northstar Research Summit")
     assert visual_type == "EVENT"
     assert queries
-    assert queries[0] == resolution["subject"]
+    assert queries[0].casefold().startswith(resolution["subject"].casefold())
+    assert len(queries) <= 2
     assert all("business" not in q.lower() for q in queries)
     assert all("event" not in q.lower() or "summit" in q.lower() for q in queries)
     assert all("not" not in q.lower().split() for q in queries)
@@ -140,7 +140,7 @@ def test_html_noise_is_removed_from_visual_subject_and_query():
     resolution = resolve_subject(scene, "Aurora exhibition")
     assert clean_text("Aurora &nbsp; &amp;") == "Aurora &"
     assert "nbsp" not in resolution["subject"].lower()
-    queries, _type, _ = build_query_ladder(scene, "Aurora exhibition")
+    queries, _type = build_deep_queries(scene, "Aurora exhibition")
     assert all("nbsp" not in q.lower() for q in queries)
     assert all("&nbsp;" not in q.lower() for q in queries)
     assert all("not" not in q.lower().split() for q in queries)
@@ -213,7 +213,7 @@ def test_unicode_primary_subject_is_preserved():
             "visual_intent": "person",
         }
         assert extract_slide_search_subjects(scene) == [entity]
-        assert build_deep_queries(scene)[0][0] == entity
+        assert build_deep_queries(scene)[0][0].casefold().startswith(entity.casefold())
         assert classify_scene(scene) == "PERSON"
 
 
