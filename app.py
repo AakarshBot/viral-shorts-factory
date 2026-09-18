@@ -150,6 +150,7 @@ def _init_state() -> None:
         "offline_diagnostics": {},
         "pending_candidate": None,
         "visual_search_queries": "",
+        "discovery_headline_selection": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -172,6 +173,7 @@ def reset_run() -> None:
         "final_comment": "",
         "pending_candidate": None,
         "visual_search_queries": "",
+        "discovery_headline_selection": None,
     }.items():
         st.session_state[key] = value
 
@@ -714,6 +716,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 st.session_state.final_qc = False
                 st.session_state.upload_result = ""
                 st.session_state.candidate_page = 0
+                st.session_state.discovery_headline_selection = None
                 st.success(
                     f"Found {len(candidates)} ranked headlines. Choose one below."
                 )
