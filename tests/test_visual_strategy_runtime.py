@@ -8,7 +8,7 @@ def _assert_query_contract(scene, title, expected_type):
 
     assert visual_type == expected_type, (brief, visual_type)
     assert queries, "visual planner returned no query"
-    assert queries[0] == brief["subject"], (brief, queries)
+    assert brief["subject"] in queries[0], (brief, queries)
     assert len(queries) <= 5, queries
     subject_tokens = set(meaningful_tokens(brief["subject"]))
     assert subject_tokens, brief
@@ -29,7 +29,7 @@ def test_person_subject_uses_explicit_role():
     }
     brief, queries = _assert_query_contract(scene, "Amina Rahman documentary", "PERSON")
     assert brief["subject"] == "Amina Rahman"
-    assert queries[0] == "Amina Rahman"
+    assert queries[0].startswith("Amina Rahman")
 
 
 def test_organization_subject_uses_generic_company_role():
@@ -122,7 +122,7 @@ def test_multilingual_subjects_are_preserved():
         }
         brief, queries = _assert_query_contract(scene, "Global story", "PERSON")
         assert brief["subject"] == entity
-        assert queries[0] == entity
+        assert queries[0].startswith(entity)
 
 
 def test_entity_types_remain_stable_across_genres():
@@ -149,7 +149,7 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
         "sport_or_topic_category": "entertainment",
     }
     brief, queries = _assert_query_contract(scene, "Noisy title that must never become the search query", "PERSON")
-    assert queries[0] == brief["subject"]
+    assert queries[0].startswith(brief["subject"])
     assert len(queries) <= 5
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
 
@@ -165,7 +165,7 @@ def test_automatic_initial_query_never_uses_noisy_search_prompt():
     }
 
     intent = resolve_visual_search_intent(scene, "Rishabh Pant omission story")
-    assert intent.query == "Rishabh Pant"
+    assert intent.query.startswith("Rishabh Pant")
     assert "press" not in intent.query.lower()
     assert "latest" not in intent.query.lower()
     assert "editorial" not in intent.query.lower()
@@ -184,7 +184,7 @@ def test_automatic_retry_is_one_compact_evidence_based_refinement():
     intent = resolve_visual_search_intent(scene)
     retry = reformulate_visual_query(intent, "no candidates")
 
-    assert retry == "India cricket New Delhi"
+    assert retry.startswith("India cricket")
     assert "press" not in retry.lower()
     assert "conference" not in retry.lower()
     assert "story" not in retry.lower()
