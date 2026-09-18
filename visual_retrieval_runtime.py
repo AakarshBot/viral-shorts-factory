@@ -368,7 +368,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     # real-source candidate if verification is unavailable.
                     if hard_reject:
                         score = max(20, float(score or REAL_SOURCE_SCORES.get(source.lower(), 50)) - 30)
-                        hard_reject = False\n                        print(
+                        hard_reject = False
+                        print(
                             f"   [Visual QA] semantic mismatch | retained as low-confidence candidate | "
                             f"source={source} score={score:.0f} | query='{query}'",
                             flush=True,
