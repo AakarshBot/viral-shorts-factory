@@ -29,6 +29,10 @@ STOPWORDS = {
 }
 
 GDELT_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
+GDELT_TIMEOUT_SECONDS = 4.0
+GDELT_FAILURE_COOLDOWN_SECONDS = 120.0
+_GDELT_FAILURE_UNTIL = 0.0
+_GDELT_FAILURE_LOGGED = False
 
 EVENT_ACTION_FAMILIES = {
     "launch": {
@@ -444,11 +448,17 @@ def fetch_gdelt_articles(
     *,
     timespan: str = "48h",
     max_records: int = 75,
-    timeout: float = 10.0,
+    timeout: float = GDELT_TIMEOUT_SECONDS,
 ) -> list[dict]:
-    """Fetch a broad article pool from the free GDELT DOC 2.0 API."""
+    """Fetch one bounded supplemental GDELT pool without blocking discovery."""
+    global _GDELT_FAILURE_UNTIL, _GDELT_FAILURE_LOGGED
+
     query = _clean(query)
     if not query:
+        return []
+
+    now = __import__("time").time()
+    if now < _GDELT_FAILURE_UNTIL:
         return []
 
     try:
@@ -457,28 +467,55 @@ def fetch_gdelt_articles(
             params={
                 "query": query,
                 "mode": "artlist",
-                "maxrecords": max(1, min(250, int(max_records))),
+                "maxrecords": max(1, min(100, int(max_records))),
                 "timespan": timespan,
                 "sort": "datedesc",
                 "format": "json",
             },
             headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
-            timeout=timeout,
+            timeout=max(1.0, min(GDELT_TIMEOUT_SECONDS, float(timeout))),
         )
         response.raise_for_status()
         payload = response.json()
-    except (requests.RequestException, ValueError, TypeError) as exc:
-        print(
-            f"   [Discovery] GDELT intake unavailable ({type(exc).__name__}); continuing with existing sources.",
-            flush=True,
-        )
+    except (requests.Timeout, requests.ConnectionError) as exc:
+        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        if not _GDELT_FAILURE_LOGGED:
+            print(
+                f"   [Discovery] GDELT unavailable ({type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
+                flush=True,
+            )
+            _GDELT_FAILURE_LOGGED = True
+        return []
+    except requests.RequestException as exc:
+        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        if not _GDELT_FAILURE_LOGGED:
+            print(
+                f"   [Discovery] GDELT unavailable (HTTP/network {type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
+                flush=True,
+            )
+            _GDELT_FAILURE_LOGGED = True
+        return []
+    except (ValueError, TypeError) as exc:
+        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        if not _GDELT_FAILURE_LOGGED:
+            print(
+                f"   [Discovery] GDELT returned an invalid response ({type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
+                flush=True,
+            )
+            _GDELT_FAILURE_LOGGED = True
         return []
     except Exception as exc:
-        print(
-            f"   [Discovery] GDELT intake failed ({type(exc).__name__}); continuing with existing sources.",
-            flush=True,
-        )
+        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        if not _GDELT_FAILURE_LOGGED:
+            print(
+                f"   [Discovery] GDELT failed ({type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
+                flush=True,
+            )
+            _GDELT_FAILURE_LOGGED = True
         return []
+
+    _GDELT_FAILURE_UNTIL = 0.0
+    _GDELT_FAILURE_LOGGED = False
 
     output = []
     articles = payload.get("articles", []) if isinstance(payload, dict) else []
