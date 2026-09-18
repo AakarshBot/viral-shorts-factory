@@ -185,7 +185,10 @@ def _source_quality(story):
     source = _clean(story.get("source") or story.get("publisher") or story.get("source_name"))
     domain = _source_domain(story)
     blob = f"{source} {domain} {_text_blob(story)}"
-    return min(5.0, sum(1 for term in SOURCE_QUALITY_TERMS if term in blob))
+    score = min(5.0, sum(1 for term in SOURCE_QUALITY_TERMS if term in blob))
+    if _clean(story.get("collection_source")) == "official":
+        score = min(5.0, score + 2.0)
+    return score
 
 
 def _load_history(conn):
@@ -404,7 +407,7 @@ def _gnews_items(query, api_key, genre_key):
         return []
 
 
-def _rss_items(url, genre_key):
+def _rss_items(url, genre_key, collection_source="rss"):
     if not url:
         return []
     try:
@@ -432,11 +435,37 @@ def _rss_items(url, genre_key):
                     "url": link,
                     "publishedAt": published,
                     "genre": genre_key,
-                    "collection_source": "rss",
+                    "collection_source": collection_source,
                 })
         return items
     except Exception:
         return []
+
+
+def _official_feed_urls(genre_key, genre_cfg):
+    urls = []
+    configured = genre_cfg.get("official_rss_urls") or []
+    if isinstance(configured, str):
+        configured = re.split(r"[;,]", configured)
+    urls.extend(str(item).strip() for item in configured if str(item).strip())
+    urls.extend(
+        item.strip()
+        for item in os.getenv(f"OFFICIAL_FEEDS_{str(genre_key).upper()}", "").split(";")
+        if item.strip()
+    )
+    urls.extend(
+        item.strip()
+        for item in os.getenv("FACTORY_OFFICIAL_FEEDS", "").split(";")
+        if item.strip()
+    )
+    return list(dict.fromkeys(urls))
+
+
+def _official_feed_items(genre_key, genre_cfg):
+    items = []
+    for url in _official_feed_urls(genre_key, genre_cfg):
+        items.extend(_rss_items(url, genre_key, collection_source="official"))
+    return items
 
 
 def _reddit_items(genre_key):
@@ -460,14 +489,33 @@ def _reddit_items(genre_key):
         if response.status_code != 200:
             return []
         children = response.json().get("data", {}).get("children", [])
-        return [
-            {
-                "title": str(node.get("data", {}).get("title") or "").strip(),
-                "score": _safe_float(node.get("data", {}).get("score")) or 0.0,
-            }
-            for node in children
-            if str(node.get("data", {}).get("title") or "").strip()
-        ]
+        output = []
+        for node in children:
+            data = node.get("data", {}) if isinstance(node, dict) else {}
+            title = str(data.get("title") or "").strip()
+            permalink = str(data.get("permalink") or "").strip()
+            if not title:
+                continue
+            created_utc = _safe_float(data.get("created_utc"))
+            published = ""
+            if created_utc:
+                try:
+                    published = datetime.fromtimestamp(created_utc, tz=timezone.utc).isoformat()
+                except (TypeError, ValueError, OSError):
+                    published = ""
+            output.append({
+                "title": title,
+                "text": title,
+                "description": title,
+                "source": f"Reddit r/{subreddit}",
+                "source_name": f"Reddit r/{subreddit}",
+                "url": f"https://www.reddit.com{permalink}" if permalink else "",
+                "publishedAt": published,
+                "genre": genre_key,
+                "collection_source": "reddit",
+                "reddit_score": _safe_float(data.get("score")) or 0.0,
+            })
+        return output
     except Exception:
         return []
 
@@ -592,7 +640,11 @@ def _fact_source_stage(stories, max_items=8):
 
     passed = [story for story in stories if story.get("fact_source_pass")]
     if len(passed) < min(5, max_items):
-        passed = list(stories)
+        non_social = [
+            story for story in stories
+            if _clean(story.get("collection_source")) not in {"reddit", "social"}
+        ]
+        passed = non_social or list(stories)
     passed.sort(
         key=lambda item: (
             _safe_float(item.get("fact_source_score")) or 0.0,
@@ -731,8 +783,10 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         raw.extend(_gnews_items(query, api_key, genre_key))
 
     raw.extend(_rss_items(custom_rss_url or genre_cfg.get("rss_url", ""), genre_key))
+    raw.extend(_official_feed_items(genre_key, genre_cfg))
     social_rows = _reddit_items(genre_key)
     social_titles = [row.get("title", "") for row in social_rows]
+    raw.extend(social_rows)
 
     for story in raw:
         story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
@@ -816,8 +870,10 @@ def patch_story_selection(bot):
         ):
             raw.extend(_gnews_items(query, api_key, genre_key))
         raw.extend(_rss_items(custom_rss_url or genre_cfg.get("rss_url", ""), genre_key))
+        raw.extend(_official_feed_items(genre_key, genre_cfg))
         social_rows = _reddit_items(genre_key)
         social_titles = [row.get("title", "") for row in social_rows]
+        raw.extend(social_rows)
 
         compact = []
         seen = set()
