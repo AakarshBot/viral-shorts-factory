@@ -81,7 +81,7 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
     if score>=0.80 or role in _NON_STABLE: return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
     for anchor in _anchors(script_data):
         a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
-        if a_score>=0.80: return {"entity":anchor,"grounded":False,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
+        if a_score>=0.80: return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
     return {"entity":original,"grounded":False,"changed":False,"reason":reason,"confidence":0.0,"original_entity":original}
 
 def apply_grounding(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
