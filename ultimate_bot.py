@@ -923,7 +923,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         "matching the input order one-to-one."
     )
     
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
             resp = requests.post(
@@ -1050,7 +1050,40 @@ def validate_script(script_data, source_text, format_mode):
     return True, "Passed"
 
 def self_critique_pass(script_data, format_mode):
-    return 8, "Passed"
+    """Run a deterministic final script sanity check without another model call."""
+    if not isinstance(script_data, dict):
+        return 0, "Script data is not a dictionary."
+    scenes = script_data.get("script", [])
+    if not isinstance(scenes, list) or not scenes:
+        return 0, "Script contains no scenes."
+
+    score = 10
+    reasons = []
+    seen = []
+    for index, scene in enumerate(scenes, 1):
+        text = safe_text(scene.get("voiceover"), "") if isinstance(scene, dict) else ""
+        words = text.split()
+        if len(words) < 8 or len(words) > 30:
+            score -= 1
+            reasons.append(f"scene {index} word count")
+        normalised = re.sub(r"[^a-z0-9 ]", " ", text.lower()).strip()
+        if normalised and any(
+            difflib.SequenceMatcher(None, normalised, previous).ratio() >= 0.90
+            for previous in seen
+        ):
+            score -= 1
+            reasons.append(f"scene {index} repetition")
+        if normalised:
+            seen.append(normalised)
+        if re.search(r"\b(?:wait|stay|keep watching|stop scrolling|you will not believe)\b", text, re.IGNORECASE):
+            score -= 1
+            reasons.append(f"scene {index} performative hook")
+        if re.search(r"\b(?:like|share|subscribe|follow)\b", text, re.IGNORECASE):
+            score -= 1
+            reasons.append(f"scene {index} CTA")
+
+    score = max(0, min(10, score))
+    return score, ("Passed" if not reasons else "Issues: " + ", ".join(reasons))
 
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     print(f"\n✍️ Generating Unique Editorial Script ({format_mode.upper()} MODE) with Headline-First Logic...")
@@ -1083,8 +1116,6 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         else "CYNICAL CRITIC"
     )
     profile = PERSONA_PROFILES.get(persona_name, PERSONA_PROFILES["LISTICLE HOST"])
-    persona_guidelines = f"PERSONA PROFILE: {persona_name}\n- MANDATORY CATCHPHRASES: {profile['catchphrases']}\n- FORBIDDEN: {profile['forbidden']}"
-
     target_scene_count = "EXACTLY 7 scenes" if format_mode == "top5" else "STRICTLY between 5 and 8 scenes"
 
     sys_prompt = (
@@ -1099,7 +1130,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"EDITORIAL LAWS:\n"
         f"1. THE FACTUAL HOOK (Scene 1): NO performative noise. Start instantly with the headline fact.\n"
         f"2. INFORMATIVE BODY (Scenes 2 to N-1): Deliver hard facts directly from the SOURCE DATA.\n"
-        f"3. STANDARDIZED OUTRO (Final Scene): Ask ONE tight question about the story, followed EXACTLY by: 'Like, Share, and Subscribe to our channel for more {genre_label}.'\n"
+        f"3. FINAL SCENE: End with the most useful consequence, implication, comparison, or final fact. Do not add a spoken CTA.\n"
         f"4. METADATA LAWS:\n"
         f"   - Titles: Generate exactly 3 titles based ON THE FINAL SCRIPT KEYWORDS. Append ' #shorts' to ALL 3. Front-load keywords into the first 45 chars.\n"
         f"   - Description: A 2-sentence summary of the script, followed by '\\n\\n👇 Follow for daily updates!\\n\\n', followed by 5-7 hashtags (2 broad, 2-3 specific, and #Trending).\n"
@@ -1156,17 +1187,18 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 return data
             else:
                 print(f"   [!] Script validation failed: {validation_msg}")
-                messages.extend([
-                    {"role": "assistant", "content": raw_content},
-                    {"role": "user", "content": f"Validation failed: {validation_msg}. Fix this error and return complete corrected JSON."}
-                ])
+                if attempt == 1:
+                    messages.extend([
+                        {"role": "assistant", "content": raw_content},
+                        {"role": "user", "content": f"Validation failed: {validation_msg}. Return complete corrected JSON."}
+                    ])
         except Exception as e:
             print(f"   [!] Groq exception encountered: {e}")
             time.sleep(2)
 
     if GEMINI_API_KEY:
         print("   [!] Groq exhausted. Attempting Gemini fallback...")
-        for g_attempt in range(1, 4):
+        for g_attempt in range(1, 3):
             try:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
                 formatted_contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages]
@@ -1742,7 +1774,7 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 audio = AudioFileClip(audio_paths[idx])
                 audio_clips.append(audio)
 
-            scene_duration = max(0.1, (audio.duration + 0.25) if audio else 4.0)
+            scene_duration = max(0.1, audio.duration if audio else 4.0)
             bg_image_file = layer_paths[0]["image"]
             scene_source_type = layer_paths[0].get("source_type", "bg")
 
@@ -1789,20 +1821,9 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             if not is_outro_scene and not is_hook_scene and idx < len(word_timings):
                 scene_wt = word_timings[idx]
                 if not scene_wt:
-                    raw_text = layer_paths[0].get("text", "")
-                    words = raw_text.split()
-                    if words:
-                        dur_per_word = max(
-                            0.1, (scene_duration - 0.2) / len(words)
-                        )
-                        curr_t = 0.1
-                        for word in words:
-                            scene_wt.append({
-                                "word": word,
-                                "start": curr_t,
-                                "end": min(scene_duration, curr_t + dur_per_word),
-                            })
-                            curr_t += dur_per_word
+                    raise ValueError(
+                        f"Scene {idx + 1} has no authoritative word timings; refusing synthetic subtitle timing."
+                    )
 
                 chunks, current_chunk, current_len = [], [], 0
                 for wt in scene_wt:
