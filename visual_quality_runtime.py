@@ -150,6 +150,25 @@ def _saliency_focus(img: Image.Image) -> tuple[float, float, float]:
         return 0.5, 0.5, 0.0
 
 
+def _fit_with_blurred_background(img: Image.Image, size=(1080, 1920)) -> Image.Image:
+    """Preserve the full source when a confident vertical crop is unavailable."""
+    target_w, target_h = size
+    base = img.convert("RGB")
+
+    background = base.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    background = background.filter(ImageFilter.GaussianBlur(radius=24))
+
+    scale = min(target_w / max(1, base.width), target_h / max(1, base.height))
+    fit_w = max(1, int(round(base.width * scale)))
+    fit_h = max(1, int(round(base.height * scale)))
+    foreground = base.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+
+    left = max(0, (target_w - fit_w) // 2)
+    top = max(0, (target_h - fit_h) // 2)
+    background.paste(foreground, (left, top))
+    return background
+
+
 def _crop_with_focal_point(img: Image.Image, size=(1080, 1920), focal_x=0.5, focal_y=0.5):
     target_w, target_h = size
     base = img.convert("RGB")
@@ -204,7 +223,11 @@ def cover_crop(
 
     # For strongly cropped/wide images, use cheap local saliency instead of
     # assuming the subject is in the exact centre.
-    if source_aspect / max(target_aspect, 1e-6) > 1.25 or source_aspect < target_aspect / 1.25:
+    strongly_cropped = (
+        source_aspect / max(target_aspect, 1e-6) > 1.25
+        or source_aspect < target_aspect / 1.25
+    )
+    if strongly_cropped:
         saliency_x, saliency_y, confidence = _saliency_focus(base)
         if confidence >= 0.12 and (
             abs(saliency_x - 0.5) > 0.05 or abs(saliency_y - 0.5) > 0.05
@@ -215,6 +238,15 @@ def cover_crop(
                 flush=True,
             )
             return _crop_with_focal_point(base, size, saliency_x, saliency_y)
+
+        # A wide source with no reliable focal point is safer as a full-frame
+        # visual than as a blind centre crop that can remove the actual subject.
+        print(
+            f"   [Visual Framing] FULL-FRAME-FIT | genre={visual_genre or visual_type} "
+            f"reason=low-confidence-focus",
+            flush=True,
+        )
+        return _fit_with_blurred_background(base, size)
 
     return _crop_with_focal_point(base, size, 0.5, 0.5)
 
