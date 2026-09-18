@@ -265,10 +265,21 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
         for index, (title, subject) in enumerate(topic_specs, 1)
     ]
 
+    def fake_collect_high_recall_stories(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        ai_cricket=False,
+    ):
+        return list(topics), []
+
     monkeypatch.setattr(
         story_ranker,
         "collect_high_recall_stories",
-        lambda *_args, **_kwargs: (list(topics), []),
+        fake_collect_high_recall_stories,
     )
     monkeypatch.setattr(story_ranker, "_india_trend_terms", lambda: tuple())
 
