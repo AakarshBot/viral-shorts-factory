@@ -1,19 +1,8 @@
 """Visual-subject preparation and identity-first retrieval binding."""
 from __future__ import annotations
 
-from visual_semantic_guard_runtime import (
-    AUXILIARY_WORDS,
-    DISCOURSE_PREFIXES,
-    GENERIC_NOISE,
-    STOPWORDS,
-    VISUAL_DESCRIPTORS,
-    clean_text,
-    infer_role,
-    key,
-    resolve_subject,
-    tokens,
-)
-from visual_retrieval_runtime import _source_plan, run_visual_retrieval
+from visual_semantic_guard_runtime import clean_text, infer_role, resolve_subject
+from visual_retrieval_runtime import run_visual_retrieval
 from visual_taxonomy_runtime import classify_visual_genre
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
@@ -90,7 +79,6 @@ def _install_runtime_query_guard(visual_runtime_module):
         )
 
     visual_runtime_module._build_search_variants = guarded_build_search_variants
-    visual_runtime_module._source_plan = _source_plan
     visual_runtime_module._verification_tier = generic_verification_tier
     visual_runtime_module._relevant_asset = robust_relevant_asset
     visual_runtime_module._generic_semantic_query_guard = True
