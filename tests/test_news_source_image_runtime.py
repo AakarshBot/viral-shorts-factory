@@ -22,3 +22,12 @@ def test_no_non_http_image_candidate():
     parser = _ArticleImageParser()
     parser.feed(html)
     assert _candidate_urls(parser, "https://example.com/story") == []
+
+
+def test_compose_news_source_image_is_vertical():
+    from PIL import Image
+    from news_source_image_runtime import compose_news_source_image
+
+    image = Image.new("RGB", (1600, 900), "white")
+    result = compose_news_source_image(image, (1080, 1920))
+    assert result.size == (1080, 1920)
