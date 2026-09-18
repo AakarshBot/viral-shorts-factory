@@ -54,7 +54,7 @@ def _story(title, score):
     }
 
 
-def test_discovery_returns_stable_pool_up_to_twelve_without_production_calls():
+def test_discovery_returns_stable_pool_up_to_28_without_production_calls():
     stories = [
         _story("Government announces new renewable energy targets", 12),
         _story("Central bank changes interest rate guidance", 11),
@@ -70,6 +70,10 @@ def test_discovery_returns_stable_pool_up_to_twelve_without_production_calls():
         _story("Telecom regulator publishes market update", 1),
         _story("This thirteenth story must not enter the discovery pool", 0),
     ]
+    stories.extend(
+        _story(f"Additional discovery story {index}", 20 - index)
+        for index in range(1, 16)
+    )
     bot = _Bot(stories)
 
     candidates = discover_three_candidates(
@@ -78,7 +82,7 @@ def test_discovery_returns_stable_pool_up_to_twelve_without_production_calls():
         _Conn(),
     )
 
-    assert len(candidates) == MAX_DISCOVERY_CANDIDATES == 12
+    assert len(candidates) == MAX_DISCOVERY_CANDIDATES == 28
     assert [item["discovery_rank"] for item in candidates] == list(range(1, 13))
     assert [item["title"] for item in candidates[:3]] == [
         "Government announces new renewable energy targets",
@@ -86,13 +90,13 @@ def test_discovery_returns_stable_pool_up_to_twelve_without_production_calls():
         "Major technology company launches new processor",
     ]
     assert candidates[0]["discovery_rank"] == 1
-    assert candidates[-1]["discovery_rank"] == 12
+    assert candidates[-1]["discovery_rank"] == 28
     assert all(item.get("discovery_reason") for item in candidates)
     assert bot.gather_calls == 1
     assert bot.production_calls == 0
 
 
-def test_discovery_blocks_underfilled_candidate_set():
+def test_discovery_allows_underfilled_candidate_set():
     bot = _Bot(
         [
             _story("Government announces new renewable energy targets", 9),
@@ -100,12 +104,13 @@ def test_discovery_blocks_underfilled_candidate_set():
         ]
     )
 
-    with pytest.raises(ValueError, match="exactly 3"):
-        discover_three_candidates(
-            bot,
-            {"format_mode": "regular", "category": "national_global_affairs", "language": "english"},
-            _Conn(),
-        )
+    candidates = discover_three_candidates(
+        bot,
+        {"format_mode": "regular", "category": "national_global_affairs", "language": "english"},
+        _Conn(),
+    )
 
+    assert len(candidates) == 2
+    assert [item["discovery_rank"] for item in candidates] == [1, 2]
     assert bot.gather_calls == 1
     assert bot.production_calls == 0
