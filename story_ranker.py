@@ -1,6 +1,7 @@
 """High-recall discovery funnel and historical story ranking for the Shorts newsroom."""
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from db_architecture import migrate_vault
 from event_discovery_runtime import discover_event_pool, cluster_news_events
 
 
@@ -235,9 +237,10 @@ def _load_history(conn):
     if conn is None:
         return []
     try:
+        migrate_vault(conn)
         cursor = conn.execute(
             """SELECT status, video_id, avg_view_percentage, genre,
-                      format_used, language_used, combo_key, topic
+                      format_used, language_used, combo_key, topic, discovery_json
                FROM vault
                WHERE avg_view_percentage IS NOT NULL"""
         )
@@ -267,6 +270,86 @@ def _eligible(row):
         and video_id not in {"", "pending_qc", "rejected", "failed"}
         and _safe_float(row.get("avg_view_percentage")) is not None
     )
+
+
+_DISCOVERY_LEARNING_FEATURES = (
+    ("event_momentum", 10.0),
+    ("freshness", 10.0),
+    ("corroboration", 10.0),
+    ("independent_corroboration", 10.0),
+    ("source_quality", 10.0),
+    ("social_signal", 10.0),
+    ("google_trends", 10.0),
+    ("visual_potential", 10.0),
+    ("originality", 10.0),
+    ("safety_risk", 10.0),
+)
+
+
+def _discovery_feature_vector(story):
+    dimensions = story.get("discovery_dimensions") or {}
+    values = {}
+    for key, _scale in _DISCOVERY_LEARNING_FEATURES:
+        value = _safe_float(dimensions.get(key))
+        if value is None:
+            value = _safe_float(story.get(key))
+        if value is not None:
+            # Normalise known sub-10 signals onto the same 0-10 scale.
+            if key == "source_quality":
+                value *= 2.0
+            elif key in {"social_signal", "google_trends"}:
+                value *= 2.5
+            values[key] = min(10.0, max(0.0, value))
+    return values
+
+
+def _historical_discovery_score(story, rows):
+    """Learn from past completed videos with similar discovery-signal profiles."""
+    current = _discovery_feature_vector(story)
+    if not current:
+        return 0.0, 0
+
+    neighbours = []
+    for row in rows:
+        if not _eligible(row):
+            continue
+        raw = row.get("discovery_json")
+        if not raw:
+            continue
+        try:
+            snapshot = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        past = _discovery_feature_vector({"discovery_dimensions": snapshot.get("discovery_dimensions") or snapshot})
+        shared = [key for key, _scale in _DISCOVERY_LEARNING_FEATURES if key in current and key in past]
+        if len(shared) < 5:
+            continue
+
+        distance = sum(abs(current[key] - past[key]) / 10.0 for key in shared) / len(shared)
+        similarity = max(0.0, 1.0 - distance)
+        if similarity < 0.55:
+            continue
+
+        performance = _safe_float(row.get("avg_view_percentage"))
+        if performance is None:
+            continue
+        neighbours.append((similarity, min(100.0, max(0.0, performance))))
+
+    if len(neighbours) < 2:
+        return 0.0, len(neighbours)
+
+    neighbours.sort(key=lambda item: item[0], reverse=True)
+    nearest = neighbours[:5]
+    weights = [similarity * similarity for similarity, _performance in nearest]
+    denominator = sum(weights)
+    if denominator <= 0:
+        return 0.0, len(neighbours)
+
+    weighted_performance = sum(
+        weight * (performance / 10.0)
+        for weight, (_similarity, performance) in zip(weights, nearest)
+    ) / denominator
+    return round(min(10.0, weighted_performance), 2), len(neighbours)
 
 
 def _historical_score(story, rows, target_category, target_format, target_language):
@@ -732,6 +815,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     social = _social_signal(event_text, social_titles)
     google_trend = _trend_signal(event_text)
     history, history_matches = _historical_score(story, rows, target_category, target_format, target_language)
+    discovery_history, discovery_history_matches = _historical_discovery_score(story, rows)
     niche = _apply_sports_niche_bonus(story, target_category)
     originality = _safe_float(story.get("originality_score")) or 5.0
     event_momentum = _event_momentum_score(story)
@@ -753,11 +837,14 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + google_trend * 1.20
         + niche
         + min(8.0, history * 0.08)
+        + min(6.0, discovery_history * 0.65)
         - risk * 2.25
     )
     story["candidate_score"] = round(final_score, 3)
     story["event_momentum_score"] = event_momentum
     story["independent_corroboration_score"] = independent_corroboration
+    story["historical_discovery_signal"] = discovery_history
+    story["historical_discovery_matches"] = discovery_history_matches
     story["historical_topic_signal"] = round(history, 3)
     story["historical_topic_matches"] = history_matches
     story["freshness_score"] = round(freshness, 2)
@@ -777,6 +864,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "social_signal": round(social, 2),
         "google_trends": round(google_trend, 2),
         "channel_history": round(min(10.0, history * 0.10), 2),
+        "historical_discovery": discovery_history,
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
         "safety_risk": risk,
@@ -807,6 +895,8 @@ def _candidate_reason(story):
         parts.append("Google Trends signal")
     if _safe_float(dimensions.get("channel_history")) >= 2:
         parts.append("relevant channel history")
+    if _safe_float(dimensions.get("historical_discovery")) >= 4:
+        parts.append("matches proven discovery patterns")
     if _safe_float(dimensions.get("originality")) >= 7:
         parts.append("strong originality")
     if not parts:
