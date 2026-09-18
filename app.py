@@ -870,6 +870,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         )
                 finally:
                     conn.close()
+                for candidate in candidates:
+                    candidate["dashboard_discovery_pool"] = True
                 st.session_state.candidates = candidates
                 st.session_state.web_config = config
                 st.session_state.production_started = False
