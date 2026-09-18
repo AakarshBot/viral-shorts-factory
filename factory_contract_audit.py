@@ -48,7 +48,6 @@ OBSOLETE_REPOSITORY_ARTIFACTS = (
     "visual_resilience_runtime.py",
     "workflow_progress_runtime.py",
     "upload_runtime.py",
-    "thumbnail_runtime.py",
     "test_phase_runtime.py",
     "test_phase_patches.py",
     "test_history_runtime.py",
