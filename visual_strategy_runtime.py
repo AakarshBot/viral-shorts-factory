@@ -1,19 +1,15 @@
 """Authoritative, genre-agnostic visual-search strategy.
 
 The strategy layer keeps the factual entity as the primary search term. Rich
-scene context may create later search variants, but it never outranks the
-simple identity query because retrieval recall is the primary objective.
+scene context remains metadata for QA/refinement; the opening query is always
+the clean identity and retrieval decides whether a bounded refinement is needed.
 """
 from __future__ import annotations
-
-import sys
-import types
 
 import visual_retrieval_planner as _planner
 from visual_retrieval_planner import *  # noqa: F401,F403
 from visual_semantic_guard_runtime import (
     MAX_QUERY_WORDS,
-    build_query_ladder,
     clean_text,
     prepare_scene,
     resolve_subject,
@@ -88,7 +84,7 @@ def build_scene_visual_brief(scene, video_title="", category=""):
 
 
 def build_deep_queries(scene, video_title="", visual_type=None):
-    """Build identity-first simple queries; context only broadens later attempts."""
+    """Expose the exact-first query contract for compatibility callers."""
     if not isinstance(scene, dict):
         return [], visual_type or "GENERAL_CONTEXT"
     prepared = _prepare(scene, video_title)
@@ -97,8 +93,9 @@ def build_deep_queries(scene, video_title="", visual_type=None):
         from visual_query_entities_runtime import _build_identity_first_queries
         queries = _build_identity_first_queries(prepared, resolution)
     except Exception:
-        queries, _resolved_type, _ = build_query_ladder(prepared, video_title)
-    return queries[:5], (visual_type or resolution.get("visual_type") or "GENERAL_CONTEXT")
+        subject = clean_text(resolution.get("factual_entity") or resolution.get("subject", ""))
+        queries = [subject] if subject else []
+    return queries[:1], (visual_type or resolution.get("visual_type") or "GENERAL_CONTEXT")
 
 
 build_deep_queries._authoritative_locked_subject_planner = True
@@ -130,14 +127,3 @@ def _scene_phrase(scene=None, *parts, **kwargs):
     values.extend(str(part) for part in parts if str(part).strip())
     return _planner._normalise(" ".join(values))
 
-
-class _AuthoritativeVisualStrategyModule(types.ModuleType):
-    def __setattr__(self, name, value):
-        if name == "build_deep_queries":
-            return types.ModuleType.__setattr__(self, name, build_deep_queries)
-        return types.ModuleType.__setattr__(self, name, value)
-
-
-_this_module = sys.modules.get(__name__)
-if _this_module is not None and not isinstance(_this_module, _AuthoritativeVisualStrategyModule):
-    _this_module.__class__ = _AuthoritativeVisualStrategyModule
