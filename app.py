@@ -769,11 +769,17 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             source = str(candidate.get("source_label") or "News source")
             score = candidate.get("candidate_score")
             score_line = f"{float(score):.1f}" if score is not None else "live"
+            article_count = int(candidate.get("event_article_count") or 1)
+            source_count = int(candidate.get("event_source_count") or 0)
+            event_support = (
+                f"Event support: {article_count} article{'s' if article_count != 1 else ''}"
+                + (f" · {source_count} publisher{'s' if source_count != 1 else ''}" if source_count else "")
+            )
             st.markdown(
                 f"<div class='candidate'><div class='candidate-rank'>RANK {global_index + 1}</div>"
                 f"<div class='candidate-title'>{title}</div>"
                 f"<div class='candidate-reason'>{reason}</div>"
-                f"<div class='small-muted' style='margin-top:10px'>Source: {source}<br>Signal: {score_line}</div></div>",
+                f"<div class='small-muted' style='margin-top:10px'>Source: {source}<br>{event_support}<br>Signal: {score_line}</div></div>",
                 unsafe_allow_html=True,
             )
             if candidate.get("story_url"):
