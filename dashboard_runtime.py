@@ -174,6 +174,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _story_url,
         _tokens,
         discover_event_pool,
+        diversity_rerank,
     )
 
     max_candidates = max(1, min(28, int(max_candidates or 28)))
@@ -351,7 +352,6 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         ai_cricket=ai_cricket,
         max_candidates=max_candidates,
     )
-    ranked = diversity_rerank(ranked, max_items=max_candidates)
 
     pool = ranked[:max_candidates]
     for rank, story in enumerate(pool, 1):
