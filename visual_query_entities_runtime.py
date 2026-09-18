@@ -9,37 +9,10 @@ _INVALID = {"", "none", "unknown", "na", "n/a"}
 
 
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
-    """Compatibility helper for the bounded identity-first query ladder."""
-    anchor = clean_text(
-        seg.get("factual_primary_entity")
-        or resolution.get("factual_entity")
-        or resolution.get("subject")
-        or seg.get("primary_entity")
-    )
-    if not anchor:
-        return []
-    context = clean_text(
-        seg.get("factual_search_prompt")
-        or seg.get("specific_search_prompt")
-        or seg.get("factual_visual_intent")
-        or seg.get("visual_intent")
-        or seg.get("visual_context")
-    )
-    from visual_search_intent_runtime import _context_terms
-    terms = _context_terms(context, anchor)
-    queries = [anchor]
-    if terms:
-        compact = clean_text(" ".join([anchor, *terms[:3]]))
-        if compact.casefold() != anchor.casefold():
-            queries.append(compact)
-        for term in (terms[-1], terms[0]):
-            candidate = clean_text(f"{anchor} {term}")
-            if candidate.casefold() not in {item.casefold() for item in queries}:
-                queries.append(candidate)
-            if len(queries) >= 5:
-                break
-    return queries[:5]
-
+    """Compatibility helper that delegates to the canonical visual intent."""
+    from visual_search_intent_runtime import resolve_visual_search_intent
+    intent = resolve_visual_search_intent(seg, "")
+    return list(intent.queries)
 
 def _install_runtime_query_guard(visual_runtime_module):
     """Install the sole active generic visual retrieval boundary."""
