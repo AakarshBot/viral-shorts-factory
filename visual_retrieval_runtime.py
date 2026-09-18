@@ -189,6 +189,34 @@ def _candidate_items(data: Any) -> list[Any]:
     return [data]
 
 
+_VISUAL_DESCRIPTOR_WORDS = {
+    "logo", "logos", "portrait", "portraits", "headshot", "headshots", "icon", "icons",
+    "badge", "badges", "emblem", "emblems", "symbol", "symbols", "seal", "seals",
+    "map", "maps", "flag", "flags", "screenshot", "screenshots", "poster", "posters",
+}
+
+
+def _trusted_source_evidence(source: str, visual_type: str, query: str) -> tuple[bool, str, float]:
+    """Return source-level identity evidence before spending semantic-QA budget.
+
+    The factory should not make a multimodal model prove facts that are already
+    established by a canonical source. Wikimedia's person/article image and its
+    server-generated thumbnails are source evidence; Commons is also a strong
+    identity source for explicit visual assets such as logos and badges.
+    """
+    source_l = str(source or "").strip().casefold()
+    visual_l = str(visual_type or "").strip().upper()
+    query_tokens = {re.sub(r"[^a-z0-9]+", "", token.casefold()) for token in re.findall(r"[A-Za-z0-9]+", str(query or ""))}
+
+    if visual_l == "PERSON" and source_l in {"wikipedia", "commons"}:
+        return True, "SOURCE-IDENTITY", REAL_SOURCE_SCORES.get(source_l, 95.0)
+
+    if visual_l == "ORGANIZATION" and source_l == "commons" and query_tokens & _VISUAL_DESCRIPTOR_WORDS:
+        return True, "SOURCE-BRANDED", REAL_SOURCE_SCORES.get(source_l, 96.0)
+
+    return False, "", 0.0
+
+
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
@@ -301,20 +329,45 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     print(f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'", flush=True)
                     continue
 
-                verification_available = semantic_required and verification_attempts < max_verification
-                if verification_available:
-                    verification_attempts += 1
-                    try:
-                        accepted, tier_name, score, hard_reject = runtime._strict_gate(
-                            bot, normalized, qa_scene, video_title, source=source
-                        )
-                    except Exception as exc:
-                        accepted, tier_name, score, hard_reject = False, tier, 0, False
-                        print(f"   [Visual QA] candidate check unavailable; keeping as uncertain: {type(exc).__name__}: {exc}", flush=True)
-                elif semantic_required:
-                    accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
+                trusted, trusted_tier, trusted_score = _trusted_source_evidence(source, visual_type, query)
+                if trusted:
+                    # Canonical-source evidence is stronger than a generic
+                    # multimodal YES/NO gate. Do not waste a Gemini request on
+                    # an exact person page or an explicit Commons logo asset.
+                    accepted, tier_name, score, hard_reject = True, trusted_tier, trusted_score, False
+                    verification_attempts_used = False
                 else:
-                    accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
+                    verification_available = semantic_required and verification_attempts < max_verification
+                    verification_attempts_used = bool(verification_available)
+                    if verification_available:
+                        verification_attempts += 1
+                        try:
+                            accepted, tier_name, score, hard_reject = runtime._strict_gate(
+                                bot, normalized, qa_scene, video_title, source=source
+                            )
+                        except Exception as exc:
+                            accepted, tier_name, score, hard_reject = False, tier, 0, False
+                            print(f"   [Visual QA] candidate check unavailable; keeping as uncertain: {type(exc).__name__}: {exc}", flush=True)
+                    elif semantic_required:
+                        accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
+                    else:
+                        accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
+
+                    # A single multimodal NO is evidence against a candidate,
+                    # not proof that the image is wrong. Generic providers can
+                    # return cropped, logo-only, historical, or otherwise valid
+                    # representations that a text-conditioned model cannot
+                    # confidently identify. Keep the candidate as low-confidence
+                    # fallback rather than allowing one model verdict to erase
+                    # the whole retrieval result.
+                    if hard_reject:
+                        hard_reject = False
+                        score = max(20, float(score or REAL_SOURCE_SCORES.get(source.lower(), 50)) - 30)
+                        print(
+                            f"   [Visual QA] semantic mismatch | deprioritized, not discarded | "
+                            f"source={source} score={score:.0f} | query='{query}'",
+                            flush=True,
+                        )
 
                 if accepted:
                     try:
