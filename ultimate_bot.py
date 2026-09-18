@@ -1982,27 +1982,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
         except Exception:
             pass
 
-def generate_thumbnail_frame(video_path):
-    print("\n📸 Generating High-CTR Thumbnail Frame...")
-    if cv2 is None:
-        print("   [!] OpenCV not available, skipping thumbnail extraction.")
-        return None
-    try:
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 24
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fps * 1.0))
-        success, frame = cap.read()
-        cap.release()
-        
-        if success and frame is not None:
-            thumb_path = os.path.join(ASSETS_DIR, "thumbnail.jpg")
-            cv2.imwrite(thumb_path, frame)
-            print(f"   [+] Thumbnail successfully extracted at: {thumb_path}")
-            return thumb_path
-    except Exception as e:
-        pass
-    return None
-
 def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_keyword=None):
     print("\n🚀 Initializing Live YouTube Upload...")
     try:
@@ -2339,7 +2318,6 @@ def run_robot(web_config=None):
                 f"   [+] Validation Passed: Output generated successfully "
                 f"({actual_dur:.1f}s, {video_size / 1_000_000:.1f}MB)."
             )
-            generate_thumbnail_frame(video_path)
         except Exception as exc:
             print(f"   [!] Could not validate video duration: {exc}")
 
