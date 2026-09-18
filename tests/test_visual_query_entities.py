@@ -21,7 +21,7 @@ def test_person_subject_is_preserved_without_prompt_padding():
     assert lock_visual_subject(scene) == "Amina Rahman"
     queries, visual_type = build_deep_queries(scene, "Amina Rahman documentary")
     assert queries[0].casefold().startswith("amina rahman")
-    assert len(queries) <= 2
+    assert len(queries) <= 3
     assert visual_type == "PERSON"
     assert all("press conference" not in query.lower() for query in queries[:1])
     assert all("latest" not in query.lower() for query in queries[:1])
@@ -44,7 +44,7 @@ def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks()
     assert visual_type == "EVENT"
     assert queries
     assert queries[0].casefold().startswith("indian athletes")
-    assert len(queries) <= 2
+    assert len(queries) <= 3
     assert all("sports" not in q.lower() for q in queries)
     assert all("cricket" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
@@ -65,7 +65,7 @@ def test_logo_subject_keeps_identity_first_and_bounded_fallback():
     queries, visual_type = build_deep_queries(scene, "ICC logo story")
     assert visual_type == "ORGANIZATION"
     assert queries[0].casefold().startswith("icc logo")
-    assert len(queries) <= 2
+    assert len(queries) <= 3
     assert all("sports" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
 
@@ -124,7 +124,7 @@ def test_malformed_leading_negation_is_removed_and_context_grounded():
     assert visual_type == "EVENT"
     assert queries
     assert queries[0].casefold().startswith(resolution["subject"].casefold())
-    assert len(queries) <= 2
+    assert len(queries) <= 3
     assert all("business" not in q.lower() for q in queries)
     assert all("event" not in q.lower() or "summit" in q.lower() for q in queries)
     assert all("not" not in q.lower().split() for q in queries)
@@ -215,6 +215,41 @@ def test_unicode_primary_subject_is_preserved():
         assert extract_slide_search_subjects(scene) == [entity]
         assert build_deep_queries(scene)[0][0].casefold().startswith(entity.casefold())
         assert classify_scene(scene) == "PERSON"
+
+
+def test_person_action_query_adds_scene_context():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent({
+        "primary_entity": "Rishabh Pant",
+        "voiceover": "Rishabh Pant addressed the media during the ODI squad announcement.",
+        "visual_intent": "press conference person",
+        "visual_context": "ODI squad announcement press conference",
+        "specific_search_prompt": "Rishabh Pant ODI squad press conference latest news",
+    })
+
+    assert intent.visual_genre == "PERSON_ACTION"
+    assert intent.query.casefold().startswith("rishabh pant")
+    assert "press conference" in intent.query.casefold()
+    assert intent.query.casefold() != "rishabh pant"
+
+
+def test_manual_query_stays_exact_but_routes_from_manual_subject():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent({
+        "primary_entity": "Pakistan Cricket Board",
+        "manual_visual_query": "Mohammad Rizwan",
+        "visual_intent": "person portrait",
+        "voiceover": "Pakistan Cricket Board announced the squad.",
+    })
+
+    assert intent.manual is True
+    assert intent.query == "Mohammad Rizwan"
+    assert intent.queries == ("Mohammad Rizwan",)
+    assert intent.subject == "Mohammad Rizwan"
+    assert intent.visual_type == "PERSON"
+    assert intent.visual_genre == "PERSON_PORTRAIT"
 
 
 def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkeypatch):
