@@ -357,21 +357,6 @@ def _wrap_compile(bot):
         bot.run_robot.__globals__["compile_video"] = guarded_compile
 
 
-def _wrap_compile(bot):
-    current = getattr(bot, "compile_video", None)
-    if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
-        return
-
-    def guarded_compile(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
-        video_path = current(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode)
-        return _add_endpoint_subtitles(video_path, audio_paths, word_timings)
-
-    guarded_compile._pipeline_integrity_wrapped = True
-    bot.compile_video = guarded_compile
-    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
-        bot.run_robot.__globals__["compile_video"] = guarded_compile
-
-
 def patch_pipeline_integrity(bot) -> bool:
     try:
         _wrap_script_writer(bot)
