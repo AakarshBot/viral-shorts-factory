@@ -221,6 +221,7 @@ def build_scene_branding_overlays(bot, width: int, height: int, source_credit: s
     if logo_path is None:
         print("   [Branding] Logo asset missing; frame signature remains active.", flush=True)
 
+    # The final compositor owns the on-screen provenance label.
     label = source_credit_for_type("", source_credit)
     return [
         _static_brand_overlay(str(logo_path or ""), int(width), int(height)),
