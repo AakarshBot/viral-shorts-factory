@@ -223,7 +223,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
     factual_entity = str(seg.get("factual_primary_entity") or entity).strip()
-    manual_query = str(seg.get("manual_visual_query") or "").strip()
     queries, visual_type = runtime._build_search_variants(seg, video_title)
 
     # _build_search_variants resolves the single canonical intent. Reuse it;
