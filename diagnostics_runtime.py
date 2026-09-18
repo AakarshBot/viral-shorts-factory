@@ -200,7 +200,6 @@ def _test_runtime_bindings():
     import factory_runtime, provider_runtime, runtime_bindings, ultimate_bot
     factory_runtime.patch_dashboard_runtime(ultimate_bot)
     provider_runtime.patch_provider_adapters(ultimate_bot)
-    runtime_bindings.harden_editorial_defaults(ultimate_bot)
     runtime_bindings.bind_dashboard_patches(ultimate_bot)
     namespace = ultimate_bot.run_robot.__globals__
     required = (
