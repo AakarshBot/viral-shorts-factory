@@ -19,6 +19,47 @@ from PIL import Image
 from workflow_runtime import WorkflowController
 
 
+def build_discovery_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, explainable evidence profile for one event candidate."""
+    dimensions = candidate.get("discovery_dimensions") or {}
+    evidence = [
+        item for item in (candidate.get("event_evidence") or [])
+        if isinstance(item, dict)
+    ]
+    independent_publishers = list(candidate.get("event_evidence_publishers") or [])
+    domains = list(candidate.get("event_source_domains") or [])
+    official_records = sum(
+        1 for item in evidence
+        if str(item.get("collection_source") or "").strip().lower() == "official"
+    )
+    reddit_records = sum(
+        1 for item in evidence
+        if str(item.get("collection_source") or "").strip().lower() in {"reddit", "social"}
+    )
+
+    return {
+        "articles": int(candidate.get("event_article_count") or len(evidence) or 1),
+        "independent_publishers": len(set(independent_publishers)),
+        "publishers": sorted(set(str(item) for item in independent_publishers if str(item))),
+        "independent_domains": len(set(domains)),
+        "domains": sorted(set(str(item) for item in domains if str(item))),
+        "official_records": official_records,
+        "reddit_records": reddit_records,
+        "latest_published_at": str(candidate.get("event_latest_published_at") or ""),
+        "event_momentum": float(dimensions.get("event_momentum") or candidate.get("event_momentum_score") or 0.0),
+        "freshness": float(dimensions.get("freshness") or candidate.get("freshness_score") or 0.0),
+        "corroboration": float(dimensions.get("corroboration") or candidate.get("corroboration_bonus") or 0.0),
+        "source_quality": float(dimensions.get("source_quality") or candidate.get("source_quality_score") or 0.0),
+        "social_signal": float(dimensions.get("social_signal") or candidate.get("social_signal") or 0.0),
+        "google_trends": float(dimensions.get("google_trends") or candidate.get("google_trends_signal") or 0.0),
+        "channel_history": float(dimensions.get("channel_history") or 0.0),
+        "originality": float(dimensions.get("originality") or candidate.get("originality_score") or 0.0),
+        "visual_potential": float(dimensions.get("visual_potential") or candidate.get("visual_potential") or 0.0),
+        "safety_risk": float(dimensions.get("safety_risk") or candidate.get("risk_signal_count") or 0.0),
+        "sources": evidence[:6],
+    }
+
+
 def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 12) -> list[dict[str, Any]]:
     """Dashboard-only discovery pool: preserve the factory ranker, but retain up to 12 ranked topics."""
     from story_ranker import (
