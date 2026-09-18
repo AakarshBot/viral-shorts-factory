@@ -14,6 +14,7 @@ from visual_semantic_guard_runtime import (
     tokens,
 )
 from visual_retrieval_runtime import _source_plan, run_visual_retrieval
+from visual_taxonomy_runtime import classify_visual_genre
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
 _MAX_QUERY_BUDGET = 5
@@ -135,17 +136,18 @@ def _install_runtime_query_guard(visual_runtime_module):
         # same subject/type/query instead of independently re-classifying it.
         if isinstance(seg, dict):
             seg["_visual_search_intent"] = visual_intent
+            seg["visual_genre"] = visual_intent.visual_genre
 
         if visual_intent.manual:
             print(
                 f"   [Visual Semantic Guard] MANUAL subject='{visual_intent.subject}' "
-                f"type={visual_intent.visual_type} query='{visual_intent.query}'",
+                f"type={visual_intent.visual_type} genre={visual_intent.visual_genre} query='{visual_intent.query}'",
                 flush=True,
             )
         else:
             print(
                 f"   [Visual Semantic Guard] subject='{visual_intent.subject}' "
-                f"type={visual_intent.visual_type} query='{visual_intent.query}' "
+                f"type={visual_intent.visual_type} genre={visual_intent.visual_genre} query='{visual_intent.query}' "
                 f"confidence={visual_intent.confidence:.2f}",
                 flush=True,
             )
@@ -238,6 +240,7 @@ def build_candidate_scene(scene: dict, subject: str, video_title: str = "") -> d
 
     # Primary retrieval identity is cleaned/grounded, while the original model
     # output remains available under original_primary_entity and factual_voiceover.
+    prepared["visual_genre"] = classify_visual_genre(prepared, visual_subject or factual_entity, prepared.get("visual_type", "GENERAL_CONTEXT"))
     prepared["primary_entity"] = visual_subject or factual_entity
     prepared["visual_search_subject"] = visual_subject or factual_entity
     prepared["visual_subject_locked"] = True
@@ -265,6 +268,7 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
     candidate["primary_entity"] = visual_intent.subject
     candidate["visual_search_subject"] = visual_intent.subject
     candidate["visual_type"] = visual_intent.visual_type
+    candidate["visual_genre"] = visual_intent.visual_genre
     subject = visual_intent.subject
     context = clean_text(candidate.get("specific_search_prompt", "") or candidate.get("visual_context", ""))
     if not subject:
@@ -273,7 +277,8 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
     candidate["sport_or_topic_category"] = category or candidate.get("sport_or_topic_category", "")
     print(
         f"   [Visual Search] Factual subject='{subject}' | "
-        f"search context='{context}' | type={candidate.get('visual_type', 'GENERAL_CONTEXT')}",
+        f"search context='{context}' | type={candidate.get('visual_type', 'GENERAL_CONTEXT')} "
+        f"| genre={candidate.get('visual_genre', 'GENERAL_CONTEXT')}",
         flush=True,
     )
     result = visual_runtime_module._relevant_asset(
@@ -283,7 +288,7 @@ def search_slide_visual(visual_runtime_module, bot, scene, category, used_urls, 
     if isinstance(scene, dict):
         for key_name in (
             "visual_verified", "visual_rescue_reason", "visual_fallback_reason", "visual_query_used",
-            "visual_verification_attempts", "visual_type",
+            "visual_verification_attempts", "visual_type", "visual_genre",
         ):
             if key_name in candidate:
                 scene[key_name] = candidate[key_name]
