@@ -866,39 +866,49 @@ def _perform_upload(
         st.error(f"Upload failed: {type(exc).__name__}: {exc}")
 
 
-def render_live_monitor(controller: DashboardWorkflowController) -> None:
-    @st.fragment(run_every="1s")
-    def _fragment():
-        snapshot = controller.snapshot()
-        render_stage_progress(snapshot)
 
-        selected = snapshot.get("selected_story") or {}
-        if selected:
-            st.markdown(
-                f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
-                unsafe_allow_html=True,
-            )
+@st.fragment(run_every=1.0)
+def _render_live_monitor_fragment(controller: DashboardWorkflowController) -> None:
+    snapshot = controller.snapshot()
+    render_stage_progress(snapshot)
 
-        render_research_summary(snapshot)
-        render_script(snapshot)
-        render_audio_preview(snapshot)
-        render_generated_outputs(snapshot)
+    selected = snapshot.get("selected_story") or {}
+    if selected:
+        st.markdown(
+            f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
+            unsafe_allow_html=True,
+        )
 
-        if snapshot.get("visual_review_required"):
-            render_visual_review(controller, snapshot)
-        render_visual_details(snapshot)
+    render_research_summary(snapshot)
+    render_script(snapshot)
+    render_audio_preview(snapshot)
+    render_generated_outputs(snapshot)
 
-        render_activity_timeline(snapshot)
-        render_console(snapshot)
-        render_logs(snapshot)
+    if snapshot.get("visual_review_required"):
+        render_visual_review(controller, snapshot)
+    render_visual_details(snapshot)
 
-        if snapshot.get("stage") == "error":
-            st.error(snapshot.get("error") or "The factory stopped with an error.")
+    render_activity_timeline(snapshot)
+    render_console(snapshot)
+    render_logs(snapshot)
 
-        render_upload_panel(controller, snapshot)
+    if snapshot.get("stage") == "error":
+        st.error(snapshot.get("error") or "The factory stopped with an error.")
+
+    render_upload_panel(controller, snapshot)
 
     _fragment()
 
+
+
+def render_live_monitor(controller: DashboardWorkflowController) -> None:
+    """Render the live monitor through one stable, module-level fragment.
+
+    Keeping the fragment function at module scope avoids recreating the fragment
+    definition on every full Streamlit rerun while the production worker runs.
+    The fragment itself polls the shared controller state once per second.
+    """
+    _render_live_monitor_fragment(controller)
 
 def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowController) -> None:
     problems = check_required_local_assets()
