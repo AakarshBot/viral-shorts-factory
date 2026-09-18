@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from event_discovery_runtime import discover_event_pool, cluster_news_events
+
 
 SAFETY_BLOCKLIST = {
     "sexual assault", "child sexual", "child abuse", "sexual abuse", "explicit porn",
@@ -83,7 +85,10 @@ def _tokens(value):
 def _text_blob(story):
     return " ".join(
         str(story.get(key) or "")
-        for key in ("title", "description", "snippet", "summary", "content", "text")
+        for key in (
+            "title", "description", "snippet", "summary", "content", "text",
+            "event_search_text",
+        )
     ).strip().lower()
 
 
@@ -517,13 +522,26 @@ def _cheap_filter(stories, max_items=30, max_age_hours=48):
 
 
 def _deduplicate_stage(stories, max_items=15):
+    """Remove residual duplicate articles without collapsing clustered events."""
     selected = []
-    for story in sorted(stories, key=lambda item: (_freshness_score(item), _source_quality(item)), reverse=True):
-        title = story.get("title", "")
-        if any(_topic_overlap(title, old.get("title", "")) >= 0.52 for old in selected):
-            continue
-        story["dedupe_pass"] = True
-        selected.append(story)
+    for story in sorted(
+        stories,
+        key=lambda item: (
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
+            _freshness_score(item),
+            _source_quality(item),
+        ),
+        reverse=True,
+    ):
+        if story.get("event_clustered"):
+            selected.append(story)
+            story["dedupe_pass"] = True
+        else:
+            title = story.get("title", "")
+            if any(_topic_overlap(title, old.get("title", "")) >= 0.82 for old in selected):
+                continue
+            story["dedupe_pass"] = True
+            selected.append(story)
         if len(selected) >= max_items:
             break
     return selected
@@ -531,26 +549,56 @@ def _deduplicate_stage(stories, max_items=15):
 
 def _fact_source_stage(stories, max_items=8):
     for story in stories:
-        title = story.get("title", "")
-        domains = {_source_domain(story)} if _source_domain(story) else set()
-        for other in stories:
-            if other is story:
-                continue
-            if _topic_overlap(title, other.get("title", "")) >= 0.30:
-                domain = _source_domain(other)
+        if story.get("event_clustered"):
+            domains = set(story.get("event_source_domains") or [])
+            publishers = set(story.get("event_publishers") or [])
+            if story.get("event_article_count", 0) == 1 and not domains:
+                domain = _source_domain(story)
                 if domain:
                     domains.add(domain)
-        corroboration = len(domains)
-        story["corroboration_bonus"] = min(8.0, float(corroboration))
+            corroboration = max(
+                len(domains),
+                len(publishers),
+                int(story.get("event_source_count") or 0),
+            )
+            article_count = int(story.get("event_article_count") or 1)
+        else:
+            title = story.get("title", "")
+            domains = {_source_domain(story)} if _source_domain(story) else set()
+            for other in stories:
+                if other is story:
+                    continue
+                if _topic_overlap(title, other.get("title", "")) >= 0.30:
+                    domain = _source_domain(other)
+                    if domain:
+                        domains.add(domain)
+            corroboration = len(domains)
+            article_count = 1
+
+        event_bonus = _safe_float(story.get("event_corroboration_score")) or 0.0
+        article_bonus = min(4.0, max(0.0, article_count - 1) * 0.5)
+        story["corroboration_bonus"] = min(10.0, max(float(corroboration) * 2.0, event_bonus))
+        story["article_support_bonus"] = article_bonus
         story["source_domains"] = sorted(domains)
         story["source_quality_score"] = _source_quality(story)
-        story["fact_source_score"] = min(12.0, corroboration * 2.5 + _source_quality(story))
-        story["fact_source_pass"] = bool(domains) and (_source_quality(story) >= 1.0 or corroboration >= 2)
+        story["fact_source_score"] = min(
+            16.0,
+            float(corroboration) * 2.5 + _source_quality(story) + article_bonus,
+        )
+        story["fact_source_pass"] = bool(domains or publishers) and (
+            _source_quality(story) >= 1.0 or corroboration >= 2
+        )
 
     passed = [story for story in stories if story.get("fact_source_pass")]
     if len(passed) < min(5, max_items):
         passed = list(stories)
-    passed.sort(key=lambda item: (_safe_float(item.get("fact_source_score")) or 0.0, _freshness_score(item)), reverse=True)
+    passed.sort(
+        key=lambda item: (
+            _safe_float(item.get("fact_source_score")) or 0.0,
+            _freshness_score(item),
+        ),
+        reverse=True,
+    )
     return passed[:max_items]
 
 
@@ -577,6 +625,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     trend = _safe_float(story.get("trend_bonus")) or 0.0
     freshness = _freshness_score(story)
     corroboration = _safe_float(story.get("corroboration_bonus")) or 0.0
+    article_support = _safe_float(story.get("article_support_bonus")) or 0.0
     visual = _visual_potential(story)
     risk = _risk_score(story)
     source_quality = _safe_float(story.get("source_quality_score")) or 0.0
@@ -592,6 +641,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         momentum * momentum_weight
         + freshness * 1.35
         + corroboration * 1.15
+        + article_support * 0.80
         + source_quality * 0.85
         + visual * 0.60
         + originality * 1.00
@@ -614,6 +664,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "momentum": round(momentum, 2),
         "freshness": round(freshness, 2),
         "corroboration": round(corroboration, 2),
+        "article_support": round(article_support, 2),
         "source_quality": round(source_quality, 2),
         "social_signal": round(social, 2),
         "google_trends": round(google_trend, 2),
@@ -634,6 +685,12 @@ def _candidate_reason(story):
         parts.append("very fresh")
     if _safe_float(dimensions.get("corroboration")) >= 2:
         parts.append("multi-source coverage")
+    article_count = int(story.get("event_article_count") or 1)
+    source_count = int(story.get("event_source_count") or 0)
+    if article_count >= 3:
+        parts.append(f"{article_count} articles clustered")
+    elif source_count >= 2:
+        parts.append(f"{source_count} publishers covering the event")
     if _safe_float(dimensions.get("social_signal")) >= 2:
         parts.append("social-interest signal")
     if _safe_float(dimensions.get("google_trends")) >= 1:
@@ -682,17 +739,29 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     compact = []
     seen = set()
     for story in raw:
+        if not isinstance(story, dict):
+            continue
         key = _canonical_url(_source_url_from_item(story)) or "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
         if not key or key in seen:
             continue
         seen.add(key)
         compact.append(story)
 
+    event_pool = discover_event_pool(
+        query=base_query,
+        existing_articles=compact,
+        timespan="48h",
+        max_gdelt_records=75,
+    )
+    events = event_pool["events"]
     print(
-        f"   [Discovery Funnel] raw intake={len(compact)} candidates from news + RSS + public social signals.",
+        f"   [Discovery Funnel] article intake={event_pool['article_count']} "
+        f"(GDELT={event_pool['gdelt_article_count']}) -> "
+        f"distinct events={event_pool['event_count']}; "
+        f"news + RSS + public social signals retained.",
         flush=True,
     )
-    return compact, social_titles
+    return events, social_titles
 
 
 def rank_story_candidates(stories, conn=None, target_category="", target_format="", target_language="", social_titles=None, ai_cricket=False):
@@ -776,7 +845,19 @@ def patch_story_selection(bot):
                 f"   [Discovery Relevance] {len(compact)} intake -> {len(relevance_filtered)} topic/category-relevant candidates",
                 flush=True,
             )
-        compact = relevance_filtered
+        event_pool = discover_event_pool(
+            query=base_query,
+            existing_articles=relevance_filtered,
+            timespan="48h",
+            max_gdelt_records=75,
+        )
+        compact = event_pool["events"]
+        print(
+            f"   [Discovery Events] article intake={event_pool['article_count']} "
+            f"(GDELT={event_pool['gdelt_article_count']}) -> "
+            f"distinct events={event_pool['event_count']}",
+            flush=True,
+        )
         ai_cricket = genre_key == "sports_stories_of_day" and str(config.get("cricket_category", "")) == "AI-assisted top story in cricket"
         ranked = rank_story_candidates(
             compact,
