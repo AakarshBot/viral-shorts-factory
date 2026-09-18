@@ -122,6 +122,8 @@ def test_entity_aware_clustering_does_not_merge_same_company_different_event():
     events = cluster_news_events(articles)
 
     assert len(events) == 2
+    event = events[0]
+    assert "launch" in event["event_actions"]
 
 
 def test_entity_aware_clustering_blocks_conflicting_actions_for_same_entities():
