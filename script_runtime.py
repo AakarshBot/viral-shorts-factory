@@ -97,6 +97,69 @@ def _clean_titles(script_data):
     script_data["titles"] = cleaned
 
 
+def _ground_visual_scene_entities(script_data, story_data):
+    """Deterministically lock automatic visual identities to the supplied story."""
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    if not isinstance(scenes, list):
+        return 0
+
+    try:
+        from visual_entity_grounding_runtime import ground_scene_entity
+    except Exception:
+        return 0
+
+    changed = 0
+    for index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict):
+            continue
+        original = str(
+            scene.get("primary_entity")
+            or scene.get("visual_search_subject")
+            or ""
+        ).strip()
+        if not original:
+            continue
+
+        result = ground_scene_entity(scene, story_data if isinstance(story_data, dict) else {})
+        entity = str(result.get("entity") or original).strip()
+        grounded = bool(result.get("grounded"))
+
+        if result.get("changed") and entity and entity.casefold() != original.casefold():
+            scene["original_primary_entity"] = original
+            scene["primary_entity"] = entity
+            scene["visual_search_subject"] = entity
+
+            # Never let a repaired identity keep an old, unsupported search phrase
+            # such as "Rashid Khan bowling...". The visual retrieval layer can add
+            # genre-specific context safely after this identity lock.
+            scene["specific_search_prompt"] = entity
+            scene["visual_context"] = ""
+            scene["visual_entity_grounding"] = "SCRIPT_REPAIR"
+            scene["visual_entity_grounded"] = True
+            scene["visual_entity_original"] = original
+            scene["visual_entity_grounding_reason"] = str(result.get("reason") or "")
+            scene["visual_entity_grounding_confidence"] = float(result.get("confidence") or 0.0)
+            changed += 1
+            print(
+                f"   [Script Visual Grounding] Scene {index} | REPAIRED | "{original}" -> "{entity}" | "{result.get('reason', '')}"",
+                flush=True,
+            )
+        elif not grounded:
+            scene["visual_entity_grounded"] = False
+            scene["visual_entity_grounding"] = "UNGROUNDED"
+            scene["visual_entity_original"] = original
+            scene["visual_entity_grounding_reason"] = str(result.get("reason") or "")
+            scene["visual_entity_grounding_confidence"] = 0.0
+            print(
+                f"   [Script Visual Grounding] Scene {index} | UNGROUNDED | entity="{original}" | "{result.get('reason', '')}"",
+                flush=True,
+            )
+        else:
+            scene["visual_entity_grounded"] = True
+
+    return changed
+
+
 def _add_editorial_contract(story_data, format_mode):
     if not isinstance(story_data, dict): return story_data
     structure = _story_structure(story_data, format_mode)
@@ -154,11 +217,18 @@ def clean_script_data(script_data, story_data, format_mode):
 
     result = dict(script_data)
     result["script"] = deduped
+    grounding_changed = _ground_visual_scene_entities(result, story_data)
+    result["visual_entity_grounding_changes"] = grounding_changed
     result["cta_required"] = False
     result["script_focus"] = "information_dense_storytelling"
     result["script_structure"] = _story_structure(story_data, format_mode)
     _clean_titles(result)
-    return result, {"removed_cta": removed_cta, "removed_scenes": removed_scenes, "changed_scenes": changed_scenes}
+    return result, {
+        "removed_cta": removed_cta,
+        "removed_scenes": removed_scenes,
+        "changed_scenes": changed_scenes,
+        "visual_entity_grounding_changes": grounding_changed,
+    }
 
 
 def validate_content_density(script_data, story_data, format_mode):
