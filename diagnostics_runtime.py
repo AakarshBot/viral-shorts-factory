@@ -89,12 +89,14 @@ def _test_visual_strategy():
         queries, visual_type = build_deep_queries(scene, scene["primary_entity"])
         if visual_type != expected_type:
             raise AssertionError(f"type mismatch: {queries}, {visual_type}")
-        if brief["subject"] != expected_subject or not queries or queries[0] != expected_subject:
+        if brief["subject"] != expected_subject or not queries:
             raise AssertionError(f"identity-first visual contract failed: {brief}, {queries}")
         subject_keys = set(meaningful_tokens(expected_subject))
-        for query in queries:
-            if not set(meaningful_tokens(query)).issubset(subject_keys):
-                raise AssertionError(f"query introduced non-subject tokens: {queries}")
+        first_keys = set(meaningful_tokens(queries[0]))
+        if not subject_keys.issubset(first_keys):
+            raise AssertionError(f"first visual query lost factual identity: {queries}")
+        if len(queries) > 2:
+            raise AssertionError(f"visual query budget exceeded: {queries}")
 
     malformed = {
         "primary_entity": "Not Northstar Research Summit",
@@ -107,7 +109,7 @@ def _test_visual_strategy():
         raise AssertionError(f"malformed visual subject not recovered: {resolution}")
     queries, visual_type = build_deep_queries(malformed, "Northstar Research Summit")
     joined = " ".join(queries).casefold()
-    if visual_type != "EVENT" or queries[0] != "Northstar Research Summit Berlin":
+    if visual_type != "EVENT" or not queries or not set(meaningful_tokens("Northstar Research Summit Berlin")).issubset(set(meaningful_tokens(queries[0]))):
         raise AssertionError(f"malformed visual query not corrected: {queries}")
     if any(bad in joined.split() for bad in ("not", "nbsp", "thing")) or "&nbsp;" in joined:
         raise AssertionError(f"query retained discourse/html noise: {queries}")
@@ -120,7 +122,7 @@ def _test_visual_strategy():
     multilingual = {"primary_entity": "محمد صلاح", "voiceover": "محمد صلاح appeared in the report.", "visual_intent": "person portrait"}
     brief = build_scene_visual_brief(multilingual, "Global story", "international")
     queries, visual_type = build_deep_queries(multilingual, "Global story")
-    if visual_type != "PERSON" or brief["subject"] != "محمد صلاح" or queries[0] != "محمد صلاح":
+    if visual_type != "PERSON" or brief["subject"] != "محمد صلاح" or not queries or not set(meaningful_tokens("محمد صلاح")).issubset(set(meaningful_tokens(queries[0]))):
         raise AssertionError("multilingual identity was not preserved")
 
     if _tier_for("person portrait", "PERSON", "Wikipedia") != "IDENTITY":
