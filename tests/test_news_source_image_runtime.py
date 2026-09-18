@@ -31,3 +31,20 @@ def test_compose_news_source_image_is_vertical():
     image = Image.new("RGB", (1600, 900), "white")
     result = compose_news_source_image(image, (1080, 1920))
     assert result.size == (1080, 1920)
+
+def test_news_source_scene_routing_does_not_steal_manual_first_frame():
+    from visual_content_runtime import _rank_news_source_scene_indices
+
+    scenes = [
+        {"primary_entity": "India Afghanistan", "manual_visual_query": "India Afghanistan cricket match"},
+        {"primary_entity": "Shubman Gill", "voiceover": "Shubman Gill batting"},
+        {"primary_entity": "New Delhi", "voiceover": "The New Delhi stadium hosts the match"},
+    ]
+    ranked = _rank_news_source_scene_indices(
+        scenes,
+        "India Afghanistan final cricket match in New Delhi",
+        ["India Afghanistan cricket match", "Shubman Gill batting"],
+    )
+    assert ranked
+    assert ranked[0] != 0
+
