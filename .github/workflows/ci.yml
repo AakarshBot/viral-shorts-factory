@@ -74,4 +74,4 @@ jobs:
           PY
 
       - name: Run repository regression tests
-        run: python -m pytest -q
+        run: python -m pytest -q --durations=20 --durations-min=1
