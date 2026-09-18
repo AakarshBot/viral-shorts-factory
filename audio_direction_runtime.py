@@ -29,14 +29,8 @@ def patch_audio_direction(bot):
     except Exception as exc:
         print(f"   [Bindings] Pipeline integrity guard unavailable: {type(exc).__name__}: {exc}", flush=True)
 
-    # Branding, final artifact QC and channel intelligence are bound here
-    # because this patch is part of the live runtime binding stack; each is
-    # explicit and idempotent.
-    try:
-        from channel_branding_runtime import install_channel_branding
-        install_channel_branding(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Channel branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    # Final artifact QC, channel intelligence and production hardening are
+    # installed by the live runtime binding stack.
     try:
         from branding_runtime import patch_branding_pipeline
         patch_branding_pipeline(bot)
