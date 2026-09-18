@@ -4,7 +4,6 @@ import functools
 import json
 import os
 import threading
-import traceback
 
 from dashboard_theme import apply_dashboard_theme
 
@@ -69,36 +68,6 @@ def _normalise_editorial_records(scored_data, batch_stories):
                 clean[field] = default
         normalised.append(clean)
     return normalised
-
-
-def _install_moviepy_compatibility():
-    """Expose MoviePy v2 classes at the root package for the renderer."""
-    try:
-        import moviepy
-        from moviepy.video.VideoClip import ImageClip
-        from moviepy.video.io.VideoFileClip import VideoFileClip
-        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip, concatenate_videoclips
-        from moviepy.audio.io.AudioFileClip import AudioFileClip
-        from moviepy.audio.AudioClip import CompositeAudioClip
-        exports = {
-            "ImageClip": ImageClip,
-            "VideoFileClip": VideoFileClip,
-            "CompositeVideoClip": CompositeVideoClip,
-            "concatenate_videoclips": concatenate_videoclips,
-            "AudioFileClip": AudioFileClip,
-            "CompositeAudioClip": CompositeAudioClip,
-        }
-        installed = []
-        for name, value in exports.items():
-            if not hasattr(moviepy, name):
-                setattr(moviepy, name, value)
-                installed.append(name)
-        if installed:
-            print("   [Bindings] MoviePy compatibility exports installed: " + ", ".join(installed), flush=True)
-        return True
-    except Exception as exc:
-        print(f"   [Bindings] MoviePy compatibility bridge unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return False
 
 
 def _install_visual_cache_safety():
