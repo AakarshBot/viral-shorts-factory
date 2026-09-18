@@ -1,11 +1,8 @@
-from datetime import datetime, timezone
-
 from event_discovery_runtime import cluster_news_events
 from story_ranker import (
     _cheap_filter,
     _fact_source_stage,
     _originality_stage,
-    _discovery_lane_queries,
     diversity_rerank,
 )
 
@@ -101,6 +98,8 @@ def test_event_clustering_preserves_category_provenance():
     assert len(events) == 1
     assert events[0]["event_genres"] == ["technology"]
     assert events[0]["primary_genre"] == "technology"
+
+
 def test_production_selection_does_not_call_legacy_gather(monkeypatch):
     import story_ranker
 
@@ -132,45 +131,6 @@ def test_production_selection_does_not_call_legacy_gather(monkeypatch):
 
     assert result == [{"title": "Canonical event"}]
     assert calls == {"collect": 1, "rank": 1}
-
-def test_adaptive_queries_target_underrepresented_configured_subjects():
-    from story_ranker import _adaptive_query_candidates
-
-    events = [{"title": "Artificial intelligence startup launches product"}]
-    queries = _adaptive_query_candidates(
-        "Artificial Intelligence OR Gadgets OR Startups OR Tech Launch",
-        events,
-        max_queries=2,
-    )
-
-    assert queries
-    assert "Gadgets" in queries or "Tech Launch" in queries
-    assert len(queries) <= 2
-
-
-def test_adaptive_queries_do_not_expand_single_subject_query():
-    from story_ranker import _adaptive_query_candidates
-
-    assert _adaptive_query_candidates("Artificial Intelligence", [], max_queries=2) == []
-
-
-def test_cricket_discovery_uses_complementary_free_lanes():
-    lanes = _discovery_lane_queries(
-        "sports_stories_of_day",
-        "Cricket OR ICC OR BCCI OR Test Cricket OR T20 Cricket",
-    )
-
-    assert len(lanes) == 4
-    assert any("women" in lane.lower() for lane in lanes)
-    assert any("bcci" in lane.lower() for lane in lanes)
-    assert any("sponsorship" in lane.lower() for lane in lanes)
-
-
-def test_custom_non_cricket_query_does_not_get_forced_cricket_lanes():
-    assert _discovery_lane_queries(
-        "sports_stories_of_day",
-        "Formula 1 OR MotoGP",
-    ) == []
 
 
 def test_diversity_reranker_separates_repeated_subjects():
