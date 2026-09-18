@@ -184,7 +184,7 @@ def _subject_role_hint(value: str) -> str:
         "board", "federation", "association", "committee", "foundation",
         "institute", "institution", "corporation", "company", "agency",
         "ministry", "department", "council", "club", "team", "squad",
-        "network", "studio", "university", "college", "lab", "labs",
+        "network", "studio", "university", "college", "lab", "labs", "hall",
     }
     if len(words) >= 2 and key(words[-1]) in organization_suffixes:
         return "ORGANIZATION"
