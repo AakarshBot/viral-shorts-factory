@@ -95,3 +95,35 @@ def test_event_clustering_preserves_category_provenance():
     assert len(events) == 1
     assert events[0]["event_genres"] == ["technology"]
     assert events[0]["primary_genre"] == "technology"
+def test_production_selection_does_not_call_legacy_gather(monkeypatch):
+    import story_ranker
+
+    calls = {"collect": 0, "rank": 0}
+
+    def canonical_collect(*args, **kwargs):
+        calls["collect"] += 1
+        return ([{"title": "Canonical event"}], ["social signal"])
+
+    def canonical_rank(stories, **kwargs):
+        calls["rank"] += 1
+        assert stories == [{"title": "Canonical event"}]
+        return stories
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", canonical_collect)
+    monkeypatch.setattr(story_ranker, "rank_story_candidates", canonical_rank)
+
+    def legacy_gather(*_args, **_kwargs):
+        raise AssertionError("legacy gather must not be called")
+
+    bot = type("Bot", (), {"gather_and_filter_stories": legacy_gather})()
+    story_ranker.patch_story_selection(bot)
+
+    result = bot.gather_and_filter_stories(
+        object(),
+        "technology",
+        {},
+    )
+
+    assert result == [{"title": "Canonical event"}]
+    assert calls == {"collect": 1, "rank": 1}
+
