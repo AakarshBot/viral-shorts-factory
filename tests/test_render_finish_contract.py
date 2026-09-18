@@ -40,6 +40,6 @@ def test_pipeline_integrity_no_longer_has_endpoint_subtitle_layer():
 
 def test_upload_gate_only_opens_for_completed_idle_render():
     assert upload_ready_for_manual_decision({"completed": True, "thread_alive": False, "video_path": "final_video.mp4"})
-    assert not _upload_ready({"completed": True, "thread_alive": True, "video_path": "final_video.mp4"})
-    assert not _upload_ready({"completed": False, "thread_alive": False, "video_path": "final_video.mp4"})
-    assert not _upload_ready({"completed": True, "thread_alive": False, "video_path": ""})
+    assert not upload_ready_for_manual_decision({"completed": True, "thread_alive": True, "video_path": "final_video.mp4"})
+    assert not upload_ready_for_manual_decision({"completed": False, "thread_alive": False, "video_path": "final_video.mp4"})
+    assert not upload_ready_for_manual_decision({"completed": True, "thread_alive": False, "video_path": ""})
