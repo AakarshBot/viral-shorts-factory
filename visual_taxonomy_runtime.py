@@ -403,6 +403,20 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     if _has(words, "poster", "album art", "album cover", "film poster", "movie poster", "artwork", "cover art"):
         return "MEDIA_ARTWORK"
 
+    # Explicit portrait/action wording in the visual intent outranks noisy
+    # search-prompt context. This prevents a portrait slide that merely mentions
+    # a press conference from being routed as an event/action search.
+    intent_lower = intent.casefold()
+    if vt == "PERSON":
+        if _has(_tokens(intent_lower), "portrait", "headshot"):
+            return "PERSON_PORTRAIT"
+        if _has(
+            _tokens(intent_lower),
+            "press conference", "interview", "speaking", "speaks", "appearing",
+            "on stage", "podium", "media interaction",
+        ):
+            return "PERSON_ACTION"
+
     sports_action = _has(
         words,
         "batting", "bowling", "batsman", "batter", "wicket", "goal", "scoring",
