@@ -35,6 +35,7 @@ from dashboard_runtime import (
     discover_ranked_topics,
     factory_function_coverage,
     run_demo_section,
+    upload_ready_for_manual_decision,
 )
 
 
@@ -533,19 +534,9 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
             st.markdown(f"**{prefix}:** {message}")
 
 
-def _upload_ready(snapshot: Dict[str, Any]) -> bool:
-    """Return True only when the completed render is ready for a user visibility decision."""
-    video_path = str(snapshot.get("video_path") or "").strip()
-    return (
-        bool(snapshot.get("completed"))
-        and not bool(snapshot.get("thread_alive"))
-        and bool(video_path)
-    )
-
-
 def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
     video_path = str(snapshot.get("video_path") or "").strip()
-    ready_for_upload = _upload_ready(snapshot)
+    ready_for_upload = upload_ready_for_manual_decision(snapshot)
     if not ready_for_upload:
         return
 
