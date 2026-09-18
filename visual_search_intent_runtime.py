@@ -30,6 +30,7 @@ class VisualSearchIntent:
     visual_type: str
     visual_genre: str
     query: str
+    queries: tuple[str, ...]
     intent: str
     context: str
     confidence: float
@@ -73,30 +74,59 @@ def _context_terms(text: str, subject: str) -> list[str]:
     return terms
 
 
+def _automatic_query_ladder(scene: dict, subject: str) -> list[str]:
+    """Build the bounded identity-first ladder used by the visual search."""
+    subject = clean_text(subject)
+    if not subject:
+        return []
+    context = _clean(
+        scene.get("factual_search_prompt")
+        or scene.get("specific_search_prompt")
+        or scene.get("factual_visual_intent")
+        or scene.get("visual_intent")
+        or scene.get("visual_context")
+    )
+    terms = _context_terms(context, subject)
+    queries = [subject]
+    if terms:
+        compact = _clean(" ".join([subject, *terms[:3]]))
+        if compact.casefold() != subject.casefold():
+            queries.append(compact)
+        for term in (terms[-1], terms[0]):
+            candidate = _clean(f"{subject} {term}")
+            if candidate.casefold() not in {item.casefold() for item in queries}:
+                queries.append(candidate)
+            if len(queries) >= 5:
+                break
+    return queries[:5]
+
+
 def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSearchIntent:
-    """Resolve the single subject/type/query contract for one scene."""
+    """Resolve one scene's subject, bounded query ladder and visual type."""
     scene = scene if isinstance(scene, dict) else {}
     manual = _clean(scene.get("manual_visual_query", ""))
-    base = dict(scene)
+    resolution = resolve_subject(dict(scene), video_title)
+    auto_subject = clean_text(
+        resolution.get("subject") or resolution.get("factual_entity") or scene.get("primary_entity", "")
+    )
+    visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
+    confidence = float(resolution.get("confidence") or 0.0)
 
     if manual:
-        # Manual search text is user-authored and therefore exact. Resolve only
-        # the scene's visual type; never rewrite the manual query through the
-        # factual-subject resolver.
-        scene_resolution = resolve_subject(base, video_title)
         subject = manual
-        visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
-        confidence = 1.0
         query = manual
+        queries = [manual]
+        # The first supplied manual query owns the opening scene. Only if that
+        # exact query produces no usable image may the normal automatic ladder
+        # take over for that scene. Other manual queries stay authoritative.
+        if int(scene.get("manual_visual_query_index", 0) or 0) == 1 and auto_subject:
+            for fallback in _automatic_query_ladder(scene, auto_subject):
+                if fallback.casefold() not in {item.casefold() for item in queries}:
+                    queries.append(fallback)
     else:
-        resolution = resolve_subject(base, video_title)
-        subject = clean_text(resolution.get("subject") or resolution.get("factual_entity", ""))
-        visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
-        confidence = float(resolution.get("confidence") or 0.0)
-        # The automatic first query is intentionally exact. Retrieval quality is
-        # improved by provider fan-out and candidate selection, not by stuffing
-        # narration, titles or model prompts into the opening search.
+        subject = auto_subject
         query = subject
+        queries = _automatic_query_ladder(scene, subject)
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(
@@ -113,12 +143,12 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         visual_type=visual_type,
         visual_genre=classify_visual_genre(scene, subject, visual_type),
         query=query,
+        queries=tuple(queries),
         intent=intent,
         context=context,
         confidence=confidence,
         manual=bool(manual),
     )
-
 
 def reformulate_visual_query(intent: VisualSearchIntent, reason: str) -> str:
     """Return at most one compact, evidence-based refinement.
