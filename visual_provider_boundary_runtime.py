@@ -305,14 +305,14 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
         plan.append(("Commons", fetch_commons_candidates))
 
     try:
-        from image_sources_runtime import fetch_openverse, fetch_pixabay
+        from image_sources_runtime import fetch_openverse_candidates, fetch_pixabay_candidates
     except Exception:
         fetch_openverse = fetch_pixabay = None
 
     plan.extend([
-        ("Openverse", fetch_openverse),
+        ("Openverse", fetch_openverse_candidates),
         ("DDG", fetch_duckduckgo_candidates),
-        ("Pixabay", fetch_pixabay),
+        ("Pixabay", fetch_pixabay_candidates),
         ("Pexels", fetch_pexels_candidates),
         ("Unsplash", fetch_unsplash_candidates),
     ])
