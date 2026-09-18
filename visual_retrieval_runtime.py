@@ -252,15 +252,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 break
             provider_checks += 1
             tier = runtime._verification_tier(qa_scene, visual_type, source)
-            # Curated PERSON providers already perform entity-level resolution:
-            # Wikipedia requires a near-exact person page title, while Commons is
-            # bounded to named-person media. Do not spend the semantic-QA budget
-            # on those curated candidates; the strict gate still performs its
-            # local image sanity check and source-specific PERSON acceptance.
-            # Manual-query routing can never change the factual entity used here.
-            semantic_required = tier != "SKIPPED(conceptual)" and not (
-                visual_type == "PERSON" and str(source).strip().lower() in {"wikipedia", "commons"}
-            )
+            # Retrieval is type-agnostic. A search source may have its own
+            # provider-specific identity guarantees, but those guarantees belong
+            # to the acceptance gate -- never to query routing. Every non-
+            # conceptual candidate is therefore eligible for the same semantic
+            # verification path, regardless of PERSON/ORG/EVENT/LOCATION/etc.
+            # If the gate can establish provider-level identity (for example an
+            # exact entity resolver), it can accept the candidate without a
+            # Gemini call; otherwise Gemini/uncertain fallback handles it.
+            semantic_required = tier != "SKIPPED(conceptual)"
 
             fetch_entity = cache_entity if source == "Wikipedia" else query
             args = (fetch_entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
