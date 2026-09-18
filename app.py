@@ -759,7 +759,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     start = page * page_size
     end = min(start + page_size, total)
 
-    st.markdown(f"<div class='panel'><b>Ranked topics {start + 1}–{end} of {total}</b><span class='small-muted' style='float:right'>Page {page + 1} of {page_count}</span></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='panel'><b>Distinct news events {start + 1}–{end} of {total}</b><span class='small-muted' style='float:right'>Page {page + 1} of {page_count}</span></div>", unsafe_allow_html=True)
     columns = st.columns(3, gap="medium")
     for local_index, candidate in enumerate(candidates[start:end]):
         global_index = start + local_index
