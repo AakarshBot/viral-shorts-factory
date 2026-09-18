@@ -153,8 +153,8 @@ AI_DISCOVERY_CATEGORY_KEYS = (
 )
 
 
-def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 10) -> list[dict[str, Any]]:
-    """Build a Top-10 current-topic list using one intentional query per useful genre."""
+def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
+    """Build a diverse current-topic list using one intentional query per useful genre."""
     from story_ranker import (
         _canonical_url,
         _candidate_reason,
@@ -279,7 +279,6 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         _cricket_relevance_pass,
         _requested_topic_pass,
         collect_high_recall_stories,
-        diversity_rerank,
         rank_discovery_candidates,
     )
     from workflow_runtime import CRICKET_CATEGORIES, _candidate_reason, _source_label, _story_key, _story_url
