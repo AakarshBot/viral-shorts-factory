@@ -437,6 +437,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     except Exception:
                         pass
 
+                    used_hashes.add(image_hash)
+
                     if trusted and candidate_index < len(candidates):
                         _record_trusted_related_assets(
                             seg,
@@ -449,8 +451,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                             visual_genre,
                             used_hashes,
                         )
-
-                    used_hashes.add(image_hash)
                     seg["visual_verified"] = True
                     seg["visual_rescue_reason"] = ""
                     seg["visual_fallback_reason"] = ""
