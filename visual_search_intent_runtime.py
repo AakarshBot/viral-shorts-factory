@@ -25,7 +25,7 @@ from visual_semantic_guard_runtime import (
     resolve_subject,
     tokens,
 )
-from visual_taxonomy_runtime import classify_visual_genre, genre_query_hints
+from visual_taxonomy_runtime import classify_visual_genre
 
 
 @dataclass(frozen=True)
@@ -256,31 +256,4 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         manual=bool(manual),
     )
 
-
-def reformulate_visual_query(intent: VisualSearchIntent, reason: str) -> str:
-    """Return at most one compact, evidence-based refinement."""
-    subject = _clean(intent.subject)
-    reason = _clean(reason).casefold()
-    if not subject or intent.manual:
-        return ""
-
-    if "no candidate" in reason or "no candidates" in reason:
-        terms = _ranked_scene_terms({"visual_context": intent.context}, subject, limit=3)
-        if terms:
-            query = _clean(" ".join([subject, *terms]))
-            if query.casefold() != intent.query.casefold():
-                return query[:240]
-
-    if "mismatch" in reason or "ambiguous" in reason or "unverified" in reason:
-        hints = genre_query_hints(intent.visual_genre)
-        if hints:
-            terms = _context_terms(" ".join(hints), subject, limit=2)
-            if terms:
-                query = _clean(" ".join([subject, *terms]))
-                if query.casefold() != intent.query.casefold():
-                    return query[:240]
-
-    return ""
-
-
-__all__ = ["VisualSearchIntent", "resolve_visual_search_intent", "reformulate_visual_query"]
+__all__ = ["VisualSearchIntent", "resolve_visual_search_intent"]
