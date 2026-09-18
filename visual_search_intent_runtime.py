@@ -225,13 +225,39 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         confidence = float(resolution.get("confidence") or 0.0)
         scene_terms = _scene_terms(scene, subject)
 
-        # Query order is intentional: factual identity first, then only the
-        # highest-value searchable anchors. Do not copy a natural-language
-        # visual prompt or invent an event/context that is absent from evidence.
-        query = _clean(" ".join([subject, *scene_terms[:3]]))
-        queries = [query] if query else []
-        if subject and query.casefold() != subject.casefold():
-            queries.append(subject)
+        # Person portrait/press-conference retrieval is identity-sensitive:
+        # adding prompt/context terms can turn a precise person search into a
+        # different editorial scene search. Keep the locked person identity
+        # exact for this path. Person action scenes still use evidence-backed
+        # context so the same person can retrieve materially different frames.
+        evidence_text = " ".join(
+            _clean(scene.get(field, ""))
+            for field in (
+                "factual_visual_intent",
+                "visual_intent",
+                "visual_context",
+                "specific_search_prompt",
+            )
+        ).casefold()
+        exact_person_query = (
+            visual_type == "PERSON"
+            and (
+                "press conference" in evidence_text
+                or classify_visual_genre(scene, subject, visual_type) == "PERSON_PORTRAIT"
+            )
+        )
+
+        if exact_person_query:
+            query = subject
+            queries = [subject] if subject else []
+        else:
+            # Query order is intentional: factual identity first, then only the
+            # highest-value searchable anchors. Do not copy a natural-language
+            # visual prompt or invent an event/context that is absent from evidence.
+            query = _clean(" ".join([subject, *scene_terms[:3]]))
+            queries = [query] if query else []
+            if subject and query.casefold() != subject.casefold():
+                queries.append(subject)
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(" ".join(
