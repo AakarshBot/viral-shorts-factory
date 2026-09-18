@@ -364,4 +364,23 @@ def bind_dashboard_patches(bot):
         print(f"   [Bindings] Production hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
     _patch_subtitles(bot)
     _patch_youtube_creator_comments(bot)
+
+    # Keep run_robot's production globals aligned with the live bot bindings.
+    # Several pipeline stages are invoked by functions defined in ultimate_bot.py,
+    # so rebinding bot attributes alone is not sufficient for the module namespace.
+    namespace = run_robot.__globals__
+    names = (
+        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
+        "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
+        "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep",
+        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip",
+    )
+    bound = []
+    for name in names:
+        value = getattr(bot, name, None)
+        if value is not None:
+            namespace[name] = value
+            bound.append(name)
+    print("   [Bindings] Production runtime globals bound: " + ", ".join(bound), flush=True)
+
     _install_visual_cache_safety()
