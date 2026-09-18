@@ -5,6 +5,7 @@ import math
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -914,12 +915,21 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
     raw = []
 
-    if base_query:
-        raw.extend(_gnews_items(base_query, api_key, genre_key))
+    # These providers are independent. Fetch them concurrently so one slow
+    # source does not make the entire intake run serially.
+    rss_url = custom_rss_url or genre_cfg.get("rss_url", "")
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="discovery-intake") as pool:
+        gnews_future = pool.submit(_gnews_items, base_query, api_key, genre_key) if base_query else None
+        rss_future = pool.submit(_rss_items, rss_url, genre_key)
+        official_future = pool.submit(_official_feed_items, genre_key, genre_cfg)
+        reddit_future = pool.submit(_reddit_items, genre_key)
 
-    raw.extend(_rss_items(custom_rss_url or genre_cfg.get("rss_url", ""), genre_key))
-    raw.extend(_official_feed_items(genre_key, genre_cfg))
-    social_rows = _reddit_items(genre_key)
+        if gnews_future is not None:
+            raw.extend(gnews_future.result())
+        raw.extend(rss_future.result())
+        raw.extend(official_future.result())
+        social_rows = reddit_future.result()
+
     social_titles = [row.get("title", "") for row in social_rows]
     raw.extend(social_rows)
 
