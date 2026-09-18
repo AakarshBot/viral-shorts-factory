@@ -1,4 +1,8 @@
+import inspect
+
 import pytest
+
+from story_ranker import collect_high_recall_stories
 
 from workflow_runtime import MAX_DISCOVERY_CANDIDATES, discover_three_candidates
 
@@ -52,6 +56,12 @@ def _story(title, score):
         "source": "Example News",
         "candidate_score": score,
     }
+
+
+def test_collector_accepts_legacy_discover_lanes_keyword():
+    parameter = inspect.signature(collect_high_recall_stories).parameters.get("discover_lanes")
+    assert parameter is not None
+    assert parameter.default is None
 
 
 def test_discovery_returns_stable_pool_up_to_28_without_production_calls():
