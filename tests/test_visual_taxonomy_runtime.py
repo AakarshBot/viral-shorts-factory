@@ -63,6 +63,28 @@ def test_visual_taxonomy_resolves_specific_assets_before_broad_roles():
     ) == "SPACE_VISUAL"
 
 
+def test_person_press_conference_is_action_while_explicit_portrait_stays_portrait():
+    assert classify_visual_genre(
+        {
+            "primary_entity": "Rishabh Pant",
+            "visual_intent": "press conference person",
+            "visual_context": "announcement at a media briefing",
+        },
+        "Rishabh Pant",
+        "PERSON",
+    ) == "PERSON_ACTION"
+
+    assert classify_visual_genre(
+        {
+            "primary_entity": "Rishabh Pant",
+            "visual_intent": "person portrait",
+            "visual_context": "press conference appearance",
+        },
+        "Rishabh Pant",
+        "PERSON",
+    ) == "PERSON_PORTRAIT"
+
+
 def test_visual_taxonomy_distinguishes_real_photo_and_explanatory_visuals():
     assert classify_visual_genre(
         {"primary_entity": "quantum entanglement", "visual_intent": "scientific concept"},
