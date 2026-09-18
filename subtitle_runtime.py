@@ -437,17 +437,14 @@ def _patch_scene_overlay(bot):
         source = inspect.getsource(current)
         marker = 'elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:'
         if marker in source:
-            # The first slide must use the normal scene treatment. Top-5 remains special.
+            # Remove the legacy opaque hook-card branch entirely. Top-5 is handled
+            # by its dedicated branch immediately above; every other first slide falls
+            # through to the normal visual treatment below.
             source = source.replace(
-                marker,
-                'elif format_mode == "top5" and idx == 0:',
-                1,
-            )
-            # This branch is retained only as a harmless fall-through guard; the normal
-            # scene branch below is what regular/trending/tech-review first slides use.
-            source = source.replace(
-                'render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)',
-                'render_top5_card(bg_img, 6 - idx, 5, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)',
+                'elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:\n'
+                '            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)\n'
+                '            return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]\n',
+                '',
                 1,
             )
             patched_source = textwrap.dedent(source)
