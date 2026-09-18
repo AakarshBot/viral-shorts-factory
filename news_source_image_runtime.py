@@ -388,7 +388,7 @@ def compose_news_source_image(image: Image.Image, target_size: tuple[int, int] =
             positions.add(int(round((cx - fw * 0.9) * sw)))
             positions.add(int(round((cx + fw * 0.9) * sw - crop_w)))
         positions = {max(0, min(max_left, p)) for p in positions}
-        candidates = [(p, 0, crop_w, sh) for p in positions]
+        candidates = [(p, 0, p + crop_w, sh) for p in positions]
     else:
         max_top = sh - crop_h
         positions = {int(round(max_top * i / 30)) for i in range(31)}
@@ -397,7 +397,7 @@ def compose_news_source_image(image: Image.Image, target_size: tuple[int, int] =
             positions.add(int(round((cy - fh * 0.9) * sh)))
             positions.add(int(round((cy + fh * 0.9) * sh - crop_h)))
         positions = {max(0, min(max_top, p)) for p in positions}
-        candidates = [(0, p, sw, crop_h) for p in positions]
+        candidates = [(0, p, sw, p + crop_h) for p in positions]
 
     def rect_edge_score(left: int, top: int, right: int, bottom: int) -> float:
         px1 = int(left * scale)
