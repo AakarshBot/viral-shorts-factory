@@ -1,9 +1,9 @@
 """Manual visual-query routing for the dashboard visual pipeline.
 
-Manual queries are optional. When present, they are treated as search vocabulary
-rather than hard scene indexes. The router assigns them to script scenes using
-the scene's factual entity, narration and visual intent, then lets the existing
-retrieval/QA stack fetch and verify the resulting image.
+Manual queries are optional. When present, the first query is a hard contract for
+scene/frame 1. Any remaining queries are routed to later scenes using the scene's
+factual entity, narration and visual intent, then the existing retrieval/QA stack
+fetches and verifies the resulting image.
 """
 from __future__ import annotations
 
