@@ -148,7 +148,7 @@ _SOURCE_STOPWORDS = {
 
 
 def _source_tokens(value):
-    words = re.findall(r"[\\w-]+", str(value or "").lower(), flags=re.UNICODE)
+    words = re.findall(r"[\w-]+", str(value or "").lower(), flags=re.UNICODE)
     return {word for word in words if len(word) > 2 and word not in _SOURCE_STOPWORDS}
 
 
@@ -336,16 +336,6 @@ def patch_content_first_visuals(bot):
                     scenes[scene_index - 1]["manual_visual_query_index"] = assignment.get("query_index", 0)
         elif not manual_queries:
             print("   [Manual Visual Queries] No manual queries supplied; using existing Full AI visual flow.", flush=True)
-        active_config = getattr(bot, "_active_web_config", {}) or {}
-        news_source_candidate = await _load_verified_news_source_candidate(
-            bot, visual_runtime, scenes, manual_queries, active_config
-        )
-        news_source_scene_index = (
-            int(news_source_candidate["scene_index"])
-            if isinstance(news_source_candidate, dict)
-            else -1
-        )
-
         # Ground automatic visual identities against the selected story evidence.
         # Manual queries remain untouched and authoritative.
         for scene_index, scene in enumerate(scenes, 1):
@@ -369,6 +359,16 @@ def patch_content_first_visuals(bot):
                     f"   [Visual Grounding] Scene {scene_index} | UNGROUNDED | entity='{current_entity}' | {reason}",
                     flush=True,
                 )
+
+        active_config = getattr(bot, "_active_web_config", {}) or {}
+        news_source_candidate = await _load_verified_news_source_candidate(
+            bot, visual_runtime, scenes, manual_queries, active_config
+        )
+        news_source_scene_index = (
+            int(news_source_candidate["scene_index"])
+            if isinstance(news_source_candidate, dict)
+            else -1
+        )
 
         ai_count = 0
         verified_count = 0
@@ -401,7 +401,7 @@ def patch_content_first_visuals(bot):
                         video_title,
                         manual_query=str(seg.get("manual_visual_query", "") or "").strip(),
                     )
-                    except Exception as exc:
+                except Exception as exc:
                     subject = str(seg.get("primary_entity") or "Visual rescue").strip()
                     seg["visual_verified"] = False
                     seg["visual_rescue_reason"] = f"visual-search-exception:{type(exc).__name__}:{exc}"
