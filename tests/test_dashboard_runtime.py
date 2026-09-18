@@ -100,6 +100,62 @@ def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
     assert "Visual review was rejected" in result["error"]
 
 
+
+def test_dashboard_top5_handoff_keeps_selected_story_in_full_intake(monkeypatch):
+    import workflow_runtime
+
+    bot = _Bot()
+    original_pool = [
+        {"title": "Other story one"},
+        {"title": "Other story two"},
+        {"title": "Other story three"},
+        {"title": "Other story four"},
+    ]
+    bot.run_robot.__globals__["gather_and_filter_stories"] = lambda *_args, **_kwargs: list(original_pool)
+
+    captured = {}
+
+    monkeypatch.setattr(
+        WorkflowController,
+        "_install_production_wrappers",
+        lambda self: None,
+    )
+
+    def fake_run_robot_with_exact_identity(bot_obj, web_config=None):
+        captured["config"] = dict(web_config or {})
+        captured["pool"] = bot_obj.run_robot.__globals__["gather_and_filter_stories"]()
+
+    monkeypatch.setattr(
+        workflow_runtime,
+        "run_robot_with_exact_identity",
+        fake_run_robot_with_exact_identity,
+    )
+
+    controller = DashboardWorkflowController(bot)
+    selected = {
+        "title": "Selected lead story",
+        "discovery_rank": 1,
+        "story_key": "selected lead story https example com/selected",
+        "dashboard_discovery_pool": True,
+    }
+    controller.start_production(
+        {
+            "format_mode": "top5",
+            "category": "technology",
+            "language": "english",
+        },
+        selected,
+    )
+
+    deadline = time.time() + 2
+    while time.time() < deadline and controller.snapshot()["thread_alive"]:
+        time.sleep(0.01)
+
+    assert captured["config"]["format_mode"] == "top5"
+    assert "selected_story" not in captured["config"]
+    assert captured["pool"][0]["title"] == "Selected lead story"
+    assert len(captured["pool"]) == 5
+
 def test_collect_channel_statistics_reads_recorded_vault_data(tmp_path):
     db_path = Path(tmp_path) / "vault.db"
     conn = sqlite3.connect(db_path)
