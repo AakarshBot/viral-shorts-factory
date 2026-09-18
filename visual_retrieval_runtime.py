@@ -233,7 +233,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         visual_intent = resolve_visual_search_intent(seg, video_title)
 
     visual_anchor = str(visual_intent.subject or "").strip()
-    queries = [visual_intent.query] if visual_intent.query else []
+    queries = list(visual_intent.queries or (visual_intent.query,)) if visual_intent.query else []
     visual_type = str(visual_intent.visual_type or "GENERAL_CONTEXT").upper()
     visual_genre = str(visual_intent.visual_genre or classify_visual_genre(seg, visual_anchor, visual_type) or "GENERAL_CONTEXT").upper()
     seg["visual_genre"] = visual_genre
