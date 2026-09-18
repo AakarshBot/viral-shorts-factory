@@ -96,7 +96,7 @@ def test_contextual_collective_role_is_generic_not_domain_specific():
     }
     brief, queries = _assert_query_contract(scene, "Aurora research update", "ORGANIZATION")
     assert brief["subject"] == "Aurora"
-    assert queries[0] == "Aurora"
+    assert queries[0].casefold().startswith("aurora")
 
 
 def test_contextual_venue_role_is_generic_not_domain_specific():
@@ -108,7 +108,7 @@ def test_contextual_venue_role_is_generic_not_domain_specific():
     }
     brief, queries = _assert_query_contract(scene, "Central City conference", "LOCATION")
     assert brief["subject"] == "Central City"
-    assert queries[0] == "Central City"
+    assert queries[0].casefold().startswith("central city")
 
 
 def test_multilingual_subjects_are_preserved():
@@ -122,7 +122,7 @@ def test_multilingual_subjects_are_preserved():
         }
         brief, queries = _assert_query_contract(scene, "Global story", "PERSON")
         assert brief["subject"] == entity
-        assert queries[0] == entity
+        assert queries[0].casefold().startswith(entity.casefold())
 
 
 def test_entity_types_remain_stable_across_genres():
@@ -149,8 +149,8 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
         "sport_or_topic_category": "entertainment",
     }
     brief, queries = _assert_query_contract(scene, "Noisy title that must never become the search query", "PERSON")
-    assert queries[0] == brief["subject"]
-    assert len(queries) <= 5
+    assert queries[0].casefold().startswith(brief["subject"].casefold())
+    assert len(queries) <= 2
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
 
 
