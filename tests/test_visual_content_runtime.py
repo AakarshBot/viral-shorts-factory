@@ -92,7 +92,6 @@ def test_top5_first_slide_keeps_dedicated_design(monkeypatch, tmp_path):
         lambda *args, **kwargs: calls.append("top5_intro") or args[1],
     )
     monkeypatch.setattr(content_runtime, "_render_hook_card", lambda *args, **kwargs: calls.append("hook") or args[1])
-    monkeypatch.setattr(content_runtime, "_render_scene_overlay", lambda *args, **kwargs: calls.append("scene_overlay") or args[1])
 
     bot = _fake_bot(tmp_path)
     script_data = {
