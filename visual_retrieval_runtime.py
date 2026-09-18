@@ -344,10 +344,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     # multimodal YES/NO gate. Do not waste a Gemini request on
                     # an exact person page or an explicit Commons logo asset.
                     accepted, tier_name, score, hard_reject = True, trusted_tier, trusted_score, False
-                    verification_attempts_used = False
                 else:
                     verification_available = semantic_required and verification_attempts < max_verification
-                    verification_attempts_used = bool(verification_available)
                     if verification_available:
                         verification_attempts += 1
                         try:
@@ -362,18 +360,18 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     else:
                         accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
 
-                    # A provider/model mismatch is retained as uncertain
-                    # evidence rather than immediately destroying the retrieval
-                    # result. The bounded fallback below can still use the best
-                    # real-source candidate if verification is unavailable.
+                    # An explicit semantic NO is a hard rejection. Keeping a
+                    # candidate that QA says is the wrong subject is worse than
+                    # falling through to the bounded retry/rescue path. Only a
+                    # verifier that is unavailable/uncertain may feed the
+                    # unverified-real fallback below.
                     if hard_reject:
-                        score = max(20, float(score or REAL_SOURCE_SCORES.get(source.lower(), 50)) - 30)
-                        hard_reject = False
                         print(
-                            f"   [Visual QA] semantic mismatch | retained as low-confidence candidate | "
-                            f"source={source} score={score:.0f} | query='{query}'",
+                            f"   [Visual QA] semantic mismatch | rejected | "
+                            f"source={source} | query='{query}'",
                             flush=True,
                         )
+                        continue
 
                 if accepted:
                     try:
@@ -406,8 +404,10 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             break
 
         # Adaptive retry: only reformulate after the complete first retrieval
-        # pass fails. A successful/uncertain candidate is not discarded just to
-        # consume another query. This is deliberately capped at one retry.
+        # pass produces neither an accepted candidate nor an uncertain candidate.
+        # An explicit semantic NO is a real failure and therefore qualifies for
+        # this one bounded evidence-based refinement. A manual query remains
+        # authoritative because its reformulator returns no retry.
         if query_index == 1 and len(queries) == 1 and best_uncertain is None:
             from visual_search_intent_runtime import reformulate_visual_query
             retry_query = reformulate_visual_query(visual_intent, "no candidates")
