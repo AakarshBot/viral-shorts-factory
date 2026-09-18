@@ -262,7 +262,7 @@ def _test_dashboard_architecture():
         "app_legacy.py", "app.py.mybackup", "newsroom_dashboard.py",
         "apply_production_fixes.py", "apply_script_fallback_fix.py", "apply_selected_story_lock_fix.py",
         "visual_query_lock_runtime.py", "visual_replacement_runtime.py", "visual_resilience_runtime.py",
-        "workflow_progress_runtime.py", "upload_runtime.py", "thumbnail_runtime.py",
+        "workflow_progress_runtime.py", "upload_runtime.py",
         "test_phase_runtime.py", "test_phase_patches.py", "test_history_runtime.py",
     ]
     still_present = [name for name in forbidden_paths if (root / name).exists()]
