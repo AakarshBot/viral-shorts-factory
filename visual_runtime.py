@@ -142,6 +142,7 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
     if not entity or entity.lower() in {"none", "unknown", "n/a"}:
         return False, "LOCAL-REJECT", 0, True
     visual_type = str(seg.get("visual_type", "")).strip().upper()
+    visual_genre = str(seg.get("visual_genre", "")).strip().upper()
     if not visual_type:
         try:
             from visual_strategy_runtime import classify_scene
@@ -155,7 +156,7 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
     if tier == "SKIPPED(conceptual)":
         print("   [Visual QA] Tier=SKIPPED(conceptual) | Gemini=SKIPPED.", flush=True)
         return True, tier, 90, False
-    result = _strict_gemini_check(img_bytes, entity, intent, prompt, voice, title, os.getenv("GEMINI_API_KEY"), tier=tier, visual_type=visual_type)
+    result = _strict_gemini_check(img_bytes, entity, intent, prompt, voice, title, os.getenv("GEMINI_API_KEY"), tier=tier, visual_type=visual_type, visual_genre=visual_genre)
     source_score = {"wikipedia": 100, "commons": 95, "ddg": 70, "pexels": 65, "unsplash": 65, "ai-generated": 45}.get(str(source).lower(), 50)
     if result is True:
         return True, tier, 100, False
