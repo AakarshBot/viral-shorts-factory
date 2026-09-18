@@ -140,9 +140,9 @@ def dashboard_architecture_audit() -> list[str]:
             errors.append(f"app.py: obsolete dashboard token remains: {token}")
     legacy_paging_ui = "See next " in source and "candidate_next_page" in source
     ranked_headline_ui = (
-        "Ranked headlines ·" in source
-        and "discovery_headline_selection" in source
-        and "Use selected headline" in source
+        "Ranked headlines" in source
+        and "Use headline →" in source
+        and "candidate_page" in source
     )
     if not (legacy_paging_ui or ranked_headline_ui):
         errors.append("app.py: discovery topic-selection UI is missing")
