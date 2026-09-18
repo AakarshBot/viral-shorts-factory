@@ -233,7 +233,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         visual_intent = resolve_visual_search_intent(seg, video_title)
 
     visual_anchor = str(visual_intent.subject or "").strip()
-    queries = [visual_intent.query] if visual_intent.query else []
+    queries = list(getattr(visual_intent, "queries", ()) or ())
+    if not queries and visual_intent.query:
+        queries = [visual_intent.query]
+    # The intent resolver owns the bounded query set. Retrieval must not
+    # manufacture another ladder or silently reformulate it.
     visual_type = str(visual_intent.visual_type or "GENERAL_CONTEXT").upper()
     visual_genre = str(visual_intent.visual_genre or classify_visual_genre(seg, visual_anchor, visual_type) or "GENERAL_CONTEXT").upper()
     seg["visual_genre"] = visual_genre
@@ -403,20 +407,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         if provider_checks >= max_provider_checks:
             break
 
-        # Adaptive retry: only reformulate after the complete first retrieval
-        # pass produces neither an accepted candidate nor an uncertain candidate.
-        # An explicit semantic NO is a real failure and therefore qualifies for
-        # this one bounded evidence-based refinement. A manual query remains
-        # authoritative because its reformulator returns no retry.
-        if query_index == 1 and len(queries) == 1 and best_uncertain is None:
-            from visual_search_intent_runtime import reformulate_visual_query
-            retry_query = reformulate_visual_query(visual_intent, "no candidates")
-            if retry_query and retry_query.casefold() != query.casefold():
-                queries.append(retry_query)
-                print(
-                    f"   [Visual Search] Adaptive retry | reason=no candidates | query='{retry_query}'",
-                    flush=True,
-                )
+        # No second-stage query synthesis here. The canonical intent already
+        # supplied the complete bounded query set for this scene.
 
     if best_uncertain is not None:
         score, normalized, source, query = best_uncertain
