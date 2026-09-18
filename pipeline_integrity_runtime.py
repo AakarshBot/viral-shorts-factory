@@ -302,6 +302,44 @@ def _wrap_visuals(bot):
         bot.run_robot.__globals__["process_visuals_async"] = script_bound_visuals
 
 
+def _write_endpoint_srt(path: str, word_timings: list[dict], offset: float = 0.0) -> bool:
+    if not word_timings:
+        return False
+    lines = []
+    chunk = []
+    start = None
+    last_end = None
+    for item in word_timings:
+        word = clean_narration(item.get("word", ""))
+        if not word:
+            continue
+        item_start = max(0.0, float(item.get("start", 0.0))) + offset
+        item_end = max(item_start + 0.08, float(item.get("end", item_start + 0.1)) + offset)
+        if start is None:
+            start = item_start
+        chunk.append(word)
+        last_end = item_end
+        if len(chunk) >= 6 or (last_end - start) >= 2.2:
+            lines.append((start, last_end, " ".join(chunk)))
+            chunk, start = [], None
+    if chunk and start is not None and last_end is not None:
+        lines.append((start, last_end, " ".join(chunk)))
+    if not lines:
+        return False
+
+    def stamp(seconds: float) -> str:
+        millis = max(0, int(round(seconds * 1000)))
+        hours, millis = divmod(millis, 3_600_000)
+        minutes, millis = divmod(millis, 60_000)
+        secs, millis = divmod(millis, 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+    with open(path, "w", encoding="utf-8") as handle:
+        for index, (start, end, text) in enumerate(lines, 1):
+            handle.write(f"{index}\n{stamp(start)} --> {stamp(end)}\n{text}\n\n")
+    return True
+
+
 def _wrap_compile(bot):
     current = getattr(bot, "compile_video", None)
     if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
