@@ -218,7 +218,7 @@ def test_unicode_primary_subject_is_preserved():
         assert classify_scene(scene) == "PERSON"
 
 
-def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkeypatch):
+def test_runtime_guard_uses_canonical_bounded_query_ladder(monkeypatch):
     class FakeRuntime:
         pass
 
@@ -233,5 +233,26 @@ def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkey
     }
 
     queries, visual_type = runtime._build_search_variants(scene, "Noisy title")
-    assert queries == ["Rishabh Pant"]
+    assert queries[0] == "Rishabh Pant"
+    assert len(queries) <= 5
     assert visual_type == "PERSON"
+
+
+def test_first_manual_query_has_automatic_fallback_only_after_manual_failure():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent(
+        {
+            "primary_entity": "India cricket team",
+            "manual_visual_query": "India team lifting trophy",
+            "manual_visual_query_index": 1,
+            "voiceover": "India cricket team celebrates after the final.",
+            "specific_search_prompt": "India cricket team final trophy celebration",
+            "visual_intent": "team in action",
+        }
+    )
+
+    assert intent.manual is True
+    assert intent.queries[0] == "India team lifting trophy"
+    assert "India cricket team" in intent.queries[1]
+    assert all("latest" not in q.lower() for q in intent.queries)
