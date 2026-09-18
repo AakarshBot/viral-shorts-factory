@@ -127,3 +127,22 @@ def test_production_selection_does_not_call_legacy_gather(monkeypatch):
     assert result == [{"title": "Canonical event"}]
     assert calls == {"collect": 1, "rank": 1}
 
+def test_adaptive_queries_target_underrepresented_configured_subjects():
+    from story_ranker import _adaptive_query_candidates
+
+    events = [{"title": "Artificial intelligence startup launches product"}]
+    queries = _adaptive_query_candidates(
+        "Artificial Intelligence OR Gadgets OR Startups OR Tech Launch",
+        events,
+        max_queries=2,
+    )
+
+    assert queries
+    assert "Gadgets" in queries or "Tech Launch" in queries
+    assert len(queries) <= 2
+
+
+def test_adaptive_queries_do_not_expand_single_subject_query():
+    from story_ranker import _adaptive_query_candidates
+
+    assert _adaptive_query_candidates("Artificial Intelligence", [], max_queries=2) == []
