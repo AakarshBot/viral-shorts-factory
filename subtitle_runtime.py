@@ -423,59 +423,6 @@ def _soften_frame_bars(image_path: str) -> bool:
         return False
 
 
-def _patch_scene_overlay(bot):
-    run_robot = getattr(bot, "run_robot", None)
-    namespace = getattr(run_robot, "__globals__", None)
-    if not isinstance(namespace, dict):
-        return False
-    current = namespace.get("process_visuals_async")
-    if current is None or getattr(current, "_soft_frame_overlay_bound", False):
-        return bool(current)
-
-    try:
-        source = inspect.getsource(current)
-        marker = 'elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:'
-        if marker in source:
-            # Remove the legacy opaque hook-card branch entirely. Top-5 is handled
-            # by its dedicated branch immediately above; every other first slide falls
-            # through to the normal visual treatment below.
-            source = source.replace(
-                'elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:\n'
-                '            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)\n'
-                '            return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]\n',
-                '',
-                1,
-            )
-            patched_source = textwrap.dedent(source)
-            exec(patched_source, namespace)
-            patched = namespace.get("process_visuals_async")
-            if callable(patched):
-                patched._soft_frame_overlay_bound = True
-                namespace["process_visuals_async"] = patched
-                bot.process_visuals_async = patched
-                print("   [Overlay Patch] Removed the opaque first-slide hook card for all non-Top-5 formats.", flush=True)
-                return True
-    except Exception as exc:
-        print(f"   [Overlay Patch] Could not remove first-slide hook card: {type(exc).__name__}: {exc}", flush=True)
-
-    async def polished_process_visuals(*args, **kwargs):
-        packages = await current(*args, **kwargs)
-        changed = 0
-        for package in packages or []:
-            for layer in package or []:
-                path = layer.get("image") if isinstance(layer, dict) else None
-                if path and _soften_frame_bars(path):
-                    changed += 1
-        if changed:
-            print(f"   [Overlay Patch] Refined {changed} scene frame edge(s).", flush=True)
-        return packages
-
-    polished_process_visuals._soft_frame_overlay_bound = True
-    namespace["process_visuals_async"] = polished_process_visuals
-    bot.process_visuals_async = polished_process_visuals
-    return True
-
-
 def _patch_top5_card(bot):
     current = getattr(bot, "render_top5_card", None)
     run_robot = getattr(bot, "run_robot", None)
@@ -491,51 +438,6 @@ def _patch_top5_card(bot):
     premium_top5._premium_top5_bound = True
     bot.render_top5_card = premium_top5
     namespace["render_top5_card"] = premium_top5
-
-
-def _patch_deep_dive_subtitle_condition(bot):
-    """Keep scene 1 free of karaoke subtitles and remove any legacy compile-time logo."""
-    run_robot = getattr(bot, "run_robot", None)
-    namespace = getattr(run_robot, "__globals__", None)
-    if not isinstance(namespace, dict):
-        return False
-    current = namespace.get("compile_video")
-    if not callable(current) or getattr(current, "_premium_compile_logo_bound", False):
-        return False
-    try:
-        source = inspect.getsource(current)
-        changes = []
-
-        # Do not touch the base subtitle condition. The authoritative renderer
-        # intentionally excludes scene 1 from karaoke subtitles.
-        logo_start = '        logo_file_path = os.path.join(BRAND_ASSETS_DIR, "logo.png")'
-        logo_end = '        print("   [+] Writing video file to disk for Quality Control...")'
-        if logo_start in source and logo_end in source:
-            start = source.index(logo_start)
-            end = source.index(logo_end)
-            source = source[:start] + "        # Final branding_runtime owns the channel logo; do not duplicate it in the compositor.\n" + source[end:]
-            changes.append("legacy compile-time logo removed")
-
-        if not changes:
-            current._premium_compile_logo_bound = True
-            bot._premium_compile_logo_bound = True
-            return False
-
-        patched_source = textwrap.dedent(source)
-        exec(patched_source, namespace)
-        patched = namespace.get("compile_video")
-        if not callable(patched):
-            raise RuntimeError("compile_video rebinding produced no callable")
-
-        patched._premium_compile_logo_bound = True
-        bot.compile_video = patched
-        namespace["compile_video"] = patched
-        bot._premium_compile_logo_bound = True
-        print("   [Subtitle Patch] " + "; ".join(changes) + ".", flush=True)
-        return True
-    except Exception as exc:
-        print(f"   [Subtitle Patch] Could not rebind compile_video: {type(exc).__name__}: {exc}", flush=True)
-        return False
 
 
 def _premium_branded_finish(bot, video_path: str) -> str:
@@ -642,8 +544,6 @@ def patch_subtitle_pipeline(bot):
         return bot
 
     _patch_top5_card(bot)
-    _patch_scene_overlay(bot)
-    _patch_deep_dive_subtitle_condition(bot)
     # Do not run the legacy endpoint subtitle pass: it creates a second caption layer
     # with an opaque subtitle box on the hook/outro. The normal compositor owns subtitles.
     _patch_premium_branding(bot)
