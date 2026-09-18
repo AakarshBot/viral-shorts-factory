@@ -197,7 +197,8 @@ def build_config() -> Dict[str, Any]:
             "channel": st.session_state.get("selected_channel", _channel_options()[0]),
             "cricket_pipeline": True,
             "cricket_category": st.session_state.get("cricket_category", "AI-assisted top story in cricket"),
-            "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),        }
+            "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),
+        }
 
     options = category_options(FORMAT_OPTIONS[format_label])
     default_key = next(iter(options.values()))
@@ -396,7 +397,8 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             continue
         path = str(layer.get("image") or "").strip()
         if path and os.path.isfile(path):
-            items.append(                {
+            items.append(
+                {
                     "index": index,
                     "path": path,
                     "source": str(layer.get("source_type") or "visual"),
@@ -622,7 +624,8 @@ def _perform_upload(
             genre_cfg,
             st.session_state.get("web_config", {}).get("trend_keyword", ""),
         )
-        st.session_state.upload_result = str(result)        st.rerun()
+        st.session_state.upload_result = str(result)
+        st.rerun()
     except Exception as exc:
         st.error(f"Upload failed: {type(exc).__name__}: {exc}")
 
@@ -821,3 +824,194 @@ def render_channel_statistics() -> None:
         "Average view %",
         f"{stats['avg_view_percentage']:.1f}%" if stats["avg_view_percentage"] is not None else "—",
     )
+
+    ctr_col, live_col = st.columns(2)
+    ctr_col.metric("Average title CTR", f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—")
+    with live_col:
+        if st.button("↻ Refresh live YouTube totals", use_container_width=True, key="refresh_live_channel_stats"):
+            st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
+
+    live = st.session_state.get("live_channel_stats") or {}
+    if live.get("error"):
+        st.warning(f"Live YouTube totals could not be loaded: {live['error']}")
+    elif live:
+        st.markdown("### Live YouTube channel totals")
+        live_cols = st.columns(4)
+        live_cols[0].metric("Channel", live.get("channel_title", "Connected channel"))
+        live_cols[1].metric("Subscribers", "Hidden" if live.get("hidden_subscriber_count") else f"{live.get('subscriber_count', 0):,}")
+        live_cols[2].metric("Videos", f"{live.get('video_count', 0):,}")
+        live_cols[3].metric("All-time views", f"{live.get('view_count', 0):,}")
+    else:
+        st.caption(
+            "Recorded factory metrics are shown above. Use “Refresh live YouTube totals” "
+            "to query the connected channel account."
+        )
+
+    st.markdown("### By format")
+    if stats["by_format"]:
+        st.dataframe(stats["by_format"], use_container_width=True, hide_index=True)
+
+    st.markdown("### By language")
+    if stats["by_language"]:
+        st.dataframe(stats["by_language"], use_container_width=True, hide_index=True)
+
+    st.markdown("### Recent factory history")
+    if stats["recent"]:
+        st.dataframe(stats["recent"], use_container_width=True, hide_index=True)
+    else:
+        st.info("No recorded factory runs yet.")
+
+
+def render_offline_page() -> None:
+    st.markdown("<div class='section-kicker'>Engineering</div><h2 style='margin-top:0'>Offline diagnostics</h2>", unsafe_allow_html=True)
+    st.caption("These checks are safe to run while coding. They make zero provider/API calls.")
+
+    if st.button("🧪 Run offline diagnostics", type="primary", use_container_width=True):
+        with st.spinner("Running offline factory checks..."):
+            st.session_state.offline_diagnostics = run_offline_diagnostics()
+            st.session_state.show_offline_diagnostics = True
+
+    report = st.session_state.get("offline_diagnostics") or {}
+    if not report:
+        return
+
+    if report.get("all_passed"):
+        st.success(f"All checks passed: {report.get('passed', 0)}/{report.get('total', 0)}")
+    else:
+        st.error(
+            f"Diagnostics found {report.get('failed', 0)} issue(s) out of {report.get('total', 0)}."
+        )
+
+    for item in report.get("results", []):
+        icon = "✅" if item.get("status") == "PASS" else "❌"
+        st.markdown(
+            f"<div class='panel'><b>{icon} {item.get('name', '')}</b><br>"
+            f"<span class='small-muted'>{item.get('detail', '')}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+
+
+def render_factory_function_coverage() -> None:
+    """Show a complete, read-only map of ultimate_bot callables."""
+    report = factory_function_coverage()
+    st.markdown("### Factory function coverage")
+    st.caption(
+        "Every top-level function in ultimate_bot.py is explicitly classified so we can "
+        "distinguish dashboard features from deliberate internal helpers."
+    )
+    if report.get("complete"):
+        st.success(f"All {report['total']} factory functions are accounted for.")
+    else:
+        st.error(
+            f"Coverage is incomplete: {len(report.get('unmapped', []))} unmapped and "
+            f"{len(report.get('stale_map', []))} stale entries."
+        )
+
+    buckets = report.get("by_surface") or {}
+    cols = st.columns(4)
+    labels = ["Live Factory", "Channel Statistics", "Demo / Diagnostics", "Internal"]
+    for col, label in zip(cols, labels):
+        col.metric(label, len(buckets.get(label, [])))
+
+    for label in labels:
+        names = buckets.get(label, [])
+        with st.expander(f"{label} ({len(names)})", expanded=(label != "Internal")):
+            st.code("\\n".join(names), language="text") if names else st.caption("None")
+
+def render_demo_page() -> None:
+    st.markdown("<div class='section-kicker'>Engineering lab</div><h2 style='margin-top:0'>Demo Factory</h2><h4>Component-by-component factory tests</h4>", unsafe_allow_html=True)
+    st.caption(
+        "Demo mode never performs a production upload and does not need provider calls. "
+        "It exercises existing factory contracts with controlled test inputs."
+    )
+
+    sections = [
+        ("imports", "Imports"),
+        ("environment", "Environment"),
+        ("database", "Database"),
+        ("visual_strategy", "Visual strategy & identity"),
+        ("scene_branding", "Scene overlay"),
+        ("script_audio", "Script cleaning & audio timing"),
+        ("runtime_bindings", "Runtime bindings"),
+        ("provider_boundary", "Raw provider boundary"),
+        ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
+        ("manual_visual_queries", "Manual visual query routing"),
+        ("dashboard_architecture", "Dashboard architecture"),
+        ("factory_function_coverage", "Factory function coverage"),
+    ]
+
+    if st.button("▶ Run all demo checks", type="primary", use_container_width=True):
+        results = {}
+        with st.spinner("Running all demo sections..."):
+            for key, _label in sections:
+                results[key] = run_demo_section(key)
+        st.session_state.last_demo_results = results
+
+    columns = st.columns(2, gap="medium")
+    for index, (key, label) in enumerate(sections):
+        with columns[index % 2]:
+            st.markdown(f"<div class='panel'><div class='qc-title'>{label}</div></div>", unsafe_allow_html=True)
+            if st.button(f"Test {label}", key=f"demo_{key}", use_container_width=True):
+                result = run_demo_section(key)
+                st.session_state.last_demo_results[key] = result
+
+            result = (st.session_state.get("last_demo_results") or {}).get(key)
+            if result:
+                if result.get("status") == "PASS":
+                    st.success(result.get("detail", "Passed"))
+                else:
+                    st.error(result.get("detail", "Failed"))
+                artifacts = result.get("artifacts") or {}
+                for artifact_name, artifact_path in artifacts.items():
+                    if artifact_path and os.path.isfile(artifact_path):
+                        st.caption(artifact_name.replace("_", " ").title())
+                        st.image(artifact_path, use_container_width=True)
+
+    st.markdown("---")
+    render_factory_function_coverage()
+
+
+def main() -> None:
+    load_streamlit_secrets_into_runtime()
+    initialise_runtime()
+
+    try:
+        db = sqlite3.connect(ultimate_bot.DB_PATH)
+        migrate_vault(db)
+        db.close()
+    except Exception as exc:
+        st.warning(f"Database migration check failed: {exc}")
+
+    _init_state()
+    controller: DashboardWorkflowController = st.session_state.workflow_controller
+
+    action_mode = st.radio(
+        "Action plan",
+        ["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"],
+        horizontal=True,
+        key="action_mode",
+    )
+    render_header(action_mode)
+
+    if action_mode == "Live Factory":
+        config = render_sidebar_controls()
+        render_live_factory(config, controller)
+    elif action_mode == "Channel Statistics":
+        st.sidebar.caption("Channel configuration is not needed for statistics.")
+        render_channel_statistics()
+    elif action_mode == "Run Offline Diagnostics":
+        st.sidebar.caption("No API calls are made from this screen.")
+        render_offline_page()
+    else:
+        st.sidebar.caption("Demo runs are local and do not publish videos.")
+        render_demo_page()
+
+    st.divider()
+    st.caption(
+        "Viral Shorts Factory · dashboard controls production, visual approval and upload visibility; "
+        "the underlying factory generation logic remains the production source of truth."
+    )
+
+
+main()
