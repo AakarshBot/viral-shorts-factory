@@ -234,6 +234,19 @@ def test_person_action_query_adds_scene_context():
     assert intent.query.casefold() != "rishabh pant"
 
 
+def test_locked_identity_keeps_function_words():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent({
+        "primary_entity": "The Weeknd",
+        "visual_intent": "person portrait",
+        "voiceover": "The Weeknd performed at the awards ceremony.",
+    })
+
+    assert intent.query.casefold() == "the weeknd portrait"
+    assert all("weeknd" in query.casefold() for query in intent.queries)
+
+
 def test_manual_query_stays_exact_but_routes_from_manual_subject():
     from visual_search_intent_runtime import resolve_visual_search_intent
 
