@@ -602,6 +602,7 @@ def _query_variants(base_query, genre_key, ai_cricket=False):
 
 
 def _cheap_filter(stories, max_items=30, max_age_hours=48):
+    """Apply cheap eligibility checks to the full intake before truncating."""
     survivors = []
     seen_urls = set()
     for story in stories:
@@ -625,11 +626,18 @@ def _cheap_filter(stories, max_items=30, max_age_hours=48):
         if url:
             seen_urls.add(url)
         story["cheap_filter_pass"] = True
-        story["age_hours"] = round(age, 2) if age != 9999.0 else None
+        story["age_hours"] = round(age, 2)
         survivors.append(story)
-        if len(survivors) >= max_items:
-            break
-    return survivors
+
+    survivors.sort(
+        key=lambda item: (
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
+            _freshness_score(item),
+            _source_quality(item),
+        ),
+        reverse=True,
+    )
+    return survivors[:max_items]
 
 
 def _deduplicate_stage(stories, max_items=15):
@@ -702,12 +710,9 @@ def _fact_source_stage(stories, max_items=8):
         )
 
     passed = [story for story in stories if story.get("fact_source_pass")]
-    if len(passed) < min(5, max_items):
-        non_social = [
-            story for story in stories
-            if _clean(story.get("collection_source")) not in {"reddit", "social"}
-        ]
-        passed = non_social or list(stories)
+    for story in stories:
+        if not story.get("fact_source_pass"):
+            story["discovery_rejection"] = "Insufficient source support"
     passed.sort(
         key=lambda item: (
             _safe_float(item.get("fact_source_score")) or 0.0,
