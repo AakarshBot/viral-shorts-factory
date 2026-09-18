@@ -218,10 +218,10 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     )
     candidates = event_pool.get("events") or compact
 
-    stage30 = _cheap_filter(candidates, max_items=40, max_age_hours=48)
-    stage20 = _deduplicate_stage(stage30, max_items=20)
+    stage30 = _cheap_filter(candidates, max_items=60, max_age_hours=48)
+    stage20 = _deduplicate_stage(stage30, max_items=45)
     stage20 = _recent_topic_cooldown(conn, stage20, hours=48)
-    stage12 = _fact_source_stage(stage20, max_items=12)
+    stage12 = _fact_source_stage(stage20, max_items=35)
     stage10 = _originality_stage(stage12, used_topics, max_items=max_candidates)
 
     ranked: list[dict[str, Any]] = []
