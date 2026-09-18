@@ -204,11 +204,6 @@ def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dic
     )
 
     first_three = _diverse_top_three(stories)
-    if len(first_three) != 3:
-        raise ValueError(
-            f"Discovery produced only {len(first_three)} strong diverse candidate(s); production is blocked until exactly 3 are available."
-        )
-
     pool = list(first_three)
     for story in stories:
         if story in pool:
