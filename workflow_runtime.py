@@ -407,7 +407,7 @@ class WorkflowController:
         config = dict(web_config)
         if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
             config["format_mode"] = "cricket"
-        config["selected_story"] = dict(selected_story)
+        is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
         config["publish_mode"] = "private"
         config["manual_qc_required"] = True
         self.bot._active_web_config = dict(config)
@@ -422,8 +422,24 @@ class WorkflowController:
                 def selected_gather(*args, **kwargs):
                     return [dict(selected)]
 
+                def top5_gather(*args, **kwargs):
+                    if not callable(original_gather):
+                        return [dict(selected)]
+                    pool = original_gather(*args, **kwargs) or []
+                    selected_title = str(selected.get("title") or "").strip().casefold()
+                    merged = [dict(selected)]
+                    for story in pool:
+                        if not isinstance(story, dict):
+                            continue
+                        if str(story.get("title") or "").strip().casefold() == selected_title:
+                            continue
+                        merged.append(dict(story))
+                    return merged
+
                 if original_gather is not None:
-                    globals_dict["gather_and_filter_stories"] = selected_gather
+                    globals_dict["gather_and_filter_stories"] = top5_gather if is_top5 else selected_gather
+                if not is_top5:
+                    config["selected_story"] = dict(selected_story)
                 try:
                     self._reporter("research", 18, "Selected story locked. Preparing the production pipeline…")
                     run_robot_with_exact_identity(self.bot, web_config=config)
