@@ -45,7 +45,7 @@ def parse_manual_visual_queries(raw: Any) -> list[str]:
     if isinstance(raw, (list, tuple, set)):
         values: list[str] = []
         for item in raw:
-            value = re.sub(r"\\s+", " ", str(item or "")).strip().strip(",").strip()
+            value = re.sub(r"\s+", " ", str(item or "")).strip().strip(",").strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1].strip()
             if value and value not in values:
@@ -59,7 +59,7 @@ def parse_manual_visual_queries(raw: Any) -> list[str]:
     values: list[str] = []
 
     def add(value: str) -> None:
-        value = re.sub(r"\\s+", " ", str(value or "")).strip().strip(",").strip()
+        value = re.sub(r"\s+", " ", str(value or "")).strip().strip(",").strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1].strip()
         if value and value not in values:
@@ -67,15 +67,15 @@ def parse_manual_visual_queries(raw: Any) -> list[str]:
 
     # Semicolon/newline remain explicit high-confidence delimiters.
     if ";" in raw_text or "\n" in raw_text or "\r" in raw_text:
-        for item in re.split(r";|\\r?\\n+", raw_text):
+        for item in re.split(r";|\r?\n+", raw_text):
             add(item)
         return values
 
-    text = re.sub(r"\\s+", " ", raw_text).strip()
+    text = re.sub(r"\s+", " ", raw_text).strip()
 
     # First support quoted comma-separated input.
     quoted = re.findall(
-        r"""(?:^|,\\s*)['"]([^'"]+)['"](?=\\s*(?:,|$))""",
+        r"""(?:^|,\s*)['"]([^'"]+)['"](?=\s*(?:,|$))""",
         text,
     )
     if quoted:
@@ -86,8 +86,8 @@ def parse_manual_visual_queries(raw: Any) -> list[str]:
     # The dashboard also accepts plain comma-separated query lists. Split only
     # on commas that are surrounded by whitespace; this preserves commas used
     # as punctuation inside compact tokens while handling the normal UI form.
-    if re.search(r",\\s+", text):
-        for item in re.split(r",\\s+", text):
+    if re.search(r",\s+", text):
+        for item in re.split(r",\s+", text):
             add(item)
         return values
 
