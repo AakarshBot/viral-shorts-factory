@@ -236,7 +236,7 @@ _POLICIES = {
         "Scientific object, laboratory scene, scientific phenomenon or research visual.",
     ),
     "SPACE_VISUAL": VisualGenrePolicy(
-        ("Commons", "NASA", "Openverse", "DDG", "Pexels", "Unsplash", "Pixabay"),
+        ("Commons", "Openverse", "DDG", "Pexels", "Unsplash", "Pixabay"),
         ("space",),
         (),
         True,
@@ -328,7 +328,7 @@ _ALIASES = {
 
 def _clean(value: object) -> str:
     text = str(value or "").replace("_", " ").replace("-", " ")
-    text = re.sub(r"s+", " ", text).strip().casefold()
+    text = re.sub(r"\\s+", " ", text).strip().casefold()
     return text
 
 
