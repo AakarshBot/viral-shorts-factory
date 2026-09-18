@@ -199,8 +199,6 @@ def cover_crop(
     # Near-vertical sources need little or no horizontal intervention.
     source_aspect = base.width / max(1, base.height)
     target_aspect = target_w / max(1, target_h)
-    crop_ratio = min(1.0, target_aspect / max(source_aspect, 1e-6)) if source_aspect >= target_aspect else min(1.0, source_aspect / max(target_aspect, 1e-6))
-
     person_like = {
         "PERSON_PORTRAIT",
         "PERSON_ACTION",
@@ -213,7 +211,7 @@ def cover_crop(
         or str(visual_type or "").upper() == "PERSON"
     ) else None
 
-    if face_focus is not None and face_focus[2] >= 0.01:
+    if face_focus is not None and face_focus[2] >= 0.002:
         print(
             f"   [Visual Framing] FACE-ANCHORED | genre={visual_genre or visual_type} "
             f"focus=({face_focus[0]:.2f},{face_focus[1]:.2f})",
