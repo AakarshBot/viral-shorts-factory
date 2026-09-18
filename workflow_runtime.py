@@ -288,6 +288,10 @@ class WorkflowController:
     def _reporter(self, stage: str, percent: int, message: str):
         self.update(stage, percent, message)
 
+    def _install_production_wrappers(self):
+        """Compatibility hook; production bindings install the canonical wrappers."""
+        self._patched = True
+
     def _mark_latest_run_ready_for_qc(self, _topic: str = ""):
         """Mark only the exact production row as READY_FOR_UPLOAD."""
         import ultimate_bot
