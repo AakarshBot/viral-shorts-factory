@@ -1923,35 +1923,7 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             except Exception:
                 bgm_clip = None
 
-        logo_file_path = os.path.join(BRAND_ASSETS_DIR, "logo.png")
-        if not os.path.exists(logo_file_path):
-            logo_file_path = os.path.join(
-                BRAND_ASSETS_DIR, "channels4_profile.jpg"
-            )
-
-        glossy_logo_img = create_glossy_logo_watermark(
-            logo_file_path, size=110
-        )
-        if glossy_logo_img and format_mode in [
-            "regular", "trending", "tech_reviews"
-        ]:
-            glossy_logo_path = os.path.join(
-                ASSETS_DIR, "glossy_logo_watermark.png"
-            )
-            glossy_logo_img.save(glossy_logo_path, "PNG")
-            try:
-                logo_clip = (
-                    ImageClip(glossy_logo_path)
-                    .with_duration(max(0.1, final_master.duration))
-                    .with_position((width - 150, 60))
-                )
-                logo_clip = CompositeVideoClip(
-                    [final_master, logo_clip], size=(width, height)
-                ).with_audio(final_master.audio)
-                final_master = logo_clip
-            except Exception:
-                pass
-
+        # Final branding_runtime owns the channel logo and border finish.
         print("   [+] Writing video file to disk for Quality Control...")
         final_master.write_videofile(
             video_output_path,

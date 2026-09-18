@@ -144,8 +144,11 @@ def apply_branded_finish(bot, video_path: str) -> str:
     if not valid:
         raise RuntimeError(f"Final render QC failed before branding: {reason}")
 
-    logo, overlay = _assets(bot)
-    if not logo.exists() and not overlay.exists():
+    logo, _legacy_overlay = _assets(bot)
+    # overlay.png is a legacy composite layer that can contain channel-name text
+    # and an obsolete subtitle-safe box. The final finish owns only the border + logo.
+    overlay = None
+    if not logo.exists():
         print(f"   [Branding] No logo/overlay asset found; final artifact QC passed: {reason}", flush=True)
         return video_path
 
@@ -153,15 +156,7 @@ def apply_branded_finish(bot, video_path: str) -> str:
         raise RuntimeError("Final render QC failed: source video metadata could not be verified")
 
     use_overlay = False
-    if overlay.exists():
-        use_overlay, reason = _overlay_is_caption_safe(overlay, source_w, source_h)
-        if not use_overlay:
-            print(f"   [Branding] Unsafe overlay; trying logo fallback: {reason}", flush=True)
-            if not logo.exists():
-                print("   [Branding] No safe secondary brand asset available; leaving video unchanged.", flush=True)
-                return video_path
-
-    brand_asset = overlay if use_overlay else (logo if logo.exists() else None)
+    brand_asset = logo if logo.exists() else None
     output = str(Path(video_path).with_name(Path(video_path).stem + "_branded.mp4"))
     filters = [
         f"[0:v]drawbox=x=10:y=10:w=iw-20:h=ih-20:color={ACCENT_SOFT}:t=5[frame_outer]",

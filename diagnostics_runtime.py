@@ -149,17 +149,23 @@ def _test_scene_branding():
     from PIL import Image
     from visual_content_runtime import _render_scene_overlay
 
-    class StubBot:
-        PALETTE = {"accent_primary": (0, 191, 255), "accent_secondary": (255, 140, 0)}
-
     source = Image.new("RGBA", (1080, 1920), (18, 24, 34, 255))
-    rendered = _render_scene_overlay(StubBot(), source, 2, 5, "STATISTIC", "Wikipedia", "The price fell by 25 percent.")
+    rendered = _render_scene_overlay(
+        None,
+        source,
+        2,
+        5,
+        "STATISTIC",
+        "Wikipedia",
+        "The price fell by 25 percent.",
+    )
     if rendered.size != source.size or rendered.mode != "RGBA":
-        raise AssertionError("scene branding changed output geometry/mode")
-    if rendered.getpixel((80, 85)) == source.getpixel((80, 85)):
-        raise AssertionError("scene branding produced no visible marker")
-    return "Story-aware scene branding preserves the central visual and adds the intended safe-area overlays"
-
+        raise AssertionError("scene visual cleanup changed output geometry/mode")
+    # Scene images must remain clean. The final branding layer, not the scene
+    # compositor, owns the channel logo and border treatment.
+    if rendered.tobytes() != source.tobytes():
+        raise AssertionError("scene visual cleanup baked an editorial overlay into the image")
+    return "Scene visuals stay clean; final branding owns the logo and border finish"
 
 def _test_script_and_audio():
     from audio_runtime import clean_audio_text, normalise_word_timings, validate_audio_timing, validate_timing_against_duration

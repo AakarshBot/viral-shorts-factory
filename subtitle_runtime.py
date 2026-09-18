@@ -495,23 +495,20 @@ def _patch_top5_card(bot):
 
 
 def _patch_deep_dive_subtitle_condition(bot):
-    """Let Deep Dive scene 1 receive normal subtitles now that its hook card is gone."""
+    """Keep scene 1 free of karaoke subtitles and remove any legacy compile-time logo."""
     run_robot = getattr(bot, "run_robot", None)
     namespace = getattr(run_robot, "__globals__", None)
     if not isinstance(namespace, dict):
         return False
     current = namespace.get("compile_video")
-    if not callable(current) or getattr(current, "_deep_dive_subtitles_bound", False):
+    if not callable(current) or getattr(current, "_premium_compile_logo_bound", False):
         return False
     try:
         source = inspect.getsource(current)
         changes = []
-        marker = "if not is_outro_scene and not is_hook_scene and idx < len(word_timings):"
-        replacement = "if format_mode != \"top5\" and not is_outro_scene and idx < len(word_timings):"
-        if marker in source:
-            source = source.replace(marker, replacement, 1)
-            changes.append("Deep Dive scene 1 subtitles enabled")
 
+        # Do not touch the base subtitle condition. The authoritative renderer
+        # intentionally excludes scene 1 from karaoke subtitles.
         logo_start = '        logo_file_path = os.path.join(BRAND_ASSETS_DIR, "logo.png")'
         logo_end = '        print("   [+] Writing video file to disk for Quality Control...")'
         if logo_start in source and logo_end in source:
@@ -521,16 +518,20 @@ def _patch_deep_dive_subtitle_condition(bot):
             changes.append("legacy compile-time logo removed")
 
         if not changes:
+            current._premium_compile_logo_bound = True
+            bot._premium_compile_logo_bound = True
             return False
+
         patched_source = textwrap.dedent(source)
         exec(patched_source, namespace)
         patched = namespace.get("compile_video")
         if not callable(patched):
-            return False
-        patched._deep_dive_subtitles_bound = True
+            raise RuntimeError("compile_video rebinding produced no callable")
+
         patched._premium_compile_logo_bound = True
         bot.compile_video = patched
         namespace["compile_video"] = patched
+        bot._premium_compile_logo_bound = True
         print("   [Subtitle Patch] " + "; ".join(changes) + ".", flush=True)
         return True
     except Exception as exc:

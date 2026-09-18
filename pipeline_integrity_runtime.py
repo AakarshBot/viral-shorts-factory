@@ -10,13 +10,12 @@ import html
 import os
 import re
 import subprocess
-import tempfile
 import unicodedata
 from pathlib import Path
 from typing import Any
 
 
-VERSION = "2026-09-17-v1"
+VERSION = "2026-09-18-v2-no-endpoint-subtitle-layer"
 
 _ZERO_WIDTH = re.compile(r"[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180d\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\u3164\ufe00-\ufe0f\ufeff]")
 _HTML_TAG = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
@@ -342,79 +341,15 @@ def _write_endpoint_srt(path: str, word_timings: list[dict], offset: float = 0.0
     return True
 
 
-def _add_endpoint_subtitles(video_path: str, audio_paths: list[str], word_timings: list[list[dict]]) -> str:
-    """Add missing hook/outro captions only; middle-scene captions remain untouched."""
-    if not video_path or not os.path.isfile(video_path) or not word_timings:
-        return video_path
-    if len(word_timings) < 1:
-        return video_path
-
-    durations = []
-    for path in audio_paths[: len(word_timings)]:
-        try:
-            probe = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path],
-                capture_output=True, text=True, timeout=10, check=False,
-            )
-            durations.append(max(0.1, float((probe.stdout or "0").strip()) + 0.25))
-        except Exception:
-            durations.append(0.1)
-
-    temp_dir = tempfile.mkdtemp(prefix="shorts_subtitles_", dir=os.path.dirname(video_path) or None)
-    srt_path = os.path.join(temp_dir, "endpoint.srt")
-    try:
-        events = []
-        if _write_endpoint_srt(srt_path, word_timings[0], 0.0):
-            events.append(True)
-        last_index = len(word_timings) - 1
-        last_offset = sum(durations[:last_index]) if durations else 0.0
-        if last_index != 0:
-            with open(srt_path, "a", encoding="utf-8") as handle:
-                second_path = os.path.join(temp_dir, "outro.srt")
-            if _write_endpoint_srt(second_path, word_timings[last_index], last_offset):
-                with open(second_path, "r", encoding="utf-8") as source, open(srt_path, "a", encoding="utf-8") as target:
-                    target.write(source.read())
-                events.append(True)
-        if not events:
-            return video_path
-
-        output = str(Path(video_path).with_name(Path(video_path).stem + "_subtitle_integrity.mp4"))
-        escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-        force_style = "FontName=DejaVu Sans,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=250"
-        command = [
-            "ffmpeg", "-y", "-i", video_path,
-            "-vf", f"subtitles='{escaped}':force_style='{force_style}'",
-            "-map", "0:v:0", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-            "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", output,
-        ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=240, check=False)
-        if completed.returncode != 0 or not os.path.isfile(output):
-            print(f"   [Subtitle Integrity] Endpoint caption pass skipped: {completed.stderr[-500:]}", flush=True)
-            return video_path
-        os.replace(output, video_path)
-        print("   [Subtitle Integrity] Hook/outro narration captions added from the same word timings as the voiceover.", flush=True)
-        return video_path
-    finally:
-        for candidate in Path(temp_dir).glob("*"):
-            try:
-                candidate.unlink()
-            except OSError:
-                pass
-        try:
-            Path(temp_dir).rmdir()
-        except OSError:
-            pass
-
-
 def _wrap_compile(bot):
     current = getattr(bot, "compile_video", None)
     if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
         return
 
     def guarded_compile(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
-        video_path = current(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode)
-        return _add_endpoint_subtitles(video_path, audio_paths, word_timings)
+        # The canonical compile_video already owns the active karaoke subtitles.
+        # Do not run a second FFmpeg subtitles filter on the finished video.
+        return current(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode)
 
     guarded_compile._pipeline_integrity_wrapped = True
     bot.compile_video = guarded_compile

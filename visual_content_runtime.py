@@ -78,55 +78,13 @@ def _fit_font(bot, text, max_width, base_size, min_size=20, custom_font_name=Non
 
 
 def _render_scene_overlay(bot, image, scene_number, total_scenes, visual_type, source_type, voiceover, font_name=None):
-    canvas = image.convert("RGBA")
-    width, height = canvas.size
-    accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
-    secondary = tuple(getattr(bot, "PALETTE", {}).get("accent_secondary", (255, 140, 0)))
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    """Return the raw scene image.
 
-    draw.rectangle([28, 28, width - 28, 33], fill=accent + (190,))
-    draw.rectangle([28, height - 33, width - 28, height - 28], fill=secondary + (150,))
-    draw.rectangle([28, 28, 33, height - 28], fill=accent + (105,))
-
-    marker_font = _load_brand_font(bot, 30, font_name)
-    type_label = _human_label(visual_type)
-    type_font = _fit_font(bot, type_label, min(430, width - 120), 30, 20, font_name)
-    source_text = _source_label(source_type)
-    source_font = _fit_font(bot, source_text, min(470, width - 160), 28, 18, font_name)
-
-    marker = f"{int(scene_number):02d} / {int(total_scenes):02d}"
-    marker_w, marker_h = _text_size(draw, marker, marker_font)
-    marker_box = [48, 62, 48 + marker_w + 40, max(112, 62 + marker_h + 24)]
-    draw.rounded_rectangle(marker_box, radius=18, fill=(5, 9, 16, 175))
-    draw.text((marker_box[0] + 20, marker_box[1] + 10), marker, font=marker_font, fill=(255, 255, 255, 240), stroke_width=1, stroke_fill=(0, 0, 0, 120))
-
-    type_w, type_h = _text_size(draw, type_label, type_font)
-    type_box = [48, height - 62 - type_h - 24, min(width - 48, 48 + type_w + 40), height - 62]
-    draw.rounded_rectangle(type_box, radius=18, fill=(5, 9, 16, 175), outline=accent + (150,), width=2)
-    draw.text((type_box[0] + 20, type_box[1] + 10), type_label, font=type_font, fill=accent + (245,), stroke_width=1, stroke_fill=(0, 0, 0, 120))
-
-    source_w, source_h = _text_size(draw, source_text, source_font)
-    source_box_w = min(width - 96, source_w + 36)
-    source_box_h = source_h + 24
-    sx = width - source_box_w - 48
-    source_box = [sx, 62, width - 48, 62 + source_box_h]
-    draw.rounded_rectangle(source_box, radius=18, fill=(5, 9, 16, 175), outline=(255, 255, 255, 80), width=1)
-    draw.text((sx + 18, 72), source_text, font=source_font, fill=(245, 248, 250, 235), stroke_width=1, stroke_fill=(0, 0, 0, 120))
-
-    fact_match = re.search(r"(?:₹|\$|€|£)?\b\d+(?:[.,]\d+)?%?\b", str(voiceover or ""))
-    if fact_match:
-        fact = fact_match.group(0)
-        fact_font = _fit_font(bot, fact, 250, 28, 20, font_name)
-        fact_w, fact_h = _text_size(draw, fact, fact_font)
-        chip_w = max(126, fact_w + 40)
-        chip_h = max(52, fact_h + 22)
-        cx = width - chip_w - 48
-        cy = height - 178
-        draw.rounded_rectangle([cx, cy, width - 48, cy + chip_h], radius=20, fill=accent + (215,))
-        draw.text((cx + 20, cy + 10), fact, font=fact_font, fill=(255, 255, 255, 250), stroke_width=1, stroke_fill=(0, 0, 0, 80))
-
-    return Image.alpha_composite(canvas, overlay)
+    Scene numbers, source/type labels, fact chips and other editorial text cards
+    are intentionally not baked into the visual anymore. The final branding
+    stage is the single owner of the channel logo and border treatment.
+    """
+    return image.convert("RGBA")
 
 
 def _render_hook_card(bot, image, hook_text, font_name=None):
