@@ -7,6 +7,7 @@ renderer rescue exists only to prevent an empty frame after every real source
 has been exhausted.
 """
 
+import io
 import os
 import re
 from PIL import Image, ImageDraw, ImageFont
@@ -138,6 +139,148 @@ def _fit_hook_text(bot, text, font_name, max_width):
     return font, [text]
 
 
+_SOURCE_STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
+    "with", "from", "by", "is", "are", "was", "were", "be", "has", "have",
+    "had", "this", "that", "these", "those", "news", "latest", "today",
+    "report", "reports", "says", "said", "story",
+}
+
+
+def _source_tokens(value):
+    words = re.findall(r"[\w-]+", str(value or "").lower(), flags=re.UNICODE)
+    return {word for word in words if len(word) > 2 and word not in _SOURCE_STOPWORDS}
+
+
+def _rank_news_source_scene_indices(scenes, article_title="", manual_queries=None):
+    """Rank scenes for one article image; manual query #1 always owns scene 1."""
+    article_tokens = _source_tokens(article_title)
+    manual_queries = list(manual_queries or [])
+    ranked = []
+    for index, scene in enumerate(scenes):
+        if manual_queries and index == 0:
+            continue
+        text = " ".join(
+            str(scene.get(key, "") or "")
+            for key in (
+                "primary_entity",
+                "voiceover",
+                "visual_intent",
+                "specific_search_prompt",
+                "visual_context",
+                "manual_visual_query",
+            )
+        )
+        scene_tokens = _source_tokens(text)
+        score = float(len(article_tokens & scene_tokens) * 4)
+        entity = str(
+            scene.get("factual_primary_entity")
+            or scene.get("primary_entity")
+            or scene.get("manual_visual_query")
+            or ""
+        ).strip()
+        if entity and _source_tokens(entity) & article_tokens:
+            score += 12.0
+        if scene.get("manual_visual_query"):
+            score += len(_source_tokens(scene.get("manual_visual_query"))) * 2.0
+        ranked.append((score, index))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [index for score, index in ranked if score > 0] or [index for _, index in ranked]
+
+
+async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, manual_queries, active_config):
+    """Extract the selected article image once, then run it through the normal visual QC."""
+    try:
+        from news_source_image_runtime import extract_news_source_image, compose_news_source_image
+    except Exception as exc:
+        print(f"   [News Source Image] Runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+        return None
+
+    selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else None
+    if not isinstance(selected_story, dict):
+        return None
+
+    article_url = str(
+        selected_story.get("story_url")
+        or selected_story.get("url")
+        or selected_story.get("link")
+        or ""
+    ).strip()
+    if not article_url:
+        return None
+
+    publisher = str(
+        selected_story.get("source_label")
+        or selected_story.get("source")
+        or selected_story.get("publisher")
+        or ""
+    ).strip()
+    article_title = str(selected_story.get("title") or "").strip()
+    if not article_title:
+        return None
+
+    try:
+        source_pack = await __import__("asyncio").get_running_loop().run_in_executor(
+            None, extract_news_source_image, article_url, publisher
+        )
+    except Exception as exc:
+        print(f"   [News Source Image] Extraction failed: {type(exc).__name__}: {exc}", flush=True)
+        return None
+
+    if not isinstance(source_pack, dict) or not source_pack.get("bytes"):
+        print("   [News Source Image] No article image was extracted.", flush=True)
+        return None
+
+    raw = source_pack["bytes"]
+    try:
+        image = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception as exc:
+        print(f"   [News Source Image] Invalid extracted image: {type(exc).__name__}: {exc}", flush=True)
+        return None
+
+    ranked_indices = _rank_news_source_scene_indices(scenes, article_title, manual_queries)
+    for scene_index in ranked_indices:
+        scene = scenes[scene_index]
+        scene["news_source_qc_attempted"] = True
+        try:
+            accepted, tier, score, hard_reject = visual_runtime._strict_gate(
+                bot, raw, scene, article_title, source="news_source"
+            )
+        except Exception as exc:
+            print(
+                f"   [News Source Image] QC exception for scene {scene_index + 1}: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            continue
+
+        print(
+            f"   [News Source Image] QC scene {scene_index + 1} | "
+            f"accepted={accepted} tier={tier} score={score} hard_reject={hard_reject}",
+            flush=True,
+        )
+        if not accepted:
+            continue
+
+        scene["visual_verified"] = True
+        scene["visual_query_used"] = "selected article lead image"
+        scene["visual_source"] = "news_source"
+        return {
+            "scene_index": scene_index,
+            "image": compose_news_source_image(image, (1080, 1920)),
+            "source_type": "news_source",
+            "credit": str(
+                source_pack.get("credit")
+                or f"Source: {source_pack.get('publisher') or publisher or 'News source'}"
+            ).strip(),
+            "image_url": str(source_pack.get("image_url") or ""),
+            "page_url": str(source_pack.get("page_url") or article_url),
+        }
+
+    print("   [News Source Image] Extracted image failed the normal visual QC for every relevant scene; discarded.", flush=True)
+    return None
+
+
 def patch_content_first_visuals(bot):
     try:
         import visual_runtime
@@ -217,6 +360,16 @@ def patch_content_first_visuals(bot):
                     flush=True,
                 )
 
+        active_config = getattr(bot, "_active_web_config", {}) or {}
+        news_source_candidate = await _load_verified_news_source_candidate(
+            bot, visual_runtime, scenes, manual_queries, active_config
+        )
+        news_source_scene_index = (
+            int(news_source_candidate["scene_index"])
+            if isinstance(news_source_candidate, dict)
+            else -1
+        )
+
         ai_count = 0
         verified_count = 0
         rescue_count = 0
@@ -226,29 +379,42 @@ def patch_content_first_visuals(bot):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
-            try:
-                bg_img, used_ai, source_type = search_slide_visual(
-                    visual_runtime,
-                    bot,
-                    seg,
-                    category,
-                    used_urls,
-                    used_hashes,
-                    video_title,
-                    manual_query=str(seg.get("manual_visual_query", "") or "").strip(),
-                )
-            except Exception as exc:
-                subject = str(seg.get("primary_entity") or "Visual rescue").strip()
-                seg["visual_verified"] = False
-                seg["visual_rescue_reason"] = f"visual-search-exception:{type(exc).__name__}:{exc}"
-                seg["visual_fallback_reason"] = ""
+            source_credit = ""
+            if idx == news_source_scene_index and isinstance(news_source_candidate, dict):
+                bg_img = news_source_candidate["image"]
+                used_ai = False
+                source_type = news_source_candidate["source_type"]
+                source_credit = news_source_candidate["credit"]
                 print(
-                    f"   [Visual Rescue] Scene {idx + 1} retrieval exception; continuing with renderer rescue: "
-                    f"{type(exc).__name__}: {exc}",
+                    f"   [News Source Image] Accepted for scene {idx + 1} after normal visual QC.",
                     flush=True,
                 )
-                bg_img, used_ai, source_type = make_visual_rescue(subject, str(seg.get("visual_type", "GENERAL_CONTEXT"))), False, "visual-rescue"
-                # The source-type branch below records this rescue exactly once.
+            else:
+                try:
+                    bg_img, used_ai, source_type = search_slide_visual(
+                        visual_runtime,
+                        bot,
+                        seg,
+                        category,
+                        used_urls,
+                        used_hashes,
+                        video_title,
+                        manual_query=str(seg.get("manual_visual_query", "") or "").strip(),
+                    )
+                except Exception as exc:
+                    subject = str(seg.get("primary_entity") or "Visual rescue").strip()
+                    seg["visual_verified"] = False
+                    seg["visual_rescue_reason"] = f"visual-search-exception:{type(exc).__name__}:{exc}"
+                    seg["visual_fallback_reason"] = ""
+                    print(
+                        f"   [Visual Rescue] Scene {idx + 1} retrieval exception; continuing with renderer rescue: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    bg_img, used_ai, source_type = make_visual_rescue(
+                        subject, str(seg.get("visual_type", "GENERAL_CONTEXT"))
+                    ), False, "visual-rescue"
+                    # The source-type branch below records this rescue exactly once.
 
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
@@ -257,7 +423,10 @@ def patch_content_first_visuals(bot):
             if str(source_type).lower() == "visual-rescue":
                 rescue_count += 1
 
-            bg_img = cover_crop(bg_img, target_size).convert("RGBA")
+            if source_type == "news_source":
+                bg_img = bg_img.convert("RGBA")
+            else:
+                bg_img = cover_crop(bg_img, target_size).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
             try:
@@ -289,6 +458,16 @@ def patch_content_first_visuals(bot):
                     font_name=font_choice,
                 )
 
+            rendered = rendered.convert("RGBA")
+            if source_type == "news_source" and source_credit:
+                try:
+                    from news_source_image_runtime import apply_source_credit
+                    rendered = apply_source_credit(rendered, source_credit)
+                except Exception as exc:
+                    print(
+                        f"   [News Source Image] Attribution render failed: {type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
             rendered.convert("RGB").save(img_path, "JPEG", quality=95)
             packages[idx] = [{
                 "image": img_path,
@@ -303,6 +482,8 @@ def patch_content_first_visuals(bot):
                 "visual_query_used": seg.get("visual_query_used", ""),
                 "manual_visual_query": seg.get("manual_visual_query", ""),
                 "manual_visual_query_score": seg.get("manual_visual_query_score", 0),
+                "source_credit": source_credit,
+                "source_image_url": news_source_candidate.get("image_url", "") if source_type == "news_source" and isinstance(news_source_candidate, dict) else "",
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified

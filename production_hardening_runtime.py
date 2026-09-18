@@ -97,28 +97,14 @@ def _repair_visual_identity(script_data: dict[str, Any], story_data: dict[str, A
 
 
 def _install_authoritative_visual_query_planner() -> None:
-    """Preserve the immutable one-query visual planner; never restore a legacy query ladder."""
+    """Verify that the canonical visual planner is still installed."""
     try:
         import visual_strategy_runtime
         current = getattr(visual_strategy_runtime, "build_deep_queries", None)
-
-        if getattr(current, "_authoritative_locked_subject_planner", False):
-            print(
-                "   [Visual Strategy Hardening] Strict single-query visual planner preserved; legacy multi-query hardening skipped.",
-                flush=True,
-            )
-            return
-
-        # Recovery path only: ask the real visual lock runtime to install the
-        # authoritative planner. This function must never construct its own
-        # multi-query planner.
-        from visual_query_lock_runtime import install
-        install()
-        current = getattr(visual_strategy_runtime, "build_deep_queries", None)
         if not getattr(current, "_authoritative_locked_subject_planner", False):
-            raise RuntimeError("authoritative one-query visual planner could not be installed")
+            raise RuntimeError("authoritative visual query planner is not installed")
         print(
-            "   [Visual Strategy Hardening] Strict single-query visual planner installed.",
+            "   [Visual Strategy Hardening] Strict single-query visual planner preserved.",
             flush=True,
         )
     except Exception as exc:

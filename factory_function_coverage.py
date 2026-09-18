@@ -59,7 +59,6 @@ SURFACE_MAP: dict[str, str] = {
     "wrap_text_exact": "Live Factory",
     "fit_text_in_box": "Live Factory",
     "create_branded_slide": "Live Factory",
-    "render_top5_card": "Live Factory",
     "render_hook_card": "Live Factory",
     "create_glossy_logo_watermark": "Live Factory",
     "generate_karaoke_clip": "Live Factory",

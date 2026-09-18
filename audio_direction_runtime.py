@@ -29,35 +29,6 @@ def patch_audio_direction(bot):
     except Exception as exc:
         print(f"   [Bindings] Pipeline integrity guard unavailable: {type(exc).__name__}: {exc}", flush=True)
 
-    # Branding, final artifact QC and channel intelligence are bound here
-    # because this patch is part of the live runtime binding stack; each is
-    # explicit and idempotent.
-    try:
-        from channel_branding_runtime import install_channel_branding
-        install_channel_branding(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Channel branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-    try:
-        from branding_runtime import patch_branding_pipeline
-        patch_branding_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-    try:
-        from final_qc_runtime import patch_workflow_qc
-        patch_workflow_qc(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Final QC runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-    try:
-        from channel_intelligence_runtime import install_channel_intelligence_dialog
-        install_channel_intelligence_dialog()
-    except Exception as exc:
-        print(f"   [Bindings] Channel intelligence runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-    try:
-        from production_hardening_runtime import install_production_hardening
-        install_production_hardening(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Production hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
-
     if getattr(bot, "_audio_direction_patch_installed", False):
         return bot
     run_robot = getattr(bot, "run_robot", None)

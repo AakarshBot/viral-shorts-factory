@@ -200,7 +200,6 @@ def _test_runtime_bindings():
     import factory_runtime, provider_runtime, runtime_bindings, ultimate_bot
     factory_runtime.patch_dashboard_runtime(ultimate_bot)
     provider_runtime.patch_provider_adapters(ultimate_bot)
-    runtime_bindings.harden_editorial_defaults(ultimate_bot)
     runtime_bindings.bind_dashboard_patches(ultimate_bot)
     namespace = ultimate_bot.run_robot.__globals__
     required = (
@@ -283,13 +282,13 @@ def _test_dashboard_architecture():
         raise AssertionError(f"obsolete dashboard UI leaked into app.py: {leaked}")
     legacy_paging_ui = "See next " in source and "candidate_next_page" in source
     ranked_headline_ui = (
-        "Ranked headlines ·" in source
-        and "discovery_headline_selection" in source
-        and "Use selected headline" in source
+        "Ranked headlines" in source
+        and "Use headline →" in source
+        and "candidate_page" in source
     )
     if not (legacy_paging_ui or ranked_headline_ui):
         raise AssertionError("topic-selection UI is missing from the canonical dashboard")
-    surface = "legacy paging" if legacy_paging_ui else "ranked headline list"
+    surface = "legacy paging" if legacy_paging_ui else "ranked headline cards"
     return f"Single-dashboard architecture and {surface} surface passed"
 
 

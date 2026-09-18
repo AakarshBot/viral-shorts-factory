@@ -4,7 +4,6 @@ from PIL import Image
 
 from dashboard_runtime import upload_ready_for_manual_decision
 from pipeline_integrity_runtime import _wrap_compile
-from subtitle_runtime import _patch_deep_dive_subtitle_condition
 from visual_content_runtime import _render_scene_overlay
 
 
@@ -21,12 +20,6 @@ def test_scene_overlay_contains_no_editorial_text_or_cards():
     )
     assert rendered.size == image.size
     assert rendered.tobytes() == image.tobytes()
-
-
-def test_first_slide_subtitle_patch_no_longer_reenables_scene_one():
-    source = inspect.getsource(_patch_deep_dive_subtitle_condition)
-    assert 'format_mode != "top5"' not in source
-    assert "Deep Dive scene 1 subtitles enabled" not in source
 
 
 def test_pipeline_integrity_no_longer_has_endpoint_subtitle_layer():

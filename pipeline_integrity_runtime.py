@@ -11,7 +11,6 @@ import os
 import re
 import subprocess
 import unicodedata
-from pathlib import Path
 from typing import Any
 
 
@@ -363,27 +362,6 @@ def patch_pipeline_integrity(bot) -> bool:
         _wrap_audio(bot)
         _wrap_visuals(bot)
         _wrap_compile(bot)
-        # Keep the existing final branding layer active, but make sure the
-        # repository's real .jpg logo variants are accepted by it.
-        try:
-            import branding_runtime
-            original_assets = getattr(branding_runtime, "_assets", None)
-            if callable(original_assets) and not getattr(original_assets, "_integrity_assets", False):
-                def assets_with_variants(active_bot):
-                    root = Path(getattr(active_bot, "BASE_DIR", Path(__file__).resolve().parent)) / "brand_assets"
-                    candidates = [
-                        root / "logo.png",
-                        root / "logo.png.jpg",
-                        root / "channels4_profile.jpg",
-                        root / "channels4_profile.jpg.jpg",
-                    ]
-                    logo = next((candidate for candidate in candidates if candidate.exists()), candidates[-1])
-                    overlay = root / "overlay.png"
-                    return logo, overlay
-                assets_with_variants._integrity_assets = True
-                branding_runtime._assets = assets_with_variants
-        except Exception as exc:
-            print(f"   [Pipeline Integrity] Branding asset compatibility patch skipped: {exc}", flush=True)
         bot._pipeline_integrity_installed = True
         print(f"   [Pipeline Integrity] Strict script/narration/subtitle/branding guards installed ({VERSION}).", flush=True)
         return True

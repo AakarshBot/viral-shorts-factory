@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -137,6 +138,136 @@ def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 
     return kept
 
 
+
+
+# Dashboard-only AI topic selection. This deliberately lives here so the
+# factory's production CONTENT_CATEGORIES and format contracts stay unchanged.
+AI_DISCOVERY_CATEGORY_KEYS = (
+    "national_global_affairs",
+    "technology",
+    "business_finance",
+    "entertainment",
+    "sports_stories_of_day",
+    "health_lifestyle",
+    "viral_phenomenon",
+)
+
+
+def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 10) -> list[dict[str, Any]]:
+    """Build a Top-10 current-topic list using one intentional query per useful genre."""
+    from story_ranker import (
+        _canonical_url,
+        _candidate_reason,
+        _cheap_filter,
+        _deduplicate_stage,
+        _editorial_score,
+        _fact_source_stage,
+        _gnews_items,
+        _load_history,
+        _load_used_topics,
+        _official_feed_items,
+        _originality_stage,
+        _reddit_items,
+        _rss_items,
+        _source_label,
+        _story_key,
+        _story_url,
+        _tokens,
+        discover_event_pool,
+    )
+
+    max_candidates = max(3, min(10, int(max_candidates or 10)))
+    rows = _load_history(conn)
+    used_topics = _load_used_topics(conn)
+    language = str(web_config.get("language", "english"))
+    api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
+    raw: list[dict[str, Any]] = []
+
+    for category in AI_DISCOVERY_CATEGORY_KEYS:
+        cfg = bot.CONTENT_CATEGORIES.get(category) or {}
+        query = str(cfg.get("gnews_q", "") or "").strip()
+        if query:
+            raw.extend(_gnews_items(query, api_key, category))
+        rss_url = str(cfg.get("rss_url", "") or "").strip()
+        if rss_url:
+            raw.extend(_rss_items(rss_url, category))
+        raw.extend(_official_feed_items(category, cfg))
+
+    social_rows = _reddit_items("viral_phenomenon")
+    raw.extend(social_rows)
+    social_titles = [row.get("title", "") for row in social_rows]
+
+    compact: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        key = _canonical_url(item.get("url") or item.get("link"))
+        if not key:
+            key = "title:" + " ".join(sorted(_tokens(item.get("title", ""))))
+        if key and key not in seen:
+            seen.add(key)
+            compact.append(item)
+
+    event_pool = discover_event_pool(
+        query="India OR world OR technology OR business OR entertainment OR cricket",
+        existing_articles=compact,
+        timespan="48h",
+        max_gdelt_records=75,
+    )
+    candidates = event_pool.get("events") or compact
+
+    stage30 = _cheap_filter(candidates, max_items=40, max_age_hours=48)
+    stage20 = _deduplicate_stage(stage30, max_items=20)
+    stage20 = _recent_topic_cooldown(conn, stage20, hours=48)
+    stage12 = _fact_source_stage(stage20, max_items=12)
+    stage10 = _originality_stage(stage12, used_topics, max_items=max_candidates)
+
+    ranked: list[dict[str, Any]] = []
+    for item in stage10:
+        category = str(item.get("genre") or "national_global_affairs")
+        scored = _editorial_score(
+            item,
+            rows,
+            category,
+            "regular",
+            language,
+            social_titles,
+            ai_cricket=False,
+        )
+        # _editorial_score already includes channel-history fit. Reuse its
+        # normalized dimension for the dashboard instead of adding history twice.
+        scored["channel_history_fit"] = float(
+            (scored.get("discovery_dimensions") or {}).get("channel_history") or 0.0
+        )
+        scored["recommended_category"] = category if category in bot.CONTENT_CATEGORIES else "national_global_affairs"
+        scored["recommended_format"] = "regular"
+        scored["ai_recommendation"] = True
+        ranked.append(scored)
+
+    ranked.sort(key=lambda item: float(item.get("candidate_score") or -9999.0), reverse=True)
+    pool = ranked[:max_candidates]
+    for rank, item in enumerate(pool, 1):
+        item["discovery_rank"] = rank
+        item["discovery_reason"] = _candidate_reason(item)
+        item["source_label"] = _source_label(item)
+        item["story_url"] = _story_url(item)
+        item["story_key"] = _story_key(item)
+        item["ai_fit_summary"] = (
+            f"Current momentum + freshness + source support + channel-history fit "
+            f"({item.get('channel_history_fit', 0):.1f}/10)."
+        )
+
+    if len(pool) < 3:
+        raise ValueError(f"AI discovery produced only {len(pool)} usable candidate(s). At least 3 are required.")
+    print(
+        f"   [AI Discovery] current intake={len(compact)} -> events={len(candidates)} -> "
+        f"Top {len(pool)}; history used as a fit signal, not a repetition target.",
+        flush=True,
+    )
+    return pool
+
+
 def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 20) -> list[dict[str, Any]]:
     """Dashboard discovery pool: return up to 20 ranked, distinct recent topics."""
     from story_ranker import (
@@ -257,6 +388,56 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
     return pool
 
 
+class _DashboardStreamCapture:
+    """Capture only the active factory worker's stdout/stderr without hiding it from the console."""
+    def __init__(self, original):
+        self.original = original
+        self._lock = threading.Lock()
+        self._sinks: dict[int, Callable[[str], None]] = {}
+
+    def register(self, thread_id: int, sink: Callable[[str], None]) -> None:
+        with self._lock:
+            self._sinks[thread_id] = sink
+
+    def unregister(self, thread_id: int) -> None:
+        with self._lock:
+            self._sinks.pop(thread_id, None)
+
+    def write(self, data) -> int:
+        written = self.original.write(data)
+        if not data:
+            return written
+        with self._lock:
+            sink = self._sinks.get(threading.get_ident())
+        if sink is not None:
+            try:
+                sink(str(data))
+            except Exception:
+                pass
+        return written
+
+    def flush(self) -> None:
+        self.original.flush()
+
+
+_DASHBOARD_STDOUT = _DashboardStreamCapture(sys.stdout)
+_DASHBOARD_STDERR = _DashboardStreamCapture(sys.stderr)
+_DASHBOARD_STREAMS_INSTALLED = False
+
+
+def _install_dashboard_stream_capture() -> None:
+    global _DASHBOARD_STREAMS_INSTALLED
+    if _DASHBOARD_STREAMS_INSTALLED:
+        return
+    if sys.stdout is not _DASHBOARD_STDOUT:
+        _DASHBOARD_STDOUT.original = sys.stdout
+        sys.stdout = _DASHBOARD_STDOUT
+    if sys.stderr is not _DASHBOARD_STDERR:
+        _DASHBOARD_STDERR.original = sys.stderr
+        sys.stderr = _DASHBOARD_STDERR
+    _DASHBOARD_STREAMS_INSTALLED = True
+
+
 class DashboardWorkflowController(WorkflowController):
     """WorkflowController with a dashboard-side visual approval checkpoint."""
 
@@ -269,7 +450,10 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_logs: list[str] = []
         self._activity_events: list[dict[str, Any]] = []
         self._audio_paths: list[str] = []
+        self._console_lines: list[str] = []
+        self._console_partial: str = ""
         self._last_dashboard_message = ""
+        _install_dashboard_stream_capture()
 
     def reset(self):
         # Do not reset a live worker out from under its synchronization state.
@@ -284,6 +468,8 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_logs = []
         self._activity_events = []
         self._audio_paths = []
+        self._console_lines = []
+        self._console_partial = ""
         self._last_dashboard_message = ""
         super().reset()
 
@@ -325,6 +511,25 @@ class DashboardWorkflowController(WorkflowController):
                 })
                 self._activity_events = self._activity_events[-24:]
                 self._last_dashboard_message = friendly
+
+    def _capture_console(self, data: str) -> None:
+        text = self._console_partial + str(data or "")
+        text = text.replace("\r", "\n")
+        parts = text.split("\n")
+        self._console_partial = parts.pop() if parts else ""
+        lines = [line.rstrip() for line in parts if line.strip()]
+        if not lines:
+            return
+        with self._lock:
+            self._console_lines.extend(lines)
+            self._console_lines = self._console_lines[-160:]
+
+    def console_lines(self) -> list[str]:
+        with self._lock:
+            lines = list(self._console_lines)
+            if self._console_partial.strip():
+                lines.append(self._console_partial.rstrip())
+            return lines[-120:]
 
     def _install_production_wrappers(self):
         super()._install_production_wrappers()
@@ -387,6 +592,7 @@ class DashboardWorkflowController(WorkflowController):
 
     def snapshot(self):
         data = super().snapshot()
+        console_lines = self.console_lines()
         with self._lock:
             data.update(
                 {
@@ -396,6 +602,7 @@ class DashboardWorkflowController(WorkflowController):
                     "dashboard_logs": list(self._dashboard_logs),
                     "activity_events": list(self._activity_events),
                     "audio_paths": list(self._audio_paths),
+                    "console_lines": console_lines,
                 }
             )
         return data
@@ -636,6 +843,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
 __all__ = [
     "DashboardWorkflowController",
     "discover_ranked_topics",
+    "discover_ai_topics",
     "collect_channel_statistics",
     "collect_live_channel_statistics",
     "run_demo_section",

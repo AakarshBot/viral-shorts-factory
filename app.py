@@ -7,6 +7,7 @@ the user-facing visual approval/upload decisions.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict
@@ -33,6 +34,7 @@ from dashboard_runtime import (
     collect_channel_statistics,
     collect_live_channel_statistics,
     discover_ranked_topics,
+    discover_ai_topics,
     factory_function_coverage,
     run_demo_section,
     upload_ready_for_manual_decision,
@@ -153,6 +155,9 @@ def _init_state() -> None:
         "pending_candidate": None,
         "visual_search_queries": "",
         "discovery_headline_selection": None,
+        "editorial_mode": "Deep Dive",
+        "metadata_approved": False,
+        "metadata_loaded_run_id": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -176,14 +181,38 @@ def reset_run() -> None:
         "pending_candidate": None,
         "visual_search_queries": "",
         "discovery_headline_selection": None,
+        "metadata_approved": False,
+        "metadata_loaded_run_id": "",
     }.items():
         st.session_state[key] = value
 
 
-def category_options(format_mode: str) -> Dict[str, str]:
+DEEP_DIVE_TOPICS = (
+    "national_global_affairs",
+    "technology",
+    "business_finance",
+    "health_lifestyle",
+    "entertainment",
+    "viral_phenomenon",
+    "regional_state_news",
+    "sports",
+)
+TOP_FIVE_TOPICS = (
+    "national_global_affairs",
+    "technology",
+    "business_finance",
+    "entertainment",
+    "viral_phenomenon",
+    "sports",
+)
+
+
+def category_options(format_mode: str, editorial_mode: str = "Deep Dive") -> Dict[str, str]:
+    keys = TOP_FIVE_TOPICS if editorial_mode == "Top Five" else DEEP_DIVE_TOPICS
     output: Dict[str, str] = {}
-    for key, cfg in ultimate_bot.CONTENT_CATEGORIES.items():
-        if key == "sports_stories_of_day":
+    for key in keys:
+        cfg = ultimate_bot.CONTENT_CATEGORIES.get(key)
+        if not cfg:
             continue
         if format_mode == "top5" and not cfg.get("usable_top5", True) and key != "sports":
             continue
@@ -200,12 +229,15 @@ def build_config() -> Dict[str, Any]:
     language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
     language_label = st.session_state.get("language_label", "English")
     language_key = language_options.get(language_label, "english")
-    format_label = st.session_state.get("format_label", "Deep Dive")
+    mode = str(st.session_state.get("editorial_mode", "Deep Dive"))
+    if mode == "Top 5":
+        mode = "Top Five"
 
-    if format_label == "Cricket":
+    if mode == "Cricket":
         return {
             "format_mode": "regular",
             "display_format": "Cricket",
+            "editorial_mode": "Cricket",
             "category": "sports_stories_of_day",
             "language": language_key,
             "language_label": language_label,
@@ -215,14 +247,28 @@ def build_config() -> Dict[str, Any]:
             "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),
         }
 
-    options = category_options(FORMAT_OPTIONS[format_label])
+    if mode == "AI":
+        return {
+            "format_mode": "regular",
+            "display_format": "AI",
+            "editorial_mode": "AI",
+            "category": "ai_recommendation",
+            "language": language_key,
+            "language_label": language_label,
+            "channel": st.session_state.get("selected_channel", _channel_options()[0]),
+            "cricket_pipeline": False,
+        }
+
+    format_mode = "top5" if mode == "Top Five" else "regular"
+    options = category_options(format_mode, mode)
     default_key = next(iter(options.values()))
     category_key = st.session_state.get("category_key", default_key)
     if category_key not in options.values():
         category_key = default_key
     return {
-        "format_mode": FORMAT_OPTIONS[format_label],
-        "display_format": format_label,
+        "format_mode": format_mode,
+        "display_format": mode,
+        "editorial_mode": mode,
         "category": category_key,
         "language": language_key,
         "language_label": language_label,
@@ -289,24 +335,30 @@ def render_sidebar_controls() -> Dict[str, Any]:
         key="language_label",
     )
 
-    format_labels = list(FORMAT_OPTIONS.keys())
-    current_format = st.session_state.get("format_label", format_labels[0])
+    mode_labels = ["Deep Dive", "Top 5", "Cricket", "AI"]
+    current_mode = st.session_state.get("editorial_mode", mode_labels[0])
+    if current_mode == "Top Five":
+        current_mode = "Top 5"
     st.sidebar.selectbox(
-        "Format",
-        format_labels,
-        index=format_labels.index(current_format),
-        key="format_label",
+        "Editorial mode",
+        mode_labels,
+        index=mode_labels.index(current_mode),
+        key="editorial_mode_label",
+        help="Deep Dive and Top Five use curated topic menus. Cricket keeps its dedicated cricket intake. AI ranks current stories against channel history.",
     )
+    st.session_state.editorial_mode = "Top Five" if st.session_state.editorial_mode_label == "Top 5" else st.session_state.editorial_mode_label
 
-    if st.session_state.format_label == "Cricket":
+    if st.session_state.editorial_mode == "Cricket":
         st.sidebar.selectbox("Cricket category", list(CRICKET_CATEGORIES.keys()), key="cricket_category")
         st.sidebar.text_input(
             "Specific topic (optional)",
             placeholder="e.g. BCCI to suspend Impact Player rule",
             key="requested_topic",
         )
+    elif st.session_state.editorial_mode == "AI":
+        st.sidebar.info("AI mode uses current news, channel history, genre fit, vault topics and trend signals to produce a Top 10.")
     else:
-        options = category_options(FORMAT_OPTIONS[st.session_state.format_label])
+        options = category_options("top5" if st.session_state.editorial_mode == "Top Five" else "regular", st.session_state.editorial_mode)
         labels = list(options.keys())
         current_key = st.session_state.get("category_key", next(iter(options.values())))
         current_label = next((label for label, key in options.items() if key == current_key), labels[0])
@@ -355,24 +407,40 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     current = str(snapshot.get("stage") or "idle")
     percent = int(snapshot.get("percent", 0) or 0)
 
-    st.markdown("<div class='section-kicker'>Production pipeline</div><h3 style='margin-top:0'>Factory progress</h3>", unsafe_allow_html=True)
-    for label, key, _lo, hi in stages:
+    st.markdown(
+        "<div class='section-kicker'>Production pipeline</div>"
+        "<h3 style='margin-top:0'>Factory progress</h3>",
+        unsafe_allow_html=True,
+    )
+
+    # Keep every stage visible, but use a compact grid instead of eight full-width
+    # progress sections. The overall bar remains the primary progress indicator.
+    overall = max(0.0, min(1.0, percent / 100))
+    st.progress(overall, text=f"Overall progress · {percent}%")
+
+    cols = st.columns(4, gap="small")
+    for index, (label, key, lo, hi) in enumerate(stages):
         if current == "error":
             value = 0.0
             icon = "⚠️"
+            state = "Stopped"
         elif percent >= hi:
             value = 1.0
-            icon = "✅"
+            icon = "✓"
+            state = "Complete"
         elif current == key:
-            value = 0.04 if hi <= _lo else max(0.02, min(1.0, (percent - _lo) / max(1, hi - _lo)))
-            icon = "⚙️"
+            value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
+            icon = "●"
+            state = "Active"
         else:
             value = 0.0
             icon = "○"
-        st.markdown(f"**{icon} {label}** · {value * 100:.0f}%")
-        st.progress(value)
+            state = "Waiting"
+        with cols[index % 4]:
+            st.markdown(f"**{icon} {label}**")
+            st.progress(value)
+            st.caption(state)
 
-    st.progress(max(0.0, min(1.0, percent / 100)), text=f"{percent}% complete")
     message = str(snapshot.get("message") or "").strip()
     if message:
         st.info(message, icon="ℹ️")
@@ -528,6 +596,32 @@ def render_visual_details(snapshot: Dict[str, Any]) -> None:
             st.markdown(" — ".join(details))
 
 
+def render_console(snapshot: Dict[str, Any]) -> None:
+    lines = snapshot.get("console_lines") or []
+    if not lines:
+        return
+
+    latest = lines[-1]
+    upload_match = re.search(r"\[Upload Progress\]\s*(\d+)%", latest)
+    render_match = re.search(r"(?:Rendering Video Scenes|Writing video file).*?(\d{1,3})%", latest)
+    operation_percent = None
+    operation_label = ""
+    if upload_match:
+        operation_percent = int(upload_match.group(1))
+        operation_label = "YouTube upload"
+    elif render_match:
+        operation_percent = int(render_match.group(1))
+        operation_label = "Final video render"
+
+    st.markdown("### Live factory console")
+    st.caption("Live output from the factory worker, presented here without replacing the underlying PowerShell console.")
+    if operation_percent is not None:
+        st.markdown(f"**{operation_label}** · {operation_percent}%")
+        st.progress(max(0.0, min(1.0, operation_percent / 100)))
+    with st.container(border=True):
+        st.code("\n".join(lines[-80:]), language="text")
+
+
 def render_logs(snapshot: Dict[str, Any]) -> None:
     logs = snapshot.get("dashboard_logs") or []
     if not logs:
@@ -538,18 +632,88 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
             st.markdown(f"**{prefix}:** {message}")
 
 
-def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
+def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
+    """Keep the generated title, script, audio, visuals and final video visible."""
+    script_data = snapshot.get("script_data") or {}
+    metadata = snapshot.get("final_metadata") or {}
+    story = snapshot.get("selected_story") or {}
+    title = str(metadata.get("title") or script_data.get("title") or story.get("title") or "").strip()
+    description = str(metadata.get("description") or script_data.get("seo_description") or "").strip()
+    comment = str(metadata.get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
+    visuals = _visual_items(snapshot)
+    audio = [
+        str(path).strip() for path in (snapshot.get("audio_paths") or [])
+        if str(path or "").strip() and os.path.isfile(str(path).strip())
+    ]
     video_path = str(snapshot.get("video_path") or "").strip()
-    ready_for_upload = upload_ready_for_manual_decision(snapshot)
-    if not ready_for_upload:
+    if not any((title, script_data, description, comment, visuals, audio, video_path)):
         return
 
-    st.session_state.setdefault("confirm_public_upload", False)
+    st.markdown("---")
+    st.markdown("<div class='section-kicker'>Generated outputs</div><h2 style='margin-top:0'>Your Short</h2>", unsafe_allow_html=True)
+    if title:
+        st.markdown(f"### Title\n**{title}**")
+
+    cols = st.columns(3)
+    cols[0].metric("Script", "Ready" if script_data else "Waiting")
+    cols[1].metric("Voiceover", f"{len(audio)} track(s)" if audio else "Waiting")
+    cols[2].metric("Visuals", f"{len(visuals)} ready" if visuals else "Waiting")
+
+    if script_data:
+        with st.expander("Generated script", expanded=True):
+            st.text_area("Narration", value=_script_text(script_data), height=280, disabled=True, key="generated_output_script")
+    if description or comment:
+        with st.expander("Generated YouTube metadata", expanded=False):
+            if description:
+                st.text_area("Description", value=description, height=130, disabled=True, key="generated_output_description")
+            if comment:
+                st.text_area("Pinned comment", value=comment, height=100, disabled=True, key="generated_output_comment")
+    if audio:
+        with st.expander("Generated voiceover", expanded=False):
+            for index, path in enumerate(audio, 1):
+                st.audio(path, format="audio/mpeg")
+                st.caption(f"Scene {index}")
+    if visuals:
+        with st.expander("Generated visuals", expanded=(snapshot.get("visual_review_required", False))):
+            cols = st.columns(3)
+            for index, item in enumerate(visuals):
+                with cols[index % 3]:
+                    st.image(item["path"], use_container_width=True)
+                    st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
+    if video_path and os.path.isfile(video_path):
+        with st.expander("Final rendered video", expanded=True):
+            st.video(video_path)
+
+
+def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
+    video_path = str(snapshot.get("video_path") or "").strip()
+    if not upload_ready_for_manual_decision(snapshot):
+        return
+
+    script_data = snapshot.get("script_data") or {}
+    metadata = snapshot.get("final_metadata") or {}
+    run_id = str(snapshot.get("run_id") or "")
+    if st.session_state.get("metadata_loaded_run_id") != run_id:
+        st.session_state["final_title"] = str(
+            metadata.get("title")
+            or script_data.get("title")
+            or (snapshot.get("selected_story") or {}).get("title")
+            or ""
+        ).strip()
+        st.session_state["final_description"] = str(
+            metadata.get("description") or script_data.get("seo_description") or ""
+        ).strip()
+        st.session_state["final_comment"] = str(
+            metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""
+        ).strip()
+        st.session_state["metadata_loaded_run_id"] = run_id
+        st.session_state["metadata_approved"] = False
 
     st.markdown("---")
     st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
+
     qc_checks = [
-        ("Rendered video", bool(str(snapshot.get("video_path") or "").strip())),
+        ("Rendered video", bool(video_path)),
         ("Script generated", bool(snapshot.get("script_data"))),
         ("Visual package", bool(snapshot.get("visual_packages"))),
         ("Visual approval", bool(snapshot.get("visual_review_approved"))),
@@ -559,28 +723,70 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         col.metric(label, "PASS" if ok else "CHECK")
 
     st.markdown("### Final video")
-    st.success("The Short is rendered, branded and ready for your upload decision.", icon="✅")
-
     if video_path and os.path.isfile(video_path):
+        st.success("The Short is rendered, branded and ready for your review.", icon="✅")
         st.video(video_path)
     else:
-        st.warning("The final video file is not available at the expected path.")
+        st.error("The dashboard has a final video path, but the file is not accessible from this dashboard process.")
+        st.code(video_path or "No final video path recorded.", language="text")
+        return
 
-    script_data = snapshot.get("script_data") or {}
-    metadata = snapshot.get("final_metadata") or {}
-    default_title = str(metadata.get("title") or script_data.get("title") or snapshot.get("selected_story", {}).get("title") or "").strip()
-    default_description = str(metadata.get("description") or script_data.get("seo_description") or "").strip()
-    default_comment = str(metadata.get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
+    st.markdown("### 1 · Review and approve metadata")
+    st.caption("Edit the title, description and creator comment. Upload controls stay locked until you explicitly approve these fields.")
 
-    title = st.text_input("YouTube title", value=default_title, max_chars=100, key="final_title")
-    description = st.text_area("YouTube description", value=default_description, height=150, key="final_description")
-    comment = st.text_area("Creator comment", value=default_comment, height=110, key="final_comment")
-
-    st.markdown("#### Choose upload visibility")
-    st.info(
-        "Choose **Private** to keep the video hidden, or **Public** to publish it immediately. "
-        "Public uploads require a second confirmation before anything is published."
+    editing = not bool(st.session_state.get("metadata_approved"))
+    title = st.text_input(
+        "YouTube title",
+        max_chars=100,
+        key="final_title",
+        disabled=not editing,
     )
+    description = st.text_area(
+        "YouTube description",
+        height=150,
+        key="final_description",
+        disabled=not editing,
+    )
+    comment = st.text_area(
+        "Creator comment",
+        height=110,
+        key="final_comment",
+        disabled=not editing,
+    )
+
+    if editing:
+        approve_col, info_col = st.columns([1, 2])
+        with approve_col:
+            if st.button(
+                "✅ Approve title, description & comment",
+                type="primary",
+                use_container_width=True,
+                key="approve_metadata",
+            ):
+                try:
+                    from final_qc_runtime import validate_final_upload_metadata
+                    clean_title, clean_description, clean_comment = validate_final_upload_metadata(
+                        title, description, comment
+                    )
+                    st.session_state["final_title"] = clean_title
+                    st.session_state["final_description"] = clean_description
+                    st.session_state["final_comment"] = clean_comment
+                    st.session_state["metadata_approved"] = True
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
+        with info_col:
+            st.info("Nothing will be uploaded until the metadata approval above succeeds.")
+        return
+
+    st.success("Metadata approved. You can now choose how the Short is published.", icon="✅")
+    if st.button("✏️ Edit metadata", use_container_width=True, key="edit_metadata"):
+        st.session_state["metadata_approved"] = False
+        st.rerun()
+
+    st.markdown("### 2 · Choose upload visibility")
+    st.info("Private keeps the Short hidden on YouTube. Public publishes it immediately after the final confirmation.")
+
     public_col, private_col = st.columns(2)
     with public_col:
         if st.button("🌐 Upload Publicly", type="primary", use_container_width=True, key="upload_public"):
@@ -589,30 +795,31 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with private_col:
         if st.button("🔒 Upload Privately", use_container_width=True, key="upload_private"):
             st.session_state["confirm_public_upload"] = False
-            _perform_upload(controller, snapshot, title, description, comment, "private")
+            _perform_upload(
+                controller,
+                snapshot,
+                st.session_state["final_title"],
+                st.session_state["final_description"],
+                st.session_state["final_comment"],
+                "private",
+            )
 
     if st.session_state.get("confirm_public_upload"):
-        st.warning(
-            "⚠️ You are about to publish this video publicly. "
-            "It will become visible on YouTube immediately, and the creator comment "
-            "will be posted automatically. Continue?"
-        )
+        st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
         confirm_col, cancel_col = st.columns(2)
         with confirm_col:
-            if st.button(
-                "✅ Yes, upload publicly",
-                type="primary",
-                use_container_width=True,
-                key="confirm_upload_public",
-            ):
+            if st.button("✅ Yes, upload publicly", type="primary", use_container_width=True, key="confirm_upload_public"):
                 st.session_state["confirm_public_upload"] = False
-                _perform_upload(controller, snapshot, title, description, comment, "public")
+                _perform_upload(
+                    controller,
+                    snapshot,
+                    st.session_state["final_title"],
+                    st.session_state["final_description"],
+                    st.session_state["final_comment"],
+                    "public",
+                )
         with cancel_col:
-            if st.button(
-                "← Cancel",
-                use_container_width=True,
-                key="cancel_upload_public",
-            ):
+            if st.button("← Cancel", use_container_width=True, key="cancel_upload_public"):
                 st.session_state["confirm_public_upload"] = False
                 st.rerun()
 
@@ -667,12 +874,14 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
         render_research_summary(snapshot)
         render_script(snapshot)
         render_audio_preview(snapshot)
+        render_generated_outputs(snapshot)
 
         if snapshot.get("visual_review_required"):
             render_visual_review(controller, snapshot)
         render_visual_details(snapshot)
 
         render_activity_timeline(snapshot)
+        render_console(snapshot)
         render_logs(snapshot)
 
         if snapshot.get("stage") == "error":
@@ -704,14 +913,24 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 conn = sqlite3.connect(ultimate_bot.DB_PATH)
                 try:
                     migrate_vault(conn)
-                    candidates = discover_ranked_topics(
-                        ultimate_bot,
-                        config,
-                        conn,
-                        max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
-                    )
+                    if config.get("editorial_mode") == "AI":
+                        candidates = discover_ai_topics(
+                            ultimate_bot,
+                            config,
+                            conn,
+                            max_candidates=10,
+                        )
+                    else:
+                        candidates = discover_ranked_topics(
+                            ultimate_bot,
+                            config,
+                            conn,
+                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                        )
                 finally:
                     conn.close()
+                for candidate in candidates:
+                    candidate["dashboard_discovery_pool"] = True
                 st.session_state.candidates = candidates
                 st.session_state.web_config = config
                 st.session_state.production_started = False
@@ -762,6 +981,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 config["visual_search_queries"] = str(
                     st.session_state.get("visual_search_queries", "") or ""
                 ).strip()
+                if config.get("editorial_mode") == "AI":
+                    config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
+                    config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
                 st.session_state.production_started = True
                 st.session_state.final_qc = False
                 st.session_state.upload_result = ""
@@ -780,53 +1002,87 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
+    page_size = 5
+    page_count = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(int(st.session_state.get("candidate_page", 0) or 0), page_count - 1))
+    start_index = page * page_size
+    visible = candidates[start_index:start_index + page_size]
 
     st.markdown(
-        f"<div class='panel'><b>Ranked headlines · {total} available</b>"
-        f"<span class='small-muted' style='float:right'>Select one headline to continue</span></div>",
+        f"<div class='panel'><b>Ranked headlines</b>"
+        f"<span class='small-muted' style='float:right'>Showing {start_index + 1}-{start_index + len(visible)} of {total}</span></div>",
         unsafe_allow_html=True,
     )
 
-    labels = []
-    candidate_by_label: dict[str, dict[str, Any]] = {}
-    for index, candidate in enumerate(candidates[:total], 1):
+    for offset, candidate in enumerate(visible):
+        rank = start_index + offset + 1
         title = str(candidate.get("title") or "Untitled story").strip()
-        label = f"{index:02d}. {title}"
-        labels.append(label)
-        candidate_by_label[label] = candidate
+        reason = str(candidate.get("discovery_reason") or "").strip()
+        score = float(candidate.get("candidate_score") or 0.0)
+        evidence = build_discovery_evidence(candidate)
+        history_fit = float(evidence.get("channel_history") or 0.0)
 
-    selected_label = st.radio(
-        "Ranked headlines",
-        labels,
-        key="discovery_headline_selection",
-        label_visibility="collapsed",
-    )
-    selected_candidate = candidate_by_label.get(selected_label) if selected_label else None
+        with st.container(border=True):
+            st.markdown(f"**{rank:02d}. {title}**")
+            meta = [
+                f"Score {score:.1f}",
+                f"{evidence['articles']} article{'s' if evidence['articles'] != 1 else ''}",
+            ]
+            if evidence["independent_publishers"]:
+                meta.append(f"{evidence['independent_publishers']} publisher{'s' if evidence['independent_publishers'] != 1 else ''}")
+            if candidate.get("ai_recommendation"):
+                meta.append(f"Channel fit {history_fit:.1f}/10")
+            st.caption(" · ".join(meta))
+            if reason:
+                st.write(reason)
 
-    if selected_candidate:
-        source = str(selected_candidate.get("source_label") or "News source").strip()
-        article_count = int(selected_candidate.get("event_article_count") or 1)
-        source_count = int(selected_candidate.get("event_source_count") or 0)
-        support = (
-            f"{article_count} article{'s' if article_count != 1 else ''}"
-            + (f" · {source_count} publisher{'s' if source_count != 1 else ''}" if source_count else "")
-        )
-        st.caption(f"Source: {source} · {support}")
-        if selected_candidate.get("story_url"):
-            st.link_button("Open source article", str(selected_candidate["story_url"]))
+            source = str(candidate.get("source_label") or "News source").strip()
+            url = str(candidate.get("story_url") or "").strip()
+            source_col, action_col = st.columns([3, 1])
+            with source_col:
+                st.caption(f"Source: {source}")
+                if url.startswith(("http://", "https://")):
+                    st.link_button("Open source", url)
+            with action_col:
+                if st.button(
+                    "Use headline →",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"use_candidate_{start_index + offset}",
+                ):
+                    st.session_state.pending_candidate = dict(candidate)
+                    st.session_state.visual_search_queries = ""
+                    st.rerun()
 
+    nav_left, nav_center, nav_right = st.columns([1, 2, 1])
+    with nav_left:
         if st.button(
-            "Use selected headline →",
-            type="primary",
+            "← Previous",
+            disabled=page <= 0,
             use_container_width=True,
-            key="use_selected_headline",
+            key="candidate_previous",
         ):
-            st.session_state.pending_candidate = dict(selected_candidate)
-            st.session_state.visual_search_queries = ""
+            st.session_state.candidate_page = page - 1
+            st.rerun()
+    with nav_center:
+        st.markdown(
+            f"<div style='text-align:center;padding-top:10px' class='small-muted'>"
+            f"Page {page + 1} of {page_count}</div>",
+            unsafe_allow_html=True,
+        )
+    with nav_right:
+        if st.button(
+            "Next →",
+            disabled=page >= page_count - 1,
+            use_container_width=True,
+            key="candidate_next",
+        ):
+            st.session_state.candidate_page = page + 1
             st.rerun()
 
     if not controller.snapshot().get("thread_alive"):
-        st.info("Select a headline above, then continue to the optional image-search query step.")
+        st.info("Choose a headline to continue to the optional image-search query step.")
+
 
 
 def render_channel_statistics() -> None:
@@ -1007,25 +1263,21 @@ def main() -> None:
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
 
-    action_mode = st.radio(
-        "Action plan",
-        ["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"],
-        horizontal=True,
-        key="action_mode",
-    )
-    render_header(action_mode)
+    render_header("Live Factory")
+    config = render_sidebar_controls()
+    render_live_factory(config, controller)
 
-    if action_mode == "Live Factory":
-        config = render_sidebar_controls()
-        render_live_factory(config, controller)
-    elif action_mode == "Channel Statistics":
-        st.sidebar.caption("Channel configuration is not needed for statistics.")
+    with st.sidebar.expander("Engineering & analytics", expanded=False):
+        utility = st.selectbox(
+            "Utility",
+            ["None", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"],
+            key="dashboard_utility",
+        )
+    if utility == "Channel Statistics":
         render_channel_statistics()
-    elif action_mode == "Run Offline Diagnostics":
-        st.sidebar.caption("No API calls are made from this screen.")
+    elif utility == "Run Offline Diagnostics":
         render_offline_page()
-    else:
-        st.sidebar.caption("Demo runs are local and do not publish videos.")
+    elif utility == "Demo Factory":
         render_demo_page()
 
     st.divider()

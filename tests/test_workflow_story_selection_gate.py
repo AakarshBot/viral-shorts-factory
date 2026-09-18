@@ -42,3 +42,16 @@ def test_validate_selected_story_accepts_later_candidate_from_expanded_pool():
 
     assert validated == story
     assert validated is not story
+
+def test_validate_selected_story_accepts_dashboard_candidate_from_expanded_pool():
+    story = {
+        "title": "Dashboard candidate beyond production pool",
+        "discovery_rank": 20,
+        "story_key": "dashboard candidate beyond production pool https example com/dashboard",
+        "dashboard_discovery_pool": True,
+    }
+
+    validated = _validate_selected_story(story)
+
+    assert validated == story
+    assert validated is not story

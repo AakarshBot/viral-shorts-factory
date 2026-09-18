@@ -313,6 +313,14 @@ class WorkflowController:
             def audio_wrapper(*args, **kwargs):
                 self._reporter("audio", 42, "Generating narration and word timings…")
                 result = original_audio(*args, **kwargs)
+                audio_paths = result[0] if isinstance(result, (tuple, list)) and result else result
+                if isinstance(audio_paths, (list, tuple)):
+                    with self._lock:
+                        self._audio_paths = [
+                            os.path.abspath(os.fspath(path))
+                            for path in audio_paths
+                            if path and os.path.isfile(os.fspath(path))
+                        ]
                 self._reporter("audio", 52, "Narration complete. Building visual package…")
                 return result
             if globals_dict.get("generate_audio_for_script") is not None:
@@ -335,9 +343,17 @@ class WorkflowController:
                 self._reporter("render", 78, "Stitching scenes, subtitles and branding…")
                 result = original_compile(*args, **kwargs)
                 self._reporter("render", 94, "Final video rendered. Preparing manual QC…")
-                if isinstance(result, str) and os.path.isfile(result):
-                    with self._lock:
-                        self.state.video_path = result
+                if isinstance(result, (str, os.PathLike)):
+                    result_path = os.fspath(result)
+                    if not os.path.isabs(result_path):
+                        result_path = os.path.join(
+                            getattr(self.bot, "BASE_DIR", os.getcwd()),
+                            result_path,
+                        )
+                    result_path = os.path.abspath(result_path)
+                    if os.path.isfile(result_path):
+                        with self._lock:
+                            self.state.video_path = result_path
                 return result
             globals_dict["compile_video"] = compile_wrapper
 
@@ -399,7 +415,7 @@ class WorkflowController:
         config = dict(web_config)
         if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
             config["format_mode"] = "cricket"
-        config["selected_story"] = dict(selected_story)
+        is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
         config["publish_mode"] = "private"
         config["manual_qc_required"] = True
         self.bot._active_web_config = dict(config)
@@ -414,8 +430,24 @@ class WorkflowController:
                 def selected_gather(*args, **kwargs):
                     return [dict(selected)]
 
+                def top5_gather(*args, **kwargs):
+                    if not callable(original_gather):
+                        return [dict(selected)]
+                    pool = original_gather(*args, **kwargs) or []
+                    selected_title = str(selected.get("title") or "").strip().casefold()
+                    merged = [dict(selected)]
+                    for story in pool:
+                        if not isinstance(story, dict):
+                            continue
+                        if str(story.get("title") or "").strip().casefold() == selected_title:
+                            continue
+                        merged.append(dict(story))
+                    return merged
+
                 if original_gather is not None:
-                    globals_dict["gather_and_filter_stories"] = selected_gather
+                    globals_dict["gather_and_filter_stories"] = top5_gather if is_top5 else selected_gather
+                if not is_top5:
+                    config["selected_story"] = dict(selected_story)
                 try:
                     self._reporter("research", 18, "Selected story locked. Preparing the production pipeline…")
                     run_robot_with_exact_identity(self.bot, web_config=config)
@@ -517,8 +549,9 @@ def _validate_selected_story(selected_story: Dict[str, Any]) -> Dict[str, Any]:
 
     if not title:
         raise ValueError("Production is blocked: selected story title is missing.")
-    if discovery_rank not in range(1, MAX_DISCOVERY_CANDIDATES + 1) or not story_key:
+    max_rank = 20 if bool(selected_story.get("dashboard_discovery_pool")) else MAX_DISCOVERY_CANDIDATES
+    if discovery_rank not in range(1, max_rank + 1) or not story_key:
         raise ValueError(
-            f"Production is blocked: story must be selected from the verified {MAX_DISCOVERY_CANDIDATES}-candidate discovery pool."
+            f"Production is blocked: story must be selected from the verified {max_rank}-candidate discovery pool."
         )
     return dict(selected_story)

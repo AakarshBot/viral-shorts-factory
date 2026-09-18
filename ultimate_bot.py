@@ -1474,9 +1474,6 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
             clean_vo = re.sub(r'(number\s*\d+|story\s*#?\d+|#\d+)', '', seg.get("voiceover", ""), flags=re.IGNORECASE).strip()
             render_top5_card(bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
-        elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:
-            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
         else:
             overlay = Image.new("RGBA", target_size, (0,0,0,0))
             draw_bars = ImageDraw.Draw(overlay)
@@ -1601,31 +1598,6 @@ def create_branded_slide(title_text, subtitle_text, is_outro=False, width=1080, 
                 y_text += (bbox[3] - bbox[1]) + 20
                 
     return base.convert("RGBA")
-
-def render_top5_card(bg_img, item_number, total_items, summary_text, width=1080, height=1920, font_choice=None):
-    base = bg_img.convert("RGBA")
-    box_coords = [60, 280, width - 60, height - 280]
-    base.paste(base.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=20)), box_coords)
-    
-    overlay = Image.new("RGBA", (width, height), (0,0,0,0))
-    draw = ImageDraw.Draw(overlay)
-    draw.rectangle([0, 0, width, 40], fill=PALETTE["accent_primary"] + (220,))
-    draw.rectangle([0, height - 40, width, height], fill=PALETTE["accent_secondary"] + (220,))
-    draw.rounded_rectangle(box_coords, radius=40, fill=PALETTE["bg_glass"], outline=PALETTE["glass_border"], width=2)
-    base = Image.alpha_composite(base, overlay)
-    draw_base = ImageDraw.Draw(base)
-    
-    font_num = get_bold_font(120, font_choice)
-    draw_text_with_double_shadow(draw_base, (120, 340), f"#{item_number}", font_num, fill=PALETTE["accent_primary"])
-    
-    y_text = 540
-    font_body, wrapped_lines = fit_text_in_box(summary_text, font_choice, width - 180, (box_coords[3] - box_coords[1]) - (y_text - box_coords[1]) - 40, start_size=65)
-    for line in wrapped_lines:
-        bbox = draw_base.textbbox((0, 0), line, font_body)
-        w = bbox[2] - bbox[0]
-        draw_text_with_double_shadow(draw_base, ((width - w) / 2, y_text), line, font_body, fill=PALETTE["text_primary"])
-        y_text += (bbox[3] - bbox[1]) + 20
-    return base
 
 def render_hook_card(bg_img, hook_text, width=1080, height=1920, font_choice=None):
     base = bg_img.convert("RGBA")
