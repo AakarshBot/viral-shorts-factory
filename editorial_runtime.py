@@ -112,7 +112,18 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
 
 
 def patch_editorial_scoring(bot):
-    """Reassert the authoritative scorer on every runtime binding pass."""
+    """Bind the authoritative scorer once; repeated dashboard reruns only reassert the live callable."""
+    existing = getattr(bot, "_editorial_scoring_corrected_process", None)
+    run_robot = getattr(bot, "run_robot", None)
+    namespace = getattr(run_robot, "__globals__", None)
+    if callable(existing) and getattr(existing, "_editorial_scoring_corrected", False):
+        bot.process_scored_candidates = existing
+        if isinstance(namespace, dict):
+            namespace["process_scored_candidates"] = existing
+        bot._editorial_scoring_patch_installed = True
+        bot._editorial_scoring_patch_version = "authoritative-v2"
+        return bot
+
     def process(scored_data, batch_stories, bonuses, last_genre, format_mode):
         db_path = getattr(bot, "DB_PATH", "")
         prior_topics = _load_prior_topics(db_path)
