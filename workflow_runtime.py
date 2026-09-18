@@ -260,6 +260,10 @@ class WorkflowController:
     def reset(self):
         with self._lock:
             self.state = WorkflowState()
+        # Production wrappers bind into run_robot's module globals. A new run
+        # must reinstall them because a Streamlit full rerun can legitimately
+        # rebind those globals while the previous run is idle.
+        self._patched = False
 
     def update(self, stage: str, percent: int, message: str):
         with self._lock:
@@ -325,8 +329,8 @@ class WorkflowController:
         selected_story = _validate_selected_story(selected_story)
         if self.state.thread_alive:
             return
-        self._install_production_wrappers()
         self.reset()
+        self._install_production_wrappers()
         with self._lock:
             self.state.selected_story = dict(selected_story)
             self.state.run_id = datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")

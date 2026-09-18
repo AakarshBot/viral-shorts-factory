@@ -465,6 +465,12 @@ class DashboardWorkflowController(WorkflowController):
         self._console_lines = []
         self._console_partial = ""
         self._last_dashboard_message = ""
+        # The base controller deliberately reinstalls production wrappers for
+        # each new run. Dashboard-specific wrappers must be eligible for the
+        # same fresh binding rather than remaining marked as already installed.
+        self._dashboard_visual_gate_bound = False
+        self._dashboard_audio_capture_wrapper = None
+        self._dashboard_visual_gate_wrapper = None
         super().reset()
 
     @staticmethod

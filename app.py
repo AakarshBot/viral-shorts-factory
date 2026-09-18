@@ -116,6 +116,16 @@ def initialise_runtime() -> None:
         install_visual_qa_bridge(visual_runtime)
         patch_provider_adapters(ultimate_bot)
 
+    # A full Streamlit rerun must not rebind run_robot globals while the
+    # background production worker is active. Doing so replaces the live
+    # dashboard progress/visual-review wrappers with the raw factory callables.
+    active_controller = st.session_state.get("workflow_controller")
+    if active_controller is not None:
+        try:
+            if active_controller.snapshot().get("thread_alive"):
+                return
+        except Exception:
+            pass
     bind_dashboard_patches(ultimate_bot)
 
 
