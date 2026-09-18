@@ -352,7 +352,6 @@ def patch_content_first_visuals(bot):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
-            source_credit = source_credit_for_type(source_type)
             if idx == news_source_scene_index and isinstance(news_source_candidate, dict):
                 bg_img = news_source_candidate["image"]
                 used_ai = False
@@ -389,6 +388,7 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
+            source_credit = source_credit_for_type(source_type)
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
                 verified_count += 1
