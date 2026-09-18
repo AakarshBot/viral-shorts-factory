@@ -368,7 +368,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     # real-source candidate if verification is unavailable.
                     if hard_reject:
                         score = max(20, float(score or REAL_SOURCE_SCORES.get(source.lower(), 50)) - 30)
-                        print(
+                        hard_reject = False\n                        print(
                             f"   [Visual QA] semantic mismatch | retained as low-confidence candidate | "
                             f"source={source} score={score:.0f} | query='{query}'",
                             flush=True,
@@ -392,14 +392,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     )
                     return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
 
-                if hard_reject:
-                    hard_rejections += 1
-                    print(
-                        f"   [Visual Quality] REJECTED | semantic mismatch | source={source} "
-                        f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
-                        flush=True,
-                    )
-                    continue
 
                 candidate_score = float(score or REAL_SOURCE_SCORES.get(source.lower(), 50))
                 if best_uncertain is None or candidate_score > best_uncertain[0]:
@@ -482,7 +474,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             seg["visual_verification_attempts"] = verification_attempts
             print(
                 f"   [Visual Source] {source} | USED-UNVERIFIED-FALLBACK | score={score:.0f} | query='{query}' | "
-                f"QA={verification_attempts}/{max_verification} hard_rejections={hard_rejections}",
+                f"QA={verification_attempts}/{max_verification}",
                 flush=True,
             )
             return Image.open(io.BytesIO(normalized)).convert("RGB"), source == "ai-generated", source
