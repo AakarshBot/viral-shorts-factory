@@ -26,7 +26,6 @@ REQUIRED_MODULES = (
     "audio_runtime",
     "subtitle_runtime",
     "branding_runtime",
-    "channel_branding_runtime",
     "db_architecture",
     "db_runtime",
     "runtime_bindings",
