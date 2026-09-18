@@ -25,7 +25,7 @@ from story_ranker import patch_story_selection
 from visual_content_runtime import patch_content_first_visuals as patch_visual_pipeline
 from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
-from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, MAX_DISCOVERY_CANDIDATES
+from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS
 
 from dashboard_runtime import (
     DashboardWorkflowController,
@@ -38,6 +38,8 @@ from dashboard_runtime import (
     upload_ready_for_manual_decision,
 )
 
+
+MAX_DASHBOARD_DISCOVERY_HEADLINES = 20
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
 
@@ -706,7 +708,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         ultimate_bot,
                         config,
                         conn,
-                        max_candidates=MAX_DISCOVERY_CANDIDATES,
+                        max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
                     )
                 finally:
                     conn.close()
@@ -777,7 +779,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         return
 
     candidates = st.session_state.candidates
-    total = min(len(candidates), MAX_DISCOVERY_CANDIDATES)
+    total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
 
     st.markdown(
         f"<div class='panel'><b>Ranked headlines · {total} available</b>"
