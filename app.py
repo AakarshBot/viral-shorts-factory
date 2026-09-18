@@ -632,6 +632,59 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
             st.markdown(f"**{prefix}:** {message}")
 
 
+def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
+    """Keep the generated title, script, audio, visuals and final video visible."""
+    script_data = snapshot.get("script_data") or {}
+    metadata = snapshot.get("final_metadata") or {}
+    story = snapshot.get("selected_story") or {}
+    title = str(metadata.get("title") or script_data.get("title") or story.get("title") or "").strip()
+    description = str(metadata.get("description") or script_data.get("seo_description") or "").strip()
+    comment = str(metadata.get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
+    visuals = _visual_items(snapshot)
+    audio = [
+        str(path).strip() for path in (snapshot.get("audio_paths") or [])
+        if str(path or "").strip() and os.path.isfile(str(path).strip())
+    ]
+    video_path = str(snapshot.get("video_path") or "").strip()
+    if not any((title, script_data, description, comment, visuals, audio, video_path)):
+        return
+
+    st.markdown("---")
+    st.markdown("<div class='section-kicker'>Generated outputs</div><h2 style='margin-top:0'>Your Short</h2>", unsafe_allow_html=True)
+    if title:
+        st.markdown(f"### Title\n**{title}**")
+
+    cols = st.columns(3)
+    cols[0].metric("Script", "Ready" if script_data else "Waiting")
+    cols[1].metric("Voiceover", f"{len(audio)} track(s)" if audio else "Waiting")
+    cols[2].metric("Visuals", f"{len(visuals)} ready" if visuals else "Waiting")
+
+    if script_data:
+        with st.expander("Generated script", expanded=True):
+            st.text_area("Narration", value=_script_text(script_data), height=280, disabled=True, key="generated_output_script")
+    if description or comment:
+        with st.expander("Generated YouTube metadata", expanded=False):
+            if description:
+                st.text_area("Description", value=description, height=130, disabled=True, key="generated_output_description")
+            if comment:
+                st.text_area("Pinned comment", value=comment, height=100, disabled=True, key="generated_output_comment")
+    if audio:
+        with st.expander("Generated voiceover", expanded=False):
+            for index, path in enumerate(audio, 1):
+                st.audio(path, format="audio/mpeg")
+                st.caption(f"Scene {index}")
+    if visuals:
+        with st.expander("Generated visuals", expanded=(snapshot.get("visual_review_required", False))):
+            cols = st.columns(3)
+            for index, item in enumerate(visuals):
+                with cols[index % 3]:
+                    st.image(item["path"], use_container_width=True)
+                    st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
+    if video_path and os.path.isfile(video_path):
+        with st.expander("Final rendered video", expanded=True):
+            st.video(video_path)
+
+
 def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
     video_path = str(snapshot.get("video_path") or "").strip()
     if not upload_ready_for_manual_decision(snapshot):
@@ -821,6 +874,7 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
         render_research_summary(snapshot)
         render_script(snapshot)
         render_audio_preview(snapshot)
+        render_generated_outputs(snapshot)
 
         if snapshot.get("visual_review_required"):
             render_visual_review(controller, snapshot)
