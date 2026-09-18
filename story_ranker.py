@@ -425,13 +425,19 @@ def _rss_items(url, genre_key, collection_source="rss"):
             link = (item.findtext("link") or "").strip()
             description = (item.findtext("description") or "").strip()
             published = (item.findtext("pubDate") or "").strip()
+            source_node = item.find("source")
+            publisher = (
+                (source_node.text or "").strip()
+                if source_node is not None and source_node.text
+                else _source_domain({"url": link}) or "RSS"
+            )
             if title and link:
                 items.append({
                     "title": title,
                     "text": description,
                     "description": description,
-                    "source": _source_domain({"url": link}) or "RSS",
-                    "source_name": _source_domain({"url": link}) or "RSS",
+                    "source": publisher,
+                    "source_name": publisher,
                     "url": link,
                     "publishedAt": published,
                     "genre": genre_key,
@@ -758,7 +764,7 @@ def _candidate_reason(story):
 
 
 def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False):
-    """Collect roughly 100 raw candidates using multiple discovery-only news passes."""
+    """Collect a broad article pool, then collapse it into distinct event candidates."""
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
     raw = []
@@ -820,7 +826,7 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
 
 
 def rank_story_candidates(stories, conn=None, target_category="", target_format="", target_language="", social_titles=None, ai_cricket=False):
-    """Run the explicit 100 -> 30 -> 15 -> 8 -> 5 -> ranked 3 discovery funnel."""
+    """Rank an event-first discovery pool through the existing editorial funnel."""
     stories = list(stories or [])
     rows = _load_history(conn)
     used_topics = _load_used_topics(conn)
