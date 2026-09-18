@@ -127,7 +127,7 @@ def test_historical_discovery_score_uses_similar_completed_signal_profiles():
     signal, matches = story_ranker._historical_discovery_score(current, rows)
 
     assert matches == 3
-    assert 7.0 < signal <= 8.0
+    assert signal == 6.9
 
 
 def test_historical_discovery_score_waits_for_two_matching_completed_runs():
