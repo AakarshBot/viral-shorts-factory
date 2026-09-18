@@ -10,12 +10,14 @@ from dataclasses import dataclass
 import re
 
 from visual_semantic_guard_runtime import clean_text, resolve_subject
+from visual_taxonomy_runtime import classify_visual_genre, genre_query_hints
 
 
 @dataclass(frozen=True)
 class VisualSearchIntent:
     subject: str
     visual_type: str
+    visual_genre: str
     query: str
     intent: str
     context: str
@@ -48,6 +50,8 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         confidence = float(resolution.get("confidence") or 0.0)
         query = _initial_query(subject, base, visual_type)
 
+    visual_genre = classify_visual_genre(scene, subject, visual_type)
+
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(
         scene.get("visual_context")
@@ -61,6 +65,7 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
     return VisualSearchIntent(
         subject=subject,
         visual_type=visual_type,
+        visual_genre=visual_genre,
         query=query,
         intent=intent,
         context=context,
@@ -90,6 +95,10 @@ def _initial_query(subject: str, scene: dict, visual_type: str) -> str:
         if clause:
             return _clean(f"{subject} {clause}")[:240]
 
+    hints = genre_query_hints(classify_visual_genre(scene, subject, visual_type))
+    if hints:
+        return _clean(f"{subject} {hints[0]}")[:240]
+
     return subject[:240]
 
 
@@ -111,6 +120,11 @@ def reformulate_visual_query(intent: VisualSearchIntent, reason: str) -> str:
                 return query[:240]
 
     if "mismatch" in reason or "ambiguous" in reason or "unverified" in reason:
+        hints = genre_query_hints(intent.visual_genre)
+        if hints:
+            candidate = _clean(f"{subject} {hints[0]}")
+            if candidate.casefold() != intent.query.casefold():
+                return candidate[:240]
         if intent.visual_type == "PERSON":
             return subject
         if intent.visual_type == "ORGANIZATION":
