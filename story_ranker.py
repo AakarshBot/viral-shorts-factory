@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from event_discovery_runtime import discover_event_pool, cluster_news_events, fetch_gdelt_articles
+from event_discovery_runtime import discover_event_pool, cluster_news_events
 
 
 SAFETY_BLOCKLIST = {
@@ -818,27 +818,6 @@ def _candidate_reason(story):
 
 
 
-DISCOVERY_LANE_QUERIES = {
-    "sports_stories_of_day": (
-        "India cricket BCCI squad selection injury player",
-        "ICC cricket Test ODI T20 record milestone",
-        "women cricket domestic cricket emerging players",
-        "cricket league franchise business sponsorship controversy",
-    ),
-}
-
-
-def _discovery_lane_queries(genre_key, base_query=""):
-    """Return complementary free discovery lanes for the selected newsroom section."""
-    key = str(genre_key or "").strip()
-    if key not in DISCOVERY_LANE_QUERIES:
-        return []
-    base = _clean(base_query).lower()
-    if base and not any(token in base for token in ("cricket", "icc", "bcci", "t20", "odi", "ipl", "psl")):
-        return []
-    return list(DISCOVERY_LANE_QUERIES[key])
-
-
 def _topic_entities(story):
     """Return lightweight subject/entity tokens for diversity-aware selection."""
     generic = {
@@ -928,29 +907,8 @@ def diversity_rerank(stories, max_items=28):
     return selected
 
 
-def _adaptive_query_candidates(base_query, events, max_queries=2):
-    """Return underrepresented OR-clauses when the current event pool is thin."""
-    if not base_query or max_queries <= 0:
-        return []
-    clauses = []
-    for raw_clause in re.split(r"\bOR\b", str(base_query), flags=re.IGNORECASE):
-        clause = re.sub(r"\bAND\b|[()\"]", " ", raw_clause, flags=re.IGNORECASE)
-        clause = re.sub(r"\s+", " ", clause).strip(" ,")
-        if _tokens(clause):
-            clauses.append(clause)
-    if len(clauses) <= 1:
-        return []
-    event_tokens = _tokens(" ".join(_text_blob(event) for event in (events or [])))
-    scored = []
-    for clause in dict.fromkeys(clauses):
-        tokens = _tokens(clause)
-        coverage = len(tokens & event_tokens) / max(1, len(tokens))
-        scored.append((coverage, -len(tokens), clause))
-    scored.sort(key=lambda item: (item[0], item[1]))
-    return [clause for coverage, _, clause in scored[:max_queries] if coverage < 0.75]
 
-
-def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False, discover_lanes=True):
+def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False):
     """Collect a broad article pool, then collapse it into distinct event candidates."""
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
@@ -990,25 +948,9 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     )
     events = event_pool["events"]
 
-    lane_queries = _discovery_lane_queries(genre_key, base_query) if discover_lanes else []
-    lane_article_count = 0
-    for lane_query in lane_queries:
-        extra = fetch_gdelt_articles(
-            lane_query,
-            timespan="48h",
-            max_records=50,
-        )
-        if not extra:
-            continue
-        raw.extend(extra)
-        lane_article_count += len(extra)
-
-    if lane_article_count:
-        compact = compact_items(raw)
-        events = cluster_news_events(compact)
-    # Preserve the initial GDELT intake across adaptive expansions. Re-running
-    # the same base GDELT query for every refinement adds duplicate network work
-    # without adding new base-query evidence.
+    # GDELT is one bounded supplemental source. Do not fan out into
+    # multiple query lanes: the base intake already combines GNews, RSS,
+    # official feeds and public social signals before event clustering.
     raw = list(event_pool.get("articles") or raw)
     initial_gdelt_count = int(event_pool.get("gdelt_article_count") or 0)
     print(
@@ -1018,33 +960,11 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         f"news + RSS + public social signals retained.",
         flush=True,
     )
-    expansion_queries = _adaptive_query_candidates(
-        base_query,
-        events,
-        max_queries=2 if len(events) < 12 else 0,
-    )
-    for query in expansion_queries:
-        extra = _gnews_items(query, api_key, genre_key)
-        if not extra:
-            continue
-        raw.extend(extra)
-        compact = compact_items(raw)
-        events = cluster_news_events(compact)
-        event_pool = {
-            "articles": compact,
-            "events": events,
-            "article_count": len(compact),
-            "event_count": len(events),
-            "gdelt_article_count": initial_gdelt_count,
-        }
-        if len(events) >= 12:
-            break
-
     print(
         f"   [Discovery Funnel] article intake={event_pool['article_count']} "
-        f"(GDELT={event_pool['gdelt_article_count']}) -> "
+        f"(GDELT={initial_gdelt_count}) -> "
         f"distinct events={event_pool['event_count']}; "
-        f"adaptive expansions={len(expansion_queries)}.",
+        f"single-pass intake complete.",
         flush=True,
     )
     return events, social_titles
