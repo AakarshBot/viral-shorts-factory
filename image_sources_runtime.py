@@ -91,16 +91,11 @@ def _download(url: str, used_urls: set[str] | None = None) -> bytes | None:
         return None
 
 
-def fetch_openverse(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    """Search Openverse and return the first downloadable candidate.
-
-    Openverse aggregates openly licensed/public-domain works, but the project
-    itself warns that individual license metadata should still be checked before
-    publishing.
-    """
+def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+    """Search Openverse and return a bounded set of downloadable candidates."""
     q = _clean_query(query)
     if not q:
-        return None
+        return []
     payload = _read_cache("openverse", q)
     if payload is None:
         try:
@@ -113,12 +108,13 @@ def fetch_openverse(query: str, used_urls: set[str] | None = None, *_args) -> by
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict):
-                return None
+                return []
             _write_cache("openverse", q, payload)
         except Exception as exc:
             print(f"   [Visual Source] Openverse | failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
-            return None
+            return []
 
+    candidates: list[bytes] = []
     for item in payload.get("results", []) if isinstance(payload, dict) else []:
         if not isinstance(item, dict):
             continue
@@ -128,18 +124,26 @@ def fetch_openverse(query: str, used_urls: set[str] | None = None, *_args) -> by
         for candidate in (item.get("url"), item.get("thumbnail")):
             data = _download(candidate, used_urls)
             if data:
-                return data
-    return None
+                candidates.append(data)
+                break
+        if len(candidates) >= 4:
+            break
+    return candidates
 
 
-def fetch_pixabay(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    """Search Pixabay using its free API key, when configured."""
+def fetch_openverse(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
+    candidates = fetch_openverse_candidates(query, used_urls, *_args)
+    return candidates[0] if candidates else None
+
+
+def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+    """Search Pixabay and return a bounded set of downloadable candidates."""
     key = str(os.getenv("PIXABAY_API_KEY", "")).strip()
     q = _clean_query(query)
     if not key or not q:
         if not key:
             print("   [Visual Source] Pixabay | API key not configured; skipped.", flush=True)
-        return None
+        return []
 
     payload = _read_cache("pixabay", q)
     if payload is None:
@@ -159,17 +163,26 @@ def fetch_pixabay(query: str, used_urls: set[str] | None = None, *_args) -> byte
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict):
-                return None
+                return []
             _write_cache("pixabay", q, payload)
         except Exception as exc:
             print(f"   [Visual Source] Pixabay | failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
-            return None
+            return []
 
+    candidates: list[bytes] = []
     for item in payload.get("hits", []) if isinstance(payload, dict) else []:
         if not isinstance(item, dict):
             continue
         for candidate in (item.get("largeImageURL"), item.get("webformatURL")):
             data = _download(candidate, used_urls)
             if data:
-                return data
-    return None
+                candidates.append(data)
+                break
+        if len(candidates) >= 4:
+            break
+    return candidates
+
+
+def fetch_pixabay(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
+    candidates = fetch_pixabay_candidates(query, used_urls, *_args)
+    return candidates[0] if candidates else None
