@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import functools
 import io
+import os
 from PIL import Image, ImageFilter, ImageStat
 
 MIN_SHORT_SIDE = 720
@@ -211,7 +212,7 @@ def cover_crop(
         or str(visual_type or "").upper() == "PERSON"
     ) else None
 
-    if face_focus is not None and face_focus[2] >= 0.002:
+    if face_focus is not None and face_focus[2] >= 0.01:
         print(
             f"   [Visual Framing] FACE-ANCHORED | genre={visual_genre or visual_type} "
             f"focus=({face_focus[0]:.2f},{face_focus[1]:.2f})",
