@@ -17,7 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 BRANDING_VERSION = "2026-09-19-v1"
 
@@ -94,7 +94,37 @@ def _font(size: int, bold: bool = False):
 
 
 def _contain_logo(logo_path: Path, size: int) -> Image.Image:
+    """Fit the channel mark inside the badge and remove only edge-connected white JPEG matte."""
     logo = Image.open(logo_path).convert("RGBA")
+    pixels = logo.load()
+    width, height = logo.size
+    near_white = set()
+    for y in range(height):
+        for x in range(width):
+            r, g, bl, _ = pixels[x, y]
+            if r >= 244 and g >= 244 and bl >= 244:
+                near_white.add((x, y))
+    stack = []
+    for x in range(width):
+        if (x, 0) in near_white: stack.append((x, 0))
+        if (x, height - 1) in near_white: stack.append((x, height - 1))
+    for y in range(height):
+        if (0, y) in near_white: stack.append((0, y))
+        if (width - 1, y) in near_white: stack.append((width - 1, y))
+    visited = set()
+    while stack:
+        point = stack.pop()
+        if point in visited or point not in near_white:
+            continue
+        visited.add(point)
+        x, y = point
+        if x > 0: stack.append((x - 1, y))
+        if x + 1 < width: stack.append((x + 1, y))
+        if y > 0: stack.append((x, y - 1))
+        if y + 1 < height: stack.append((x, y + 1))
+    for x, y in visited:
+        r, g, bl, _ = pixels[x, y]
+        pixels[x, y] = (r, g, bl, 0)
     logo.thumbnail((size, size), Image.Resampling.LANCZOS)
     return logo
 
@@ -134,7 +164,7 @@ def _static_brand_overlay(logo_path: str, width: int, height: int) -> np.ndarray
         radius=30,
         fill=_SHADOW,
     )
-    shadow = shadow.filter(__import__("PIL.ImageFilter", fromlist=["ImageFilter"]).GaussianBlur(8))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(8))
     canvas.alpha_composite(shadow, (x - 8, y - 8))
 
     draw = ImageDraw.Draw(canvas)
@@ -171,10 +201,23 @@ def _source_overlay(label: str, width: int, height: int) -> np.ndarray:
     draw = ImageDraw.Draw(canvas)
 
     text = str(label or "SOURCE · Visual source")
+    pad_x = 18
     font = _font(24)
+    for size in range(24, 15, -1):
+        candidate = _font(size)
+        bbox = draw.textbbox((0, 0), text, font=candidate)
+        if bbox[2] - bbox[0] + pad_x * 2 <= SOURCE_BADGE_MAX_WIDTH:
+            font = candidate
+            break
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = max(1, bbox[2] - bbox[0])
-    pad_x = 18
+    if text_w + pad_x * 2 > SOURCE_BADGE_MAX_WIDTH:
+        ellipsis = "…"
+        while text and draw.textbbox((0, 0), text + ellipsis, font=font)[2] - draw.textbbox((0, 0), text + ellipsis, font=font)[0] + pad_x * 2 > SOURCE_BADGE_MAX_WIDTH:
+            text = text[:-1]
+        text = text.rstrip() + ellipsis
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = max(1, bbox[2] - bbox[0])
     box_w = min(SOURCE_BADGE_MAX_WIDTH, text_w + pad_x * 2)
     box_h = SOURCE_BADGE_HEIGHT
     x = width - BOTTOM_RIGHT_MARGIN - box_w
