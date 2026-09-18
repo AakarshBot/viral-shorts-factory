@@ -25,6 +25,7 @@ def _prepare_primary_writer_data(story_data: Dict[str, Any], format_mode: str) -
         return data
     raw_text = _clean(
         data.get("research_evidence_text")
+        or data.get("research_bundle")
         or data.get("text")
         or data.get("summary")
         or data.get("description")
