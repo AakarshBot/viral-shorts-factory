@@ -1,15 +1,26 @@
 """Canonical visual-search intent for the Shorts factory.
 
-One scene gets one retrieval intent. Query generation, provider selection and
-semantic QA must consume this same object; downstream layers must not
-re-classify the manual/factual subject independently.
+One scene gets one authoritative retrieval intent. The first automatic query is
+the clean visual subject itself. If that exact query genuinely fails to produce
+a usable candidate, retrieval may perform at most one deterministic,
+evidence-based refinement. Manual queries remain exact and authoritative.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import re
 
-from visual_semantic_guard_runtime import clean_text, resolve_subject
+from visual_semantic_guard_runtime import (
+    AUXILIARY_WORDS,
+    DISCOURSE_PREFIXES,
+    GENERIC_NOISE,
+    STOPWORDS,
+    VISUAL_DESCRIPTORS,
+    clean_text,
+    key,
+    resolve_subject,
+    tokens,
+)
 from visual_taxonomy_runtime import classify_visual_genre, genre_query_hints
 
 
@@ -29,6 +40,39 @@ def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _context_terms(text: str, subject: str) -> list[str]:
+    """Extract only a few useful refinement terms; never copy the prompt."""
+    subject_keys = {key(word) for word in tokens(subject)}
+    seen = set()
+    terms: list[str] = []
+    for word in tokens(text):
+        token_key = key(word)
+        if (
+            not token_key
+            or token_key in subject_keys
+            or token_key in GENERIC_NOISE
+            or token_key in STOPWORDS
+            or token_key in DISCOURSE_PREFIXES
+            or token_key in AUXILIARY_WORDS
+            or token_key in VISUAL_DESCRIPTORS
+            or token_key in {
+                "person", "people", "organization", "organisation", "company",
+                "product", "device", "location", "geography", "concept",
+                "process", "event", "document", "quote", "quotation",
+                "statistic", "comparison", "timeline", "scientific",
+                "technical", "abstract", "team", "members", "venue",
+                "conference",
+            }
+        ):
+            continue
+        if token_key not in seen:
+            seen.add(token_key)
+            terms.append(word)
+        if len(terms) >= 3:
+            break
+    return terms
+
+
 def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSearchIntent:
     """Resolve the single subject/type/query contract for one scene."""
     scene = scene if isinstance(scene, dict) else {}
@@ -36,8 +80,6 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
     base = dict(scene)
 
     if manual:
-        # Manual visual queries are explicit retrieval identities. Resolve their
-        # role once, but do not mix them with the story's factual entity.
         resolution = resolve_subject({"primary_entity": manual}, video_title)
         subject = clean_text(resolution.get("subject") or manual)
         visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
@@ -48,9 +90,10 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         subject = clean_text(resolution.get("subject") or resolution.get("factual_entity", ""))
         visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
         confidence = float(resolution.get("confidence") or 0.0)
-        query = _initial_query(subject, base, visual_type)
-
-    visual_genre = classify_visual_genre(scene, subject, visual_type)
+        # The automatic first query is intentionally exact. Retrieval quality is
+        # improved by provider fan-out and candidate selection, not by stuffing
+        # narration, titles or model prompts into the opening search.
+        query = subject
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
     context = _clean(
@@ -65,7 +108,7 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
     return VisualSearchIntent(
         subject=subject,
         visual_type=visual_type,
-        visual_genre=visual_genre,
+        visual_genre=classify_visual_genre(scene, subject, visual_type),
         query=query,
         intent=intent,
         context=context,
@@ -74,69 +117,37 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
     )
 
 
-def _initial_query(subject: str, scene: dict, visual_type: str) -> str:
-    """Build one high-signal query; do not manufacture a query ladder."""
-    if not subject:
-        return ""
-
-    # Prefer the explicit search prompt only when it contains the resolved
-    # subject. Otherwise use the subject plus a small amount of visual intent.
-    prompt = _clean(scene.get("specific_search_prompt") or scene.get("factual_search_prompt"))
-    if prompt:
-        subject_tokens = {x.casefold() for x in re.findall(r"[\w][\w'/-]*", subject)}
-        prompt_tokens = re.findall(r"[\w][\w'/-]*", prompt)
-        if subject_tokens and subject_tokens.issubset({x.casefold() for x in prompt_tokens}):
-            return prompt[:240]
-
-    visual_intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
-    if visual_intent:
-        # Keep only the first short descriptive clause. Long narration is noise.
-        clause = re.split(r"[.;:!?]", visual_intent, maxsplit=1)[0].strip()
-        if clause:
-            return _clean(f"{subject} {clause}")[:240]
-
-    hints = genre_query_hints(classify_visual_genre(scene, subject, visual_type))
-    if hints:
-        return _clean(f"{subject} {hints[0]}")[:240]
-
-    return subject[:240]
-
-
 def reformulate_visual_query(intent: VisualSearchIntent, reason: str) -> str:
-    """Make one evidence-driven retry query after a failed first retrieval."""
-    subject = intent.subject
-    reason = _clean(reason).casefold()
+    """Return at most one compact, evidence-based refinement.
 
-    if not subject:
+    This is deliberately not a generic query ladder. The fallback may only add
+    a few concrete terms already present in the scene evidence, and manual
+    queries never reach this path.
+    """
+    subject = _clean(intent.subject)
+    reason = _clean(reason).casefold()
+    if not subject or intent.manual:
         return ""
 
-    # If the first query was too broad, add the strongest available contextual
-    # signal. If it was too specific, fall back to the canonical identity.
     if "no candidate" in reason or "no candidates" in reason:
-        if intent.context:
-            context = re.split(r"[.;:!?]", intent.context, maxsplit=1)[0].strip()
-            query = _clean(f"{subject} {context}")
+        terms = _context_terms(intent.context, subject)
+        if terms:
+            query = _clean(" ".join([subject, *terms]))
             if query.casefold() != intent.query.casefold():
                 return query[:240]
 
     if "mismatch" in reason or "ambiguous" in reason or "unverified" in reason:
+        # Genre hints are used only when they are short, generic visual
+        # descriptors and do not invent a factual identity.
         hints = genre_query_hints(intent.visual_genre)
         if hints:
-            candidate = _clean(f"{subject} {hints[0]}")
-            if candidate.casefold() != intent.query.casefold():
-                return candidate[:240]
-        if intent.visual_type == "PERSON":
-            return subject
-        if intent.visual_type == "ORGANIZATION":
-            return _clean(f"{subject} official")
-        if intent.visual_type == "LOCATION":
-            return _clean(f"{subject} landmark")
-        if intent.visual_type == "EVENT":
-            return _clean(f"{subject} event")
-        if intent.intent:
-            return _clean(f"{subject} {intent.intent}")[:240]
+            terms = _context_terms(" ".join(hints), subject)
+            if terms:
+                query = _clean(" ".join([subject, *terms[:2]]))
+                if query.casefold() != intent.query.casefold():
+                    return query[:240]
 
-    return subject
+    return ""
 
 
 __all__ = ["VisualSearchIntent", "resolve_visual_search_intent", "reformulate_visual_query"]
