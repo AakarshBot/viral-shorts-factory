@@ -325,6 +325,112 @@ def extract_news_source_image(article_url: str, publisher_hint: str = "") -> dic
 
 
 
+
+def compose_news_source_image(image: Image.Image, target_size: tuple[int, int] = (1080, 1920)) -> Image.Image:
+    """Crop a source-news photo to 9:16 while preserving salient/face regions.
+
+    Uses deterministic candidate-window scoring. Faces receive the strongest
+    protection; otherwise high-contrast/edge-dense regions guide the crop.
+    This is deliberately limited to source-news images and does not change the
+    existing provider crop behavior.
+    """
+    import cv2
+    import numpy as np
+
+    src = image.convert("RGB")
+    tw, th = target_size
+    target_ratio = tw / th
+    sw, sh = src.size
+    if sw <= 0 or sh <= 0:
+        return src.resize(target_size, Image.Resampling.LANCZOS)
+
+    # If already close to target, only resize.
+    if abs((sw / sh) - target_ratio) < 0.03:
+        return src.resize(target_size, Image.Resampling.LANCZOS)
+
+    # Work at a bounded resolution for predictable runtime.
+    scale = min(1.0, 900.0 / max(sw, sh))
+    probe = np.asarray(src.resize((max(1, int(sw * scale)), max(1, int(sh * scale))), Image.Resampling.BILINEAR))
+    gray = cv2.cvtColor(probe, cv2.COLOR_RGB2GRAY)
+    faces: list[tuple[float, float, float, float]] = []
+    try:
+        cascade = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        detector = cv2.CascadeClassifier(cascade)
+        if not detector.empty():
+            for x, y, w, h in detector.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=5, minSize=(28, 28)
+            ):
+                faces.append((
+                    (x + w / 2) / probe.shape[1],
+                    (y + h / 2) / probe.shape[0],
+                    w / probe.shape[1],
+                    h / probe.shape[0],
+                ))
+    except Exception:
+        faces = []
+
+    # Edge density is a useful deterministic proxy for where the photograph
+    # contains actual visual information, without requiring another API/model.
+    edges = cv2.Canny(gray, 80, 160)
+    integral = cv2.integral(edges.astype(np.float32) / 255.0)
+
+    crop_w = min(sw, max(1, int(sh * target_ratio)))
+    crop_h = min(sh, max(1, int(sw / target_ratio)))
+    if crop_w == sw and crop_h == sh:
+        return src.resize(target_size, Image.Resampling.LANCZOS)
+
+    if crop_w < sw:
+        max_left = sw - crop_w
+        # Evaluate 31 horizontal candidates, with extra candidates around faces.
+        positions = {int(round(max_left * i / 30)) for i in range(31)}
+        for cx, _, fw, _ in faces:
+            positions.add(int(round(cx * sw - crop_w / 2)))
+            positions.add(int(round((cx - fw * 0.9) * sw)))
+            positions.add(int(round((cx + fw * 0.9) * sw - crop_w)))
+        positions = {max(0, min(max_left, p)) for p in positions}
+        candidates = [(p, 0, crop_w, sh) for p in positions]
+    else:
+        max_top = sh - crop_h
+        positions = {int(round(max_top * i / 30)) for i in range(31)}
+        for _, cy, _, fh in faces:
+            positions.add(int(round(cy * sh - crop_h / 2)))
+            positions.add(int(round((cy - fh * 0.9) * sh)))
+            positions.add(int(round((cy + fh * 0.9) * sh - crop_h)))
+        positions = {max(0, min(max_top, p)) for p in positions}
+        candidates = [(0, p, sw, crop_h) for p in positions]
+
+    def rect_edge_score(left: int, top: int, right: int, bottom: int) -> float:
+        px1 = int(left * scale)
+        py1 = int(top * scale)
+        px2 = max(px1 + 1, int(right * scale))
+        py2 = max(py1 + 1, int(bottom * scale))
+        px2 = min(probe.shape[1], px2)
+        py2 = min(probe.shape[0], py2)
+        area = integral[py2, px2] - integral[py1, px2] - integral[py2, px1] + integral[py1, px1]
+        return float(area) / max(1, (px2 - px1) * (py2 - py1))
+
+    def score(rect: tuple[int, int, int, int]) -> float:
+        left, top, right, bottom = rect
+        edge_score = rect_edge_score(left, top, right, bottom)
+        face_score = 0.0
+        for cx, cy, fw, fh in faces:
+            fx, fy = cx * sw, cy * sh
+            if left <= fx <= right and top <= fy <= bottom:
+                # Penalize crops that put a face too close to an edge.
+                dx = min(fx - left, right - fx) / max(1, crop_w)
+                dy = min(fy - top, bottom - fy) / max(1, crop_h)
+                face_score += 8.0 + 12.0 * min(dx, dy)
+        # Mild center preference prevents pathological edge-only crops.
+        center_x = (left + right) / 2 / sw
+        center_y = (top + bottom) / 2 / sh
+        center_penalty = 0.6 * ((center_x - 0.5) ** 2 + (center_y - 0.5) ** 2)
+        return edge_score + face_score - center_penalty
+
+    best = max(candidates, key=score)
+    cropped = src.crop(best)
+    return cropped.resize(target_size, Image.Resampling.LANCZOS)
+
+
 def apply_source_credit(image: Image.Image, credit: str, *, font_size: int = 28) -> Image.Image:
     """Burn a compact, readable source credit into the bottom-right corner."""
     base = image.convert("RGBA")
@@ -363,4 +469,4 @@ def apply_source_credit(image: Image.Image, credit: str, *, font_size: int = 28)
     return base
 
 
-__all__ = ["extract_news_source_image", "apply_source_credit"]
+__all__ = ["extract_news_source_image", "compose_news_source_image", "apply_source_credit"]
