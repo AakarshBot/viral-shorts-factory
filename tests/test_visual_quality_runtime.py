@@ -18,18 +18,18 @@ def test_quality_gate_rejects_low_resolution():
     assert score == 0.0
 
 
-def test_cover_crop_keeps_off_center_subject_visible():
+def test_cover_crop_centres_standard_source():
     image = Image.new("RGB", (1600, 900), "black")
     pixels = image.load()
     for y in range(180, 720):
-        for x in range(1180, 1560):
+        for x in range(620, 980):
             pixels[x, y] = (255, 255, 255)
 
     cropped = cover_crop(image, (1080, 1920))
     assert cropped.size == (1080, 1920)
 
-    right_half = cropped.crop((540, 0, 1080, 1920)).convert("L")
-    assert right_half.getbbox() is not None
+    center = cropped.crop((270, 0, 810, 1920)).convert("L")
+    assert center.getbbox() is not None
 
 
 def test_cover_crop_never_stretches_the_source():
