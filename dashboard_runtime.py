@@ -53,6 +53,12 @@ def build_discovery_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
         "social_signal": float(dimensions.get("social_signal") or candidate.get("social_signal") or 0.0),
         "google_trends": float(dimensions.get("google_trends") or candidate.get("google_trends_signal") or 0.0),
         "channel_history": float(dimensions.get("channel_history") or 0.0),
+        "historical_discovery": float(
+            dimensions.get("historical_discovery")
+            or candidate.get("historical_discovery_signal")
+            or 0.0
+        ),
+        "historical_discovery_matches": int(candidate.get("historical_discovery_matches") or 0),
         "originality": float(dimensions.get("originality") or candidate.get("originality_score") or 0.0),
         "visual_potential": float(dimensions.get("visual_potential") or candidate.get("visual_potential") or 0.0),
         "safety_risk": float(dimensions.get("safety_risk") or candidate.get("risk_signal_count") or 0.0),
