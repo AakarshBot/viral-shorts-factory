@@ -223,17 +223,18 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
     factual_entity = str(seg.get("factual_primary_entity") or entity).strip()
-    queries, visual_type = runtime._build_search_variants(seg, video_title)
 
-    # _build_search_variants resolves the single canonical intent. Reuse it;
-    # never independently classify the manual subject here.
+    # Resolve the canonical intent exactly once. Query construction belongs to
+    # visual_search_intent_runtime; retrieval must not rebuild it through a
+    # second strategy function.
     from visual_search_intent_runtime import resolve_visual_search_intent
     visual_intent = seg.get("_visual_search_intent")
     if visual_intent is None:
         visual_intent = resolve_visual_search_intent(seg, video_title)
 
     visual_anchor = str(visual_intent.subject or "").strip()
-    visual_type = str(visual_intent.visual_type or visual_type or "GENERAL_CONTEXT").upper()
+    queries = [visual_intent.query] if visual_intent.query else []
+    visual_type = str(visual_intent.visual_type or "GENERAL_CONTEXT").upper()
     visual_genre = str(visual_intent.visual_genre or classify_visual_genre(seg, visual_anchor, visual_type) or "GENERAL_CONTEXT").upper()
     seg["visual_genre"] = visual_genre
     if not visual_anchor or not queries:
@@ -264,7 +265,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             return cached_img.convert("RGB"), False, "cached"
 
     verification_attempts = 0
-    hard_rejections = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))
     try:
         source_plan = _source_plan(bot, visual_type, visual_genre)
@@ -362,18 +362,14 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     else:
                         accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
 
-                    # A single multimodal NO is evidence against a candidate,
-                    # not proof that the image is wrong. Generic providers can
-                    # return cropped, logo-only, historical, or otherwise valid
-                    # representations that a text-conditioned model cannot
-                    # confidently identify. Keep the candidate as low-confidence
-                    # fallback rather than allowing one model verdict to erase
-                    # the whole retrieval result.
+                    # A provider/model mismatch is retained as uncertain
+                    # evidence rather than immediately destroying the retrieval
+                    # result. The bounded fallback below can still use the best
+                    # real-source candidate if verification is unavailable.
                     if hard_reject:
-                        hard_reject = False
                         score = max(20, float(score or REAL_SOURCE_SCORES.get(source.lower(), 50)) - 30)
                         print(
-                            f"   [Visual QA] semantic mismatch | deprioritized, not discarded | "
+                            f"   [Visual QA] semantic mismatch | retained as low-confidence candidate | "
                             f"source={source} score={score:.0f} | query='{query}'",
                             flush=True,
                         )
@@ -419,19 +415,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         # Adaptive retry: only reformulate after the complete first retrieval
         # pass fails. A successful/uncertain candidate is not discarded just to
         # consume another query. This is deliberately capped at one retry.
-        if query_index == 1 and len(queries) == 1:
-            saw_hard_mismatch = hard_rejections > 0
-            saw_candidate = best_uncertain is not None
-            if not saw_candidate or saw_hard_mismatch:
-                from visual_search_intent_runtime import reformulate_visual_query
-                reason = "semantic mismatch" if saw_hard_mismatch else "no candidates"
-                retry_query = reformulate_visual_query(visual_intent, reason)
-                if retry_query and retry_query.casefold() != query.casefold():
-                    queries.append(retry_query)
-                    print(
-                        f"   [Visual Search] Adaptive retry | reason={reason} | query='{retry_query}'",
-                        flush=True,
-                    )
+        if query_index == 1 and len(queries) == 1 and best_uncertain is None:
+            from visual_search_intent_runtime import reformulate_visual_query
+            retry_query = reformulate_visual_query(visual_intent, "no candidates")
+            if retry_query and retry_query.casefold() != query.casefold():
+                queries.append(retry_query)
+                print(
+                    f"   [Visual Search] Adaptive retry | reason=no candidates | query='{retry_query}'",
+                    flush=True,
+                )
 
     if best_uncertain is not None:
         score, normalized, source, query = best_uncertain
@@ -445,7 +437,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             seg["visual_verification_attempts"] = verification_attempts
             print(
                 f"   [Visual Source] {source} | USED-UNVERIFIED-REAL | score={score:.0f} | query='{query}' | "
-                f"QA={verification_attempts}/{max_verification} hard_rejections={hard_rejections}",
+                f"QA={verification_attempts}/{max_verification}",
                 flush=True,
             )
             return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
