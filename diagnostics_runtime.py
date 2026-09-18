@@ -93,8 +93,9 @@ def _test_visual_strategy():
             raise AssertionError(f"identity-first visual contract failed: {brief}, {queries}")
         subject_keys = set(meaningful_tokens(expected_subject))
         for query in queries:
-            if not set(meaningful_tokens(query)).issubset(subject_keys):
-                raise AssertionError(f"query introduced non-subject tokens: {queries}")
+            query_keys = set(meaningful_tokens(query))
+            if not subject_keys.issubset(query_keys):
+                raise AssertionError(f"query dropped subject identity: {queries}")
 
     malformed = {
         "primary_entity": "Not Northstar Research Summit",
