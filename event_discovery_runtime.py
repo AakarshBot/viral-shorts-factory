@@ -34,7 +34,7 @@ EVENT_ACTION_FAMILIES = {
     "launch": {
         "launch", "launched", "launches",
         "lift", "lifts", "lifted", "lifting",
-        "takeoff", "takeoff",
+        "takeoff",
     },
     "unveil": {"unveil", "unveiled", "unveils"},
     "announce": {"announce", "announced", "announces"},
