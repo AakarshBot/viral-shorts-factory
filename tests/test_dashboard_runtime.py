@@ -363,3 +363,11 @@ def test_build_discovery_evidence_summarises_event_support_and_signals():
     assert evidence["event_momentum"] == 6.5
     assert evidence["channel_history"] == 4.0
     assert len(evidence["sources"]) == 2
+
+def test_dashboard_primary_menu_and_generated_outputs_contract():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert 'mode_labels = ["Deep Dive", "Top 5", "Cricket", "AI"]' in app_source
+    assert '["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"]' not in app_source
+    assert 'def render_generated_outputs(snapshot: Dict[str, Any]) -> None:' in app_source
+    assert 'render_generated_outputs(snapshot)' in app_source
