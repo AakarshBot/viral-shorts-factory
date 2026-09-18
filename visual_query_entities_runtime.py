@@ -9,14 +9,14 @@ _INVALID = {"", "none", "unknown", "na", "n/a"}
 
 
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
-    """Compatibility helper: one clean identity query, never a blind ladder."""
-    anchor = clean_text(
-        resolution.get("subject")
-        or seg.get("factual_primary_entity")
-        or resolution.get("factual_entity")
-        or seg.get("primary_entity")
-    )
-    return [anchor] if anchor else []
+    """Compatibility shim: return the canonical bounded query set."""
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    scene = dict(seg or {})
+    if resolution and not scene.get("primary_entity"):
+        scene["primary_entity"] = resolution.get("factual_entity") or resolution.get("subject", "")
+    intent = resolve_visual_search_intent(scene)
+    return list(intent.queries)
 
 
 def _install_runtime_query_guard(visual_runtime_module):
@@ -55,7 +55,7 @@ def _install_runtime_query_guard(visual_runtime_module):
                 flush=True,
             )
 
-        return [visual_intent.query], visual_intent.visual_type
+        return list(visual_intent.queries), visual_intent.visual_type
 
     def generic_verification_tier(seg, visual_type, source):
         source_l = str(source or "").strip().lower()
