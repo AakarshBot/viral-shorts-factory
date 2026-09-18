@@ -22,7 +22,7 @@ def test_self_critique_is_not_an_unconditional_pass():
 def test_strict_fallback_top5_has_json_dependency_available():
     story = {
         "title": "Top five technology developments",
-        "text": "[{\"title\": \"AI launch\", \"text\": \"A new AI product was launched with several documented features and broad industry coverage. The company described the product in a detailed announcement covering its architecture, availability, pricing, performance, integrations, safety measures, and intended users. Industry observers also noted the launch as a significant technology development with practical implications for developers and businesses.\"}]",
+        "text": "[{\"title\": \"AI launch\", \"text\": \"A new AI product was launched with several documented features and broad industry coverage. The company described the product in a detailed announcement covering its architecture, availability, pricing, performance, integrations, safety measures, and intended users. Industry observers also noted the launch as a significant technology development with practical implications for developers and businesses. The announcement also described the rollout schedule, supported platforms, regional availability, and the evidence provided for each major product claim.\"}]",
     }
 
     result = pipeline_integrity_runtime.strict_fallback(
