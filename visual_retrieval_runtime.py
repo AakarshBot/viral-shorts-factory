@@ -1,7 +1,7 @@
 """Genre-agnostic multi-source visual retrieval for the Shorts factory.
 
-The active visual path is deliberately resilient: each scene gets multiple
-search phrases, multiple real image sources, several candidates per source,
+The active visual path is deliberately resilient: each scene gets a bounded
+canonical query ladder, multiple real image sources, several candidates per source,
 cheap image validation, then semantic verification. A real source candidate
 that is merely unverified is preferred over an empty frame when verification
 infrastructure is unavailable. AI generation is reserved for abstract/contextual
@@ -220,7 +220,7 @@ def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_g
 
 
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
-    """Search grounded phrases through raw providers and apply one QA boundary."""
+    """Search the canonical bounded query ladder through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
     factual_entity = str(seg.get("factual_primary_entity") or entity).strip()
 
@@ -402,21 +402,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 )
         if provider_checks >= max_provider_checks:
             break
-
-        # Adaptive retry: only reformulate after the complete first retrieval
-        # pass produces neither an accepted candidate nor an uncertain candidate.
-        # An explicit semantic NO is a real failure and therefore qualifies for
-        # this one bounded evidence-based refinement. A manual query remains
-        # authoritative because its reformulator returns no retry.
-        if query_index == 1 and len(queries) == 1 and best_uncertain is None:
-            from visual_search_intent_runtime import reformulate_visual_query
-            retry_query = reformulate_visual_query(visual_intent, "no candidates")
-            if retry_query and retry_query.casefold() != query.casefold():
-                queries.append(retry_query)
-                print(
-                    f"   [Visual Search] Adaptive retry | reason=no candidates | query='{retry_query}'",
-                    flush=True,
-                )
 
     if best_uncertain is not None:
         score, normalized, source, query = best_uncertain
