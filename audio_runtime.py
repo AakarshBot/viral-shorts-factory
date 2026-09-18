@@ -153,6 +153,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
     audio_paths = []
     word_timings = []
     scene_durations = []
+    narration_texts = []
     persona_key = next(
         (key for key in bot.PERSONA_PROFILES.keys() if key in script_data.get("persona_used", "LISTICLE HOST").upper()),
         "LISTICLE HOST",
@@ -186,11 +187,11 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                 aligned, alignment_reason = validate_timing_against_duration(timings, actual_duration)
                 if not aligned:
                     raise RuntimeError(alignment_reason)
-                timing_duration = (timings[-1]["end"] + 0.15) if timings else 0.0
-                duration = max(actual_duration, timing_duration)
+                duration = actual_duration
                 audio_paths.append(path)
                 word_timings.append(timings)
                 scene_durations.append(duration)
+                narration_texts.append(text)
                 success = True
                 print(
                     f"   [Audio] Scene {idx + 1}/{len(scenes)} complete: "
@@ -203,16 +204,18 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                 print(f"   [Audio] Scene {idx + 1} timed out after 45s on attempt {attempt}.", flush=True)
             except Exception as exc:
                 print(f"   [Audio] Scene {idx + 1} failed on attempt {attempt}: {type(exc).__name__}: {exc}", flush=True)
-            await asyncio.sleep(min(3 * attempt, 9))
-            gc.collect()
+            if attempt < 3:
+                await asyncio.sleep(min(3 * attempt, 9))
+                gc.collect()
 
         if not success:
             print(f"   [Audio] FATAL: Could not generate real narration for scene {idx + 1}.", flush=True)
             return [], []
 
+    script_data["audio_narration_texts"] = narration_texts
     script_data["audio_scene_durations"] = scene_durations
     script_data["audio_total_duration"] = round(sum(scene_durations), 3)
-    script_data["word_timing_version"] = 3
+    script_data["word_timing_version"] = 4
     script_data["word_timing_counts"] = [len(items) for items in word_timings]
 
     gc.collect()
