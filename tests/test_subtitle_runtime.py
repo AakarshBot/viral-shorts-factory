@@ -106,5 +106,9 @@ def test_compile_patch_enables_deep_dive_scene_one_and_removes_duplicate_logo():
 
     assert _patch_deep_dive_subtitle_condition(bot) is True
     assert bot.compile_video() == "subtitle-enabled"
+
+    bot.run_robot.__globals__["format_mode"] = "top5"
+    assert bot.compile_video() == "not-enabled"
+
     assert getattr(bot.compile_video, "_deep_dive_subtitles_bound", False) is True
     assert getattr(bot.compile_video, "_premium_compile_logo_bound", False) is True
