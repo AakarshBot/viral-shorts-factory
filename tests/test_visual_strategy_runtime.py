@@ -8,7 +8,7 @@ def _assert_query_contract(scene, title, expected_type):
 
     assert visual_type == expected_type, (brief, visual_type)
     assert queries, "visual planner returned no query"
-    assert queries[0] == brief["subject"], (brief, queries)
+    assert queries[0].casefold().startswith(brief["subject"].casefold()), (brief, queries)
     assert len(queries) <= 5, queries
     subject_tokens = set(meaningful_tokens(brief["subject"]))
     assert subject_tokens, brief
@@ -29,7 +29,7 @@ def test_person_subject_uses_explicit_role():
     }
     brief, queries = _assert_query_contract(scene, "Amina Rahman documentary", "PERSON")
     assert brief["subject"] == "Amina Rahman"
-    assert queries[0] == "Amina Rahman"
+    assert queries[0].casefold().startswith("amina rahman")
 
 
 def test_organization_subject_uses_generic_company_role():
@@ -137,7 +137,7 @@ def test_entity_types_remain_stable_across_genres():
     for scene, expected_type in cases:
         brief, queries = _assert_query_contract(scene, "cross genre story", expected_type)
         assert brief["subject"] == scene["primary_entity"]
-        assert queries[0] == scene["primary_entity"]
+        assert queries[0].casefold().startswith(scene["primary_entity"].casefold())
 
 
 def test_query_ladder_is_bounded_and_never_degrades_identity():
@@ -154,7 +154,7 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
 
 
-def test_automatic_initial_query_never_uses_noisy_search_prompt():
+def test_automatic_query_is_compact_and_retrieval_oriented():
     from visual_search_intent_runtime import resolve_visual_search_intent
 
     scene = {
@@ -162,45 +162,54 @@ def test_automatic_initial_query_never_uses_noisy_search_prompt():
         "voiceover": "Rishabh Pant was omitted from India's ODI squad.",
         "specific_search_prompt": "Rishabh Pant ODI players press conference editorial_person latest news",
         "visual_intent": "press conference person",
+        "visual_context": "ODI squad announcement",
     }
 
     intent = resolve_visual_search_intent(scene, "Rishabh Pant omission story")
-    assert intent.query == "Rishabh Pant"
-    assert "press" not in intent.query.lower()
+    assert intent.query.casefold().startswith("rishabh pant")
+    assert len(intent.query.split()) <= 6
     assert "latest" not in intent.query.lower()
     assert "editorial" not in intent.query.lower()
+    assert "story" not in intent.query.lower()
 
 
-def test_automatic_retry_is_one_compact_evidence_based_refinement():
-    from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
+def test_same_entity_gets_different_searchable_scene_queries():
+    from visual_search_intent_runtime import resolve_visual_search_intent
 
-    scene = {
-        "primary_entity": "India",
-        "voiceover": "India's cricket team trained in New Delhi before the final.",
-        "visual_intent": "cricket team",
-        "specific_search_prompt": "India cricket team New Delhi final press conference",
-    }
+    first = resolve_visual_search_intent({
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_intent": "young batsman batting",
+        "visual_context": "cricket match action",
+        "factual_voiceover": "Vaibhav Sooryavanshi played for Rajasthan Royals in the match.",
+    })
+    second = resolve_visual_search_intent({
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_intent": "player receiving award",
+        "visual_context": "trophy presentation ceremony",
+        "factual_voiceover": "Vaibhav Sooryavanshi received the award after the presentation.",
+    })
 
-    intent = resolve_visual_search_intent(scene)
-    retry = reformulate_visual_query(intent, "no candidates")
+    assert first.query != second.query
+    assert first.query.casefold().startswith("vaibhav sooryavanshi")
+    assert second.query.casefold().startswith("vaibhav sooryavanshi")
+    assert "young" not in first.query.lower()
+    assert "player" not in second.query.lower()
+    assert any(term in first.query.lower() for term in ("batting", "match", "rajasthan"))
+    assert any(term in second.query.lower() for term in ("award", "trophy", "presentation", "ceremony"))
+    assert len(first.queries) <= 2
+    assert len(second.queries) <= 2
 
-    assert retry == "India cricket New Delhi"
-    assert "press" not in retry.lower()
-    assert "conference" not in retry.lower()
-    assert "story" not in retry.lower()
 
 
-def test_manual_visual_query_never_gets_automatic_retry():
-    from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
+def test_manual_visual_query_stays_exact():
+    from visual_search_intent_runtime import resolve_visual_search_intent
 
-    intent = resolve_visual_search_intent(
-        {
-            "primary_entity": "Pakistan Cricket Board",
-            "manual_visual_query": "Mohammad Rizwan",
-            "voiceover": "Pakistan Cricket Board announced the squad.",
-        }
-    )
+    intent = resolve_visual_search_intent({
+        "primary_entity": "Pakistan Cricket Board",
+        "manual_visual_query": "Mohammad Rizwan",
+        "voiceover": "Pakistan Cricket Board announced the squad.",
+    })
 
     assert intent.manual is True
     assert intent.query == "Mohammad Rizwan"
-    assert reformulate_visual_query(intent, "no candidates") == ""
+    assert intent.queries == ("Mohammad Rizwan",)
