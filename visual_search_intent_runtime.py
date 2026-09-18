@@ -80,11 +80,14 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
     base = dict(scene)
 
     if manual:
-        resolution = resolve_subject({"primary_entity": manual}, video_title)
-        subject = clean_text(resolution.get("subject") or manual)
-        visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
+        # Manual search text is user-authored and therefore exact. Resolve only
+        # the scene's visual type; never rewrite the manual query through the
+        # factual-subject resolver.
+        scene_resolution = resolve_subject(base, video_title)
+        subject = manual
+        visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
         confidence = 1.0
-        query = subject
+        query = manual
     else:
         resolution = resolve_subject(base, video_title)
         subject = clean_text(resolution.get("subject") or resolution.get("factual_entity", ""))
