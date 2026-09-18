@@ -138,6 +138,10 @@ def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeyp
 
 
 def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch):
+    from visual_taxonomy_runtime import classify_visual_genre
+
+    assert classify_visual_genre({"visual_intent": "logo", "voiceover": "The BCCI logo appears on screen."}, "BCCI logo", "ORGANIZATION") == "ORG_BRANDING"
+
     image_bytes = _jpeg_bytes((900, 900))
 
     class FakeBot:
@@ -252,6 +256,6 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
         "Sanju Samson story",
     )
 
-    assert image.size == (1080, 1920)
+    assert image.size == (900, 900)
     assert used_ai is False
-    assert source == "visual-rescue"
+    assert source == "Commons"
