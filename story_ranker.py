@@ -549,6 +549,7 @@ def _deduplicate_stage(stories, max_items=15):
 
 def _fact_source_stage(stories, max_items=8):
     for story in stories:
+        publishers = set()
         if story.get("event_clustered"):
             domains = set(story.get("event_source_domains") or [])
             publishers = set(story.get("event_publishers") or [])
@@ -847,15 +848,24 @@ def patch_story_selection(bot):
             )
         event_pool = discover_event_pool(
             query=base_query,
-            existing_articles=relevance_filtered,
+            existing_articles=compact,
             timespan="48h",
             max_gdelt_records=75,
         )
-        compact = event_pool["events"]
+        event_candidates = event_pool["events"]
+        relevance_filtered = []
+        for candidate in event_candidates:
+            if not _cricket_relevance_pass(candidate, genre_key):
+                continue
+            if not _requested_topic_pass(candidate, requested_topic):
+                continue
+            relevance_filtered.append(candidate)
+        compact = relevance_filtered
         print(
             f"   [Discovery Events] article intake={event_pool['article_count']} "
             f"(GDELT={event_pool['gdelt_article_count']}) -> "
-            f"distinct events={event_pool['event_count']}",
+            f"distinct events={event_pool['event_count']} -> "
+            f"relevant events={len(compact)}",
             flush=True,
         )
         ai_cricket = genre_key == "sports_stories_of_day" and str(config.get("cricket_category", "")) == "AI-assisted top story in cricket"
