@@ -230,6 +230,8 @@ def build_config() -> Dict[str, Any]:
     language_label = st.session_state.get("language_label", "English")
     language_key = language_options.get(language_label, "english")
     mode = str(st.session_state.get("editorial_mode", "Deep Dive"))
+    if mode == "Top 5":
+        mode = "Top Five"
 
     if mode == "Cricket":
         return {
@@ -333,15 +335,18 @@ def render_sidebar_controls() -> Dict[str, Any]:
         key="language_label",
     )
 
-    mode_labels = ["Deep Dive", "Top Five", "Cricket", "AI"]
+    mode_labels = ["Deep Dive", "Top 5", "Cricket", "AI"]
     current_mode = st.session_state.get("editorial_mode", mode_labels[0])
+    if current_mode == "Top Five":
+        current_mode = "Top 5"
     st.sidebar.selectbox(
         "Editorial mode",
         mode_labels,
         index=mode_labels.index(current_mode),
-        key="editorial_mode",
+        key="editorial_mode_label",
         help="Deep Dive and Top Five use curated topic menus. Cricket keeps its dedicated cricket intake. AI ranks current stories against channel history.",
     )
+    st.session_state.editorial_mode = "Top Five" if st.session_state.editorial_mode_label == "Top 5" else st.session_state.editorial_mode_label
 
     if st.session_state.editorial_mode == "Cricket":
         st.sidebar.selectbox("Cricket category", list(CRICKET_CATEGORIES.keys()), key="cricket_category")
@@ -1204,25 +1209,21 @@ def main() -> None:
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
 
-    action_mode = st.radio(
-        "Action plan",
-        ["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"],
-        horizontal=True,
-        key="action_mode",
-    )
-    render_header(action_mode)
+    render_header("Live Factory")
+    config = render_sidebar_controls()
+    render_live_factory(config, controller)
 
-    if action_mode == "Live Factory":
-        config = render_sidebar_controls()
-        render_live_factory(config, controller)
-    elif action_mode == "Channel Statistics":
-        st.sidebar.caption("Channel configuration is not needed for statistics.")
+    with st.sidebar.expander("Engineering & analytics", expanded=False):
+        utility = st.selectbox(
+            "Utility",
+            ["None", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"],
+            key="dashboard_utility",
+        )
+    if utility == "Channel Statistics":
         render_channel_statistics()
-    elif action_mode == "Run Offline Diagnostics":
-        st.sidebar.caption("No API calls are made from this screen.")
+    elif utility == "Run Offline Diagnostics":
         render_offline_page()
-    else:
-        st.sidebar.caption("Demo runs are local and do not publish videos.")
+    elif utility == "Demo Factory":
         render_demo_page()
 
     st.divider()
