@@ -152,13 +152,6 @@ AI_DISCOVERY_CATEGORY_KEYS = (
 )
 
 
-def _dashboard_history_fit(story, rows, category, language):
-    history, matches = _historical_score(story, rows, category, "regular", language)
-    story["channel_history_fit"] = round(min(10.0, history * 0.10), 2)
-    story["historical_topic_matches"] = matches
-    return history
-
-
 def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 10) -> list[dict[str, Any]]:
     """Build a Top-10 current-topic list using one intentional query per useful genre."""
     from story_ranker import (
@@ -241,10 +234,10 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
             social_titles,
             ai_cricket=False,
         )
-        history = _dashboard_history_fit(item, rows, category, language)
-        scored["candidate_score"] = round(
-            float(scored.get("candidate_score") or 0.0) + min(10.0, history * 0.10),
-            3,
+        # _editorial_score already includes channel-history fit. Reuse its
+        # normalized dimension for the dashboard instead of adding history twice.
+        scored["channel_history_fit"] = float(
+            (scored.get("discovery_dimensions") or {}).get("channel_history") or 0.0
         )
         scored["recommended_category"] = category if category in bot.CONTENT_CATEGORIES else "national_global_affairs"
         scored["recommended_format"] = "regular"
@@ -773,6 +766,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
 __all__ = [
     "DashboardWorkflowController",
     "discover_ranked_topics",
+    "discover_ai_topics",
     "collect_channel_statistics",
     "collect_live_channel_statistics",
     "run_demo_section",
