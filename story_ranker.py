@@ -817,15 +817,35 @@ def _candidate_reason(story):
     return ", ".join(parts) + "."
 
 
+
+def _adaptive_query_candidates(base_query, events, max_queries=2):
+    """Return underrepresented OR-clauses when the current event pool is thin."""
+    if not base_query or max_queries <= 0:
+        return []
+    clauses = []
+    for raw_clause in re.split(r"\bOR\b", str(base_query), flags=re.IGNORECASE):
+        clause = re.sub(r"\bAND\b|[()\"]", " ", raw_clause, flags=re.IGNORECASE)
+        clause = re.sub(r"\s+", " ", clause).strip(" ,")
+        if _tokens(clause):
+            clauses.append(clause)
+    if len(clauses) <= 1:
+        return []
+    event_tokens = _tokens(" ".join(_text_blob(event) for event in (events or [])))
+    scored = []
+    for clause in dict.fromkeys(clauses):
+        tokens = _tokens(clause)
+        coverage = len(tokens & event_tokens) / max(1, len(tokens))
+        scored.append((coverage, -len(tokens), clause))
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return [clause for coverage, _, clause in scored[:max_queries] if coverage < 0.75]
+
+
 def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False):
     """Collect a broad article pool, then collapse it into distinct event candidates."""
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
     raw = []
 
-    # Dashboard discovery is the authoritative intake path. The patched
-    # bot.gather_and_filter_stories performs its own intake, so calling it
-    # here would repeat the same network work a second time.
     if base_query:
         raw.extend(_gnews_items(base_query, api_key, genre_key))
 
@@ -838,17 +858,20 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     for story in raw:
         story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
 
-    compact = []
-    seen = set()
-    for story in raw:
-        if not isinstance(story, dict):
-            continue
-        key = _canonical_url(_source_url_from_item(story)) or "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        compact.append(story)
+    def compact_items(items):
+        compacted = []
+        seen = set()
+        for story in items:
+            if not isinstance(story, dict):
+                continue
+            key = _canonical_url(_source_url_from_item(story)) or "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            compacted.append(story)
+        return compacted
 
+    compact = compact_items(raw)
     event_pool = discover_event_pool(
         query=base_query,
         existing_articles=compact,
@@ -861,6 +884,34 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         f"(GDELT={event_pool['gdelt_article_count']}) -> "
         f"distinct events={event_pool['event_count']}; "
         f"news + RSS + public social signals retained.",
+        flush=True,
+    )
+    expansion_queries = _adaptive_query_candidates(
+        base_query,
+        events,
+        max_queries=2 if len(events) < 12 else 0,
+    )
+    for query in expansion_queries:
+        extra = _gnews_items(query, api_key, genre_key)
+        if not extra:
+            continue
+        raw.extend(extra)
+        compact = compact_items(raw)
+        event_pool = discover_event_pool(
+            query=base_query,
+            existing_articles=compact,
+            timespan="48h",
+            max_gdelt_records=75,
+        )
+        events = event_pool["events"]
+        if len(events) >= 12:
+            break
+
+    print(
+        f"   [Discovery Funnel] article intake={event_pool['article_count']} "
+        f"(GDELT={event_pool['gdelt_article_count']}) -> "
+        f"distinct events={event_pool['event_count']}; "
+        f"adaptive expansions={len(expansion_queries)}.",
         flush=True,
     )
     return events, social_titles
