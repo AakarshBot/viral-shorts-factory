@@ -228,86 +228,67 @@ def generate_readable_karaoke_clip(
     bg_img_path=None,
     source_type="bg",
 ):
-    """Render quiet, readable captions with a single frosted-glass surface.
+    """Render one stable caption card per timing chunk.
 
-    Word timings are still respected by the compositor, but the appearance no
-    longer jumps between giant highlighted words. The full chunk stays visually
-    stable while the audio remains word-synchronised.
+    The active word argument remains for API compatibility, but captions no
+    longer regenerate an image for every word. One lightweight PNG is created
+    per chunk, eliminating the repeated background crop/blur and per-word PNG
+    generation that dominated subtitle overhead.
     """
     width = max(1, int(video_width))
-    height = 300
-    transparent = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    height = 220
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
-    words = [_clean_word(item.get("word") if isinstance(item, dict) else item) for item in chunk]
+    words = [
+        _clean_word(item.get("word") if isinstance(item, dict) else item)
+        for item in chunk
+    ]
     words = [word for word in words if word]
     if not words:
-        transparent.save(output_path, "PNG")
+        image.save(output_path, "PNG")
         return output_path
 
-    max_text_width = int(width * 0.80)
+    max_text_width = int(width * 0.82)
     base_font_size = max(48, min(72, int(width * 0.062)))
-    font, lines = _fit_layout(words, base_font_size, font_path, max_text_width, max_lines=2)
+    font, lines = _fit_layout(
+        words, base_font_size, font_path, max_text_width, max_lines=2
+    )
     font_size = int(getattr(font, "size", base_font_size) or base_font_size)
     line_height = max(42, int(font_size * 1.08))
-    line_gap = max(7, int(font_size * 0.10))
+    line_gap = max(6, int(font_size * 0.08))
     text_h = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
-    panel_h = min(190, max(120, text_h + 54))
-    panel_w = min(width - 72, max(480, int(width * 0.88)))
+
+    # A quiet, translucent panel: no gloss, no white outline, no accent border.
+    panel_h = min(170, max(104, text_h + 42))
+    panel_w = min(width - 96, max(440, int(width * 0.84)))
     panel_x = (width - panel_w) // 2
     panel_y = (height - panel_h) // 2
-
-    base_for_glass = transparent
-    if bg_img_path and os.path.isfile(str(bg_img_path)):
-        try:
-            bg = Image.open(bg_img_path).convert("RGBA")
-            if bg.size != (width, 1920):
-                bg = bg.resize((width, 1920), Image.Resampling.LANCZOS)
-            center_y = 1160 if str(source_type).lower() == "person" else 1010
-            y0 = max(0, center_y - height // 2)
-            crop = bg.crop((0, y0, width, min(bg.height, y0 + height)))
-            if crop.height < height:
-                padded = Image.new("RGBA", (width, height), (7, 13, 23, 255))
-                padded.paste(crop, (0, 0))
-                crop = padded
-            base_for_glass = crop
-        except Exception:
-            base_for_glass = transparent
-
-    glass_base = _glass_surface(base_for_glass, (panel_x, panel_y, panel_x + panel_w, panel_y + panel_h), 30, tint=(5, 10, 18, 145), blur_radius=18)
-    if base_for_glass is transparent:
-        glass_base = _glass_surface(
-            Image.new("RGBA", (width, height), (9, 15, 25, 255)),
-            (panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
-            30,
-            tint=(5, 10, 18, 170),
-            blur_radius=6,
-        )
-
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    accent = (64, 196, 255, 185)
+    draw = ImageDraw.Draw(image)
     draw.rounded_rectangle(
         (panel_x, panel_y, panel_x + panel_w - 1, panel_y + panel_h - 1),
-        radius=30,
-        outline=accent,
-        width=2,
+        radius=22,
+        fill=(8, 12, 20, 168),
     )
 
-    normal = (248, 249, 250, 255)
-    shadow = (0, 0, 0, 155)
-    y = panel_y + max(18, (panel_h - text_h) // 2) - 2
+    # Soft shadow only; the caption remains the visual focus.
+    y = panel_y + max(14, (panel_h - text_h) // 2) - 1
     for line in lines:
+        text = " ".join(line)
         text_w = _measure_line(line, font)
         x = (width - text_w) / 2
-        text = " ".join(line)
-        draw.text((x + 2, y + 3), text, font=font, fill=shadow, stroke_width=1, stroke_fill=(0, 0, 0, 125))
-        draw.text((x, y), text, font=font, fill=normal)
+        draw.text(
+            (x + 2, y + 3),
+            text,
+            font=font,
+            fill=(0, 0, 0, 150),
+            stroke_width=1,
+            stroke_fill=(0, 0, 0, 130),
+        )
+        draw.text((x, y), text, font=font, fill=(248, 249, 250, 255))
         y += line_height + line_gap
 
-    result = Image.alpha_composite(glass_base.convert("RGBA"), overlay)
-    result.save(output_path, "PNG")
+    image.save(output_path, "PNG")
     return output_path
-
 
 def render_premium_top5_card(
     bg_img,

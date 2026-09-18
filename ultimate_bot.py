@@ -1683,7 +1683,12 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 "regular", "trending", "tech_reviews"
             ]
 
-            if not is_outro_scene and not is_hook_scene and idx < len(word_timings):
+            # Subtitles are intentionally omitted from hook/title and Top-5 cards:
+            # those frames already contain their editorial text. For normal scenes,
+            # render one stable caption image per timing chunk instead of one image
+            # for every word. Word timings still define the chunk's display window.
+            is_top5_scene = format_mode == "top5"
+            if not is_outro_scene and not is_hook_scene and not is_top5_scene and idx < len(word_timings):
                 scene_wt = word_timings[idx]
                 if not scene_wt:
                     raw_text = layer_paths[0].get("text", "")
@@ -1714,7 +1719,7 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                     if not w_text:
                         continue
                     wt["word"] = w_text
-                    
+
                     if current_len + len(w_text) > 18 and current_chunk:
                         chunks.append(current_chunk)
                         current_chunk, current_len = [], 0
@@ -1726,33 +1731,33 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 safe_y_pos = int(height * 0.60) if scene_source_type == "person" else int(height * 0.50)
 
                 for chunk_idx, chunk in enumerate(chunks):
-                    for word_idx, wt in enumerate(chunk):
-                        start_t = max(0.0, float(wt.get("start", 0.0)))
-                        next_start = (
-                            float(chunk[word_idx + 1].get("start", start_t))
-                            if word_idx < len(chunk) - 1
-                            else float(wt.get("end", start_t + 0.1)) + 0.1
-                        )
-                        end_t = min(scene_duration, max(start_t + 0.1, next_start))
-                        if start_t >= scene_duration:
-                            continue
+                    if not chunk:
+                        continue
+                    start_t = max(0.0, float(chunk[0].get("start", 0.0)))
+                    end_t = min(
+                        scene_duration,
+                        max(
+                            start_t + 0.1,
+                            float(chunk[-1].get("end", start_t + 0.1)) + 0.05,
+                        ),
+                    )
+                    if start_t >= scene_duration or end_t <= start_t:
+                        continue
 
-                        sub_path = os.path.join(
-                            ASSETS_DIR, f"sub_{idx}_{chunk_idx}_{word_idx}.png"
-                        )
-                        generate_karaoke_clip(
-                            chunk, word_idx, font_path, width, sub_path,
-                            bg_img_path=bg_image_file,
-                            source_type=scene_source_type,
-                        )
-                        txt_clip = (
-                            ImageClip(sub_path)
-                            .with_start(start_t)
-                            .with_duration(end_t - start_t)
-                            .with_position(("center", safe_y_pos))
-                        )
-                        text_clips.append(txt_clip)
-                        text_clips_all.append(txt_clip)
+                    sub_path = os.path.join(
+                        ASSETS_DIR, f"sub_{idx}_{chunk_idx}.png"
+                    )
+                    generate_karaoke_clip(
+                        chunk, 0, font_path, width, sub_path
+                    )
+                    txt_clip = (
+                        ImageClip(sub_path)
+                        .with_start(start_t)
+                        .with_duration(end_t - start_t)
+                        .with_position(("center", safe_y_pos))
+                    )
+                    text_clips.append(txt_clip)
+                    text_clips_all.append(txt_clip)
 
             scene_layers = [bg_anim] + text_clips
             scene = CompositeVideoClip(
