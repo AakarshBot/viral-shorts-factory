@@ -251,16 +251,6 @@ def patch_dashboard_runtime(bot):
     bot.get_trend_signal_bonus=lambda keyword:get_trend_signal_bonus(bot,keyword)
     bot.auto_pilot_selection=lambda conn:auto_pilot_selection(bot,conn)
 
-    original_quality=bot.passes_quality_gate
-    def quality(data,search_prompt="",video_title=""):
-        if not original_quality(data,search_prompt,video_title):return False
-        cv2=getattr(bot,"cv2",None); npmod=getattr(bot,"np",None); text=f"{search_prompt} {video_title}".lower(); terms=["person","people","man","woman","player","actor","actress","celebrity","politician","president","coach","cricketer","footballer","athlete","singer","director"]
-        if cv2 is None or npmod is None or not any(t in text for t in terms):return True
-        try:
-            img=Image.open(io.BytesIO(data)).convert("RGB"); gray=cv2.cvtColor(npmod.array(img),cv2.COLOR_RGB2GRAY); c=cv2.CascadeClassifier(getattr(cv2.data,"haarcascades","")+"haarcascade_frontalface_default.xml"); return True if c.empty() else len(c.detectMultiScale(gray,1.1,4,minSize=(40,40)))>0
-        except Exception:return True
-    bot.passes_quality_gate=quality
-
     bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.render_top5_card=lambda bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None:render_top5_card(bot,bg_img,item_number,total_items,summary_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
