@@ -582,25 +582,6 @@ def _reddit_items(genre_key):
         return []
 
 
-def _query_variants(base_query, genre_key, ai_cricket=False):
-    base = re.sub(r"\s+", " ", str(base_query or "").strip())
-    if not base:
-        return []
-    if ai_cricket:
-        suffixes = ["today", "match result", "announcement", "record", "selection"]
-    elif genre_key in {"sports", "sports_stories_of_day"}:
-        suffixes = ["today", "match result", "tournament", "record", "announcement"]
-    elif genre_key == "technology":
-        suffixes = ["today", "launch", "AI", "update", "announcement"]
-    elif genre_key == "business_finance":
-        suffixes = ["today", "market", "earnings", "deal", "announcement"]
-    elif genre_key == "entertainment":
-        suffixes = ["today", "trailer", "box office", "announcement", "release"]
-    else:
-        suffixes = ["today", "breaking", "decision", "report", "announcement"]
-    return list(dict.fromkeys([base] + [f"{base} {suffix}" for suffix in suffixes]))
-
-
 def _cheap_filter(stories, max_items=30, max_age_hours=48):
     """Apply cheap eligibility checks to the full intake before truncating."""
     survivors = []
@@ -911,88 +892,44 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
 
 
 def patch_story_selection(bot):
-    """Replace the old single-pass story shortlist with the staged discovery funnel."""
+    """Bind production story selection to the canonical event-first discovery funnel."""
     if getattr(bot, "_story_selection_patch_installed", False):
         return bot
 
-    original = bot.gather_and_filter_stories
-
     def gather(conn, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None):
-        def legacy_pass():
-            try:
-                result = original(conn, genre_key, genre_cfg, trend_keyword, custom_gnews_q, custom_rss_url)
-                return result if isinstance(result, list) else []
-            except Exception as exc:
-                print(f"   [Discovery] Legacy fallback unavailable: {type(exc).__name__}", flush=True)
-                return []
-
-        api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
-        base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
-        raw = legacy_pass()
-        for query in _query_variants(
-            base_query,
-            genre_key,
-            ai_cricket=(genre_key == "sports_stories_of_day" and str((getattr(bot, "_active_web_config", {}) or {}).get("cricket_category", "")) == "AI-assisted top story in cricket"),
-        ):
-            raw.extend(_gnews_items(query, api_key, genre_key))
-        raw.extend(_rss_items(custom_rss_url or genre_cfg.get("rss_url", ""), genre_key))
-        raw.extend(_official_feed_items(genre_key, genre_cfg))
-        social_rows = _reddit_items(genre_key)
-        social_titles = [row.get("title", "") for row in social_rows]
-        raw.extend(social_rows)
-
-        compact = []
-        seen = set()
-        for story in raw:
-            if not isinstance(story, dict):
-                continue
-            source_key = _canonical_url(_source_url_from_item(story))
-            title_key = "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
-            key = source_key or title_key
-            if key in seen:
-                continue
-            seen.add(key)
-            compact.append(story)
-
         config = getattr(bot, "_active_web_config", {}) or {}
         requested_topic = str(config.get("requested_topic", "") or "").strip()
-        relevance_filtered = []
-        for candidate in compact:
+        ai_cricket = (
+            genre_key == "sports_stories_of_day"
+            and str(config.get("cricket_category", "")) == "AI-assisted top story in cricket"
+        )
+
+        events, social_titles = collect_high_recall_stories(
+            bot,
+            genre_key,
+            genre_cfg,
+            trend_keyword,
+            custom_gnews_q,
+            custom_rss_url,
+            ai_cricket=ai_cricket,
+        )
+
+        relevant = []
+        for candidate in events:
             if not _cricket_relevance_pass(candidate, genre_key):
                 continue
             if not _requested_topic_pass(candidate, requested_topic):
                 continue
-            relevance_filtered.append(candidate)
+            relevant.append(candidate)
+
         if requested_topic or genre_key == "sports_stories_of_day":
             print(
-                f"   [Discovery Relevance] {len(compact)} intake -> {len(relevance_filtered)} topic/category-relevant candidates",
+                f"   [Discovery Relevance] {len(events)} event candidates -> {len(relevant)} topic/category-relevant candidates",
                 flush=True,
             )
-        event_pool = discover_event_pool(
-            query=base_query,
-            existing_articles=compact,
-            timespan="48h",
-            max_gdelt_records=75,
-        )
-        event_candidates = event_pool["events"]
-        relevance_filtered = []
-        for candidate in event_candidates:
-            if not _cricket_relevance_pass(candidate, genre_key):
-                continue
-            if not _requested_topic_pass(candidate, requested_topic):
-                continue
-            relevance_filtered.append(candidate)
-        compact = relevance_filtered
-        print(
-            f"   [Discovery Events] article intake={event_pool['article_count']} "
-            f"(GDELT={event_pool['gdelt_article_count']}) -> "
-            f"distinct events={event_pool['event_count']} -> "
-            f"relevant events={len(compact)}",
-            flush=True,
-        )
-        ai_cricket = genre_key == "sports_stories_of_day" and str(config.get("cricket_category", "")) == "AI-assisted top story in cricket"
-        ranked = rank_story_candidates(
-            compact,
+
+        return rank_story_candidates(
+            relevant,
             conn=conn,
             target_category=config.get("category", genre_key or ""),
             target_format=config.get("format_mode", "regular"),
@@ -1000,7 +937,6 @@ def patch_story_selection(bot):
             social_titles=social_titles,
             ai_cricket=ai_cricket,
         )
-        return ranked
 
     gather._story_selection_patch = True
     bot.gather_and_filter_stories = gather
