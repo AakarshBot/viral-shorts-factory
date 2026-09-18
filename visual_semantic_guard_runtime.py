@@ -237,12 +237,16 @@ def _intent_words(scene: dict) -> list[str]:
 def infer_role(scene: dict) -> str:
     explicit = clean_text(scene.get("visual_type", "")).upper().replace("-", "_").replace(" ", "_")
     candidate = sanitize_candidate(scene.get("primary_entity", ""))
-    subject_hint = _subject_role_hint(candidate)
     descriptor_hint = _descriptor_role_hint(candidate)
-    if subject_hint:
-        return subject_hint
+    subject_hint = _subject_role_hint(candidate)
+
+    # Visual descriptors such as "logo" or "map" are stronger evidence than
+    # the generic title-case person heuristic. Check them before subject-name
+    # inference so identities like "Deccan Herald logo" stay ORGANIZATION.
     if descriptor_hint:
         return descriptor_hint
+    if subject_hint:
+        return subject_hint
     if explicit in ROLE_CUES:
         return explicit
     intent_words = set(_intent_words(scene))
