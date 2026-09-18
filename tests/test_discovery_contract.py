@@ -68,10 +68,10 @@ def test_discovery_returns_stable_pool_up_to_28_without_production_calls():
         _story("Energy grid operator publishes demand outlook", 3),
         _story("Agriculture ministry releases seasonal forecast", 2),
         _story("Telecom regulator publishes market update", 1),
-        _story("This thirteenth story must not enter the discovery pool", 0),
+        _story("This thirteenth story fills the discovery pool", 0),
     ]
     stories.extend(
-        _story(f"Additional discovery story {index}", 20 - index)
+        _story(f"Additional discovery story {index}", -index)
         for index in range(1, 16)
     )
     bot = _Bot(stories)
