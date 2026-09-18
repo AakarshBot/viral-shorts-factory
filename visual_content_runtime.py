@@ -299,19 +299,14 @@ def patch_content_first_visuals(bot):
             if str(source_type).lower() == "visual-rescue":
                 rescue_count += 1
 
+            bg_img = cover_crop(bg_img, target_size).convert("RGBA")
+            img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
+
             try:
                 from visual_strategy_runtime import classify_scene
                 visual_type = classify_scene(seg, category)
             except Exception:
                 visual_type = str(seg.get("visual_type", "GENERAL_CONTEXT"))
-
-            bg_img = cover_crop(
-                bg_img,
-                target_size,
-                visual_genre=str(seg.get("visual_genre", "GENERAL_CONTEXT")),
-                visual_type=str(visual_type or "GENERAL_CONTEXT"),
-            ).convert("RGBA")
-            img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
             if format_mode == "top5" and idx == 0:
                 rendered = visual_runtime._render_image_slide(
