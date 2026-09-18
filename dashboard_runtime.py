@@ -762,7 +762,6 @@ def _run_scene_branding_demo() -> dict[str, Any]:
 def _run_synthetic_renderer_demo() -> dict[str, Any]:
     """Exercise the current premium subtitle/card renderers without network calls."""
     from subtitle_runtime import (
-        create_glossy_logo_watermark,
         generate_readable_karaoke_clip,
         render_premium_top5_card,
     )
@@ -795,22 +794,10 @@ def _run_synthetic_renderer_demo() -> dict[str, Any]:
     )
     top5.save(top5_path, "PNG")
 
-    logo = None
-    brand_root = Path(getattr(__import__("ultimate_bot"), "BRAND_ASSETS_DIR", ""))
-    logo_candidates = [
-        brand_root / "logo.png",
-        brand_root / "channels4_profile.jpg",
-        brand_root / "logo.png.jpg",
-    ]
-    for candidate in logo_candidates:
-        if candidate.exists():
-            logo = create_glossy_logo_watermark(str(candidate), size=128)
-            break
-
-    logo_path = None
-    if logo is not None:
-        logo_path = os.path.join(temp_dir, "logo_badge.png")
-        logo.save(logo_path, "PNG")
+    from branding_runtime import build_scene_branding_overlays
+    branding_layers = build_scene_branding_overlays(__import__("ultimate_bot"), 1080, 1920, "Source: Reuters")
+    logo_path = os.path.join(temp_dir, "logo_badge.png")
+    Image.fromarray(branding_layers[0], mode="RGBA").crop((900, 0, 1080, 220)).save(logo_path, "PNG")
 
     return {
         "status": "PASS",
