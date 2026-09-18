@@ -16,6 +16,8 @@ from typing import Any
 
 import requests
 
+from visual_taxonomy_runtime import preferred_sources
+
 DEFAULT_TIMEOUT = max(3, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "8")))
 MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "4"))))
 
@@ -270,18 +272,38 @@ def fetch_unsplash(query: str, used_urls: set[str] | None = None, *_args) -> byt
     return candidates[0] if candidates else None
 
 
-def build_raw_source_plan(visual_type: str):
-    """Return multi-candidate raw providers with no semantic acceptance logic."""
+def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
+    """Return raw providers ordered for the visual genre.
+
+    The provider layer never decides whether an image is correct. It only
+    changes the order in which low-cost sources are searched so obvious
+    category mismatches do not consume the verification budget first.
+    """
     kind = str(visual_type or "GENERAL_CONTEXT").upper()
+    genre = str(visual_genre or "").strip().upper()
+    if not genre:
+        genre = "PERSON_PORTRAIT" if kind == "PERSON" else "GENERAL_CONTEXT"
+
     plan = []
     if kind == "PERSON":
-        plan.extend([("Wikipedia", fetch_wikipedia_person_candidates), ("Commons", fetch_commons_candidates)])
-    elif kind in {"ORGANIZATION", "EVENT", "QUOTE", "DOCUMENT", "LOCATION"}:
+        plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
+
+    commons_kinds = {
+        "PERSON", "ORGANIZATION", "EVENT", "PRODUCT", "LOCATION", "DOCUMENT",
+        "QUOTE", "PROCESS", "CONCEPT",
+    }
+    commons_genres = {
+        "ORG_BRANDING", "ORG_HEADQUARTERS", "TEAM_BRANDING", "TEAM_ACTION",
+        "PRODUCT_PHOTO", "PRODUCT_LAUNCH", "LANDMARK", "ARCHITECTURE",
+        "PLACE_SCENE", "EVENT_SCENE", "SPORTS_ACTION", "SPORTS_MATCH",
+        "TROPHY_AWARD", "DOCUMENT", "SCREENSHOT_UI", "CHART_GRAPH", "MAP",
+        "DIAGRAM", "PROCESS", "SCIENCE_VISUAL", "SPACE_VISUAL",
+        "HISTORICAL_ARTIFACT", "HISTORICAL_PHOTO", "MEDIA_ARTWORK",
+        "MONEY_CURRENCY", "FLAG_SYMBOL",
+    }
+    if kind in commons_kinds or genre in commons_genres:
         plan.append(("Commons", fetch_commons_candidates))
 
-    # Openverse/Pixabay remain in image_sources_runtime until their multi-result
-    # adapters are promoted. Their current wrappers still provide a useful
-    # additional source without changing the active acceptance boundary.
     try:
         from image_sources_runtime import fetch_openverse, fetch_pixabay
     except Exception:
@@ -294,7 +316,21 @@ def build_raw_source_plan(visual_type: str):
         ("Pexels", fetch_pexels_candidates),
         ("Unsplash", fetch_unsplash_candidates),
     ])
-    return [(name, fn) for name, fn in plan if callable(fn)]
+
+    plan = [(name, fn) for name, fn in plan if callable(fn)]
+    preferred = preferred_sources(genre)
+    rank = {name.casefold(): index for index, name in enumerate(preferred)}
+    plan.sort(key=lambda item: (rank.get(item[0].casefold(), 999), item[0]))
+
+    deduped = []
+    seen = set()
+    for item in plan:
+        key = item[0].casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
 __all__ = [
