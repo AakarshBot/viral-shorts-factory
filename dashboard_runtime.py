@@ -225,7 +225,11 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
 
     ranked: list[dict[str, Any]] = []
     for item in stage10:
-        category = str(item.get("genre") or "national_global_affairs")
+        category = str(
+            item.get("primary_genre")
+            or item.get("genre")
+            or "national_global_affairs"
+        )
         scored = _editorial_score(
             item,
             rows,
@@ -340,19 +344,9 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
     fresh_stage = _recent_topic_cooldown(conn, stage30, hours=48)
     stage25 = _fact_source_stage(fresh_stage, max_items=25)
 
-    # Keep the existing editorial originality filter, but retain a larger
-    # candidate pool so the dashboard can show a ranked list rather than 3 cards.
+    # Do not silently turn originality failures into passes. If fewer
+    # candidates survive, return the smaller evidence-backed pool.
     stage20 = _originality_stage(stage25, used_topics, max_items=max_candidates)
-    if len(stage20) < min(max_candidates, len(stage25)):
-        used = {id(item) for item in stage20}
-        for item in stage25:
-            if id(item) in used:
-                continue
-            if len(stage20) >= max_candidates:
-                break
-            item["originality_score"] = float(item.get("originality_score") or 5.0)
-            item["originality_pass"] = True
-            stage20.append(item)
 
     ranked = [
         _editorial_score(
