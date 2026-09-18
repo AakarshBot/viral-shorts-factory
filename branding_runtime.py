@@ -228,13 +228,6 @@ def build_scene_branding_overlays(bot, width: int, height: int, source_credit: s
     ]
 
 
-def build_branding_clips(bot, ImageClip, width: int, height: int, source_credit: str = ""):
-    """Create lightweight full-frame/static ImageClips for the final composite."""
-    clips = []
-    for rgba in build_scene_branding_overlays(bot, width, height, source_credit):
-        clips.append(ImageClip(rgba).with_duration(0))
-    return clips
-
 
 __all__ = [
     "BRANDING_VERSION",
@@ -242,5 +235,4 @@ __all__ = [
     "LOGO_INNER_SIZE",
     "source_credit_for_type",
     "build_scene_branding_overlays",
-    "build_branding_clips",
 ]
