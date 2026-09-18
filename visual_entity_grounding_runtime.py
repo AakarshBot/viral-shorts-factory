@@ -57,23 +57,58 @@ def _support(entity:str,evidence:str,role:str)->tuple[float,str]:
     return (0.80,"strong evidence overlap") if ratio>=0.60 else (0.0,"entity is weakly supported by story evidence")
 
 def _anchors(script_data:dict[str,Any])->list[str]:
-    headline=_norm(script_data.get("title") or script_data.get("step_1_headline") or "")
-    words=re.findall(r"[\w][\w\'&.-]*",headline,flags=re.UNICODE)
+    headline=_norm(script_data.get('title') or script_data.get('step_1_headline') or '')
+    words=re.findall(r"[\w][\w'&.-]*",headline,flags=re.UNICODE)
     found=[]
-    for size in range(min(6,len(words)),1,-1):
-        for start in range(0,len(words)-size+1):
-            phrase=" ".join(words[start:start+size]); ts=set(_tokens(phrase))
-            if ts and ts & _CUES: found.append(phrase)
+    cue_words={
+        'team','squad','club','federation','association','company','corporation',
+        'organisation','organization','government','ministry','agency','board',
+        'committee','university','institute','foundation','product','phone','device',
+        'car','stadium','arena','landmark',
+    }
+    gender_words={'women','women\'s','men','men\'s'}
+    low=[key(w) for w in words]
+
+    # Teams/collectives: take the identity through the cue, never the action
+    # that follows it (for example, 'India women\'s team' from a headline that
+    # continues with 'win the T20 World Cup').
+    for i, token in enumerate(low):
+        if token in gender_words and i + 1 < len(words) and low[i + 1] in {'team','squad'}:
+            start=max(0,i-2)
+            while start < i and low[start] in _STOP:
+                start += 1
+            found.append(' '.join(words[start:i+2]))
+        elif token in cue_words:
+            start=i
+            steps=0
+            while start>0 and steps<3:
+                previous=words[start-1]
+                previous_key=low[start-1]
+                if previous_key in _STOP or previous_key in _GENERIC:
+                    break
+                if not previous[:1].isupper() and previous_key not in gender_words:
+                    break
+                start-=1; steps+=1
+            found.append(' '.join(words[start:i+1]))
+
+    # Also keep short title-cased names as fallback anchors (for example NASA,
+    # OpenAI, or a two-word organisation/person name).
     for size in range(min(4,len(words)),1,-1):
         for start in range(0,len(words)-size+1):
             group=words[start:start+size]
-            if group and all(w[:1].isupper() for w in group): found.append(" ".join(group))
+            if group and all(w[:1].isupper() for w in group):
+                found.append(' '.join(group))
+    if not found:
+        for token in words:
+            if token[:1].isupper() and len(token)>2:
+                found.append(token)
+
     result=[]
     for item in found:
         item=_norm(item)
-        if item and item.casefold() not in {x.casefold() for x in result}: result.append(item)
+        if item and item.casefold() not in {x.casefold() for x in result}:
+            result.append(item)
     return result[:8]
-
 def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
     original=_norm(scene.get("factual_primary_entity") or scene.get("primary_entity") or scene.get("visual_search_subject") or "")
     if not original: return {"entity":"","grounded":False,"changed":False,"reason":"no visual entity supplied","confidence":0.0}
