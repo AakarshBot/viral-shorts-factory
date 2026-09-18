@@ -11,8 +11,8 @@ _INVALID = {"", "none", "unknown", "na", "n/a"}
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
     """Compatibility helper: one clean identity query, never a blind ladder."""
     anchor = clean_text(
-        seg.get("factual_primary_entity")
-        or resolution.get("subject")
+        resolution.get("subject")
+        or seg.get("factual_primary_entity")
         or resolution.get("factual_entity")
         or seg.get("primary_entity")
     )
