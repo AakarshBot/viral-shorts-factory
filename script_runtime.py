@@ -141,7 +141,7 @@ def _ground_visual_scene_entities(script_data, story_data):
             scene["visual_entity_grounding_confidence"] = float(result.get("confidence") or 0.0)
             changed += 1
             print(
-                f"   [Script Visual Grounding] Scene {index} | REPAIRED | "{original}" -> "{entity}" | "{result.get('reason', '')}"",
+                f"""   [Script Visual Grounding] Scene {index} | REPAIRED | "{original}" -> "{entity}" | "{result.get("reason", "")}" """.strip(),
                 flush=True,
             )
         elif not grounded:
@@ -151,7 +151,7 @@ def _ground_visual_scene_entities(script_data, story_data):
             scene["visual_entity_grounding_reason"] = str(result.get("reason") or "")
             scene["visual_entity_grounding_confidence"] = 0.0
             print(
-                f"   [Script Visual Grounding] Scene {index} | UNGROUNDED | entity="{original}" | "{result.get('reason', '')}"",
+                f"""   [Script Visual Grounding] Scene {index} | UNGROUNDED | entity="{original}" | "{result.get("reason", "")}" """.strip(),
                 flush=True,
             )
         else:
