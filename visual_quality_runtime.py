@@ -36,7 +36,7 @@ def inspect_image(img_bytes: bytes) -> dict:
         crop_loss = 1.0 - kept_area
         gray = img.resize((min(256, w), min(256, h))).convert("L")
         edge = gray.filter(ImageFilter.FIND_EDGES)
-        sharpness = float(ImageStat.Stat(edge).var)
+        sharpness = float(ImageStat.Stat(edge).var[0])
         return {"width": w, "height": h, "short_side": short, "long_side": max(w, h), "aspect": aspect, "crop_loss": crop_loss, "sharpness": sharpness, "valid": True}
     except Exception:
         return {"valid": False}
