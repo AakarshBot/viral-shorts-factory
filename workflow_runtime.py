@@ -335,9 +335,17 @@ class WorkflowController:
                 self._reporter("render", 78, "Stitching scenes, subtitles and branding…")
                 result = original_compile(*args, **kwargs)
                 self._reporter("render", 94, "Final video rendered. Preparing manual QC…")
-                if isinstance(result, str) and os.path.isfile(result):
-                    with self._lock:
-                        self.state.video_path = result
+                if isinstance(result, (str, os.PathLike)):
+                    result_path = os.fspath(result)
+                    if not os.path.isabs(result_path):
+                        result_path = os.path.join(
+                            getattr(self.bot, "BASE_DIR", os.getcwd()),
+                            result_path,
+                        )
+                    result_path = os.path.abspath(result_path)
+                    if os.path.isfile(result_path):
+                        with self._lock:
+                            self.state.video_path = result_path
                 return result
             globals_dict["compile_video"] = compile_wrapper
 
