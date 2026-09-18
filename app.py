@@ -311,7 +311,7 @@ def render_sidebar_controls() -> Dict[str, Any]:
     elif sidebar_snapshot.get("stage") == "error":
         st.sidebar.error("Latest run stopped", icon="⚠️")
     else:
-        st.sidebar.info("Ready for a new run", icon="●")
+        st.sidebar.info("Ready for a new run")
 
     if st.sidebar.button(
         "Reset current run",
