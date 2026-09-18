@@ -198,21 +198,6 @@ def render_top5_card(bot,bg_img,item_number,total_items,summary_text,width=1080,
 
 def patch_dashboard_runtime(bot):
     """Apply requested improvements to Streamlit execution."""
-    def score(scored_data,batch,bonuses,last_genre,fmt):
-        weights=fit_retention_weights(getattr(bot,"_active_scoring_conn",None)) or {"hook_strength":.25,"narrative_completeness":.20,"audience_fit":.20,"monetization_risk":-.20,"shelf_life":.15}
-        out=[]
-        for i,s in enumerate(scored_data):
-            if i>=len(batch) or not isinstance(s,dict):continue
-            try: vals={k:max(1,min(10,float(s.get(k,5)))) for k in weights}
-            except (TypeError,ValueError):continue
-            if s.get("hard_reject",False) or vals["monetization_risk"]>=8:continue
-            story=batch[i]; story.update(vals); trend=get_trend_signal_bonus(bot,story.get("title","")); story["trend_bonus"]=trend
-            comp=sum(vals[k]*weights[k] for k in weights)+trend+float(story.get("velocity_score",0))-float(story.get("recency_penalty",1))-((vals["monetization_risk"]-1)*.20)
-            comp+=float(story.get("corroboration_bonus",0))+(bonuses.get(story.get("genre"),0) if fmt=="regular" else 0)+(2 if fmt=="regular" and story.get("genre")==last_genre else 0)
-            story["composite_score"]=round(comp,3); out.append(story)
-        return sorted(out,key=lambda x:x["composite_score"],reverse=True) or []
-    bot.process_scored_candidates=score
-
     original_editorial=bot.editorial_gate_batch
     def editorial(stories,bonuses,last_genre,fmt): return original_editorial(preselect_candidates(stories,15),bonuses,last_genre,fmt) if stories else None
     bot.editorial_gate_batch=editorial
