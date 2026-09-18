@@ -184,10 +184,10 @@ def test_automatic_retry_is_one_compact_evidence_based_refinement():
     intent = resolve_visual_search_intent(scene)
     retry = reformulate_visual_query(intent, "no candidates")
 
-    assert retry.startswith("India cricket")
-    assert "press" not in retry.lower()
-    assert "conference" not in retry.lower()
+    assert retry.startswith("India")
+    assert len(retry.split()) <= 8
     assert "story" not in retry.lower()
+    assert any(term in retry.lower() for term in ("new delhi", "press", "conference", "final"))
 
 
 def test_manual_visual_query_never_gets_automatic_retry():
@@ -230,6 +230,47 @@ def test_same_entity_gets_scene_specific_queries():
     assert first.queries[-1] == first.subject
     assert second.queries[-1] == second.subject
 
+
+
+def test_automatic_query_prefers_searchable_visual_anchors_over_narrative_words():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    scene = {
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_intent": "young batsman batting",
+        "visual_context": "cricket match action",
+        "factual_voiceover": "Vaibhav Sooryavanshi played for Rajasthan Royals in the match.",
+    }
+
+    intent = resolve_visual_search_intent(scene)
+    query = intent.query.lower()
+
+    assert query.startswith("vaibhav sooryavanshi")
+    assert "young" not in query
+    assert "player" not in query
+    assert "receiving" not in query
+    assert "batting" in query or "match" in query or "rajasthan royals" in query
+    assert len(query.split()) <= 6
+
+
+def test_scene_specific_query_uses_named_context_when_that_is_the_best_anchor():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    scene = {
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_intent": "player receiving award",
+        "visual_context": "trophy presentation ceremony",
+        "factual_voiceover": "Vaibhav Sooryavanshi received the award after the presentation.",
+    }
+
+    intent = resolve_visual_search_intent(scene)
+    query = intent.query.lower()
+
+    assert query.startswith("vaibhav sooryavanshi")
+    assert any(term in query for term in ("trophy", "award", "presentation", "ceremony"))
+    assert "receiving" not in query
+    assert "player" not in query
+    assert len(query.split()) <= 6
 
 def test_manual_visual_query_stays_exact():
     from visual_search_intent_runtime import resolve_visual_search_intent
