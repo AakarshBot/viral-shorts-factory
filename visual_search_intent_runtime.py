@@ -213,9 +213,10 @@ def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
 
     subject_keys = {key(word) for word in tokens(subject)}
     words = list(tokens(subject))
+    additions: list[str] = []
     remaining = max(0, int(max_words) - len(words))
     if remaining <= 0:
-        return _clean(" ".join(words))
+        return subject
 
     added: set[str] = set()
     for anchor in anchors:
@@ -223,7 +224,7 @@ def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
             token_key = key(word)
             if not token_key or token_key in subject_keys or token_key in added:
                 continue
-            words.append(word)
+            additions.append(word)
             added.add(token_key)
             remaining -= 1
             if remaining <= 0:
@@ -231,7 +232,7 @@ def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
         if remaining <= 0:
             break
 
-    return _clean(" ".join(words))
+    return _clean(" ".join([subject, *additions]))
 
 
 def _primary_visual_anchor(scene_terms: list[str]) -> str:
