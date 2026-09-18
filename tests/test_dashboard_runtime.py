@@ -229,7 +229,7 @@ def test_recent_topic_cooldown_removes_only_recent_repeats(tmp_path):
     kept = _recent_topic_cooldown(
         conn,
         stories,
-        hours=48 * 2,
+        hours=48,
     )
 
     kept_titles = [item["title"] for item in kept]
