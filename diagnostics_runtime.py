@@ -203,8 +203,9 @@ def _test_runtime_bindings():
     runtime_bindings.bind_dashboard_patches(ultimate_bot)
     namespace = ultimate_bot.run_robot.__globals__
     required = (
-        "process_scored_candidates", "write_script", "generate_voiceover_and_timestamps",
-        "process_visuals_async", "generate_karaoke_clip", "compile_video",
+        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
+        "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
+        "fetch_scene_asset", "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video",
     )
     missing = [name for name in required if name not in namespace]
     if missing:
