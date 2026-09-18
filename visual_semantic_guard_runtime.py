@@ -175,15 +175,47 @@ def _subject_role_hint(value: str) -> str:
     # Bare manual visual identities often arrive without an explicit semantic
     # role (for example, "Kapil Dev" or "Mohammad Rizwan"). Resolve the role
     # generically here so retrieval and QA share the same semantic anchor.
+    words = tokens(core)
+
+    # Strong lexical identity cues must beat the generic title-case person
+    # heuristic. This matters for names such as "Northstar Labs", "Central
+    # City" and "Nova Phone 8", which otherwise look like people's names.
     organization_suffixes = {
         "board", "federation", "association", "committee", "foundation",
         "institute", "institution", "corporation", "company", "agency",
         "ministry", "department", "council", "club", "team", "squad",
-        "network", "studio", "university", "college",
+        "network", "studio", "university", "college", "lab", "labs",
     }
-    words = tokens(core)
     if len(words) >= 2 and key(words[-1]) in organization_suffixes:
         return "ORGANIZATION"
+
+    location_suffixes = {
+        "city", "town", "village", "state", "province", "country", "island",
+        "county", "district", "region", "capital", "stadium", "arena",
+    }
+    if len(words) >= 2 and key(words[-1]) in location_suffixes:
+        return "LOCATION"
+
+    product_cues = {
+        "product", "device", "phone", "smartphone", "tablet", "laptop",
+        "computer", "car", "suv", "chip", "processor", "gpu", "console",
+        "camera", "headset", "prototype", "hardware",
+    }
+    if core_words & product_cues:
+        return "PRODUCT"
+
+    event_cues = {
+        "event", "competition", "tournament", "championship", "summit",
+        "conference", "festival", "ceremony", "election", "launch", "opening",
+        "closing", "meeting", "final",
+    }
+    if core_words & event_cues:
+        return "EVENT"
+
+    # Explicit semantic cues remain stronger than the generic person heuristic.
+    for role, cues in ROLE_CUES.items():
+        if core_words & cues:
+            return role
 
     # Keep the proper-name heuristic deliberately narrow: multi-word,
     # title-cased identities only. Single-word terms and descriptive phrases
@@ -193,9 +225,6 @@ def _subject_role_hint(value: str) -> str:
         if alpha_words and all(word[:1].isupper() for word in alpha_words):
             return "PERSON"
 
-    for role, cues in ROLE_CUES.items():
-        if core_words & cues:
-            return role
     return ""
 
 
