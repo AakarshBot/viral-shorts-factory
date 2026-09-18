@@ -14,7 +14,7 @@ from db_runtime import run_robot_with_exact_identity
 from db_architecture import migrate_vault, update_run_record
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
-MAX_DISCOVERY_CANDIDATES = 12
+MAX_DISCOVERY_CANDIDATES = 28
 
 FORMAT_OPTIONS = {
     "Deep Dive": "regular",
@@ -159,7 +159,7 @@ def _apply_sports_diversity_bonus(stories: List[Dict[str, Any]]) -> None:
 
 
 def discover_three_candidates(bot, web_config: Dict[str, Any], conn) -> List[Dict[str, Any]]:
-    """Run one discovery pass and return a stable pool of up to 20 candidates."""
+    """Run one discovery pass and return a stable pool of up to 28 candidates."""
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
@@ -478,7 +478,7 @@ def _validate_selected_story(selected_story: Dict[str, Any]) -> Dict[str, Any]:
 
     if not title:
         raise ValueError("Production is blocked: selected story title is missing.")
-    max_rank = 20 if bool(selected_story.get("dashboard_discovery_pool")) else MAX_DISCOVERY_CANDIDATES
+    max_rank = MAX_DISCOVERY_CANDIDATES
     if discovery_rank not in range(1, max_rank + 1) or not story_key:
         raise ValueError(
             f"Production is blocked: story must be selected from the verified {max_rank}-candidate discovery pool."
