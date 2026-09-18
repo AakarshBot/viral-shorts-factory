@@ -592,6 +592,7 @@ class DashboardWorkflowController(WorkflowController):
 
     def snapshot(self):
         data = super().snapshot()
+        console_lines = self.console_lines()
         with self._lock:
             data.update(
                 {
@@ -601,7 +602,7 @@ class DashboardWorkflowController(WorkflowController):
                     "dashboard_logs": list(self._dashboard_logs),
                     "activity_events": list(self._activity_events),
                     "audio_paths": list(self._audio_paths),
-                    "console_lines": self.console_lines(),
+                    "console_lines": console_lines,
                 }
             )
         return data
