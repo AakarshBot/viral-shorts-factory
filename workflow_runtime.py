@@ -312,7 +312,7 @@ class WorkflowController:
         if callable(original_audio):
             async def audio_wrapper(*args, **kwargs):
                 self._reporter("audio", 42, "Generating narration and word timings…")
-                result = await original_audio(*args, **kwargs) if hasattr(result := original_audio, "__call__") else result
+                result = await original_audio(*args, **kwargs)
                 audio_paths = result[0] if isinstance(result, (tuple, list)) and result else result
                 if isinstance(audio_paths, (list, tuple)):
                     with self._lock:
