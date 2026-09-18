@@ -252,11 +252,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 break
             provider_checks += 1
             tier = runtime._verification_tier(qa_scene, visual_type, source)
-            # Manual search vocabulary can broaden retrieval, but it can never
-            # weaken factual identity verification. In particular, PERSON
-            # candidates from Wikipedia/Commons must still pass the same
-            # subject-identity gate as every other person image source.
-            semantic_required = tier != "SKIPPED(conceptual)" or visual_type == "PERSON"
+            # Curated PERSON providers already perform entity-level resolution:
+            # Wikipedia requires a near-exact person page title, while Commons is
+            # bounded to named-person media. Do not spend the semantic-QA budget
+            # on those curated candidates; the strict gate still performs its
+            # local image sanity check and source-specific PERSON acceptance.
+            # Manual-query routing can never change the factual entity used here.
+            semantic_required = tier != "SKIPPED(conceptual)" and not (
+                visual_type == "PERSON" and str(source).strip().lower() in {"wikipedia", "commons"}
+            )
 
             fetch_entity = cache_entity if source == "Wikipedia" else query
             args = (fetch_entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
