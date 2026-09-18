@@ -8,6 +8,7 @@ normalisation and clustering layer.
 from __future__ import annotations
 
 import hashlib
+import time
 import re
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -457,7 +458,7 @@ def fetch_gdelt_articles(
     if not query:
         return []
 
-    now = __import__("time").time()
+    now = time.time()
     if now < _GDELT_FAILURE_UNTIL:
         return []
 
@@ -478,7 +479,7 @@ def fetch_gdelt_articles(
         response.raise_for_status()
         payload = response.json()
     except (requests.Timeout, requests.ConnectionError) as exc:
-        _GDELT_FAILURE_UNTIL = __import__("time").time() + GDELT_FAILURE_COOLDOWN_SECONDS
+        _GDELT_FAILURE_UNTIL = time.time() + GDELT_FAILURE_COOLDOWN_SECONDS
         if not _GDELT_FAILURE_LOGGED:
             print(
                 f"   [Discovery] GDELT unavailable ({type(exc).__name__}); skipping GDELT for the next {int(GDELT_FAILURE_COOLDOWN_SECONDS)}s.",
