@@ -92,11 +92,11 @@ def _salient_entities(value: object) -> set[str]:
         if any(word not in ENTITY_NOISE for word in words):
             entities.add(phrase)
 
-    for token in _tokens(text):
-        if token in EVENT_ACTIONS or token in GENERIC_ENTITY_TOKENS:
-            continue
-        # Long, distinctive tokens act as weak entity/topic anchors.
-        if len(token) >= 7:
+    # Mixed-case brand/product names such as OpenAI, ChatGPT and iPhone are
+    # useful entity anchors even when they do not start with a capital letter.
+    for match in re.findall(r"\b[A-Za-z]*[A-Z][A-Za-z0-9-]*\b", text):
+        token = match.lower()
+        if len(token) >= 4 and token not in ENTITY_NOISE:
             entities.add(token)
 
     return entities
