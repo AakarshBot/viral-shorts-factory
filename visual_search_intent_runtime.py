@@ -41,7 +41,7 @@ def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
-def _context_terms(text: str, subject: str, limit: int = 3) -> list[str]:
+def _context_terms(text: str, subject: str, limit: int = 4) -> list[str]:
     """Extract a few concrete scene terms without copying editorial prose."""
     subject_keys = {key(word) for word in tokens(subject)}
     seen = set()
@@ -92,7 +92,7 @@ def _scene_terms(scene: dict, subject: str) -> list[str]:
             if token_key not in seen:
                 seen.add(token_key)
                 terms.append(term)
-            if len(terms) >= 3:
+            if len(terms) >= 4:
                 return terms
     return terms
 
