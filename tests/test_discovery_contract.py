@@ -83,7 +83,7 @@ def test_discovery_returns_stable_pool_up_to_28_without_production_calls():
     )
 
     assert len(candidates) == MAX_DISCOVERY_CANDIDATES == 28
-    assert [item["discovery_rank"] for item in candidates] == list(range(1, 13))
+    assert [item["discovery_rank"] for item in candidates] == list(range(1, MAX_DISCOVERY_CANDIDATES + 1))
     assert [item["title"] for item in candidates[:3]] == [
         "Government announces new renewable energy targets",
         "Central bank changes interest rate guidance",
