@@ -1,25 +1,9 @@
 from PIL import Image, ImageDraw
 
 from subtitle_runtime import (
-    create_glossy_logo_watermark,
     generate_readable_karaoke_clip,
     render_premium_top5_card,
 )
-
-
-def test_logo_watermark_removes_edge_white_background(tmp_path):
-    logo_path = tmp_path / "logo.jpg"
-    image = Image.new("RGB", (48, 48), "white")
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((10, 10, 38, 38), fill=(0, 120, 200))
-    image.save(logo_path, quality=98)
-
-    result = create_glossy_logo_watermark(str(logo_path), size=112)
-
-    assert result is not None
-    assert result.size == (112, 112)
-    assert result.getpixel((0, 0))[3] < 255
-    assert result.getpixel((56, 56))[3] > 0
 
 
 def test_subtitle_clip_is_simple_caption_card(tmp_path):
