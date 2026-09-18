@@ -31,7 +31,11 @@ STOPWORDS = {
 GDELT_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
 EVENT_ACTION_FAMILIES = {
-    "launch": {"launch", "launched", "launches"},
+    "launch": {
+        "launch", "launched", "launches",
+        "lift", "lifts", "lifted", "lifting",
+        "takeoff", "takeoff",
+    },
     "unveil": {"unveil", "unveiled", "unveils"},
     "announce": {"announce", "announced", "announces"},
     "approve": {"approve", "approved", "approves"},
@@ -122,11 +126,18 @@ def _salient_entities(value: object) -> set[str]:
 
 
 def _event_actions(value: object) -> set[str]:
-    return {
+    tokens = _tokens(value)
+    actions = {
         EVENT_ACTION_LOOKUP[token]
-        for token in _tokens(value)
+        for token in tokens
         if token in EVENT_ACTION_LOOKUP
     }
+    # Multi-word variants such as “lifts off” / “takes off” are common in
+    # news headlines and should resolve to the same launch event family.
+    text = re.sub(r"[^a-z0-9]+", " ", _clean(value).lower())
+    if re.search(r"\blifts? off\b|\btook off\b|\btakes? off\b", text):
+        actions.add("launch")
+    return actions
 
 
 def _entity_context(story: dict) -> set[str]:
