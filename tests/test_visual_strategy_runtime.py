@@ -152,3 +152,55 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
     assert queries[0] == brief["subject"]
     assert len(queries) <= 5
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
+
+
+def test_automatic_initial_query_never_uses_noisy_search_prompt():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    scene = {
+        "primary_entity": "Rishabh Pant",
+        "voiceover": "Rishabh Pant was omitted from India's ODI squad.",
+        "specific_search_prompt": "Rishabh Pant ODI players press conference editorial_person latest news",
+        "visual_intent": "press conference person",
+    }
+
+    intent = resolve_visual_search_intent(scene, "Rishabh Pant omission story")
+    assert intent.query == "Rishabh Pant"
+    assert "press" not in intent.query.lower()
+    assert "latest" not in intent.query.lower()
+    assert "editorial" not in intent.query.lower()
+
+
+def test_automatic_retry_is_one_compact_evidence_based_refinement():
+    from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
+
+    scene = {
+        "primary_entity": "India",
+        "voiceover": "India's cricket team trained in New Delhi before the final.",
+        "visual_intent": "cricket team",
+        "specific_search_prompt": "India cricket team New Delhi final press conference",
+    }
+
+    intent = resolve_visual_search_intent(scene)
+    retry = reformulate_visual_query(intent, "no candidates")
+
+    assert retry == "India cricket New Delhi"
+    assert "press" not in retry.lower()
+    assert "conference" not in retry.lower()
+    assert "story" not in retry.lower()
+
+
+def test_manual_visual_query_never_gets_automatic_retry():
+    from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
+
+    intent = resolve_visual_search_intent(
+        {
+            "primary_entity": "Pakistan Cricket Board",
+            "manual_visual_query": "Mohammad Rizwan",
+            "voiceover": "Pakistan Cricket Board announced the squad.",
+        }
+    )
+
+    assert intent.manual is True
+    assert intent.query == "Mohammad Rizwan"
+    assert reformulate_visual_query(intent, "no candidates") == ""
