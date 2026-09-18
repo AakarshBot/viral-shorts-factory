@@ -52,7 +52,7 @@ def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks()
     assert all("event" not in q.lower().split() for q in queries)
 
 
-def test_exact_logo_subject_keeps_exact_first_query_and_identity_fallback():
+def test_logo_subject_keeps_identity_first_and_bounded_fallback():
     scene = {
         "primary_entity": "ICC logo",
         "voiceover": "The ICC logo represents the International Cricket Council.",
@@ -67,7 +67,6 @@ def test_exact_logo_subject_keeps_exact_first_query_and_identity_fallback():
     queries, visual_type, _ = build_query_ladder(scene, "ICC logo story")
     assert visual_type == "ORGANIZATION"
     assert queries == ["ICC logo", "ICC"]
-    assert queries[0] == "ICC logo"
     assert all("sports" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
 
