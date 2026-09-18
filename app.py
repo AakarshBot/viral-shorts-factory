@@ -402,24 +402,40 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     current = str(snapshot.get("stage") or "idle")
     percent = int(snapshot.get("percent", 0) or 0)
 
-    st.markdown("<div class='section-kicker'>Production pipeline</div><h3 style='margin-top:0'>Factory progress</h3>", unsafe_allow_html=True)
-    for label, key, _lo, hi in stages:
+    st.markdown(
+        "<div class='section-kicker'>Production pipeline</div>"
+        "<h3 style='margin-top:0'>Factory progress</h3>",
+        unsafe_allow_html=True,
+    )
+
+    # Keep every stage visible, but use a compact grid instead of eight full-width
+    # progress sections. The overall bar remains the primary progress indicator.
+    overall = max(0.0, min(1.0, percent / 100))
+    st.progress(overall, text=f"Overall progress · {percent}%")
+
+    cols = st.columns(4, gap="small")
+    for index, (label, key, lo, hi) in enumerate(stages):
         if current == "error":
             value = 0.0
             icon = "⚠️"
+            state = "Stopped"
         elif percent >= hi:
             value = 1.0
-            icon = "✅"
+            icon = "✓"
+            state = "Complete"
         elif current == key:
-            value = 0.04 if hi <= _lo else max(0.02, min(1.0, (percent - _lo) / max(1, hi - _lo)))
-            icon = "⚙️"
+            value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
+            icon = "●"
+            state = "Active"
         else:
             value = 0.0
             icon = "○"
-        st.markdown(f"**{icon} {label}** · {value * 100:.0f}%")
-        st.progress(value)
+            state = "Waiting"
+        with cols[index % 4]:
+            st.markdown(f"**{icon} {label}**")
+            st.progress(value)
+            st.caption(state)
 
-    st.progress(max(0.0, min(1.0, percent / 100)), text=f"{percent}% complete")
     message = str(snapshot.get("message") or "").strip()
     if message:
         st.info(message, icon="ℹ️")
@@ -925,53 +941,87 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
+    page_size = 5
+    page_count = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(int(st.session_state.get("candidate_page", 0) or 0), page_count - 1))
+    start_index = page * page_size
+    visible = candidates[start_index:start_index + page_size]
 
     st.markdown(
-        f"<div class='panel'><b>Ranked headlines · {total} available</b>"
-        f"<span class='small-muted' style='float:right'>Select one headline to continue</span></div>",
+        f"<div class='panel'><b>Ranked headlines</b>"
+        f"<span class='small-muted' style='float:right'>Showing {start_index + 1}-{start_index + len(visible)} of {total}</span></div>",
         unsafe_allow_html=True,
     )
 
-    labels = []
-    candidate_by_label: dict[str, dict[str, Any]] = {}
-    for index, candidate in enumerate(candidates[:total], 1):
+    for offset, candidate in enumerate(visible):
+        rank = start_index + offset + 1
         title = str(candidate.get("title") or "Untitled story").strip()
-        label = f"{index:02d}. {title}"
-        labels.append(label)
-        candidate_by_label[label] = candidate
+        reason = str(candidate.get("discovery_reason") or "").strip()
+        score = float(candidate.get("candidate_score") or 0.0)
+        evidence = build_discovery_evidence(candidate)
+        history_fit = float(evidence.get("channel_history") or 0.0)
 
-    selected_label = st.radio(
-        "Ranked headlines",
-        labels,
-        key="discovery_headline_selection",
-        label_visibility="collapsed",
-    )
-    selected_candidate = candidate_by_label.get(selected_label) if selected_label else None
+        with st.container(border=True):
+            st.markdown(f"**{rank:02d}. {title}**")
+            meta = [
+                f"Score {score:.1f}",
+                f"{evidence['articles']} article{'s' if evidence['articles'] != 1 else ''}",
+            ]
+            if evidence["independent_publishers"]:
+                meta.append(f"{evidence['independent_publishers']} publisher{'s' if evidence['independent_publishers'] != 1 else ''}")
+            if candidate.get("ai_recommendation"):
+                meta.append(f"Channel fit {history_fit:.1f}/10")
+            st.caption(" · ".join(meta))
+            if reason:
+                st.write(reason)
 
-    if selected_candidate:
-        source = str(selected_candidate.get("source_label") or "News source").strip()
-        article_count = int(selected_candidate.get("event_article_count") or 1)
-        source_count = int(selected_candidate.get("event_source_count") or 0)
-        support = (
-            f"{article_count} article{'s' if article_count != 1 else ''}"
-            + (f" · {source_count} publisher{'s' if source_count != 1 else ''}" if source_count else "")
-        )
-        st.caption(f"Source: {source} · {support}")
-        if selected_candidate.get("story_url"):
-            st.link_button("Open source article", str(selected_candidate["story_url"]))
+            source = str(candidate.get("source_label") or "News source").strip()
+            url = str(candidate.get("story_url") or "").strip()
+            source_col, action_col = st.columns([3, 1])
+            with source_col:
+                st.caption(f"Source: {source}")
+                if url.startswith(("http://", "https://")):
+                    st.link_button("Open source", url)
+            with action_col:
+                if st.button(
+                    "Use headline →",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"use_candidate_{start_index + offset}",
+                ):
+                    st.session_state.pending_candidate = dict(candidate)
+                    st.session_state.visual_search_queries = ""
+                    st.rerun()
 
+    nav_left, nav_center, nav_right = st.columns([1, 2, 1])
+    with nav_left:
         if st.button(
-            "Use selected headline →",
-            type="primary",
+            "← Previous",
+            disabled=page <= 0,
             use_container_width=True,
-            key="use_selected_headline",
+            key="candidate_previous",
         ):
-            st.session_state.pending_candidate = dict(selected_candidate)
-            st.session_state.visual_search_queries = ""
+            st.session_state.candidate_page = page - 1
+            st.rerun()
+    with nav_center:
+        st.markdown(
+            f"<div style='text-align:center;padding-top:10px' class='small-muted'>"
+            f"Page {page + 1} of {page_count}</div>",
+            unsafe_allow_html=True,
+        )
+    with nav_right:
+        if st.button(
+            "Next →",
+            disabled=page >= page_count - 1,
+            use_container_width=True,
+            key="candidate_next",
+        ):
+            st.session_state.candidate_page = page + 1
             st.rerun()
 
     if not controller.snapshot().get("thread_alive"):
-        st.info("Select a headline above, then continue to the optional image-search query step.")
+        st.info("Choose a headline to continue to the optional image-search query step.")
+
 
 
 def render_channel_statistics() -> None:
