@@ -689,7 +689,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     st.markdown("<div class='section-kicker'>Step 01 · Discovery</div><h2 style='margin-top:0'>Choose a story</h2>", unsafe_allow_html=True)
     st.caption(
-        "The factory finds up to 12 ranked stories. Three appear first; use the next-page controls to review 3 more at a time."
+        "The factory ranks up to 20 fresh stories for this section. Repeats from the previous 48 hours are removed before ranking."
     )
 
     if not st.session_state.candidates:
@@ -700,7 +700,12 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 conn = sqlite3.connect(ultimate_bot.DB_PATH)
                 try:
                     migrate_vault(conn)
-                    candidates = discover_ranked_topics(ultimate_bot, config, conn, max_candidates=MAX_DISCOVERY_CANDIDATES)
+                    candidates = discover_ranked_topics(
+                        ultimate_bot,
+                        config,
+                        conn,
+                        max_candidates=MAX_DISCOVERY_CANDIDATES,
+                    )
                 finally:
                     conn.close()
                 st.session_state.candidates = candidates
@@ -710,7 +715,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 st.session_state.upload_result = ""
                 st.session_state.candidate_page = 0
                 st.success(
-                    f"Found {min(len(candidates), MAX_DISCOVERY_CANDIDATES)} ranked topics. Showing the first 3."
+                    f"Found {len(candidates)} ranked headlines. Choose one below."
                 )
                 st.rerun()
             except Exception as exc:
@@ -736,7 +741,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             label_visibility="collapsed",
         )
         st.markdown(
-            f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div>"
+            f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
             f"<b>{pending_candidate.get('title', '')}</b></div>",
             unsafe_allow_html=True,
         )
@@ -759,123 +764,64 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 st.rerun()
         with cancel_col:
             if st.button(
-                "← Choose another topic",
+                "← Choose another headline",
                 use_container_width=True,
                 key="cancel_selected_topic",
             ):
                 st.session_state.pending_candidate = None
                 st.session_state.visual_search_queries = ""
                 st.rerun()
-        st.markdown("---")
+        return
 
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DISCOVERY_CANDIDATES)
-    page_size = 3
-    page_count = max(1, (total + page_size - 1) // page_size)
-    page = max(0, min(int(st.session_state.get("candidate_page", 0) or 0), page_count - 1))
-    start = page * page_size
-    end = min(start + page_size, total)
 
-    st.markdown(f"<div class='panel'><b>Distinct news events {start + 1}–{end} of {total}</b><span class='small-muted' style='float:right'>Page {page + 1} of {page_count}</span></div>", unsafe_allow_html=True)
-    columns = st.columns(3, gap="medium")
-    for local_index, candidate in enumerate(candidates[start:end]):
-        global_index = start + local_index
-        with columns[local_index]:
-            title = str(candidate.get("title") or "Untitled story")
-            reason = str(candidate.get("discovery_reason") or "")
-            source = str(candidate.get("source_label") or "News source")
-            score = candidate.get("candidate_score")
-            score_line = f"{float(score):.1f}" if score is not None else "live"
-            article_count = int(candidate.get("event_article_count") or 1)
-            source_count = int(candidate.get("event_source_count") or 0)
-            event_support = (
-                f"Event support: {article_count} article{'s' if article_count != 1 else ''}"
-                + (f" · {source_count} publisher{'s' if source_count != 1 else ''}" if source_count else "")
-            )
-            st.markdown(
-                f"<div class='candidate'><div class='candidate-rank'>RANK {global_index + 1}</div>"
-                f"<div class='candidate-title'>{title}</div>"
-                f"<div class='candidate-reason'>{reason}</div>"
-                f"<div class='small-muted' style='margin-top:10px'>Source: {source}<br>{event_support}<br>Signal: {score_line}</div></div>",
-                unsafe_allow_html=True,
-            )
+    st.markdown(
+        f"<div class='panel'><b>Ranked headlines · {total} available</b>"
+        f"<span class='small-muted' style='float:right'>Select one headline to continue</span></div>",
+        unsafe_allow_html=True,
+    )
 
-            evidence = build_discovery_evidence(candidate)
-            with st.expander("Why this event?", expanded=False):
-                left, right = st.columns(2)
-                with left:
-                    st.caption(
-                        f"📰 {evidence['articles']} article{'s' if evidence['articles'] != 1 else ''}"
-                        f" · 🌐 {evidence['independent_publishers']} independent publisher{'s' if evidence['independent_publishers'] != 1 else ''}"
-                    )
-                    st.caption(
-                        f"⚡ Coverage momentum: {evidence['event_momentum']:.1f}/10"
-                        f" · Freshness: {evidence['freshness']:.1f}/10"
-                    )
-                    st.caption(
-                        f"🔎 Corroboration: {evidence['corroboration']:.1f}"
-                        f" · Source quality: {evidence['source_quality']:.1f}/5"
-                    )
-                with right:
-                    st.caption(
-                        f"🎥 Visual potential: {evidence['visual_potential']:.1f}/10"
-                        f" · 📈 Google Trends: {evidence['google_trends']:.1f}"
-                    )
-                    st.caption(
-                        f"📚 Channel history: {evidence['channel_history']:.1f}/10"
-                        f" · ✨ Originality: {evidence['originality']:.1f}/10"
-                    )
-                    if evidence["official_records"]:
-                        st.caption(f"✅ Official feed records: {evidence['official_records']}")
-                    if evidence["reddit_records"]:
-                        st.caption(f"💬 Reddit intake records: {evidence['reddit_records']}")
+    labels = []
+    candidate_by_label: dict[str, dict[str, Any]] = {}
+    for index, candidate in enumerate(candidates[:total], 1):
+        title = str(candidate.get("title") or "Untitled story").strip()
+        label = f"{index:02d}. {title}"
+        labels.append(label)
+        candidate_by_label[label] = candidate
 
-                publishers = ", ".join(evidence["publishers"]) or "No independent publisher names recorded"
-                domains = ", ".join(evidence["domains"]) or "No independent domains recorded"
-                st.caption(f"Publishers: {publishers}")
-                st.caption(f"Domains: {domains}")
-                if evidence["latest_published_at"]:
-                    st.caption(f"Latest evidence: {evidence['latest_published_at']}")
+    selected_label = st.radio(
+        "Ranked headlines",
+        labels,
+        key="discovery_headline_selection",
+        label_visibility="collapsed",
+    )
+    selected_candidate = candidate_by_label.get(selected_label) if selected_label else None
 
-                for source_item in evidence["sources"]:
-                    source_name = str(source_item.get("publisher") or "Source").strip()
-                    source_title = str(source_item.get("title") or "Untitled report").strip()
-                    source_url = str(source_item.get("url") or "").strip()
-                    if source_url:
-                        st.markdown(f"- [{source_name}]({source_url}) — {source_title}")
-                    else:
-                        st.markdown(f"- **{source_name}** — {source_title}")
+    if selected_candidate:
+        source = str(selected_candidate.get("source_label") or "News source").strip()
+        article_count = int(selected_candidate.get("event_article_count") or 1)
+        source_count = int(selected_candidate.get("event_source_count") or 0)
+        support = (
+            f"{article_count} article{'s' if article_count != 1 else ''}"
+            + (f" · {source_count} publisher{'s' if source_count != 1 else ''}" if source_count else "")
+        )
+        st.caption(f"Source: {source} · {support}")
+        if selected_candidate.get("story_url"):
+            st.link_button("Open source article", str(selected_candidate["story_url"]))
 
-            if candidate.get("story_url"):
-                st.link_button("Open source", str(candidate["story_url"]), use_container_width=True)
-            if st.button(
-                f"Use topic #{global_index + 1}",
-                key=f"use_candidate_{global_index}",
-                use_container_width=True,
-            ):
-                st.session_state.pending_candidate = dict(candidate)
-                st.session_state.visual_search_queries = ""
-                st.rerun()
-
-    nav_left, nav_right = st.columns(2)
-    if page > 0:
-        with nav_left:
-            if st.button("← Previous 3", key="candidate_previous_page", use_container_width=True):
-                st.session_state.candidate_page = page - 1
-                st.rerun()
-    if end < total:
-        with nav_right:
-            next_end = min(end + page_size, total)
-            if st.button(
-                f"See next 3 ranked topics ({end + 1}–{next_end})",
-                key="candidate_next_page",
-                use_container_width=True,
-            ):
-                st.session_state.candidate_page = page + 1
-                st.rerun()
+        if st.button(
+            "Use selected headline →",
+            type="primary",
+            use_container_width=True,
+            key="use_selected_headline",
+        ):
+            st.session_state.pending_candidate = dict(selected_candidate)
+            st.session_state.visual_search_queries = ""
+            st.rerun()
 
     if not controller.snapshot().get("thread_alive"):
-        st.info("Choose one ranked topic above to start the production run.")
+        st.info("Select a headline above, then continue to the optional image-search query step.")
 
 
 def render_channel_statistics() -> None:
