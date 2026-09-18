@@ -263,12 +263,8 @@ def _wrap_editorial_provider_usage(bot):
 
 
 def _patch_research_pipeline(bot):
-    try:
-        from research_runtime import patch_research_pipeline
-        return patch_research_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Multi-source research runtime unavailable: {exc}", flush=True)
-        return bot
+    from research_runtime import patch_research_pipeline
+    return patch_research_pipeline(bot)
 
 
 def _wrap_content_dense_script(bot):
