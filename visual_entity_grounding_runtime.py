@@ -66,7 +66,7 @@ def _anchors(script_data:dict[str,Any])->list[str]:
         'committee','university','institute','foundation','product','phone','device',
         'car','stadium','arena','landmark',
     }
-    gender_words={'women','women\'s','men','men\'s'}
+    gender_words={'women','womens','women\'s','men','mens','men\'s'}
     low=[key(w) for w in words]
 
     # Teams/collectives: take the identity through the cue, never the action
