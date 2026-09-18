@@ -11,7 +11,6 @@ import inspect
 import os
 import re
 import subprocess
-import tempfile
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -539,108 +538,6 @@ def _patch_deep_dive_subtitle_condition(bot):
         return False
 
 
-def _patch_endpoint_subtitles():
-    """Use the same quiet typography for integrity-layer hook/outro captions."""
-    try:
-        import pipeline_integrity_runtime
-    except Exception:
-        return
-    current = getattr(pipeline_integrity_runtime, "_add_endpoint_subtitles", None)
-    if not callable(current) or getattr(current, "_premium_endpoint_bound", False):
-        return
-
-    def premium_endpoint_subtitles(video_path, audio_paths, word_timings):
-        if not video_path or not os.path.isfile(video_path) or not word_timings:
-            return video_path
-        try:
-            durations = []
-            for path in audio_paths[: len(word_timings)]:
-                probe = subprocess.run(
-                    ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path],
-                    capture_output=True, text=True, timeout=10, check=False,
-                )
-                durations.append(max(0.1, float((probe.stdout or "0").strip()) + 0.25))
-
-            temp_dir = tempfile.mkdtemp(prefix="shorts_subtitles_", dir=os.path.dirname(video_path) or None)
-            srt_path = os.path.join(temp_dir, "endpoint.srt")
-
-            def write_srt(path, timings, offset=0.0):
-                events, chunk, start, last_end = [], [], None, None
-                for item in timings:
-                    word = str(item.get("word", "")).replace("\u00a0", " ").strip()
-                    if not word:
-                        continue
-                    item_start = max(0.0, float(item.get("start", 0.0)) + offset)
-                    item_end = max(item_start + 0.08, float(item.get("end", item_start + 0.1)) + offset)
-                    if start is None:
-                        start = item_start
-                    chunk.append(word)
-                    last_end = item_end
-                    if len(chunk) >= 6 or (last_end - start) >= 2.2:
-                        events.append((start, last_end, " ".join(chunk)))
-                        chunk, start = [], None
-                if chunk and start is not None and last_end is not None:
-                    events.append((start, last_end, " ".join(chunk)))
-                if not events:
-                    return False
-
-                def stamp(seconds):
-                    millis = max(0, int(round(seconds * 1000)))
-                    hours, millis = divmod(millis, 3_600_000)
-                    minutes, millis = divmod(millis, 60_000)
-                    secs, millis = divmod(millis, 1000)
-                    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-                with open(path, "w", encoding="utf-8") as handle:
-                    for index, (start, end, text) in enumerate(events, 1):
-                        handle.write(f"{index}\n{stamp(start)} --> {stamp(end)}\n{text}\n\n")
-                return True
-
-            ok = write_srt(srt_path, word_timings[0], 0.0)
-            last_index = len(word_timings) - 1
-            if last_index != 0:
-                outro_path = os.path.join(temp_dir, "outro.srt")
-                if write_srt(outro_path, word_timings[last_index], sum(durations[:last_index]) if durations else 0.0):
-                    with open(srt_path, "a", encoding="utf-8") as target, open(outro_path, "r", encoding="utf-8") as source:
-                        target.write(source.read())
-                    ok = True
-            if not ok:
-                return video_path
-
-            output = str(Path(video_path).with_name(Path(video_path).stem + "_subtitle_integrity.mp4"))
-            escaped = srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-            force_style = (
-                "FontName=Arial,FontSize=18,PrimaryColour=&H00F8F9FA,"
-                "OutlineColour=&H90050A12,BackColour=&H90101925,BorderStyle=3,"
-                "Outline=2,Shadow=0,Alignment=2,MarginV=250,Spacing=0"
-            )
-            command = [
-                "ffmpeg", "-y", "-i", video_path,
-                "-vf", f"subtitles='{escaped}':force_style='{force_style}'",
-                "-map", "0:v:0", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-                "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", output,
-            ]
-            completed = subprocess.run(command, capture_output=True, text=True, timeout=240, check=False)
-            if completed.returncode != 0 or not os.path.isfile(output):
-                return video_path
-            os.replace(output, video_path)
-            return video_path
-        except Exception as exc:
-            print(f"   [Subtitle Integrity] Premium endpoint caption pass skipped: {type(exc).__name__}: {exc}", flush=True)
-            return video_path
-        finally:
-            try:
-                for candidate in Path(temp_dir).glob("*"):
-                    candidate.unlink(missing_ok=True)
-                Path(temp_dir).rmdir()
-            except Exception:
-                pass
-
-    premium_endpoint_subtitles._premium_endpoint_bound = True
-    pipeline_integrity_runtime._add_endpoint_subtitles = premium_endpoint_subtitles
-
-
 def _premium_branded_finish(bot, video_path: str) -> str:
     """Apply the final premium glass branding layer without changing media geometry."""
     try:
@@ -714,7 +611,7 @@ def _premium_branded_finish(bot, video_path: str) -> str:
             raise RuntimeError(f"Final premium branding QC failed: {reason}")
         os.replace(output, video_path)
         print(
-            f"   [Branding] Premium glass finish applied: frame + glass logo (legacy overlay disabled); "
+            f"   [Branding] Premium glass finish applied: frame + glass logo; "
             f"{source_w}x{source_h}, {source_duration:.2f}s, audio_streams={source_audio_count}.",
             flush=True,
         )
