@@ -666,39 +666,18 @@ def _premium_branded_finish(bot, video_path: str) -> str:
     if not valid:
         raise RuntimeError(f"Final render QC failed before premium branding: {reason}")
 
-    logo, overlay = assets(bot)
+    logo, _legacy_overlay = assets(bot)
     glass_logo = create_glossy_logo_watermark(logo, size=132) if logo and logo.exists() else None
     if glass_logo is None and (not overlay or not overlay.exists()):
         return video_path
 
     temp_paths: list[str] = []
     work_dir = os.path.dirname(video_path) or None
+    # The legacy overlay.png is intentionally not rendered here. It is a
+    # composite layer from the old branding system and was the second branding
+    # layer responsible for the duplicate-overlay appearance. The final finish
+    # owns the frame and channel logo exactly once.
     overlay_asset = None
-    temp_dir = None
-    if overlay and overlay.exists():
-        try:
-            processed = Image.open(overlay).convert("RGBA")
-            if processed.size != (source_w, source_h):
-                processed = processed.resize((source_w, source_h), Image.Resampling.LANCZOS)
-            safe_y0 = max(0, source_h - 360)
-            safe_x0 = int(source_w * 0.08)
-            safe_x1 = int(source_w * 0.92)
-            alpha = processed.getchannel("A")
-            mask = Image.new("L", processed.size, 0)
-            md = ImageDraw.Draw(mask)
-            md.rectangle((safe_x0, safe_y0, safe_x1, source_h), fill=255)
-            alpha = ImageChops.subtract(alpha, mask)
-            processed.putalpha(alpha)
-            overlay_asset = os.path.join(work_dir, "premium_brand_overlay.png")
-            processed.save(overlay_asset, "PNG")
-            temp_paths.append(overlay_asset)
-        except Exception:
-            overlay_asset = None
-
-    if overlay_asset is None and overlay and overlay.exists():
-        safe, _ = branding_runtime._overlay_is_caption_safe(overlay, source_w, source_h)
-        if safe:
-            overlay_asset = str(overlay)
 
     logo_asset = None
     if glass_logo is not None:
@@ -710,21 +689,13 @@ def _premium_branded_finish(bot, video_path: str) -> str:
     filters = [
         "[0:v]drawbox=x=10:y=10:w=iw-20:h=ih-20:color=0x40C4FF@0.58:t=3[frame1]",
         "[frame1]drawbox=x=16:y=16:w=iw-32:h=ih-32:color=white@0.16:t=1[frame2]",
-        "[frame2]drawbox=x=27:y=27:w=iw-54:h=ih-54:color=0x40C4FF@0.10:t=1[frame3]",
-        "[frame3]drawbox=x=32:y=32:w=iw-64:h=2:color=white@0.12:t=fill[frame4]",
     ]
-    last = "[frame4]"
+    last = "[frame2]"
     inputs = ["-i", video_path]
-
-    if overlay_asset:
-        inputs += ["-loop", "1", "-i", overlay_asset]
-        filters += [f"[1:v]format=rgba[brand];{last}[brand]overlay=0:0:eof_action=repeat:shortest=0:format=auto[withbrand]"]
-        last = "[withbrand]"
 
     if logo_asset:
         inputs += ["-loop", "1", "-i", logo_asset]
-        badge_index = 2 if overlay_asset else 1
-        filters += [f"[{badge_index}:v]format=rgba[badge];{last}[badge]overlay=W-w-28:24:eof_action=repeat:shortest=0:format=auto[finalv]"]
+        filters += [f"[1:v]format=rgba[badge];{last}[badge]overlay=W-w-28:24:eof_action=repeat:shortest=0:format=auto[finalv]"]
         last = "[finalv]"
 
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", last, "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-map_metadata", "0", "-movflags", "+faststart", "-t", f"{source_duration:.3f}", output]
