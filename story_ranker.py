@@ -139,6 +139,46 @@ def _freshness_score(story):
     return 0.0
 
 
+def _event_momentum_score(story):
+    """Score how quickly an event is accumulating recent coverage."""
+    evidence = story.get("event_evidence") or []
+    if not evidence:
+        return 0.0
+
+    now = datetime.now(timezone.utc)
+    score = 0.0
+    for item in evidence:
+        raw = item.get("publishedAt") if isinstance(item, dict) else None
+        if not raw:
+            continue
+        try:
+            published = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            continue
+
+        age_hours = max(0.0, (now - published).total_seconds() / 3600.0)
+        if age_hours <= 1:
+            score += 2.5
+        elif age_hours <= 3:
+            score += 2.0
+        elif age_hours <= 6:
+            score += 1.25
+        elif age_hours <= 12:
+            score += 0.5
+
+    # A single stale article should never masquerade as a fast-moving event.
+    return round(min(10.0, score), 2)
+
+
+def _independent_corroboration_score(story):
+    """Reward independent publishers, not raw duplicate article volume."""
+    source_count = _safe_float(story.get("event_source_count")) or 0.0
+    domains = len(set(story.get("event_source_domains") or []))
+    publishers = len(set(story.get("event_evidence_publishers") or []))
+    independent = max(source_count, float(domains), float(publishers))
+    return round(min(10.0, independent * 2.5), 2)
+
+
 def _safety_gate(story):
     text = _text_blob(story)
     hits = sorted(term for term in SAFETY_BLOCKLIST if term in text)
@@ -688,18 +728,23 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     visual = _visual_potential(story)
     risk = _risk_score(story)
     source_quality = _safe_float(story.get("source_quality_score")) or 0.0
-    social = _social_signal(story.get("title", ""), social_titles)
-    google_trend = _trend_signal(story.get("title", ""))
+    event_text = story.get("event_search_text") or story.get("title", "")
+    social = _social_signal(event_text, social_titles)
+    google_trend = _trend_signal(event_text)
     history, history_matches = _historical_score(story, rows, target_category, target_format, target_language)
     niche = _apply_sports_niche_bonus(story, target_category)
     originality = _safe_float(story.get("originality_score")) or 5.0
+    event_momentum = _event_momentum_score(story)
+    independent_corroboration = _independent_corroboration_score(story)
 
     momentum = velocity + trend
     momentum_weight = 1.45 if ai_cricket else 1.25
     final_score = (
         momentum * momentum_weight
+        + event_momentum * 0.85
         + freshness * 1.35
         + corroboration * 1.15
+        + independent_corroboration * 0.55
         + article_support * 0.80
         + source_quality * 0.85
         + visual * 0.60
@@ -711,6 +756,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         - risk * 2.25
     )
     story["candidate_score"] = round(final_score, 3)
+    story["event_momentum_score"] = event_momentum
+    story["independent_corroboration_score"] = independent_corroboration
     story["historical_topic_signal"] = round(history, 3)
     story["historical_topic_matches"] = history_matches
     story["freshness_score"] = round(freshness, 2)
@@ -721,8 +768,10 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["sports_niche_bonus"] = niche
     story["discovery_dimensions"] = {
         "momentum": round(momentum, 2),
+        "event_momentum": round(event_momentum, 2),
         "freshness": round(freshness, 2),
         "corroboration": round(corroboration, 2),
+        "independent_corroboration": round(independent_corroboration, 2),
         "article_support": round(article_support, 2),
         "source_quality": round(source_quality, 2),
         "social_signal": round(social, 2),
@@ -740,6 +789,8 @@ def _candidate_reason(story):
     parts = []
     if _safe_float(dimensions.get("momentum")) >= 5:
         parts.append("strong current momentum")
+    if _safe_float(dimensions.get("event_momentum")) >= 4:
+        parts.append("coverage accelerating")
     if _safe_float(dimensions.get("freshness")) >= 6:
         parts.append("very fresh")
     if _safe_float(dimensions.get("corroboration")) >= 2:
