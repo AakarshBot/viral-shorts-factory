@@ -141,7 +141,7 @@ def test_collect_channel_statistics_reads_recorded_vault_data(tmp_path):
     assert {row["format"] for row in stats["by_format"]} == {"regular", "top5"}
 
 
-def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
+def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
     import story_ranker
 
     class Bot:
@@ -161,6 +161,14 @@ def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
         ("Autonomous taxi expansion", "autonomous taxi"),
         ("New gene editing platform", "gene editing"),
         ("AR headset developer launch", "augmented reality"),
+        ("Quantum battery research milestone", "quantum battery"),
+        ("Space station cargo mission", "space station cargo"),
+        ("AI coding tool enterprise rollout", "AI coding"),
+        ("Solar farm expansion project", "solar energy"),
+        ("New privacy regulation proposal", "privacy regulation"),
+        ("Next generation gaming console", "gaming console"),
+        ("Medical imaging breakthrough", "medical imaging"),
+        ("Data centre investment boom", "data centre"),
     ]
     topics = [
         {
@@ -184,11 +192,52 @@ def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
         Bot(),
         {"format_mode": "regular", "category": "technology", "language": "english"},
         conn=None,
-        max_candidates=12,
+        max_candidates=20,
     )
 
-    assert len(pool) == 12
-    assert [item["discovery_rank"] for item in pool] == list(range(1, 13))
+    assert len(pool) == 20
+    assert [item["discovery_rank"] for item in pool] == list(range(1, 21))
+
+
+def test_recent_topic_cooldown_removes_only_recent_repeats(tmp_path):
+    from dashboard_runtime import _recent_topic_cooldown
+
+    db_path = Path(tmp_path) / "cooldown.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE vault (
+            topic TEXT,
+            date_used TEXT,
+            created_at TEXT
+        )"""
+    )
+    conn.executemany(
+        "INSERT INTO vault (topic, date_used, created_at) VALUES (?, ?, ?)",
+        [
+            ("Major battery breakthrough announced", "2026-09-17T10:00:00+00:00", "2026-09-17T10:00:00+00:00"),
+            ("Old satellite launch story", "2026-09-10T10:00:00+00:00", "2026-09-10T10:00:00+00:00"),
+        ],
+    )
+    conn.commit()
+
+    stories = [
+        {"title": "Battery breakthrough announced with new results"},
+        {"title": "Satellite launch gets a fresh update"},
+        {"title": "Completely new robotics factory opens"},
+    ]
+
+    kept = _recent_topic_cooldown(
+        conn,
+        stories,
+        hours=48 * 2,
+    )
+
+    kept_titles = [item["title"] for item in kept]
+    assert "Battery breakthrough announced with new results" not in kept_titles
+    assert "Completely new robotics factory opens" in kept_titles
+    assert "Satellite launch gets a fresh update" in kept_titles
+
+    conn.close()
 
 
 
