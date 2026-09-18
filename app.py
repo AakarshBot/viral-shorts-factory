@@ -41,7 +41,7 @@ from dashboard_runtime import (
 )
 
 
-MAX_DASHBOARD_DISCOVERY_HEADLINES = 20
+MAX_DASHBOARD_DISCOVERY_HEADLINES = 28
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
 
@@ -910,7 +910,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     st.markdown("<div class='section-kicker'>Step 01 · Discovery</div><h2 style='margin-top:0'>Choose a story</h2>", unsafe_allow_html=True)
     st.caption(
-        "The factory ranks up to 20 fresh stories for this section. Repeats from the previous 48 hours are removed before ranking."
+        "The factory ranks up to 28 fresh, diverse stories for this section. Repeats from the previous 48 hours are removed before ranking."
     )
 
     if not st.session_state.candidates:
@@ -926,7 +926,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                             ultimate_bot,
                             config,
                             conn,
-                            max_candidates=10,
+                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
                         )
                     else:
                         candidates = discover_ranked_topics(
