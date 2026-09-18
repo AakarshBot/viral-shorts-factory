@@ -198,9 +198,6 @@ def render_top5_card(bot,bg_img,item_number,total_items,summary_text,width=1080,
 
 def patch_dashboard_runtime(bot):
     """Apply requested improvements to Streamlit execution."""
-    original_editorial=bot.editorial_gate_batch
-    def editorial(stories,bonuses,last_genre,fmt): return original_editorial(preselect_candidates(stories,15),bonuses,last_genre,fmt) if stories else None
-    bot.editorial_gate_batch=editorial
     bot.get_trend_signal_bonus=lambda keyword:get_trend_signal_bonus(bot,keyword)
     bot.auto_pilot_selection=lambda conn:auto_pilot_selection(bot,conn)
 
