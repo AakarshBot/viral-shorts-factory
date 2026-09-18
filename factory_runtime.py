@@ -261,28 +261,6 @@ def patch_dashboard_runtime(bot):
         except Exception:return True
     bot.passes_quality_gate=quality
 
-    def scene(seg,category,used_urls,used_hashes,video_title=""):
-        primary=bot.safe_text(seg.get("primary_entity","none")).strip() or "none"; intent=bot.safe_text(seg.get("visual_intent","conceptual")); prompt=bot.safe_text(seg.get("specific_search_prompt",f"{video_title} {primary}")); editorial=any(k in intent.lower() for k in ["editorial","stadium","news","trophy","event","person"]) or any(k in category for k in ["sport","cricket","football","news","politics","entertainment","movie"])
-        def accept(data,name):
-            if not data:return None
-            try:
-                h=bot.get_image_hash(data)
-                if h in used_hashes:return None
-                used_hashes.add(h); print(f"   [Visual Source] {name}"); return Image.open(io.BytesIO(data)).convert("RGB"),False,name
-            except Exception:return None
-        if editorial and primary.lower()!="none":
-            attempts=[(bot.fetch_wiki_person_image(primary,used_urls,prompt,video_title),"Wikipedia"),(bot.fetch_wikimedia_commons(prompt,used_urls,prompt,video_title),"Commons"),(bot.fetch_pexels(prompt,used_urls,prompt,video_title),"Pexels"),(bot.fetch_unsplash(prompt,used_urls,prompt,video_title),"Unsplash"),(bot.fetch_duckduckgo(prompt,used_urls,prompt,video_title),"DDG")]
-        else: attempts=[(bot.fetch_pexels(prompt,used_urls,prompt,video_title),"Pexels"),(bot.fetch_unsplash(prompt,used_urls,prompt,video_title),"Unsplash"),(bot.fetch_duckduckgo(prompt or video_title,used_urls,prompt,video_title),"DDG")]
-        for data,name in attempts:
-            result=accept(data,name)
-            if result:return result
-        ai=bot.fetch_hf_ai_image(f"{prompt}, high resolution cinematic photography, detailed")
-        if ai is not None: print("   [Visual Source] AI-generated"); return ai,True,"AI-generated"
-        fallback=Image.new("RGB",(1080,1920),bot.PALETTE["bg"]); d=ImageDraw.Draw(fallback)
-        for i in range(1920):d.line([(0,i),(1080,i)],fill=(15,20+int(i/1920*30),35+int(i/1920*50)))
-        print("   [Visual Source] gradient-fallback"); return fallback,True,"gradient-fallback"
-    bot.fetch_scene_asset=scene
-
     bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.render_top5_card=lambda bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None:render_top5_card(bot,bg_img,item_number,total_items,summary_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
