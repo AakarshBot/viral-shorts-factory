@@ -412,56 +412,6 @@ def resolve_subject(scene: dict, video_title: str = "") -> dict:
     }
 
 
-def _anchor_for_resolution(resolution: dict) -> str:
-    factual = sanitize_candidate(resolution.get("factual_entity") or resolution.get("original_entity") or "")
-    core = _strip_visual_descriptors(factual)
-    return core or factual
-
-
-def _reduce_subject_once(subject: str, anchor: str) -> str:
-    words = tokens(subject)
-    anchor_keys = meaningful_tokens(anchor)
-    if not words or not anchor_keys:
-        return ""
-    protected: set[int] = set()
-    next_anchor = 0
-    for index, word in enumerate(words):
-        if next_anchor < len(anchor_keys) and key(word) == anchor_keys[next_anchor]:
-            protected.add(index)
-            next_anchor += 1
-    if next_anchor < len(anchor_keys):
-        return ""
-    removable = [i for i in range(len(words) - 1, -1, -1) if i not in protected]
-    if not removable:
-        return ""
-    reduced = " ".join(word for i, word in enumerate(words) if i != removable[0])
-    reduced = sanitize_candidate(reduced)
-    if not reduced:
-        return ""
-    reduced_keys = set(meaningful_tokens(reduced))
-    if not all(item in reduced_keys for item in anchor_keys):
-        return ""
-    return reduced
-
-
-def build_query_ladder(scene: dict, video_title: str = "") -> tuple[list[str], str, dict]:
-    resolution = resolve_subject(scene, video_title)
-    subject = resolution["subject"]
-    anchor = _anchor_for_resolution(resolution)
-    queries: list[str] = []
-    if subject:
-        queries.append(subject)
-    contextual = _contextual_query_variant(subject, anchor)
-    if contextual and contextual.casefold() not in {q.casefold() for q in queries}:
-        queries.append(contextual)
-    reduced = _reduce_subject_once(subject, anchor)
-    if reduced and reduced.casefold() not in {q.casefold() for q in queries}:
-        queries.append(reduced)
-    if anchor and anchor.casefold() not in {q.casefold() for q in queries}:
-        queries.append(anchor)
-    return queries[:4], resolution["visual_type"], resolution
-
-
 def prepare_scene(scene: dict, video_title: str = "") -> dict:
     resolution = resolve_subject(scene, video_title)
     prepared = dict(scene or {})
