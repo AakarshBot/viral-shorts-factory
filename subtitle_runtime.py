@@ -421,23 +421,6 @@ def _soften_frame_bars(image_path: str) -> bool:
         return False
 
 
-def _patch_top5_card(bot):
-    current = getattr(bot, "render_top5_card", None)
-    run_robot = getattr(bot, "run_robot", None)
-    namespace = getattr(run_robot, "__globals__", None)
-    if not isinstance(namespace, dict):
-        return
-    if getattr(current, "_premium_top5_bound", False):
-        return
-
-    def premium_top5(bg_img, item_number, total_items, summary_text, width=1080, height=1920, font_choice=None):
-        return render_premium_top5_card(bg_img, item_number, total_items, summary_text, width, height, font_choice)
-
-    premium_top5._premium_top5_bound = True
-    bot.render_top5_card = premium_top5
-    namespace["render_top5_card"] = premium_top5
-
-
 def patch_subtitle_pipeline(bot):
     if getattr(bot, "_subtitle_pipeline_patch_installed", False):
         return bot
@@ -446,8 +429,8 @@ def patch_subtitle_pipeline(bot):
     if not isinstance(namespace, dict):
         return bot
 
-    _patch_top5_card(bot)
-
+    namespace["render_top5_card"] = render_premium_top5_card
+    bot.render_top5_card = render_premium_top5_card
     namespace["generate_karaoke_clip"] = generate_readable_karaoke_clip
     namespace["create_glossy_logo_watermark"] = create_glossy_logo_watermark
     bot.generate_karaoke_clip = generate_readable_karaoke_clip
