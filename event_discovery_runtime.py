@@ -111,6 +111,11 @@ def _published_datetime(story: dict) -> datetime | None:
             return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
         except (TypeError, ValueError):
             pass
+        for fmt in ("%Y%m%d%H%M%S", "%Y%m%dT%H%M%S", "%Y%m%dT%H%M%SZ"):
+            try:
+                return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
     return None
 
 
@@ -225,6 +230,9 @@ def cluster_news_events(
 
         representative.update({
             "event_id": _event_id(cluster),
+            "event_search_text": " ".join(
+                _clean(item.get("title")) for item in cluster[:max_articles_per_event]
+            ),
             "event_clustered": True,
             "event_article_count": article_count,
             "event_source_count": source_count,
