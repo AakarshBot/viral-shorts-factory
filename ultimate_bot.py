@@ -47,7 +47,7 @@ if IMAGEMAGICK_BINARY_PATH:
 os.environ["IMAGEIO_FFMPEG_EXE"] = "ffmpeg"
 
 from PIL import Image, UnidentifiedImageError, ImageFilter, ImageDraw, ImageFont
-from news_source_image_runtime import extract_news_source_image, apply_source_credit
+from news_source_image_runtime import extract_news_source_image, compose_news_source_image, apply_source_credit
 import PIL
 try:
     import edge_tts
@@ -1499,7 +1499,10 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
                 print(f"   [News Source Image] unavailable; preserving normal visual routing: {type(exc).__name__}: {exc}", flush=True)
 
         if source_image_used:
-            bg_img, used_ai, source_type = source_image, False, "news_source"
+            # Dedicated crop path for the article photograph. Existing provider
+            # assets continue through their original resize path unchanged.
+            bg_img = compose_news_source_image(source_image, target_size)
+            used_ai, source_type = False, "news_source"
         else:
             bg_img, used_ai, source_type = await loop.run_in_executor(
                 None, fetch_scene_asset, seg, category, used_urls, used_image_hashes, video_title
@@ -1507,7 +1510,10 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
         
         if used_ai:
             ai_count += 1
-        bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
+        if not source_image_used:
+            bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
+        else:
+            bg_img = bg_img.convert("RGBA")
 
         # Attribution is applied AFTER any scene card/text composition so the
         # credit cannot be covered by the hook/top-five overlays.
