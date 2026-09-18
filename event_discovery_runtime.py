@@ -30,17 +30,36 @@ STOPWORDS = {
 
 GDELT_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-EVENT_ACTIONS = {
-    "launch", "launched", "launches", "unveil", "unveiled", "unveils",
-    "announce", "announced", "announces", "approve", "approved", "approves",
-    "ban", "banned", "bans", "sign", "signed", "signs", "acquire", "acquired",
-    "acquires", "win", "won", "wins", "defeat", "defeats", "beat", "beats",
-    "appoint", "appointed", "appoints", "resign", "resigned", "resigns",
-    "arrest", "arrested", "arrests", "die", "dies", "died", "injure", "injured",
-    "qualify", "qualified", "qualifies", "eliminate", "eliminated",
-    "release", "released", "releases", "delay", "delayed", "delays",
-    "cancel", "cancelled", "cancels", "signing", "join", "joins", "joined",
-    "open", "opened", "opens", "close", "closed", "closes",
+EVENT_ACTION_FAMILIES = {
+    "launch": {"launch", "launched", "launches"},
+    "unveil": {"unveil", "unveiled", "unveils"},
+    "announce": {"announce", "announced", "announces"},
+    "approve": {"approve", "approved", "approves"},
+    "ban": {"ban", "banned", "bans"},
+    "sign": {"sign", "signed", "signs", "signing"},
+    "acquire": {"acquire", "acquired", "acquires"},
+    "win": {"win", "won", "wins"},
+    "defeat": {"defeat", "defeats"},
+    "beat": {"beat", "beats"},
+    "appoint": {"appoint", "appointed", "appoints"},
+    "resign": {"resign", "resigned", "resigns"},
+    "arrest": {"arrest", "arrested", "arrests"},
+    "die": {"die", "dies", "died"},
+    "injure": {"injure", "injured"},
+    "qualify": {"qualify", "qualified", "qualifies"},
+    "eliminate": {"eliminate", "eliminated"},
+    "release": {"release", "released", "releases"},
+    "delay": {"delay", "delayed", "delays"},
+    "cancel": {"cancel", "cancelled", "cancels"},
+    "join": {"join", "joins", "joined"},
+    "open": {"open", "opened", "opens"},
+    "close": {"close", "closed", "closes"},
+}
+
+EVENT_ACTION_LOOKUP = {
+    form: family
+    for family, forms in EVENT_ACTION_FAMILIES.items()
+    for form in forms
 }
 
 GENERIC_ENTITY_TOKENS = {
@@ -103,7 +122,11 @@ def _salient_entities(value: object) -> set[str]:
 
 
 def _event_actions(value: object) -> set[str]:
-    return {token for token in _tokens(value) if token in EVENT_ACTIONS}
+    return {
+        EVENT_ACTION_LOOKUP[token]
+        for token in _tokens(value)
+        if token in EVENT_ACTION_LOOKUP
+    }
 
 
 def _entity_context(story: dict) -> set[str]:
@@ -214,11 +237,18 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
     right_actions = set(right.get("identity_actions") or _action_context(right))
     shared_actions = left_actions & right_actions
 
-    # A strong entity match plus compatible event action is our best
-    # no-LLM signal for differently worded reporting of the same event.
+    # Conflicting actions are strong evidence of different events even when
+    # the same people/organisations are involved.
+    if left_actions and right_actions and not shared_actions and overlap < 0.78:
+        return False
+
+    # A strong entity match plus a compatible action is our best no-LLM signal
+    # for differently worded reporting of the same event.
     if len(shared_entities) >= 2 and shared_actions:
         return True
-    if len(shared_entities) >= 3:
+    if len(shared_entities) >= 3 and (
+        not left_actions or not right_actions or shared_actions
+    ):
         return True
 
     # Preserve the existing high-confidence headline matching path.
