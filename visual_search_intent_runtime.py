@@ -291,7 +291,12 @@ def _automatic_queries(scene: dict, subject: str, visual_genre: str) -> tuple[st
     # Exact visual asset genres benefit from an explicit asset descriptor when
     # the taxonomy provides one. This is safe because it describes the target
     # visual form rather than inventing a fact.
-    if strategy == "asset":
+    if visual_genre == "PERSON_PORTRAIT":
+        # A portrait slide should stay a portrait search even when the narration
+        # mentions a related event. This keeps the identity precise and avoids
+        # turning a clean headshot request into an event-scene query.
+        _append_query(queries, subject, [*hints[:1]])
+    elif strategy == "asset":
         _append_query(queries, subject, [*hints[:1], *scene_terms[:1]])
         _append_query(queries, subject, [*hints[:1]])
     elif strategy == "scene":
@@ -313,7 +318,7 @@ def _automatic_queries(scene: dict, subject: str, visual_genre: str) -> tuple[st
 def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSearchIntent:
     """Resolve one factual identity and a compact adaptive retrieval strategy."""
     scene = scene if isinstance(scene, dict) else {}
-    manual = _clean(scene.get("manual_visual_query", ""))
+    manual = str(scene.get("manual_visual_query") or "").strip()
     base = dict(scene)
 
     if manual:
