@@ -169,8 +169,30 @@ def _subject_role_hint(value: str) -> str:
     if not core_words:
         return ""
     core_text = clean_text(core)
-    if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,12}(?:\s+[A-Z][A-Z0-9&.-]{1,12})*", core_text):
+    if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,12}(?:\\s+[A-Z][A-Z0-9&.-]{1,12})*", core_text):
         return "ORGANIZATION"
+
+    # Bare manual visual identities often arrive without an explicit semantic
+    # role (for example, "Kapil Dev" or "Mohammad Rizwan"). Resolve the role
+    # generically here so retrieval and QA share the same semantic anchor.
+    organization_suffixes = {
+        "board", "federation", "association", "committee", "foundation",
+        "institute", "institution", "corporation", "company", "agency",
+        "ministry", "department", "council", "club", "team", "squad",
+        "network", "studio", "university", "college",
+    }
+    words = tokens(core)
+    if len(words) >= 2 and key(words[-1]) in organization_suffixes:
+        return "ORGANIZATION"
+
+    # Keep the proper-name heuristic deliberately narrow: multi-word,
+    # title-cased identities only. Single-word terms and descriptive phrases
+    # remain GENERAL_CONTEXT unless stronger role evidence exists.
+    if 2 <= len(words) <= 4:
+        alpha_words = [word for word in words if any(char.isalpha() for char in word)]
+        if alpha_words and all(word[:1].isupper() for word in alpha_words):
+            return "PERSON"
+
     for role, cues in ROLE_CUES.items():
         if core_words & cues:
             return role
