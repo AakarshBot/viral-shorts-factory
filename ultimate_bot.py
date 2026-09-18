@@ -1509,33 +1509,35 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
             ai_count += 1
         bg_img = bg_img.resize(target_size, Image.Resampling.LANCZOS).convert("RGBA")
 
-        # One attribution boundary for every image-based scene. The credit is
-        # always burned into the final scene image, including provider/AI
-        # fallbacks, so attribution is not dependent on which provider branch
-        # happened to run.
+        # Attribution is applied AFTER any scene card/text composition so the
+        # credit cannot be covered by the hook/top-five overlays.
         if source_image_used and source_credit:
-            bg_img = apply_source_credit(bg_img, source_credit)
-        elif source_type == "news_source":
-            bg_img = apply_source_credit(bg_img, "Source: News source")
+            scene_credit = source_credit
         elif used_ai:
-            bg_img = apply_source_credit(bg_img, "Source: AI-generated visual")
+            scene_credit = "Source: AI-generated visual"
+        elif source_type == "news_source":
+            scene_credit = "Source: News source"
         else:
-            provider_label = str(source_type or "Visual source").replace("_", " ").strip()
-            bg_img = apply_source_credit(bg_img, f"Source: {provider_label}")
+            scene_credit = "Source: Editorial visual"
 
         if format_mode == "top5":
             clean_vo = re.sub(r'(number\s*\d+|story\s*#?\d+|#\d+)', '', seg.get("voiceover", ""), flags=re.IGNORECASE).strip()
-            render_top5_card(bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
+            rendered = render_top5_card(
+                bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice
+            ).convert("RGB")
+            apply_source_credit(rendered, scene_credit).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
         elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:
-            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
+            rendered = render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB")
+            apply_source_credit(rendered, scene_credit).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
         else:
             overlay = Image.new("RGBA", target_size, (0,0,0,0))
             draw_bars = ImageDraw.Draw(overlay)
             draw_bars.rectangle([0, 0, width, 40], fill=PALETTE["accent_primary"] + (200,))
             draw_bars.rectangle([0, height - 40, width, height], fill=PALETTE["accent_secondary"] + (200,))
-            Image.alpha_composite(bg_img, overlay).convert("RGB").save(img_path, "JPEG", quality=95)
+            rendered = Image.alpha_composite(bg_img, overlay).convert("RGB")
+            apply_source_credit(rendered, scene_credit).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": seg.get("voiceover", ""), "ai_generated": used_ai, "source_type": source_type}]
 
     tasks = [fetch_task(idx, seg) for idx, seg in enumerate(script_scenes)]
