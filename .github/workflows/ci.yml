@@ -46,7 +46,7 @@ jobs:
         run: |
           python - <<'PY'
           import audio_direction_runtime, audio_runtime, autopilot_runtime
-          import branding_runtime, db_architecture, db_runtime, diagnostics_runtime
+          import branding_runtime, db_architecture, db_runtime, diagnostics_runtime, evidence_runtime
           import editorial_runtime, factory_runtime, final_qc_runtime, learning_runtime
           import image_sources_runtime, provider_runtime, quality_runtime, research_runtime
           import runtime_bindings, runtime_hardener, production_hardening_runtime
