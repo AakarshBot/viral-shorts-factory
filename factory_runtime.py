@@ -199,7 +199,6 @@ def render_top5_card(bot,bg_img,item_number,total_items,summary_text,width=1080,
 def patch_dashboard_runtime(bot):
     """Apply requested improvements to Streamlit execution."""
     bot.get_trend_signal_bonus=lambda keyword:get_trend_signal_bonus(bot,keyword)
-    bot.auto_pilot_selection=lambda conn:auto_pilot_selection(bot,conn)
 
     bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
