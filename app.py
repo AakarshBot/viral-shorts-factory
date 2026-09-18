@@ -27,7 +27,15 @@ from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
 from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS, MAX_DISCOVERY_CANDIDATES
 
-from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics, collect_live_channel_statistics, discover_ranked_topics, factory_function_coverage, run_demo_section
+from dashboard_runtime import (
+    DashboardWorkflowController,
+    build_discovery_evidence,
+    collect_channel_statistics,
+    collect_live_channel_statistics,
+    discover_ranked_topics,
+    factory_function_coverage,
+    run_demo_section,
+)
 
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
@@ -782,6 +790,53 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 f"<div class='small-muted' style='margin-top:10px'>Source: {source}<br>{event_support}<br>Signal: {score_line}</div></div>",
                 unsafe_allow_html=True,
             )
+
+            evidence = build_discovery_evidence(candidate)
+            with st.expander("Why this event?", expanded=False):
+                left, right = st.columns(2)
+                with left:
+                    st.caption(
+                        f"📰 {evidence['articles']} article{'s' if evidence['articles'] != 1 else ''}"
+                        f" · 🌐 {evidence['independent_publishers']} independent publisher{'s' if evidence['independent_publishers'] != 1 else ''}"
+                    )
+                    st.caption(
+                        f"⚡ Coverage momentum: {evidence['event_momentum']:.1f}/10"
+                        f" · Freshness: {evidence['freshness']:.1f}/10"
+                    )
+                    st.caption(
+                        f"🔎 Corroboration: {evidence['corroboration']:.1f}"
+                        f" · Source quality: {evidence['source_quality']:.1f}/5"
+                    )
+                with right:
+                    st.caption(
+                        f"🎥 Visual potential: {evidence['visual_potential']:.1f}/10"
+                        f" · 📈 Google Trends: {evidence['google_trends']:.1f}"
+                    )
+                    st.caption(
+                        f"📚 Channel history: {evidence['channel_history']:.1f}/10"
+                        f" · ✨ Originality: {evidence['originality']:.1f}/10"
+                    )
+                    if evidence["official_records"]:
+                        st.caption(f"✅ Official feed records: {evidence['official_records']}")
+                    if evidence["reddit_records"]:
+                        st.caption(f"💬 Reddit intake records: {evidence['reddit_records']}")
+
+                publishers = ", ".join(evidence["publishers"]) or "No independent publisher names recorded"
+                domains = ", ".join(evidence["domains"]) or "No independent domains recorded"
+                st.caption(f"Publishers: {publishers}")
+                st.caption(f"Domains: {domains}")
+                if evidence["latest_published_at"]:
+                    st.caption(f"Latest evidence: {evidence['latest_published_at']}")
+
+                for source_item in evidence["sources"]:
+                    source_name = str(source_item.get("publisher") or "Source").strip()
+                    source_title = str(source_item.get("title") or "Untitled report").strip()
+                    source_url = str(source_item.get("url") or "").strip()
+                    if source_url:
+                        st.markdown(f"- [{source_name}]({source_url}) — {source_title}")
+                    else:
+                        st.markdown(f"- **{source_name}** — {source_title}")
+
             if candidate.get("story_url"):
                 st.link_button("Open source", str(candidate["story_url"]), use_container_width=True)
             if st.button(
