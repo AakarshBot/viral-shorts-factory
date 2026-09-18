@@ -414,6 +414,9 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
         "match", "fixture", "game", "vs", "versus", "scoreline", "innings",
         "semi final", "quarter final", "final", "tournament",
     )
+    if vt == "PERSON" and (sports_action or _has(words, "interview", "speaking", "speaks", "appearing", "on stage")):
+        return "PERSON_ACTION"
+
     team_terms = _has(words, "team", "squad", "club", "xi", "eleven", "federation")
     if sports_action and (vt == "ORGANIZATION" or team_terms):
         return "TEAM_ACTION"
