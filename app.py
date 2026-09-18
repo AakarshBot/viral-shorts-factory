@@ -33,6 +33,7 @@ from dashboard_runtime import (
     collect_channel_statistics,
     collect_live_channel_statistics,
     discover_ranked_topics,
+    discover_ai_topics,
     factory_function_coverage,
     run_demo_section,
     upload_ready_for_manual_decision,
@@ -153,6 +154,7 @@ def _init_state() -> None:
         "pending_candidate": None,
         "visual_search_queries": "",
         "discovery_headline_selection": None,
+        "editorial_mode": "Deep Dive",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -180,10 +182,32 @@ def reset_run() -> None:
         st.session_state[key] = value
 
 
-def category_options(format_mode: str) -> Dict[str, str]:
+DEEP_DIVE_TOPICS = (
+    "national_global_affairs",
+    "technology",
+    "business_finance",
+    "health_lifestyle",
+    "entertainment",
+    "viral_phenomenon",
+    "regional_state_news",
+    "sports",
+)
+TOP_FIVE_TOPICS = (
+    "national_global_affairs",
+    "technology",
+    "business_finance",
+    "entertainment",
+    "viral_phenomenon",
+    "sports",
+)
+
+
+def category_options(format_mode: str, editorial_mode: str = "Deep Dive") -> Dict[str, str]:
+    keys = TOP_FIVE_TOPICS if editorial_mode == "Top Five" else DEEP_DIVE_TOPICS
     output: Dict[str, str] = {}
-    for key, cfg in ultimate_bot.CONTENT_CATEGORIES.items():
-        if key == "sports_stories_of_day":
+    for key in keys:
+        cfg = ultimate_bot.CONTENT_CATEGORIES.get(key)
+        if not cfg:
             continue
         if format_mode == "top5" and not cfg.get("usable_top5", True) and key != "sports":
             continue
@@ -200,12 +224,13 @@ def build_config() -> Dict[str, Any]:
     language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
     language_label = st.session_state.get("language_label", "English")
     language_key = language_options.get(language_label, "english")
-    format_label = st.session_state.get("format_label", "Deep Dive")
+    mode = str(st.session_state.get("editorial_mode", "Deep Dive"))
 
-    if format_label == "Cricket":
+    if mode == "Cricket":
         return {
             "format_mode": "regular",
             "display_format": "Cricket",
+            "editorial_mode": "Cricket",
             "category": "sports_stories_of_day",
             "language": language_key,
             "language_label": language_label,
@@ -215,14 +240,28 @@ def build_config() -> Dict[str, Any]:
             "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),
         }
 
-    options = category_options(FORMAT_OPTIONS[format_label])
+    if mode == "AI":
+        return {
+            "format_mode": "regular",
+            "display_format": "AI",
+            "editorial_mode": "AI",
+            "category": "ai_recommendation",
+            "language": language_key,
+            "language_label": language_label,
+            "channel": st.session_state.get("selected_channel", _channel_options()[0]),
+            "cricket_pipeline": False,
+        }
+
+    format_mode = "top5" if mode == "Top Five" else "regular"
+    options = category_options(format_mode, mode)
     default_key = next(iter(options.values()))
     category_key = st.session_state.get("category_key", default_key)
     if category_key not in options.values():
         category_key = default_key
     return {
-        "format_mode": FORMAT_OPTIONS[format_label],
-        "display_format": format_label,
+        "format_mode": format_mode,
+        "display_format": mode,
+        "editorial_mode": mode,
         "category": category_key,
         "language": language_key,
         "language_label": language_label,
@@ -289,24 +328,27 @@ def render_sidebar_controls() -> Dict[str, Any]:
         key="language_label",
     )
 
-    format_labels = list(FORMAT_OPTIONS.keys())
-    current_format = st.session_state.get("format_label", format_labels[0])
+    mode_labels = ["Deep Dive", "Top Five", "Cricket", "AI"]
+    current_mode = st.session_state.get("editorial_mode", mode_labels[0])
     st.sidebar.selectbox(
-        "Format",
-        format_labels,
-        index=format_labels.index(current_format),
-        key="format_label",
+        "Editorial mode",
+        mode_labels,
+        index=mode_labels.index(current_mode),
+        key="editorial_mode",
+        help="Deep Dive and Top Five use curated topic menus. Cricket keeps its dedicated cricket intake. AI ranks current stories against channel history.",
     )
 
-    if st.session_state.format_label == "Cricket":
+    if st.session_state.editorial_mode == "Cricket":
         st.sidebar.selectbox("Cricket category", list(CRICKET_CATEGORIES.keys()), key="cricket_category")
         st.sidebar.text_input(
             "Specific topic (optional)",
             placeholder="e.g. BCCI to suspend Impact Player rule",
             key="requested_topic",
         )
+    elif st.session_state.editorial_mode == "AI":
+        st.sidebar.info("AI mode uses current news, channel history, genre fit, vault topics and trend signals to produce a Top 10.")
     else:
-        options = category_options(FORMAT_OPTIONS[st.session_state.format_label])
+        options = category_options("top5" if st.session_state.editorial_mode == "Top Five" else "regular", st.session_state.editorial_mode)
         labels = list(options.keys())
         current_key = st.session_state.get("category_key", next(iter(options.values())))
         current_label = next((label for label, key in options.items() if key == current_key), labels[0])
@@ -704,12 +746,20 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 conn = sqlite3.connect(ultimate_bot.DB_PATH)
                 try:
                     migrate_vault(conn)
-                    candidates = discover_ranked_topics(
-                        ultimate_bot,
-                        config,
-                        conn,
-                        max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
-                    )
+                    if config.get("editorial_mode") == "AI":
+                        candidates = discover_ai_topics(
+                            ultimate_bot,
+                            config,
+                            conn,
+                            max_candidates=10,
+                        )
+                    else:
+                        candidates = discover_ranked_topics(
+                            ultimate_bot,
+                            config,
+                            conn,
+                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                        )
                 finally:
                     conn.close()
                 st.session_state.candidates = candidates
@@ -762,6 +812,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 config["visual_search_queries"] = str(
                     st.session_state.get("visual_search_queries", "") or ""
                 ).strip()
+                if config.get("editorial_mode") == "AI":
+                    config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
+                    config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
                 st.session_state.production_started = True
                 st.session_state.final_qc = False
                 st.session_state.upload_result = ""
