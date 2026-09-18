@@ -1474,9 +1474,6 @@ async def process_visuals_async(script_data, language_cfg, format_mode="regular"
             clean_vo = re.sub(r'(number\s*\d+|story\s*#?\d+|#\d+)', '', seg.get("voiceover", ""), flags=re.IGNORECASE).strip()
             render_top5_card(bg_img, 6 - idx, 5, clean_vo or seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
             return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
-        elif idx == 0 and format_mode in ["regular", "trending", "tech_reviews"]:
-            render_hook_card(bg_img, seg.get("voiceover", ""), font_choice=font_choice).convert("RGB").save(img_path, "JPEG", quality=95)
-            return idx, [{"image": img_path, "text": "", "ai_generated": used_ai, "source_type": source_type}]
         else:
             overlay = Image.new("RGBA", target_size, (0,0,0,0))
             draw_bars = ImageDraw.Draw(overlay)
