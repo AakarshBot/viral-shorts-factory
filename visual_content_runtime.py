@@ -12,6 +12,8 @@ import os
 import re
 from PIL import Image, ImageDraw, ImageFont
 
+from branding_runtime import source_credit_for_type
+
 
 def _load_brand_font(bot, size, custom_font_name=None):
     try:
@@ -349,8 +351,6 @@ def patch_content_first_visuals(bot):
         for idx, seg in enumerate(scenes):
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
-
-            from branding_runtime import source_credit_for_type
 
             source_credit = source_credit_for_type(source_type)
             if idx == news_source_scene_index and isinstance(news_source_candidate, dict):
