@@ -159,16 +159,8 @@ def test_endpoint_subtitle_srt_uses_word_timings():
         assert "The headline is confirmed today officially" in text
 
 
-def test_compile_integrity_keeps_all_scene_timing_sets(monkeypatch):
+def test_compile_integrity_does_not_add_duplicate_endpoint_subtitles(monkeypatch):
     captured = {}
-
-    def fake_endpoint(video_path, audio_paths, word_timings):
-        captured["video_path"] = video_path
-        captured["audio_paths"] = list(audio_paths)
-        captured["word_timings"] = list(word_timings)
-        return video_path
-
-    monkeypatch.setattr("pipeline_integrity_runtime._add_endpoint_subtitles", fake_endpoint)
 
     class CompileBot:
         def __init__(self):
@@ -178,6 +170,13 @@ def test_compile_integrity_keeps_all_scene_timing_sets(monkeypatch):
             self.run_robot = run_robot
 
             def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
+                captured["args"] = (
+                    scene_visual_packages,
+                    audio_paths,
+                    word_timings,
+                    language_cfg,
+                    format_mode,
+                )
                 return "final.mp4"
 
             self.compile_video = compile_video
@@ -190,9 +189,15 @@ def test_compile_integrity_keeps_all_scene_timing_sets(monkeypatch):
         [{"word": "body2"}],
         [{"word": "outro"}],
     ]
-    result = bot.compile_video(["s1", "s2", "s3", "s4"], ["a1", "a2", "a3", "a4"], timings, {}, "regular")
+    result = bot.compile_video(
+        ["s1", "s2", "s3", "s4"],
+        ["a1", "a2", "a3", "a4"],
+        timings,
+        {},
+        "regular",
+    )
 
     assert result == "final.mp4"
-    assert captured["audio_paths"] == ["a1", "a2", "a3", "a4"]
-    assert captured["word_timings"] == timings
-    assert len(captured["word_timings"]) == 4
+    assert captured["args"][1] == ["a1", "a2", "a3", "a4"]
+    assert captured["args"][2] == timings
+    assert len(captured["args"][2]) == 4
