@@ -7,6 +7,7 @@ the user-facing visual approval/upload decisions.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict
@@ -155,6 +156,8 @@ def _init_state() -> None:
         "visual_search_queries": "",
         "discovery_headline_selection": None,
         "editorial_mode": "Deep Dive",
+        "metadata_approved": False,
+        "metadata_loaded_run_id": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -178,6 +181,8 @@ def reset_run() -> None:
         "pending_candidate": None,
         "visual_search_queries": "",
         "discovery_headline_selection": None,
+        "metadata_approved": False,
+        "metadata_loaded_run_id": "",
     }.items():
         st.session_state[key] = value
 
@@ -570,6 +575,32 @@ def render_visual_details(snapshot: Dict[str, Any]) -> None:
             st.markdown(" — ".join(details))
 
 
+def render_console(snapshot: Dict[str, Any]) -> None:
+    lines = snapshot.get("console_lines") or []
+    if not lines:
+        return
+
+    latest = lines[-1]
+    upload_match = re.search(r"\[Upload Progress\]\s*(\d+)%", latest)
+    render_match = re.search(r"(?:Rendering Video Scenes|Writing video file).*?(\d{1,3})%", latest)
+    operation_percent = None
+    operation_label = ""
+    if upload_match:
+        operation_percent = int(upload_match.group(1))
+        operation_label = "YouTube upload"
+    elif render_match:
+        operation_percent = int(render_match.group(1))
+        operation_label = "Final video render"
+
+    st.markdown("### Live factory console")
+    st.caption("Live output from the factory worker, presented here without replacing the underlying PowerShell console.")
+    if operation_percent is not None:
+        st.markdown(f"**{operation_label}** · {operation_percent}%")
+        st.progress(max(0.0, min(1.0, operation_percent / 100)))
+    with st.container(border=True):
+        st.code("\n".join(lines[-80:]), language="text")
+
+
 def render_logs(snapshot: Dict[str, Any]) -> None:
     logs = snapshot.get("dashboard_logs") or []
     if not logs:
@@ -582,16 +613,33 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
 
 def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
     video_path = str(snapshot.get("video_path") or "").strip()
-    ready_for_upload = upload_ready_for_manual_decision(snapshot)
-    if not ready_for_upload:
+    if not upload_ready_for_manual_decision(snapshot):
         return
 
-    st.session_state.setdefault("confirm_public_upload", False)
+    script_data = snapshot.get("script_data") or {}
+    metadata = snapshot.get("final_metadata") or {}
+    run_id = str(snapshot.get("run_id") or "")
+    if st.session_state.get("metadata_loaded_run_id") != run_id:
+        st.session_state["final_title"] = str(
+            metadata.get("title")
+            or script_data.get("title")
+            or (snapshot.get("selected_story") or {}).get("title")
+            or ""
+        ).strip()
+        st.session_state["final_description"] = str(
+            metadata.get("description") or script_data.get("seo_description") or ""
+        ).strip()
+        st.session_state["final_comment"] = str(
+            metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""
+        ).strip()
+        st.session_state["metadata_loaded_run_id"] = run_id
+        st.session_state["metadata_approved"] = False
 
     st.markdown("---")
     st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
+
     qc_checks = [
-        ("Rendered video", bool(str(snapshot.get("video_path") or "").strip())),
+        ("Rendered video", bool(video_path)),
         ("Script generated", bool(snapshot.get("script_data"))),
         ("Visual package", bool(snapshot.get("visual_packages"))),
         ("Visual approval", bool(snapshot.get("visual_review_approved"))),
@@ -601,28 +649,70 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         col.metric(label, "PASS" if ok else "CHECK")
 
     st.markdown("### Final video")
-    st.success("The Short is rendered, branded and ready for your upload decision.", icon="✅")
-
     if video_path and os.path.isfile(video_path):
+        st.success("The Short is rendered, branded and ready for your review.", icon="✅")
         st.video(video_path)
     else:
-        st.warning("The final video file is not available at the expected path.")
+        st.error("The dashboard has a final video path, but the file is not accessible from this dashboard process.")
+        st.code(video_path or "No final video path recorded.", language="text")
+        return
 
-    script_data = snapshot.get("script_data") or {}
-    metadata = snapshot.get("final_metadata") or {}
-    default_title = str(metadata.get("title") or script_data.get("title") or snapshot.get("selected_story", {}).get("title") or "").strip()
-    default_description = str(metadata.get("description") or script_data.get("seo_description") or "").strip()
-    default_comment = str(metadata.get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
+    st.markdown("### 1 · Review and approve metadata")
+    st.caption("Edit the title, description and creator comment. Upload controls stay locked until you explicitly approve these fields.")
 
-    title = st.text_input("YouTube title", value=default_title, max_chars=100, key="final_title")
-    description = st.text_area("YouTube description", value=default_description, height=150, key="final_description")
-    comment = st.text_area("Creator comment", value=default_comment, height=110, key="final_comment")
-
-    st.markdown("#### Choose upload visibility")
-    st.info(
-        "Choose **Private** to keep the video hidden, or **Public** to publish it immediately. "
-        "Public uploads require a second confirmation before anything is published."
+    editing = not bool(st.session_state.get("metadata_approved"))
+    title = st.text_input(
+        "YouTube title",
+        max_chars=100,
+        key="final_title",
+        disabled=not editing,
     )
+    description = st.text_area(
+        "YouTube description",
+        height=150,
+        key="final_description",
+        disabled=not editing,
+    )
+    comment = st.text_area(
+        "Creator comment",
+        height=110,
+        key="final_comment",
+        disabled=not editing,
+    )
+
+    if editing:
+        approve_col, info_col = st.columns([1, 2])
+        with approve_col:
+            if st.button(
+                "✅ Approve title, description & comment",
+                type="primary",
+                use_container_width=True,
+                key="approve_metadata",
+            ):
+                try:
+                    from final_qc_runtime import validate_final_upload_metadata
+                    clean_title, clean_description, clean_comment = validate_final_upload_metadata(
+                        title, description, comment
+                    )
+                    st.session_state["final_title"] = clean_title
+                    st.session_state["final_description"] = clean_description
+                    st.session_state["final_comment"] = clean_comment
+                    st.session_state["metadata_approved"] = True
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
+        with info_col:
+            st.info("Nothing will be uploaded until the metadata approval above succeeds.")
+        return
+
+    st.success("Metadata approved. You can now choose how the Short is published.", icon="✅")
+    if st.button("✏️ Edit metadata", use_container_width=True, key="edit_metadata"):
+        st.session_state["metadata_approved"] = False
+        st.rerun()
+
+    st.markdown("### 2 · Choose upload visibility")
+    st.info("Private keeps the Short hidden on YouTube. Public publishes it immediately after the final confirmation.")
+
     public_col, private_col = st.columns(2)
     with public_col:
         if st.button("🌐 Upload Publicly", type="primary", use_container_width=True, key="upload_public"):
@@ -631,30 +721,31 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with private_col:
         if st.button("🔒 Upload Privately", use_container_width=True, key="upload_private"):
             st.session_state["confirm_public_upload"] = False
-            _perform_upload(controller, snapshot, title, description, comment, "private")
+            _perform_upload(
+                controller,
+                snapshot,
+                st.session_state["final_title"],
+                st.session_state["final_description"],
+                st.session_state["final_comment"],
+                "private",
+            )
 
     if st.session_state.get("confirm_public_upload"):
-        st.warning(
-            "⚠️ You are about to publish this video publicly. "
-            "It will become visible on YouTube immediately, and the creator comment "
-            "will be posted automatically. Continue?"
-        )
+        st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
         confirm_col, cancel_col = st.columns(2)
         with confirm_col:
-            if st.button(
-                "✅ Yes, upload publicly",
-                type="primary",
-                use_container_width=True,
-                key="confirm_upload_public",
-            ):
+            if st.button("✅ Yes, upload publicly", type="primary", use_container_width=True, key="confirm_upload_public"):
                 st.session_state["confirm_public_upload"] = False
-                _perform_upload(controller, snapshot, title, description, comment, "public")
+                _perform_upload(
+                    controller,
+                    snapshot,
+                    st.session_state["final_title"],
+                    st.session_state["final_description"],
+                    st.session_state["final_comment"],
+                    "public",
+                )
         with cancel_col:
-            if st.button(
-                "← Cancel",
-                use_container_width=True,
-                key="cancel_upload_public",
-            ):
+            if st.button("← Cancel", use_container_width=True, key="cancel_upload_public"):
                 st.session_state["confirm_public_upload"] = False
                 st.rerun()
 
@@ -715,6 +806,7 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
         render_visual_details(snapshot)
 
         render_activity_timeline(snapshot)
+        render_console(snapshot)
         render_logs(snapshot)
 
         if snapshot.get("stage") == "error":
