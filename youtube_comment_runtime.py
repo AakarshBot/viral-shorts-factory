@@ -3,11 +3,6 @@
 import os
 import re
 
-from audio_direction_runtime import patch_audio_direction
-from branding_runtime import patch_branding_pipeline
-from research_runtime import patch_research_pipeline
-from subtitle_runtime import patch_subtitle_pipeline
-
 
 def _clean_comment(text):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -83,18 +78,7 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
 
 
 def patch_youtube_upload(bot):
-    """Install newsroom research/audio/subtitle/branding hooks and safe uploader."""
-    for label, fn in (
-        ("Research", patch_research_pipeline),
-        ("Audio Direction", patch_audio_direction),
-        ("Subtitle Patch", patch_subtitle_pipeline),
-        ("Branding Patch", patch_branding_pipeline),
-    ):
-        try:
-            fn(bot)
-        except Exception as exc:
-            print(f"   [{label}] Could not install: {exc}", flush=True)
-
+    """Install the creator-comment uploader on the already-bound runtime."""
     current = getattr(bot, "upload_to_youtube", None)
     if current is None or getattr(current, "_creator_comment_wrapped", False):
         return current
