@@ -289,8 +289,9 @@ class WorkflowController:
         self.update(stage, percent, message)
 
     def _install_production_wrappers(self):
-        """Compatibility hook; production bindings install the canonical wrappers."""
-        self._patched = True
+        """Install the single canonical production wrapper set for this controller."""
+        from production_hardening_runtime import install_production_wrappers
+        install_production_wrappers(self)
 
     def _mark_latest_run_ready_for_qc(self, _topic: str = ""):
         """Mark only the exact production row as READY_FOR_UPLOAD."""
