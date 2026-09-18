@@ -193,11 +193,28 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
     factual_entity = str(seg.get("factual_primary_entity") or entity).strip()
+    manual_query = str(seg.get("manual_visual_query") or "").strip()
     queries, visual_type = runtime._build_search_variants(seg, video_title)
+
+    # A supplied manual query is an explicit visual identity override. It must
+    # not be QA-checked against the scene's unrelated factual entity (for
+    # example, a scene about the Pakistan Cricket Board may intentionally use
+    # "Mohammad Rizwan" as the requested visual). Keep the story entity for
+    # narration/context, but route, cache, source-plan and semantic QA through
+    # the manual visual anchor.
+    visual_anchor = manual_query or entity
+    if manual_query:
+        try:
+            from visual_strategy_runtime import classify_scene
+            manual_visual_type = classify_scene({"primary_entity": manual_query}, "")
+            if manual_visual_type:
+                visual_type = manual_visual_type
+        except Exception:
+            pass
     visual_type = str(visual_type or "GENERAL_CONTEXT").upper()
 
-    if not entity or not queries:
-        rescue = make_visual_rescue(entity or factual_entity, visual_type)
+    if not visual_anchor or not queries:
+        rescue = make_visual_rescue(visual_anchor or factual_entity, visual_type)
         seg["visual_verified"] = False
         seg["visual_rescue_reason"] = "no-grounded-query"
         seg["visual_fallback_reason"] = ""
@@ -208,7 +225,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     prompt = str(seg.get("specific_search_prompt") or entity).strip()
     voice = str(seg.get("factual_voiceover") or seg.get("voiceover") or "").strip()
     context = _context_fingerprint(intent, prompt, voice, video_title)
-    cache_entity = factual_entity or entity
+    cache_entity = manual_query or factual_entity or entity
 
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
     if cached_img is not None:
@@ -235,7 +252,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     qa_scene["primary_entity"] = cache_entity
     qa_scene["factual_primary_entity"] = cache_entity
     qa_scene["visual_intent"] = intent
-    qa_scene["specific_search_prompt"] = prompt
+    qa_scene["specific_search_prompt"] = manual_query or prompt
     qa_scene["voiceover"] = voice
 
     print(
