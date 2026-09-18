@@ -879,6 +879,11 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         max_gdelt_records=75,
     )
     events = event_pool["events"]
+    # Preserve the initial GDELT intake across adaptive expansions. Re-running
+    # the same base GDELT query for every refinement adds duplicate network work
+    # without adding new base-query evidence.
+    raw = list(event_pool.get("articles") or raw)
+    initial_gdelt_count = int(event_pool.get("gdelt_article_count") or 0)
     print(
         f"   [Discovery Funnel] article intake={event_pool['article_count']} "
         f"(GDELT={event_pool['gdelt_article_count']}) -> "
@@ -897,13 +902,14 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
             continue
         raw.extend(extra)
         compact = compact_items(raw)
-        event_pool = discover_event_pool(
-            query=base_query,
-            existing_articles=compact,
-            timespan="48h",
-            max_gdelt_records=75,
-        )
-        events = event_pool["events"]
+        events = cluster_news_events(compact)
+        event_pool = {
+            "articles": compact,
+            "events": events,
+            "article_count": len(compact),
+            "event_count": len(events),
+            "gdelt_article_count": initial_gdelt_count,
+        }
         if len(events) >= 12:
             break
 
