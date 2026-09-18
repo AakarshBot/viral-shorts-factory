@@ -816,6 +816,11 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         f"📚 Channel history: {evidence['channel_history']:.1f}/10"
                         f" · ✨ Originality: {evidence['originality']:.1f}/10"
                     )
+                    if evidence["historical_discovery"]:
+                        st.caption(
+                            f"🧠 Proven discovery pattern: {evidence['historical_discovery']:.1f}/10"
+                            f" · {evidence['historical_discovery_matches']} matching run{'s' if evidence['historical_discovery_matches'] != 1 else ''}"
+                        )
                     if evidence["official_records"]:
                         st.caption(f"✅ Official feed records: {evidence['official_records']}")
                     if evidence["reddit_records"]:
