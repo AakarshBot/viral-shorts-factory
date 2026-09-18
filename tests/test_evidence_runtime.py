@@ -22,6 +22,8 @@ def _source(url, publisher, text, tier=None):
     }
     if tier is not None:
         item["tier"] = tier
+    else:
+        item["tier"] = source_tier(item)
     return item
 
 
