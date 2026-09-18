@@ -24,13 +24,14 @@ def _prepare_primary_writer_data(story_data: Dict[str, Any], format_mode: str) -
     if str(format_mode or "").lower() != "cricket":
         return data
     raw_text = _clean(
-        data.get("research_evidence_text")
-        or data.get("research_bundle")
-        or data.get("text")
+        data.get("text")
         or data.get("summary")
         or data.get("description")
         or data.get("title")
     )
+    evidence_text = _clean(data.get("research_evidence_text") or data.get("research_bundle"))
+    if evidence_text:
+        raw_text = f"{raw_text}\n\n{evidence_text}".strip()
     title = _clean(data.get("title") or data.get("topic") or "Selected cricket story")
     data["text"] = json.dumps([{"title": title, "text": raw_text}])
     return data
