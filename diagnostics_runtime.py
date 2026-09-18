@@ -147,25 +147,27 @@ def _test_visual_strategy():
 
 def _test_scene_branding():
     from PIL import Image
-    from visual_content_runtime import _render_scene_overlay
+
+    from branding_runtime import (
+        LOGO_BOX_SIZE,
+        build_scene_branding_overlays,
+        source_credit_for_type,
+    )
 
     source = Image.new("RGBA", (1080, 1920), (18, 24, 34, 255))
-    rendered = _render_scene_overlay(
-        None,
-        source,
-        2,
-        5,
-        "STATISTIC",
-        "Wikipedia",
-        "The price fell by 25 percent.",
-    )
-    if rendered.size != source.size or rendered.mode != "RGBA":
-        raise AssertionError("scene visual cleanup changed output geometry/mode")
-    # Scene images must remain clean. The final branding layer, not the scene
-    # compositor, owns the channel logo and border treatment.
-    if rendered.tobytes() != source.tobytes():
-        raise AssertionError("scene visual cleanup baked an editorial overlay into the image")
-    return "Scene visuals stay clean; final branding owns the logo and border finish"
+    layers = build_scene_branding_overlays(None, 1080, 1920, "Source: Reuters")
+
+    if len(layers) != 2:
+        raise AssertionError("final branding must expose logo/frame and source layers")
+    if any(layer.shape != (1920, 1080, 4) for layer in layers):
+        raise AssertionError("final branding layers changed output geometry")
+    if layers[0][36:36 + LOGO_BOX_SIZE, 1080 - 36 - LOGO_BOX_SIZE:1080 - 36, 3].max() <= 0:
+        raise AssertionError("top-right logo glass badge is not rendered")
+    if layers[1][-100:, -420:, 3].max() <= 0:
+        raise AssertionError("bottom-right source badge is not rendered")
+    if source_credit_for_type("news_source", "Source: Reuters") != "SOURCE · Reuters":
+        raise AssertionError("source credit normalization failed")
+    return "Final branding owns the fixed logo/frame and dynamic source-credit overlays"
 
 def _test_script_and_audio():
     from audio_runtime import clean_audio_text, normalise_word_timings, validate_audio_timing, validate_timing_against_duration
