@@ -78,7 +78,7 @@ def test_dashboard_controller_captures_generated_audio_paths(tmp_path):
     bot.run_robot.__globals__["generate_voiceover_and_timestamps"] = fake_voiceover
 
     controller = DashboardWorkflowController(bot)
-    WorkflowController._install_production_wrappers(controller)
+    controller._install_production_wrappers()
 
     result = asyncio.run(
         bot.run_robot.__globals__["generate_voiceover_and_timestamps"]()
