@@ -126,28 +126,24 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         queries = [query]
         if query.casefold() != subject.casefold():
             queries.append(subject)
-        for term in scene_terms:
-            candidate = _clean(f"{subject} {term}")
-            if candidate.casefold() not in {item.casefold() for item in queries}:
-                queries.append(candidate)
-            if len(queries) >= 3:
-                break
 
     intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
-    context = _clean(
-        scene.get("visual_context")
-        or scene.get("factual_search_prompt")
-        or scene.get("specific_search_prompt")
-        or scene.get("factual_voiceover")
-        or scene.get("voiceover")
-        or video_title
-    )
+    context = _clean(" ".join(
+        _clean(scene.get(field, ""))
+        for field in (
+            "factual_visual_intent", "visual_intent", "visual_context",
+            "factual_search_prompt", "specific_search_prompt",
+            "factual_voiceover", "voiceover",
+        )
+        if _clean(scene.get(field, ""))
+    ) or video_title)
 
     return VisualSearchIntent(
         subject=subject,
         visual_type=visual_type,
         visual_genre=classify_visual_genre(scene, subject, visual_type),
         query=query,
+        queries=tuple(queries),
         intent=intent,
         context=context,
         confidence=confidence,
