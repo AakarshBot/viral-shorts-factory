@@ -137,6 +137,143 @@ def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 
     return kept
 
 
+
+
+# Dashboard-only AI topic selection. This deliberately lives here so the
+# factory's production CONTENT_CATEGORIES and format contracts stay unchanged.
+AI_DISCOVERY_CATEGORY_KEYS = (
+    "national_global_affairs",
+    "technology",
+    "business_finance",
+    "entertainment",
+    "sports_stories_of_day",
+    "health_lifestyle",
+    "viral_phenomenon",
+)
+
+
+def _dashboard_history_fit(story, rows, category, language):
+    history, matches = _historical_score(story, rows, category, "regular", language)
+    story["channel_history_fit"] = round(min(10.0, history * 0.10), 2)
+    story["historical_topic_matches"] = matches
+    return history
+
+
+def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 10) -> list[dict[str, Any]]:
+    """Build a Top-10 current-topic list using one intentional query per useful genre."""
+    from story_ranker import (
+        _canonical_url,
+        _candidate_reason,
+        _cheap_filter,
+        _deduplicate_stage,
+        _editorial_score,
+        _fact_source_stage,
+        _gnews_items,
+        _load_history,
+        _load_used_topics,
+        _official_feed_items,
+        _originality_stage,
+        _reddit_items,
+        _rss_items,
+        _source_label,
+        _story_key,
+        _story_url,
+        _tokens,
+        discover_event_pool,
+    )
+
+    max_candidates = max(3, min(10, int(max_candidates or 10)))
+    rows = _load_history(conn)
+    used_topics = _load_used_topics(conn)
+    language = str(web_config.get("language", "english"))
+    api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
+    raw: list[dict[str, Any]] = []
+
+    for category in AI_DISCOVERY_CATEGORY_KEYS:
+        cfg = bot.CONTENT_CATEGORIES.get(category) or {}
+        query = str(cfg.get("gnews_q", "") or "").strip()
+        if query:
+            raw.extend(_gnews_items(query, api_key, category))
+        rss_url = str(cfg.get("rss_url", "") or "").strip()
+        if rss_url:
+            raw.extend(_rss_items(rss_url, category))
+        raw.extend(_official_feed_items(category, cfg))
+
+    social_rows = _reddit_items("viral_phenomenon")
+    raw.extend(social_rows)
+    social_titles = [row.get("title", "") for row in social_rows]
+
+    compact: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        key = _canonical_url(item.get("url") or item.get("link"))
+        if not key:
+            key = "title:" + " ".join(sorted(_tokens(item.get("title", ""))))
+        if key and key not in seen:
+            seen.add(key)
+            compact.append(item)
+
+    event_pool = discover_event_pool(
+        query="India OR world OR technology OR business OR entertainment OR cricket",
+        existing_articles=compact,
+        timespan="48h",
+        max_gdelt_records=75,
+    )
+    candidates = event_pool.get("events") or compact
+
+    stage30 = _cheap_filter(candidates, max_items=40, max_age_hours=48)
+    stage20 = _deduplicate_stage(stage30, max_items=20)
+    stage20 = _recent_topic_cooldown(conn, stage20, hours=48)
+    stage12 = _fact_source_stage(stage20, max_items=12)
+    stage10 = _originality_stage(stage12, used_topics, max_items=max_candidates)
+
+    ranked: list[dict[str, Any]] = []
+    for item in stage10:
+        category = str(item.get("genre") or "national_global_affairs")
+        scored = _editorial_score(
+            item,
+            rows,
+            category,
+            "regular",
+            language,
+            social_titles,
+            ai_cricket=False,
+        )
+        history = _dashboard_history_fit(item, rows, category, language)
+        scored["candidate_score"] = round(
+            float(scored.get("candidate_score") or 0.0) + min(10.0, history * 0.10),
+            3,
+        )
+        scored["recommended_category"] = category if category in bot.CONTENT_CATEGORIES else "national_global_affairs"
+        scored["recommended_format"] = "regular"
+        scored["ai_recommendation"] = True
+        ranked.append(scored)
+
+    ranked.sort(key=lambda item: float(item.get("candidate_score") or -9999.0), reverse=True)
+    pool = ranked[:max_candidates]
+    for rank, item in enumerate(pool, 1):
+        item["discovery_rank"] = rank
+        item["discovery_reason"] = _candidate_reason(item)
+        item["source_label"] = _source_label(item)
+        item["story_url"] = _story_url(item)
+        item["story_key"] = _story_key(item)
+        item["ai_fit_summary"] = (
+            f"Current momentum + freshness + source support + channel-history fit "
+            f"({item.get('channel_history_fit', 0):.1f}/10)."
+        )
+
+    if len(pool) < 3:
+        raise ValueError(f"AI discovery produced only {len(pool)} usable candidate(s). At least 3 are required.")
+    print(
+        f"   [AI Discovery] current intake={len(compact)} -> events={len(candidates)} -> "
+        f"Top {len(pool)}; history used as a fit signal, not a repetition target.",
+        flush=True,
+    )
+    return pool
+
+
 def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 20) -> list[dict[str, Any]]:
     """Dashboard discovery pool: return up to 20 ranked, distinct recent topics."""
     from story_ranker import (
