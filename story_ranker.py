@@ -7,6 +7,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from urllib.parse import urlparse
 
@@ -103,16 +104,32 @@ def _source_domain(story):
 
 
 def _published_datetime(story):
+    """Parse the date formats used by GNews, RSS, Reddit and event evidence."""
     for key in ("published_at", "publishedAt", "published", "pub_date", "date", "timestamp"):
         raw = story.get(key)
-        if not raw:
+        if raw in (None, ""):
             continue
+        if isinstance(raw, (int, float)):
+            try:
+                return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+            except (TypeError, ValueError, OSError, OverflowError):
+                continue
         text = str(raw).strip()
-        try:
-            return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
-        except ValueError:
+        if not text:
             continue
-        except Exception:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            pass
+        try:
+            parsed = parsedate_to_datetime(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
             continue
     return None
 
@@ -151,9 +168,8 @@ def _event_momentum_score(story):
         raw = item.get("publishedAt") if isinstance(item, dict) else None
         if not raw:
             continue
-        try:
-            published = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(timezone.utc)
-        except (TypeError, ValueError):
+        published = _published_datetime({"publishedAt": raw})
+        if published is None:
             continue
 
         age_hours = max(0.0, (now - published).total_seconds() / 3600.0)
@@ -600,7 +616,8 @@ def _cheap_filter(stories, max_items=30, max_age_hours=48):
             story["safety_hits"] = hits
             continue
         age = _age_hours(story)
-        if age != 9999.0 and age > max_age_hours:
+        if age == 9999.0 or age > max_age_hours:
+            story["discovery_rejection"] = "Missing or stale publication date"
             continue
         url = _canonical_url(_source_url_from_item(story))
         if url and url in seen_urls:
@@ -820,24 +837,11 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
     raw = []
 
-    try:
-        legacy = bot.gather_and_filter_stories(
-            None,
-            genre_key,
-            genre_cfg,
-            trend_keyword,
-            custom_gnews_q,
-            custom_rss_url,
-        )
-        if isinstance(legacy, list):
-            raw.extend(legacy)
-    except TypeError:
-        pass
-    except Exception as exc:
-        print(f"   [Discovery] Legacy intake pass skipped: {type(exc).__name__}", flush=True)
-
-    for query in _query_variants(base_query, genre_key, ai_cricket=ai_cricket):
-        raw.extend(_gnews_items(query, api_key, genre_key))
+    # Dashboard discovery is the authoritative intake path. The patched
+    # bot.gather_and_filter_stories performs its own intake, so calling it
+    # here would repeat the same network work a second time.
+    if base_query:
+        raw.extend(_gnews_items(base_query, api_key, genre_key))
 
     raw.extend(_rss_items(custom_rss_url or genre_cfg.get("rss_url", ""), genre_key))
     raw.extend(_official_feed_items(genre_key, genre_cfg))
