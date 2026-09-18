@@ -324,4 +324,43 @@ def extract_news_source_image(article_url: str, publisher_hint: str = "") -> dic
     return None
 
 
-__all__ = ["extract_news_source_image"]
+
+def apply_source_credit(image: Image.Image, credit: str, *, font_size: int = 28) -> Image.Image:
+    """Burn a compact, readable source credit into the bottom-right corner."""
+    base = image.convert("RGBA")
+    text = _clean(credit)[:120]
+    if not text:
+        return base
+    draw = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).ImageDraw.Draw(base)
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+    except Exception:
+        try:
+            from PIL import ImageFont
+            font = ImageFont.truetype(r"C:\\Windows\\Fonts\\arial.ttf", font_size)
+        except Exception:
+            from PIL import ImageFont
+            font = ImageFont.load_default()
+    bbox = draw.textbbox((0, 0), text, font=font)
+    pad_x, pad_y = 14, 8
+    margin = 24
+    box_w = bbox[2] - bbox[0] + pad_x * 2
+    box_h = bbox[3] - bbox[1] + pad_y * 2
+    left = max(0, base.width - box_w - margin)
+    top = max(0, base.height - box_h - margin)
+    draw.rounded_rectangle(
+        [left, top, base.width - margin, base.height - margin],
+        radius=max(8, font_size // 3),
+        fill=(0, 0, 0, 165),
+    )
+    draw.text(
+        (left + pad_x, top + pad_y - bbox[1]),
+        text,
+        font=font,
+        fill=(255, 255, 255, 235),
+    )
+    return base
+
+
+__all__ = ["extract_news_source_image", "apply_source_credit"]
