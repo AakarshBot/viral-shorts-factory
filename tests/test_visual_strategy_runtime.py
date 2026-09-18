@@ -190,17 +190,18 @@ def test_automatic_query_ladder_is_bounded_and_evidence_based():
     assert all("conference" not in q.lower() for q in intent.queries)
     assert all("story" not in q.lower() for q in intent.queries)
 
-def test_manual_visual_query_never_gets_automatic_retry():
-    from visual_search_intent_runtime import resolve_visual_search_intent, reformulate_visual_query
+def test_non_first_manual_query_is_exact_and_has_no_automatic_ladder():
+    from visual_search_intent_runtime import resolve_visual_search_intent
 
     intent = resolve_visual_search_intent(
         {
             "primary_entity": "Pakistan Cricket Board",
             "manual_visual_query": "Mohammad Rizwan",
+            "manual_visual_query_index": 2,
             "voiceover": "Pakistan Cricket Board announced the squad.",
         }
     )
 
     assert intent.manual is True
     assert intent.query == "Mohammad Rizwan"
-    assert reformulate_visual_query(intent, "no candidates") == ""
+    assert intent.queries == ("Mohammad Rizwan",)
