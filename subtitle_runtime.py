@@ -149,30 +149,6 @@ def _fit_layout(words: list[str], base_font_size: int, font_path: str | None, ma
     return font, _split_lines(words, font, max_width)[:max_lines]
 
 
-def _glass_surface(base: Image.Image, box, radius: int, tint=(7, 13, 23, 120), blur_radius: int = 20):
-    """Build a frosted panel from the underlying image, not a flat opaque card."""
-    x0, y0, x1, y1 = [int(v) for v in box]
-    surface = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    panel_w = max(1, x1 - x0)
-    panel_h = max(1, y1 - y0)
-    crop = base.crop((x0, y0, x1, y1)).convert("RGBA")
-    crop = crop.filter(ImageFilter.GaussianBlur(max(2, int(blur_radius))))
-    crop = Image.blend(crop, Image.new("RGBA", crop.size, tint), 0.62)
-
-    mask = Image.new("L", (panel_w, panel_h), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, panel_w - 1, panel_h - 1), radius=max(4, int(radius)), fill=255)
-    surface.paste(crop, (x0, y0), mask)
-
-    draw = ImageDraw.Draw(surface)
-    draw.rounded_rectangle((x0, y0, x1 - 1, y1 - 1), radius=max(4, int(radius)), outline=(255, 255, 255, 90), width=2)
-    highlight_h = max(10, int(panel_h * 0.20))
-    highlight = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    hmask = Image.new("L", (panel_w, highlight_h), 0)
-    ImageDraw.Draw(hmask).rounded_rectangle((0, 0, panel_w - 1, min(highlight_h * 2, highlight_h - 1)), radius=max(4, int(radius)), fill=255)
-    highlight.paste((255, 255, 255, 22), (x0, y0), hmask)
-    return Image.alpha_composite(surface, highlight)
-
-
 def generate_readable_karaoke_clip(
     chunk,
     active_index,
