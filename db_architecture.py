@@ -12,7 +12,7 @@ VAULT_COLUMNS = [
     ("ai_image_ratio", "REAL"), ("voice_gender", "TEXT"), ("format_used", "TEXT"),
     ("language_used", "TEXT"), ("avg_view_duration", "REAL"), ("avg_view_percentage", "REAL"),
     ("combo_key", "TEXT"), ("title_ctr", "REAL"), ("hook_style_used", "TEXT"),
-    ("trend_keyword", "TEXT"), ("discovery_json", "TEXT"),
+    ("trend_keyword", "TEXT"),
 ]
 
 
@@ -49,7 +49,6 @@ def _create(conn):
         title_ctr REAL,
         hook_style_used TEXT,
         trend_keyword TEXT,
-        discovery_json TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""")
@@ -103,7 +102,6 @@ def migrate_vault(conn):
     _add_column(conn, "status", "TEXT DEFAULT 'COMPLETED'")
     _add_column(conn, "created_at", "TIMESTAMP")
     _add_column(conn, "updated_at", "TIMESTAMP")
-    _add_column(conn, "discovery_json", "TEXT")
     conn.execute("UPDATE vault SET status = CASE WHEN video_id = 'PENDING_QC' THEN 'PENDING_QC' WHEN video_id = 'REJECTED' THEN 'REJECTED' WHEN video_id IS NULL OR video_id = '' THEN 'FAILED' ELSE COALESCE(status, 'COMPLETED') END")
     conn.execute("UPDATE vault SET created_at = COALESCE(created_at, date_used, CURRENT_TIMESTAMP)")
     conn.execute("UPDATE vault SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)")
@@ -145,7 +143,7 @@ def update_run_record(conn, row_id, **fields):
         "narrative_completeness", "audience_fit", "monetization_risk", "shelf_life",
         "composite_score", "rejected_reason", "script_json", "ai_image_ratio", "voice_gender",
         "format_used", "language_used", "avg_view_duration", "avg_view_percentage", "combo_key",
-        "title_ctr", "hook_style_used", "trend_keyword", "discovery_json",
+        "title_ctr", "hook_style_used", "trend_keyword",
     }
     unknown = set(fields) - allowed
     if unknown:
