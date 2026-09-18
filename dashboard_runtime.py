@@ -726,6 +726,39 @@ def collect_live_channel_statistics(bot) -> dict[str, Any]:
         }
 
 
+def _run_scene_branding_demo() -> dict[str, Any]:
+    """Render a representative final-frame preview using the canonical compositor."""
+    from PIL import ImageDraw
+    from branding_runtime import build_scene_branding_overlays
+
+    temp_dir = tempfile.mkdtemp(prefix="vsf_branding_demo_")
+    preview_path = os.path.join(temp_dir, "final_branding_preview.png")
+    width, height = 1080, 1920
+    base = Image.new("RGB", (width, height))
+    pixels = base.load()
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        shade = int(18 + 48 * ratio)
+        for x in range(width):
+            pixels[x, y] = (12 + int(22 * (1 - ratio)), 28 + shade // 2, 52 + shade)
+    draw = ImageDraw.Draw(base)
+    draw.text((70, 160), "FINAL VIDEO PREVIEW", fill=(240, 245, 250), font=None)
+    draw.text((70, 220), "Canonical end-of-video branding", fill=(145, 180, 205), font=None)
+    draw.rounded_rectangle((70, 330, 1010, 1540), radius=32, outline=(80, 115, 145), width=3)
+    draw.text((110, 430), "This is a synthetic frame.\nThe real video remains unchanged beneath the overlay.", fill=(220, 228, 235), font=None, spacing=18)
+
+    overlays = build_scene_branding_overlays(__import__("ultimate_bot"), width, height, "Source: Reuters")
+    composed = base.convert("RGBA")
+    for layer in overlays:
+        composed = Image.alpha_composite(composed, Image.fromarray(layer, mode="RGBA"))
+    composed.convert("RGB").save(preview_path, "PNG")
+    return {
+        "status": "PASS",
+        "detail": "Canonical final branding rendered successfully on a 1080x1920 synthetic frame. This is the same overlay path used by the final compositor.",
+        "artifacts": {"final_branding_preview": preview_path},
+    }
+
+
 def _run_synthetic_renderer_demo() -> dict[str, Any]:
     """Exercise the current premium subtitle/card renderers without network calls."""
     from subtitle_runtime import (
@@ -845,6 +878,9 @@ def run_demo_section(section: str) -> dict[str, Any]:
             }
         except Exception as exc:
             return {"status": "FAIL", "detail": f"{type(exc).__name__}: {exc}"}
+
+    if section == "scene_branding":
+        return _run_scene_branding_demo()
 
     if section == "premium_renderers":
         return _run_synthetic_renderer_demo()
