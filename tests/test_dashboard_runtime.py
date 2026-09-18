@@ -4,7 +4,11 @@ import threading
 import time
 from pathlib import Path
 
-from dashboard_runtime import DashboardWorkflowController, collect_channel_statistics
+from dashboard_runtime import (
+    DashboardWorkflowController,
+    build_discovery_evidence,
+    collect_channel_statistics,
+)
 from workflow_runtime import WorkflowController
 
 
@@ -186,3 +190,51 @@ def test_dashboard_discovery_retains_twelve_ranked_topics(monkeypatch):
     assert len(pool) == 12
     assert [item["discovery_rank"] for item in pool] == list(range(1, 13))
 
+
+
+def test_build_discovery_evidence_summarises_event_support_and_signals():
+    candidate = {
+        "event_article_count": 7,
+        "event_source_count": 3,
+        "event_evidence_publishers": ["Reuters", "BBC", "Associated Press"],
+        "event_source_domains": ["reuters.com", "bbc.com", "apnews.com"],
+        "event_latest_published_at": "2026-09-18T08:00:00+00:00",
+        "event_momentum_score": 6.5,
+        "freshness_score": 8.0,
+        "corroboration_bonus": 6.0,
+        "source_quality_score": 4.5,
+        "social_signal": 2.0,
+        "google_trends_signal": 1.0,
+        "visual_potential": 8.0,
+        "originality_score": 7.5,
+        "risk_signal_count": 0,
+        "discovery_dimensions": {
+            "channel_history": 4.0,
+        },
+        "event_evidence": [
+            {
+                "title": "NASA launches Artemis",
+                "url": "https://reuters.com/story",
+                "publisher": "Reuters",
+                "publishedAt": "2026-09-18T08:00:00+00:00",
+                "collection_source": "official",
+            },
+            {
+                "title": "Artemis lifts off",
+                "url": "https://bbc.com/story",
+                "publisher": "BBC",
+                "publishedAt": "2026-09-18T07:30:00+00:00",
+                "collection_source": "test",
+            },
+        ],
+    }
+
+    evidence = build_discovery_evidence(candidate)
+
+    assert evidence["articles"] == 7
+    assert evidence["independent_publishers"] == 3
+    assert evidence["independent_domains"] == 3
+    assert evidence["official_records"] == 1
+    assert evidence["event_momentum"] == 6.5
+    assert evidence["channel_history"] == 4.0
+    assert len(evidence["sources"]) == 2
