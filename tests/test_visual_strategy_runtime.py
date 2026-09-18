@@ -173,6 +173,26 @@ def test_automatic_query_is_compact_and_retrieval_oriented():
     assert "story" not in intent.query.lower()
 
 
+def test_press_conference_query_uses_scene_anchor_not_full_prompt():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent(
+        {
+            "primary_entity": "Rishabh Pant",
+            "specific_search_prompt": "Rishabh Pant announcement press conference editorial_person latest news",
+            "visual_intent": "press conference person",
+            "visual_context": "Rishabh Pant addresses reporters after the squad announcement.",
+        }
+    )
+
+    assert intent.visual_genre == "PERSON_ACTION"
+    assert intent.queries == ("Rishabh Pant press conference", "Rishabh Pant")
+    assert "announcement" not in intent.queries[0].lower()
+    assert "editorial" not in intent.queries[0].lower()
+    assert "latest" not in intent.queries[0].lower()
+    assert "news" not in intent.queries[0].lower()
+
+
 def test_same_entity_gets_different_searchable_scene_queries():
     from visual_search_intent_runtime import resolve_visual_search_intent
 
