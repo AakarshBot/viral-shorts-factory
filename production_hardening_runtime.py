@@ -101,10 +101,10 @@ def _install_authoritative_visual_query_planner() -> None:
     try:
         import visual_strategy_runtime
         current = getattr(visual_strategy_runtime, "build_deep_queries", None)
-        if not getattr(current, "_authoritative_locked_subject_planner", False):
+        if not getattr(current, "_authoritative_bounded_query_planner", False):
             raise RuntimeError("authoritative visual query planner is not installed")
         print(
-            "   [Visual Strategy Hardening] Strict single-query visual planner preserved.",
+            "   [Visual Strategy Hardening] Canonical bounded visual query planner preserved.",
             flush=True,
         )
     except Exception as exc:
