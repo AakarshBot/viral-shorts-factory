@@ -70,8 +70,75 @@ def build_discovery_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 12) -> list[dict[str, Any]]:
-    """Dashboard-only discovery pool: preserve the factory ranker, but retain up to 12 ranked topics."""
+
+def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 48) -> list[dict[str, Any]]:
+    """Remove stories that substantially overlap topics used in the recent cooldown window."""
+    if conn is None:
+        return stories
+
+    recent_topics: list[str] = []
+    try:
+        rows = conn.execute(
+            "SELECT topic, COALESCE(date_used, created_at) FROM vault "
+            "WHERE topic IS NOT NULL AND topic != ''"
+        ).fetchall()
+        now = datetime.now(timezone.utc)
+        for topic, raw_date in rows:
+            if not topic or not raw_date:
+                continue
+            value = raw_date if isinstance(raw_date, datetime) else str(raw_date).strip()
+            if not value:
+                continue
+            try:
+                when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    when = datetime.strptime(value[:10], "%Y-%m-%d")
+                except ValueError:
+                    continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            age_hours = (now - when.astimezone(timezone.utc)).total_seconds() / 3600.0
+            if 0 <= age_hours <= hours:
+                recent_topics.append(str(topic))
+    except Exception as exc:
+        print(f"   [Dashboard Discovery] Recent topic history unavailable: {type(exc).__name__}", flush=True)
+        return stories
+
+    if not recent_topics:
+        return stories
+
+    from story_ranker import _tokens, _topic_overlap
+
+    kept: list[dict[str, Any]] = []
+    excluded = 0
+    for story in stories:
+        title = str(story.get("title") or "").strip()
+        current_tokens = _tokens(title)
+        is_repeat = False
+        for old_topic in recent_topics:
+            overlap = _topic_overlap(title, old_topic)
+            shared = len(current_tokens & _tokens(old_topic))
+            if overlap >= 0.50 or (shared >= 3 and overlap >= 0.32):
+                is_repeat = True
+                break
+        if is_repeat:
+            story["discovery_rejection"] = "Recent topic cooldown (48 hours)"
+            excluded += 1
+            continue
+        kept.append(story)
+
+    if excluded:
+        print(
+            f"   [Dashboard Discovery] Recent topic cooldown removed {excluded} repeated candidate(s); "
+            f"window={hours}h.",
+            flush=True,
+        )
+    return kept
+
+
+def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 20) -> list[dict[str, Any]]:
+    """Dashboard discovery pool: return up to 20 ranked, distinct recent topics."""
     from story_ranker import (
         _cheap_filter,
         _cricket_relevance_pass,
@@ -86,7 +153,7 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
     )
     from workflow_runtime import _candidate_reason, _source_label, _story_key, _story_url
 
-    max_candidates = max(3, min(12, int(max_candidates or 12)))
+    max_candidates = max(3, min(20, int(max_candidates or 20)))
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
@@ -137,24 +204,24 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
     )
     rows = _load_history(conn)
     used_topics = _load_used_topics(conn)
-    stage30 = _cheap_filter(relevance_filtered, max_items=30, max_age_hours=24 if ai_cricket else 48)
-    stage15 = _deduplicate_stage(stage30, max_items=15)
-    stage8 = _fact_source_stage(stage15, max_items=15)
+    stage50 = _cheap_filter(relevance_filtered, max_items=50, max_age_hours=24 if ai_cricket else 48)
+    stage30 = _deduplicate_stage(stage50, max_items=30)
+    fresh_stage = _recent_topic_cooldown(conn, stage30, hours=48)
+    stage25 = _fact_source_stage(fresh_stage, max_items=25)
 
-    # The production ranker intentionally returns only its top 3. The
-    # dashboard must expose a broader review pool, so retain additional
-    # distinct candidates rather than truncating the factory selection.
-    stage12 = _originality_stage(stage8, used_topics, max_items=max_candidates)
-    if len(stage12) < min(max_candidates, len(stage8)):
-        used = {id(item) for item in stage12}
-        for item in stage8:
+    # Keep the existing editorial originality filter, but retain a larger
+    # candidate pool so the dashboard can show a ranked list rather than 3 cards.
+    stage20 = _originality_stage(stage25, used_topics, max_items=max_candidates)
+    if len(stage20) < min(max_candidates, len(stage25)):
+        used = {id(item) for item in stage20}
+        for item in stage25:
             if id(item) in used:
                 continue
-            if len(stage12) >= max_candidates:
+            if len(stage20) >= max_candidates:
                 break
             item["originality_score"] = float(item.get("originality_score") or 5.0)
             item["originality_pass"] = True
-            stage12.append(item)
+            stage20.append(item)
 
     ranked = [
         _editorial_score(
@@ -166,7 +233,7 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
             social_titles,
             ai_cricket,
         )
-        for item in stage12
+        for item in stage20
     ]
     ranked.sort(key=lambda item: float(item.get("candidate_score") or -9999.0), reverse=True)
 
@@ -183,7 +250,8 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
             f"Discovery produced only {len(pool)} dashboard candidate(s). At least 3 are required to start production."
         )
     print(
-        f"   [Dashboard Discovery] Ranked topic pool ready: {len(pool)} candidate(s); dashboard shows 3 at a time.",
+        f"   [Dashboard Discovery] Ranked topic list ready: {len(pool)} candidate(s); "
+        f"recent 48-hour repeats excluded.",
         flush=True,
     )
     return pool
