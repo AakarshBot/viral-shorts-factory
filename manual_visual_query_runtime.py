@@ -29,14 +29,46 @@ def _tokens(value: Any) -> list[str]:
 
 
 def parse_manual_visual_queries(raw: Any) -> list[str]:
-    """Parse the dashboard's semicolon-separated input safely."""
+    """Parse manual visual queries from semicolons, newlines, or quoted commas.
+
+    The dashboard historically documented semicolon-separated values, but users
+    can also paste a Python/JSON-like list such as:
+        'Saurav Ganguly', 'BCCI logo', 'Indian Cricket Team'
+    Quoted comma-separated values are split only when the quote is closed at a
+    comma/end boundary, so ordinary commas and apostrophes inside unquoted
+    queries remain intact.
+    """
     if raw is None:
         return []
-    values = []
-    for item in str(raw).split(";"):
-        item = re.sub(r"\s+", " ", item).strip()
-        if item and item not in values:
-            values.append(item[:300])
+
+    text = re.sub(r"\s+", " ", str(raw)).strip()
+    if not text:
+        return []
+
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        value = re.sub(r"\s+", " ", str(value or "")).strip().strip(",").strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1].strip()
+        if value and value not in values:
+            values.append(value[:300])
+
+    if ";" in text or "\n" in str(raw):
+        for item in re.split(r";|\n+", str(raw)):
+            add(item)
+        return values
+
+    quoted = re.findall(
+        r"""(?:^|,\s*)['"]([^'"]+)['"](?=\s*(?:,|$))""",
+        text,
+    )
+    if quoted:
+        for item in quoted:
+            add(item)
+        return values
+
+    add(text)
     return values
 
 
@@ -96,10 +128,10 @@ def _score(query: str, scene: dict[str, Any], scene_index: int, query_index: int
 def assign_manual_queries(scenes: list[dict[str, Any]], raw_queries: Any) -> list[dict[str, Any]]:
     """Assign each supplied query to at most one scene, with graceful reuse.
 
-    The output is scene-aligned. If there are more scenes than queries, the best
-    query can be reused only when necessary. If there are more queries than
-    scenes, unassigned queries remain available as retrieval alternatives on
-    the closest scene.
+    The output is scene-aligned. Queries are assigned only when they have
+    positive semantic overlap with a scene. Unmatched scenes intentionally
+    receive an empty query so the normal identity-first retrieval path can take
+    over; unrelated manual vocabulary is never forced onto them.
     """
     queries = parse_manual_visual_queries(raw_queries)
     if not queries:
@@ -126,28 +158,22 @@ def assign_manual_queries(scenes: list[dict[str, Any]], raw_queries: Any) -> lis
         used_scenes.add(si)
         used_queries.add(qi)
 
-    # Every scene gets a query when possible. This fallback is only used when
-    # semantic evidence is weak; it prevents a manually supplied query from
-    # disappearing merely because the script wording is indirect.
+    # Do not force an unrelated query onto a scene. An unassigned scene must
+    # fall back to normal identity-first retrieval, not search for an arbitrary
+    # leftover person/logo/topic supplied for another scene.
     for si in range(len(scenes)):
         if assignments[si]:
             continue
-        remaining = [qi for qi in range(len(queries)) if qi not in used_queries]
-        if remaining:
-            qi = max(remaining, key=lambda q: _score(queries[q], scenes[si], si, q, len(scenes), len(queries)))
-            assignments[si].append((queries[qi], _score(queries[qi], scenes[si], si, qi, len(scenes), len(queries))))
-            used_queries.add(qi)
-        else:
-            qi = max(range(len(queries)), key=lambda q: _score(queries[q], scenes[si], si, q, len(scenes), len(queries)))
-            assignments[si].append((queries[qi], _score(queries[qi], scenes[si], si, qi, len(scenes), len(queries))))
+        assignments[si].append(("", 0.0))
 
     result = []
     for si, scene in enumerate(scenes):
         item = assignments[si][0]
+        query = item[0]
         result.append({
-            "query": item[0],
+            "query": query,
             "score": round(float(item[1]), 2),
-            "query_index": queries.index(item[0]) + 1,
+            "query_index": (queries.index(query) + 1) if query else 0,
             "total_queries": len(queries),
         })
     return result
