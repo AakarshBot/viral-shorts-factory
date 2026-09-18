@@ -84,18 +84,14 @@ def build_scene_visual_brief(scene, video_title="", category=""):
 
 
 def build_deep_queries(scene, video_title="", visual_type=None):
-    """Expose the exact-first query contract for compatibility callers."""
+    """Expose the canonical retrieval query contract for compatibility callers."""
     if not isinstance(scene, dict):
         return [], visual_type or "GENERAL_CONTEXT"
     prepared = _prepare(scene, video_title)
     resolution = resolve_subject(prepared, video_title)
-    try:
-        from visual_query_entities_runtime import _build_identity_first_queries
-        queries = _build_identity_first_queries(prepared, resolution)
-    except Exception:
-        subject = clean_text(resolution.get("factual_entity") or resolution.get("subject", ""))
-        queries = [subject] if subject else []
-    return queries[:1], (visual_type or resolution.get("visual_type") or "GENERAL_CONTEXT")
+    from visual_search_intent_runtime import resolve_visual_search_intent
+    intent = resolve_visual_search_intent(prepared, video_title)
+    return list(intent.queries), (visual_type or intent.visual_type or "GENERAL_CONTEXT")
 
 
 build_deep_queries._authoritative_locked_subject_planner = True
