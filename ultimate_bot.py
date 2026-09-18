@@ -1923,7 +1923,8 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             except Exception:
                 bgm_clip = None
 
-        # Final branding_runtime owns the channel logo and border finish.        print("   [+] Writing video file to disk for Quality Control...")
+        # Final branding_runtime owns the channel logo and border finish.
+        print("   [+] Writing video file to disk for Quality Control...")
         final_master.write_videofile(
             video_output_path,
             fps=24,
