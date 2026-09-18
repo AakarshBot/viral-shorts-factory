@@ -176,7 +176,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         discover_event_pool,
     )
 
-    max_candidates = max(3, min(10, int(max_candidates or 10)))
+    max_candidates = max(1, min(28, int(max_candidates or 28)))
     rows = _load_history(conn)
     used_topics = _load_used_topics(conn)
     language = str(web_config.get("language", "english"))
@@ -249,7 +249,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         scored["ai_recommendation"] = True
         ranked.append(scored)
 
-    ranked.sort(key=lambda item: float(item.get("candidate_score") or -9999.0), reverse=True)
+    ranked = diversity_rerank(ranked, max_items=max_candidates)
     pool = ranked[:max_candidates]
     for rank, item in enumerate(pool, 1):
         item["discovery_rank"] = rank
@@ -262,8 +262,8 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
             f"({item.get('channel_history_fit', 0):.1f}/10)."
         )
 
-    if len(pool) < 3:
-        raise ValueError(f"AI discovery produced only {len(pool)} usable candidate(s). At least 3 are required.")
+    if not pool:
+        print("   [AI Discovery] No evidence-backed candidates survived the discovery gates.", flush=True)
     print(
         f"   [AI Discovery] current intake={len(compact)} -> events={len(candidates)} -> "
         f"Top {len(pool)}; history used as a fit signal, not a repetition target.",
@@ -272,23 +272,18 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     return pool
 
 
-def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 20) -> list[dict[str, Any]]:
-    """Dashboard discovery pool: return up to 20 ranked, distinct recent topics."""
+def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
+    """Dashboard discovery pool: return up to 28 diverse, evidence-backed topics."""
     from story_ranker import (
-        _cheap_filter,
         _cricket_relevance_pass,
-        _deduplicate_stage,
-        _editorial_score,
-        _fact_source_stage,
-        _load_history,
-        _load_used_topics,
-        _originality_stage,
         _requested_topic_pass,
         collect_high_recall_stories,
+        diversity_rerank,
+        rank_discovery_candidates,
     )
-    from workflow_runtime import _candidate_reason, _source_label, _story_key, _story_url
+    from workflow_runtime import CRICKET_CATEGORIES, _candidate_reason, _source_label, _story_key, _story_url
 
-    max_candidates = max(3, min(20, int(max_candidates or 20)))
+    max_candidates = max(1, min(28, int(max_candidates or 28)))
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
@@ -296,18 +291,24 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
 
     is_cricket = fmt == "cricket" or bool(web_config.get("cricket_pipeline"))
     if is_cricket:
-        from workflow_runtime import CRICKET_CATEGORIES
-        cricket_name = str(web_config.get("cricket_category", "AI-assisted top story in cricket"))
-        cricket_cfg = CRICKET_CATEGORIES.get(cricket_name, CRICKET_CATEGORIES["AI-assisted top story in cricket"])
+        cricket_name = str(
+            web_config.get("cricket_category", "AI-assisted top story in cricket")
+        )
+        cricket_cfg = CRICKET_CATEGORIES.get(
+            cricket_name,
+            CRICKET_CATEGORIES["AI-assisted top story in cricket"],
+        )
         genre_key = "sports_stories_of_day"
         genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key, {})
-        custom_q = str(web_config.get("requested_topic", "") or "").strip() or cricket_cfg["query"]
+        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+        custom_q = requested_topic or cricket_cfg["query"]
         custom_rss = cricket_cfg["rss"]
     else:
         genre_key = category or "national_global_affairs"
         genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key)
         if not genre_cfg:
             raise ValueError(f"Unknown category: {genre_key}")
+        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
         custom_q = None
         custom_rss = None
 
@@ -320,11 +321,12 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         custom_rss,
         ai_cricket=(
             genre_key == "sports_stories_of_day"
-            and str(web_config.get("cricket_category", "")) == "AI-assisted top story in cricket"
+            and str(web_config.get("cricket_category", ""))
+            == "AI-assisted top story in cricket"
         ),
+        discover_lanes=not bool(requested_topic),
     )
 
-    requested_topic = str(web_config.get("requested_topic", "") or "").strip()
     relevance_filtered = []
     for candidate in raw:
         if not _cricket_relevance_pass(candidate, genre_key):
@@ -335,32 +337,21 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
 
     ai_cricket = (
         genre_key == "sports_stories_of_day"
-        and str(web_config.get("cricket_category", "")) == "AI-assisted top story in cricket"
+        and str(web_config.get("cricket_category", ""))
+        == "AI-assisted top story in cricket"
     )
-    rows = _load_history(conn)
-    used_topics = _load_used_topics(conn)
-    stage50 = _cheap_filter(relevance_filtered, max_items=50, max_age_hours=24 if ai_cricket else 48)
-    stage30 = _deduplicate_stage(stage50, max_items=30)
-    fresh_stage = _recent_topic_cooldown(conn, stage30, hours=48)
-    stage25 = _fact_source_stage(fresh_stage, max_items=25)
 
-    # Do not silently turn originality failures into passes. If fewer
-    # candidates survive, return the smaller evidence-backed pool.
-    stage20 = _originality_stage(stage25, used_topics, max_items=max_candidates)
-
-    ranked = [
-        _editorial_score(
-            item,
-            rows,
-            category or genre_key,
-            web_config.get("format_mode", "regular"),
-            language,
-            social_titles,
-            ai_cricket,
-        )
-        for item in stage20
-    ]
-    ranked.sort(key=lambda item: float(item.get("candidate_score") or -9999.0), reverse=True)
+    ranked = rank_discovery_candidates(
+        relevance_filtered,
+        conn=conn,
+        target_category=category or genre_key,
+        target_format=web_config.get("format_mode", "regular"),
+        target_language=language,
+        social_titles=social_titles,
+        ai_cricket=ai_cricket,
+        max_candidates=max_candidates,
+    )
+    ranked = diversity_rerank(ranked, max_items=max_candidates)
 
     pool = ranked[:max_candidates]
     for rank, story in enumerate(pool, 1):
@@ -370,13 +361,9 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         story["story_url"] = _story_url(story)
         story["story_key"] = _story_key(story)
 
-    if len(pool) < 3:
-        raise ValueError(
-            f"Discovery produced only {len(pool)} dashboard candidate(s). At least 3 are required to start production."
-        )
     print(
-        f"   [Dashboard Discovery] Ranked topic list ready: {len(pool)} candidate(s); "
-        f"recent 48-hour repeats excluded.",
+        f"   [Dashboard Discovery] {len(raw)} event candidates -> "
+        f"{len(relevance_filtered)} relevant -> {len(pool)} diverse ranked headline(s).",
         flush=True,
     )
     return pool
