@@ -1,5 +1,7 @@
 import asyncio
 import sqlite3
+
+# CI reproduction marker; no test logic change.
 import threading
 import time
 from pathlib import Path
