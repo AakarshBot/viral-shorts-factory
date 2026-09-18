@@ -5,8 +5,8 @@ import math
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
@@ -963,13 +963,6 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     # official feeds and public social signals before event clustering.
     raw = list(event_pool.get("articles") or raw)
     initial_gdelt_count = int(event_pool.get("gdelt_article_count") or 0)
-    print(
-        f"   [Discovery Funnel] article intake={event_pool['article_count']} "
-        f"(GDELT={event_pool['gdelt_article_count']}) -> "
-        f"distinct events={event_pool['event_count']}; "
-        f"news + RSS + public social signals retained.",
-        flush=True,
-    )
     print(
         f"   [Discovery Funnel] article intake={event_pool['article_count']} "
         f"(GDELT={initial_gdelt_count}) -> "
