@@ -121,7 +121,8 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             "gsrnamespace": 0,
             "gsrlimit": MAX_PROVIDER_CANDIDATES,
             "prop": "pageimages",
-            "piprop": "original",
+            "piprop": "original|thumbnail",
+            "pithumbsize": 1600,
             "format": "json",
         },
     )
@@ -133,7 +134,13 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
         title = str(page.get("title", "")).strip()
         if not _title_is_entity(title, entity):
             continue
-        source = ((page.get("original") or {}).get("source"))
+        # Prefer Wikimedia's generated thumbnail. This is important for SVG
+        # logos and other vector/page-image assets that Pillow cannot decode
+        # directly. MediaWiki can return a raster thumbnail while preserving
+        # the source image's visual content.
+        thumbnail = ((page.get("thumbnail") or {}).get("source"))
+        original = ((page.get("original") or {}).get("source"))
+        source = thumbnail or original
         if source:
             urls.append(str(source))
     return _bounded_downloads(urls, used_urls)
@@ -158,7 +165,8 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
             "gsrnamespace": 6,
             "gsrlimit": MAX_PROVIDER_CANDIDATES,
             "prop": "imageinfo",
-            "iiprop": "url",
+            "iiprop": "url|mime",
+            "iiurlwidth": 1600,
             "format": "json",
         },
     )
@@ -168,8 +176,14 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
         if not isinstance(page, dict):
             continue
         imageinfo = page.get("imageinfo") or []
-        if imageinfo and isinstance(imageinfo[0], dict) and imageinfo[0].get("url"):
-            urls.append(str(imageinfo[0]["url"]))
+        if imageinfo and isinstance(imageinfo[0], dict):
+            info = imageinfo[0]
+            # Prefer Wikimedia's server-rendered thumbnail. Besides keeping
+            # downloads bounded, this transparently rasterizes SVG logos and
+            # other formats that are not directly supported by Pillow.
+            source = info.get("thumburl") or info.get("url")
+            if source:
+                urls.append(str(source))
     return _bounded_downloads(urls, used_urls)
 
 
