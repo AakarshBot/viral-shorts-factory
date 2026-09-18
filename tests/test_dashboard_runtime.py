@@ -265,10 +265,11 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
         for index, (title, subject) in enumerate(topic_specs, 1)
     ]
 
-    monkeypatch.setattr(story_ranker, "_query_variants", lambda *_args, **_kwargs: ["technology"])
-    monkeypatch.setattr(story_ranker, "_gnews_items", lambda *_args, **_kwargs: list(topics))
-    monkeypatch.setattr(story_ranker, "_rss_items", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(story_ranker, "_reddit_items", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        story_ranker,
+        "collect_high_recall_stories",
+        lambda *_args, **_kwargs: (list(topics), []),
+    )
     monkeypatch.setattr(story_ranker, "_india_trend_terms", lambda: tuple())
 
     pool = __import__("dashboard_runtime").discover_ranked_topics(
