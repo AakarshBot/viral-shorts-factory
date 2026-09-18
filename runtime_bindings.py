@@ -342,79 +342,26 @@ def bind_dashboard_patches(bot):
     _wrap_content_dense_script(bot)
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
+    try:
+        from branding_runtime import patch_branding_pipeline
+        patch_branding_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Branding runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    try:
+        from final_qc_runtime import patch_workflow_qc
+        patch_workflow_qc(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Final QC runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    try:
+        from channel_intelligence_runtime import install_channel_intelligence_dialog
+        install_channel_intelligence_dialog()
+    except Exception as exc:
+        print(f"   [Bindings] Channel intelligence runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    try:
+        from production_hardening_runtime import install_production_hardening
+        install_production_hardening(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Production hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
     _patch_subtitles(bot)
     _patch_youtube_creator_comments(bot)
     _install_visual_cache_safety()
-
-    namespace = run_robot.__globals__
-    names = (
-        "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
-        "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
-        "fetch_scene_asset", "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep",
-        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip",
-    )
-    bound = []
-    for name in names:
-        value = getattr(bot, name, None)
-        if value is not None:
-            namespace[name] = value
-            bound.append(name)
-
-    original_process_visuals = getattr(bot, "process_visuals_async", None)
-    if original_process_visuals is not None and not getattr(original_process_visuals, "_traceback_bound", False):
-        async def process_visuals_with_traceback(*args, **kwargs):
-            try:
-                return await original_process_visuals(*args, **kwargs)
-            except BaseException:
-                print("   [Bindings] FULL TRACEBACK FROM process_visuals_async:", flush=True)
-                traceback.print_exc()
-                raise
-
-        process_visuals_with_traceback._traceback_bound = True
-        bot.process_visuals_async = process_visuals_with_traceback
-        namespace["process_visuals_async"] = process_visuals_with_traceback
-        bound.append("process_visuals_async(traceback)")
-
-    original_compile_video = getattr(bot, "compile_video", None)
-    if original_compile_video is not None and not getattr(original_compile_video, "_traceback_bound", False):
-        def compile_video_with_traceback(*args, **kwargs):
-            _install_moviepy_compatibility()
-            try:
-                return original_compile_video(*args, **kwargs)
-            except BaseException:
-                print("   [Bindings] FULL TRACEBACK FROM compile_video:", flush=True)
-                traceback.print_exc()
-                raise
-
-        compile_video_with_traceback._traceback_bound = True
-        bot.compile_video = compile_video_with_traceback
-        namespace["compile_video"] = compile_video_with_traceback
-        bound.append("compile_video(traceback)")
-
-    try:
-        import factory_runtime
-        if hasattr(factory_runtime, "_vignette"):
-            namespace["_vignette"] = factory_runtime._vignette
-            bound.append("_vignette")
-    except Exception as exc:
-        print(f"   [Bindings] Render dependency binding skipped: {exc}", flush=True)
-
-    print("   [Bindings] Production runtime globals bound: " + ", ".join(dict.fromkeys(bound)), flush=True)
-    return bot
-
-
-def harden_editorial_defaults(bot):
-    """Remove deterministic contradictions between prompts, hooks and personas."""
-    bot.HOOK_STYLES_REGISTRY["Urgent Warning"] = [
-        "A new development just changed the situation in a measurable way.",
-        "Here is the documented detail that changes this update.",
-        "The latest facts show a change worth understanding.",
-    ]
-    bot.HOOK_STYLES_REGISTRY["Absurd Reality"] = [
-        "The facts behind this development are stranger than they first appear.",
-        "This sounds unlikely, but the documented sequence is real.",
-        "One overlooked detail makes this story more surprising.",
-    ]
-    for persona in getattr(bot, "PERSONA_PROFILES", {}).values():
-        persona["catchphrases"] = []
-    return bot
