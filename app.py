@@ -163,6 +163,7 @@ def _init_state() -> None:
         "show_offline_diagnostics": False,
         "offline_diagnostics": {},
         "pending_candidate": None,
+        "visual_search_queries": "",
         "discovery_headline_selection": None,
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
@@ -188,6 +189,7 @@ def reset_run() -> None:
         "final_description": "",
         "final_comment": "",
         "pending_candidate": None,
+        "visual_search_queries": "",
         "discovery_headline_selection": None,
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
@@ -1132,10 +1134,20 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     pending_candidate = st.session_state.get("pending_candidate")
     if pending_candidate:
-        st.markdown("### Ready for production")
+        st.markdown("### Visual search queries (optional)")
         st.caption(
-            "The script will be shown after research. You can then enter a separate image-search query for each slide before visuals are sourced."
+            "Enter optional manual visual queries separated by semicolons (;). "
+            "The factory will intelligently assign them to the most relevant slides. "
+            "You can still refine individual slides during script review."
         )
+        st.text_input(
+            "Search queries",
+            placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
+            key="visual_search_queries",
+            label_visibility="collapsed",
+        )
+        st.markdown(
+            f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
         st.markdown(
             f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
             f"<b>{pending_candidate.get('title', '')}</b></div>",
@@ -1150,6 +1162,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key="start_selected_topic",
             ):
                 config = dict(st.session_state.web_config)
+                config["visual_search_queries"] = str(
+                    st.session_state.get("visual_search_queries", "") or ""
+                ).strip()
                 if config.get("editorial_mode") == "AI":
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
@@ -1165,6 +1180,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key="cancel_selected_topic",
             ):
                 st.session_state.pending_candidate = None
+                st.session_state.visual_search_queries = ""
                 st.rerun()
         return
 
@@ -1219,6 +1235,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                     key=f"use_candidate_{start_index + offset}",
                 ):
                     st.session_state.pending_candidate = dict(candidate)
+                    st.session_state.visual_search_queries = ""
                     st.rerun()
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
