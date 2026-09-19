@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from event_discovery_runtime import discover_event_pool, cluster_news_events
+from event_discovery_runtime import discover_event_pool, cluster_news_events, _event_actions
 
 
 SAFETY_BLOCKLIST = {
@@ -893,7 +893,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["candidate_score"] = round(final_score, 3)
     story["event_momentum_score"] = event_momentum
     story["independent_corroboration_score"] = independent_corroboration
-    story["historical_topic_signal"] = round(history * 10.0, 3)
+    story["historical_topic_signal"] = round(history, 3)
     story["historical_topic_matches"] = history_matches
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
