@@ -1337,7 +1337,7 @@ def rank_discovery_candidates(
             social_titles,
             ai_cricket,
         )
-        for item in stage40
+        for item in stage50
     ]
     ranked.sort(
         key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0,
@@ -1349,7 +1349,7 @@ def rank_discovery_candidates(
         story["discovery_reason"] = _candidate_reason(story)
 
     print(
-        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
+        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
         % (
             len(stories),
             len(stage120),
