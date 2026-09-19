@@ -23,6 +23,8 @@ import traceback
 
 load_dotenv()
 
+from visual_licensing_runtime import allow_unlicensed_visuals, append_image_credits
+
 
 def global_exception_hook(exctype, value, tb):
     print("💥 UNCAUGHT EXCEPTION DETECTED BY GLOBAL HOOK:")
@@ -377,13 +379,14 @@ def init_db(conn):
         hook_type TEXT, structure_used TEXT, persona_used TEXT,
         hook_strength REAL, narrative_completeness REAL, audience_fit REAL, 
         monetization_risk REAL, shelf_life REAL, composite_score REAL, rejected_reason TEXT,
-        script_json TEXT, ai_image_ratio REAL, voice_gender TEXT, format_used TEXT,
+        script_json TEXT, asset_credits_json TEXT, ai_image_ratio REAL, voice_gender TEXT, format_used TEXT,
         language_used TEXT, avg_view_duration REAL, avg_view_percentage REAL, combo_key TEXT, title_ctr REAL,
         hook_style_used TEXT, trend_keyword TEXT
     )''')
     
     columns = [
         "reported INTEGER DEFAULT 0", "views INTEGER DEFAULT 0", "title_used TEXT", 
+        "asset_credits_json TEXT",
         "hook_type TEXT", "structure_used TEXT", "persona_used TEXT", "hook_strength REAL", 
         "narrative_completeness REAL", "audience_fit REAL", "monetization_risk REAL", 
         "shelf_life REAL", "composite_score REAL", "rejected_reason TEXT", "script_json TEXT", 
@@ -1343,7 +1346,8 @@ def fetch_unsplash(query, used_urls, search_prompt, video_title):
     return None
 
 def fetch_duckduckgo(query, used_urls, search_prompt, video_title):
-    if DDGS is None: return None
+    if not allow_unlicensed_visuals() or DDGS is None:
+        return None
     spoofed_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
