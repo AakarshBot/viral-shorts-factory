@@ -505,7 +505,7 @@ def _trend_signal(title):
 
 
 def _discovery_query_lanes(base_query, genre_key="", ai_cricket=False, broad=False):
-    """Create a small set of intentional discovery lenses without query fanout."""
+    """Create bounded category lenses; broad mode adds independent topical lenses."""
     base = str(base_query or "").strip()
     if not base:
         return []
@@ -1055,6 +1055,35 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     return story
 
 
+def _discovery_source_pass(story):
+    """Require minimum provenance for dashboard discovery without requiring corroboration."""
+    url = _source_url_from_item(story)
+    evidence = [
+        item for item in (story.get("event_evidence") or [])
+        if isinstance(item, dict)
+    ]
+    has_evidence_url = any(str(item.get("url") or "").strip() for item in evidence)
+    publisher = _clean(
+        story.get("publisher")
+        or story.get("source")
+        or story.get("source_name")
+        or story.get("domain")
+    )
+    has_evidence_publisher = any(
+        _clean(item.get("publisher"))
+        for item in evidence
+        if isinstance(item, dict)
+    )
+    if not (url or has_evidence_url):
+        story["discovery_rejection"] = "No source URL/evidence"
+        return False
+    if not (publisher or has_evidence_publisher):
+        story["discovery_rejection"] = "No identifiable publisher"
+        return False
+    story["discovery_source_backed"] = True
+    return True
+
+
 def _candidate_quality_pass(story):
     """Keep weak candidates out of the dashboard instead of padding the list."""
     dimensions = story.get("discovery_dimensions") or {}
@@ -1409,10 +1438,10 @@ def rank_discovery_candidates(
     stage120 = _cheap_filter(stories, max_items=120, max_age_hours=72)
     stage100 = _recent_topic_cooldown(conn, stage120, hours=36)
     stage80 = _deduplicate_stage(stage100, max_items=80)
-    # Dashboard discovery already requires a usable source URL/event record.
-    # Keep source quality as a dimension, not a hard pre-ranking choke point;
-    # strict corroboration remains in production selection.
-    stage60 = stage80
+    stage60 = [
+        item for item in stage80
+        if _discovery_source_pass(item)
+    ]
     stage50 = _originality_stage(stage60, used_topics, max_items=60)
 
     ranked = [
