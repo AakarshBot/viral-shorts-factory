@@ -286,6 +286,10 @@ class WorkflowController:
     def _reporter(self, stage: str, percent: int, message: str):
         self.update(stage, percent, message)
 
+    def _prepare_production_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Hook for dashboard/host controllers that need a core workflow checkpoint."""
+        return config
+
     def _install_production_wrappers(self):
         """Install the single canonical production wrapper set for this controller."""
         from production_hardening_runtime import install_production_wrappers
@@ -325,6 +329,8 @@ class WorkflowController:
         if self.state.thread_alive:
             return
         self.reset()
+        config = dict(web_config)
+        config = self._prepare_production_config(config)
         self._install_production_wrappers()
         with self._lock:
             self.state.selected_story = dict(selected_story)
@@ -336,7 +342,6 @@ class WorkflowController:
             self.state.completed = False
             self.state.error = ""
 
-        config = dict(web_config)
         if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
             config["format_mode"] = "cricket"
         is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
