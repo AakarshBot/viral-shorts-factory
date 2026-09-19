@@ -62,7 +62,8 @@ _SEARCH_WEAK = {
 # in the scene evidence. This is deliberately cross-genre rather than
 # sport/celebrity/product specific.
 _SEARCH_STRONG = {
-    "batting", "bowling", "training", "match", "trophy", "award", "medal",
+    "batting", "bowling", "fielding", "wicket", "innings", "match", "odi", "t20", "test",
+    "series", "qualifier", "semifinal", "final", "trophy", "award", "medal",
     "ceremony", "presentation", "conference", "summit", "launch", "opening",
     "closing", "meeting", "hearing", "rally", "protest", "demonstration",
     "interview", "speech", "press", "stadium", "arena", "laboratory", "lab",
@@ -332,8 +333,24 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
 
         query = _compose_query(subject, anchor)
         queries = [query] if query else []
-        if subject and query.casefold() != subject.casefold():
-            queries.append(subject)
+
+        # A second automatic query is allowed only when the scene contains a
+        # different concrete visual anchor. Do not fall back to the bare
+        # subject: for events and matchups that usually produces a generic
+        # image rather than the actual scene.
+        if query:
+            subject_keys = {key(word) for word in tokens(subject)}
+            query_keys = {key(word) for word in tokens(query)}
+            for alternate in scene_terms:
+                alt_keys = {key(word) for word in tokens(alternate)}
+                if not alt_keys or alt_keys <= subject_keys or alt_keys <= query_keys:
+                    continue
+                if not (alt_keys & _SEARCH_STRONG):
+                    continue
+                alternate_query = _compose_query(subject, alternate)
+                if alternate_query.casefold() != query.casefold():
+                    queries.append(alternate_query)
+                    break
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))
