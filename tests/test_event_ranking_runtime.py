@@ -129,4 +129,4 @@ def test_adaptive_discovery_query_requires_repeated_social_novelty():
         "technology news",
         ["single unrelated topic"],
     ) == ""
-\n
+
