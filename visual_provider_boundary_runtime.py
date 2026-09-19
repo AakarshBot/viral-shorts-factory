@@ -404,12 +404,13 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
     except Exception:
         fetch_openverse = fetch_pixabay = None
 
-    plan.extend([
-        ("Openverse", fetch_openverse_candidates),
-        ("Pixabay", fetch_pixabay_candidates),
-        ("Pexels", fetch_pexels_candidates),
-        ("Unsplash", fetch_unsplash_candidates),
-    ])
+    plan.append(("Openverse", fetch_openverse_candidates))
+    if str(os.getenv("PIXABAY_API_KEY", "")).strip():
+        plan.append(("Pixabay", fetch_pixabay_candidates))
+    if str(os.getenv("PEXELS_API_KEY", "")).strip():
+        plan.append(("Pexels", fetch_pexels_candidates))
+    if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
+        plan.append(("Unsplash", fetch_unsplash_candidates))
     if allow_unlicensed_visuals():
         plan.append(("DDG", fetch_duckduckgo_candidates))
 
