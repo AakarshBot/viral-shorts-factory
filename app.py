@@ -895,6 +895,14 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     )
     passed_count = sum(1 for gate in gates if gate["passed"])
     qc_ready = passed_count == len(gates)
+    public_blocked = any(bool(gate.get("public_blocked")) for gate in gates)
+    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+    if fallback_mode == "extractive_source_grounded":
+        st.error(
+            "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
+            "Private upload remains available after the other QC gates pass.",
+            icon="⛔",
+        )
     st.markdown(f"**Live gate status: {passed_count}/{len(gates)} passing**")
     gate_cols = st.columns(2)
     for index, gate in enumerate(gates):
@@ -1000,7 +1008,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
-        st.caption("Public: full release QC + explicit publish confirmation.")
+        st.caption("Public: full release QC + explicit publish confirmation." + (" · BLOCKED by originality policy" if public_blocked else ""))
     with private_col:
         if st.button(
             "🔒 Upload Privately",
