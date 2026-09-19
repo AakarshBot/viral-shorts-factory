@@ -132,6 +132,7 @@ def test_dashboard_start_production_reaches_script_review(monkeypatch):
         {
             "title": "Live integration story",
             "story_key": "live integration story",
+            "discovery_rank": 1,
             "dashboard_discovery_pool": True,
         },
     )
