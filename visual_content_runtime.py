@@ -435,6 +435,12 @@ def patch_content_first_visuals(bot):
                 "using scene-level/automatic visual flow.",
                 flush=True,
             )
+
+        manual_scene_count = sum(
+            1
+            for scene in scenes
+            if str(scene.get("manual_visual_query") or "").strip()
+        )
         print(
             f"   [Manual Visual Queries] Scene-level dashboard queries={manual_scene_count}/{len(scenes)}; "
             "blank scenes use the automatic visual flow.",
