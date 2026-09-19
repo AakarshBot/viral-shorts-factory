@@ -6,6 +6,7 @@ from script_guard_runtime import source_only_fallback
 from script_runtime import _extractive_script_fallback
 from subtitle_runtime import generate_readable_karaoke_clip
 from youtube_comment_runtime import build_description_hashtags, ensure_shorts_title
+from factory_function_coverage import collect_factory_function_coverage
 
 
 def test_every_scene_caption_contract_removed_from_compile():
@@ -96,6 +97,12 @@ def test_fallback_title_variants_have_no_shorts_suffix():
         titles = builder()["titles"]
         assert len(titles) == 3
         assert all("#shorts" not in title.lower() for title in titles)
+
+
+def test_retention_helpers_are_accounted_for_in_coverage():
+    report = collect_factory_function_coverage()
+    assert report["complete"] is True
+    assert report["stale_map"] == []
 
 
 def test_subtitle_renderer_uses_active_word_parameter(tmp_path):
