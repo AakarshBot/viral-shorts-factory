@@ -99,6 +99,182 @@ def check_script_originality(script_data, story_data):
 def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
+def _script_scene_bounds(format_mode):
+    return (7, 7) if str(format_mode or "").lower() == "top5" else (5, 8)
+
+
+def _scene_word_count(text):
+    return len(str(text or "").split())
+
+
+def _split_scene_text(text, min_words=8, max_words=30):
+    value = re.sub(r"\s+", " ", str(text or "").strip())
+    if not value:
+        return []
+
+    atomic = []
+    sentence_parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", value) if part.strip()]
+    if not sentence_parts:
+        sentence_parts = [value]
+
+    for sentence in sentence_parts:
+        words = sentence.split()
+        if len(words) <= max_words:
+            atomic.append(sentence)
+            continue
+
+        clauses = [part.strip() for part in re.split(r"(?<=[,;:—–-])\s+", sentence) if part.strip()]
+        if len(clauses) > 1 and all(len(part.split()) <= max_words for part in clauses):
+            atomic.extend(clauses)
+            continue
+
+        chunk_count = max(2, (len(words) + max_words - 1) // max_words)
+        chunk_size = max(min_words, (len(words) + chunk_count - 1) // chunk_count)
+        for start in range(0, len(words), chunk_size):
+            atomic.append(" ".join(words[start:start + chunk_size]))
+
+    packed = []
+    pending = ""
+    for part in atomic:
+        candidate = f"{pending} {part}".strip() if pending else part
+        if pending and _scene_word_count(candidate) > max_words:
+            packed.append(pending)
+            pending = part
+        else:
+            pending = candidate
+    if pending:
+        packed.append(pending)
+
+    index = 0
+    while index < len(packed):
+        if _scene_word_count(packed[index]) >= min_words:
+            index += 1
+            continue
+        if index + 1 < len(packed) and _scene_word_count(packed[index] + " " + packed[index + 1]) <= max_words:
+            packed[index:index + 2] = [packed[index] + " " + packed[index + 1]]
+            continue
+        if index > 0 and _scene_word_count(packed[index - 1] + " " + packed[index]) <= max_words:
+            packed[index - 1:index + 1] = [packed[index - 1] + " " + packed[index]]
+            index = max(0, index - 1)
+            continue
+        index += 1
+
+    return [part.strip() for part in packed if min_words <= _scene_word_count(part) <= max_words]
+
+
+def _split_scene_at_midpoint(text, min_words=8, max_words=30):
+    words = str(text or "").split()
+    if len(words) < min_words * 2:
+        return []
+    midpoint = len(words) // 2
+    low = min_words
+    high = len(words) - min_words
+
+    candidates = []
+    for cut in range(low, high + 1):
+        left = " ".join(words[:cut])
+        if re.search(r"[.!?,;:—–-]$", left):
+            candidates.append(cut)
+    cut = min(candidates, key=lambda value: abs(value - midpoint)) if candidates else midpoint
+
+    left, right = " ".join(words[:cut]).strip(), " ".join(words[cut:]).strip()
+    if not (min_words <= len(left.split()) <= max_words and min_words <= len(right.split()) <= max_words):
+        return []
+    return [left, right]
+
+
+def repair_script_structure(script_data, format_mode):
+    """Repair scene-count/word-count defects without inventing narration."""
+    if not isinstance(script_data, dict) or not isinstance(script_data.get("script"), list):
+        return None, {"changed": False, "reason": "script is missing or malformed"}
+
+    minimum, maximum = _script_scene_bounds(format_mode)
+    original_scenes = [scene for scene in script_data.get("script") if isinstance(scene, dict)]
+    if not original_scenes:
+        return None, {"changed": False, "reason": "script contains no scenes"}
+
+    if (
+        minimum <= len(original_scenes) <= maximum
+        and all(8 <= _scene_word_count(scene.get("voiceover")) <= 30 for scene in original_scenes)
+    ):
+        return script_data, {"changed": False, "reason": "scene contract already satisfied"}
+
+    expanded = []
+    for scene in original_scenes:
+        voiceover = str(scene.get("voiceover") or "").strip()
+        parts = _split_scene_text(voiceover)
+        if not parts:
+            parts = [voiceover] if 8 <= _scene_word_count(voiceover) <= 30 else []
+        for part in parts:
+            copy = dict(scene)
+            copy["voiceover"] = part
+            expanded.append(copy)
+
+    if not expanded:
+        return None, {"changed": False, "reason": "no scene text can satisfy the word contract"}
+
+    while len(expanded) < minimum:
+        candidate_index = max(
+            range(len(expanded)),
+            key=lambda index: _scene_word_count(expanded[index].get("voiceover")),
+            default=-1,
+        )
+        if candidate_index < 0:
+            break
+        pieces = _split_scene_at_midpoint(expanded[candidate_index].get("voiceover"))
+        if not pieces:
+            break
+        original = expanded[candidate_index]
+        expanded[candidate_index:candidate_index + 1] = [
+            dict(original, voiceover=pieces[0]),
+            dict(original, voiceover=pieces[1]),
+        ]
+
+    while len(expanded) > maximum:
+        best_pair = None
+        best_size = None
+        for index in range(len(expanded) - 1):
+            combined = (
+                str(expanded[index].get("voiceover") or "").strip()
+                + " "
+                + str(expanded[index + 1].get("voiceover") or "").strip()
+            ).strip()
+            size = _scene_word_count(combined)
+            if 8 <= size <= 30 and (best_size is None or size < best_size):
+                best_pair = index
+                best_size = size
+        if best_pair is None:
+            break
+        left = expanded[best_pair]
+        right = expanded[best_pair + 1]
+        merged = dict(
+            left,
+            voiceover=(
+                str(left.get("voiceover") or "").strip()
+                + " "
+                + str(right.get("voiceover") or "").strip()
+            ).strip(),
+        )
+        expanded[best_pair:best_pair + 2] = [merged]
+
+    if len(expanded) < minimum or len(expanded) > maximum:
+        return None, {
+            "changed": False,
+            "reason": f"could not safely reach {minimum}-{maximum} scenes from supplied narration",
+        }
+    if not all(8 <= _scene_word_count(scene.get("voiceover")) <= 30 for scene in expanded):
+        return None, {"changed": False, "reason": "repaired scenes still violate the word contract"}
+
+    repaired = dict(script_data)
+    repaired["script"] = expanded
+    repaired["script_structure_repaired"] = True
+    return repaired, {
+        "changed": True,
+        "original_scene_count": len(original_scenes),
+        "final_scene_count": len(expanded),
+    }
+
+
 
 def _topic_terms(story_data):
     if not isinstance(story_data, dict): return set()
@@ -600,6 +776,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         "persona_used": "Analytical Insider",
         "script": scenes,
         "fallback_mode": "extractive_source_grounded",
+        "public_publish_blocked": True,
     }
 
 def wrap_write_script(bot):
@@ -611,6 +788,15 @@ def wrap_write_script(bot):
         result = current(contracted_story, language_cfg, genre_key, conn, format_mode)
 
         cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
+        repaired, structure_diag = repair_script_structure(cleaned, format_mode)
+        if repaired is not None:
+            cleaned = repaired
+            if structure_diag.get("changed"):
+                print(
+                    "   [Script QC] Local structure repair: "
+                    f"{structure_diag.get('original_scene_count')} -> {structure_diag.get('final_scene_count')} scenes.",
+                    flush=True,
+                )
         if diagnostics["changed_scenes"] or diagnostics["removed_scenes"]:
             print(
                 "   [Script QC] Structural cleanup: "
@@ -643,7 +829,17 @@ def wrap_write_script(bot):
             )
             rewritten = _rewrite_for_originality_once(cleaned, story_data, originality)
             if rewritten is None:
-                raise ValueError("Originality gate failed and the one-shot LLM rewrite was unavailable.")
+                cleaned["originality_rewrite_diagnostics"] = {
+                    "available": False,
+                    "reason": "No configured rewrite provider was available.",
+                }
+                cleaned["public_publish_blocked"] = True
+                cleaned["originality_overlap"] = originality
+                print(
+                    "   [Script Originality] Rewrite provider unavailable; keeping the validated script preview-only.",
+                    flush=True,
+                )
+                return cleaned
             cleaned, rewrite_diag = clean_script_data(rewritten, story_data, format_mode)
             ok, reason = validate_content_density(cleaned, story_data, format_mode)
             if not ok:
@@ -651,16 +847,23 @@ def wrap_write_script(bot):
             originality = check_script_originality(cleaned, story_data)
             cleaned["originality_rewrite_diagnostics"] = rewrite_diag
             if not originality["passed"]:
-                raise ValueError("Originality gate failed after the one-shot LLM rewrite.")
+                cleaned["public_publish_blocked"] = True
+                print(
+                    "   [Script Originality] Rewrite did not clear overlap; keeping the script preview-only.",
+                    flush=True,
+                )
+                return cleaned
         cleaned["originality_overlap"] = originality
 
         critique = _run_real_critique(cleaned, story_data)
         cleaned["originality_critique"] = critique
         if critique.get("unsupported_claims"):
-            raise ValueError(
-                "Originality critique found unsupported claims: "
-                + "; ".join(critique["unsupported_claims"][:3])
+            cleaned["public_publish_blocked"] = True
+            print(
+                "   [Script Critique] Unsupported claims or unavailable critique provider; keeping the script preview-only.",
+                flush=True,
             )
+            return cleaned
 
         return cleaned
 
