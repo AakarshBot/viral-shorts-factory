@@ -270,7 +270,7 @@ def install_production_wrappers(controller) -> None:
     original_compile = globals_dict.get("compile_video")
     if callable(original_compile):
         def compile_wrapper(*args, **kwargs):
-            controller._reporter("render", 78, "Rendering scenes, subtitles and branding…")
+            controller._reporter("render", 78, "Rendering motion, word-highlight captions and branding…")
             result = original_compile(*args, **kwargs)
             controller._reporter("render", 94, "Final video rendered. Preparing final QC…")
             if isinstance(result, str) and os.path.isfile(result):
