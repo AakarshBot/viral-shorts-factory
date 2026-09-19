@@ -125,14 +125,11 @@ def _source_tokens(value):
     return {word for word in words if len(word) > 2 and word not in _SOURCE_STOPWORDS}
 
 
-def _rank_news_source_scene_indices(scenes, article_title="", manual_queries=None):
-    """Rank scenes for one article image; manual query #1 always owns scene 1."""
+def _rank_news_source_scene_indices(scenes, article_title=""):
+    """Rank scenes for one article image without assigning a special manual-query slide."""
     article_tokens = _source_tokens(article_title)
-    manual_queries = list(manual_queries or [])
     ranked = []
     for index, scene in enumerate(scenes):
-        if manual_queries and index == 0:
-            continue
         text = " ".join(
             str(scene.get(key, "") or "")
             for key in (
@@ -161,7 +158,7 @@ def _rank_news_source_scene_indices(scenes, article_title="", manual_queries=Non
     return [index for score, index in ranked if score > 0] or [index for _, index in ranked]
 
 
-async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, manual_queries, active_config):
+async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, active_config):
     """Extract the selected article image once, then run it through the normal visual QC."""
     try:
         from news_source_image_runtime import extract_news_source_image, compose_news_source_image
@@ -211,7 +208,7 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, manu
         print(f"   [News Source Image] Invalid extracted image: {type(exc).__name__}: {exc}", flush=True)
         return None
 
-    ranked_indices = _rank_news_source_scene_indices(scenes, article_title, manual_queries)
+    ranked_indices = _rank_news_source_scene_indices(scenes, article_title)
     for scene_index in ranked_indices:
         scene = scenes[scene_index]
         scene["news_source_qc_attempted"] = True
@@ -370,13 +367,6 @@ def patch_content_first_visuals(bot):
         print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
         return bot
 
-    try:
-        from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
-    except Exception as exc:
-        assign_manual_queries = None
-        parse_manual_visual_queries = lambda _value: []
-        print(f"   [Manual Visual Queries] Optional router unavailable: {type(exc).__name__}: {exc}", flush=True)
-
     install_visual_quality(visual_runtime)
 
     async def process(script_data, language_cfg, format_mode="regular"):
@@ -391,47 +381,18 @@ def patch_content_first_visuals(bot):
         related_pool: list[dict] = []
         related_reuse_counts: dict[str, int] = {}
 
-        # Dashboard manual queries are optional. Blank input preserves the
-        # existing AI/automatic visual-search flow exactly.
-        manual_raw = ""
-        try:
-            active_config = getattr(bot, "_active_web_config", {}) or {}
-            manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
-        except Exception:
-            manual_raw = ""
-
-        manual_assignments = [{} for _ in scenes]
-        manual_queries = parse_manual_visual_queries(manual_raw)
-        if manual_queries and callable(assign_manual_queries):
-            manual_assignments = assign_manual_queries(scenes, manual_queries)
-            assigned_query_indices = {
-                int(assignment.get("query_index") or 0)
-                for assignment in manual_assignments
-                if assignment.get("query")
-            }
-            unused_manual_queries = [
-                (index, query)
-                for index, query in enumerate(manual_queries, 1)
-                if index not in assigned_query_indices
-            ]
-            print(
-                f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
-                f"assigned={len(assigned_query_indices)}; "
-                f"unused={len(unused_manual_queries)} across {len(scenes)} scene(s).",
-                flush=True,
-            )
-            for query_index, query in unused_manual_queries:
-                print(
-                    f"   [Manual Visual Queries] UNUSED #{query_index}: '{query}'",
-                    flush=True,
-                )
-            for scene_index, assignment in enumerate(manual_assignments, 1):
-                if assignment.get("query"):
-                    scenes[scene_index - 1]["manual_visual_query"] = assignment["query"]
-                    scenes[scene_index - 1]["manual_visual_query_score"] = assignment.get("score", 0)
-                    scenes[scene_index - 1]["manual_visual_query_index"] = assignment.get("query_index", 0)
-        elif not manual_queries:
-            print("   [Manual Visual Queries] No manual queries supplied; using existing Full AI visual flow.", flush=True)
+        active_config = getattr(bot, "_active_web_config", {}) or {}
+        # Manual queries are injected directly into their individual scenes by
+        # the dashboard script-review checkpoint. Blank scenes stay automatic.
+        manual_scene_count = sum(
+            1 for scene in scenes
+            if str(scene.get("manual_visual_query") or "").strip()
+        )
+        print(
+            f"   [Manual Visual Queries] Scene-level dashboard queries={manual_scene_count}/{len(scenes)}; "
+            "blank scenes use the automatic visual flow.",
+            flush=True,
+        )
         # Ground automatic visual identities against the selected story evidence.
         # Manual queries remain untouched and authoritative.
         for scene_index, scene in enumerate(scenes, 1):
@@ -481,7 +442,7 @@ def patch_content_first_visuals(bot):
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
         news_source_candidate = await _load_verified_news_source_candidate(
-            bot, visual_runtime, scenes, manual_queries, active_config
+            bot, visual_runtime, scenes, active_config
         )
         news_source_scene_index = (
             int(news_source_candidate["scene_index"])
