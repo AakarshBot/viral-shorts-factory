@@ -726,13 +726,15 @@ class DashboardWorkflowController(WorkflowController):
                     "sport_or_topic_category": str(script_scenes[-1].get("sport_or_topic_category") or ""),
                     "human_contributed": True,
                 }
-                script_scenes.insert(len(script_scenes) - 1, insight_scene)
+                insert_at = len(script_scenes) - 1
+                script_scenes.insert(insert_at, insight_scene)
+                queries = queries[:insert_at] + [""] + queries[insert_at:]
                 result["script"] = script_scenes
                 result["creator_insight"] = insight
                 result["creator_insight_required"] = True
                 with self._lock:
                     self.state.script_data = result
-                    self._script_visual_queries = (queries + [""])[:len(script_scenes)]
+                    self._script_visual_queries = queries[:len(script_scenes)]
 
                 for index, scene in enumerate(script_scenes):
                     if not isinstance(scene, dict):
