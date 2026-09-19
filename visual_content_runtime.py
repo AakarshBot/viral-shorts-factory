@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from branding_runtime import source_credit_for_type
 from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
+from visual_licensing_runtime import allow_unlicensed_visuals, provenance, rescue_provenance
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
@@ -160,7 +161,9 @@ def _rank_news_source_scene_indices(scenes, article_title=""):
 
 
 async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, active_config):
-    """Extract the selected article image once, then run it through the normal visual QC."""
+    """Extract the selected article image only when explicitly opted in."""
+    if not allow_unlicensed_visuals():
+        return None
     try:
         from news_source_image_runtime import extract_news_source_image, compose_news_source_image
     except Exception as exc:
