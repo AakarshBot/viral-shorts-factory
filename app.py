@@ -1037,17 +1037,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     pending_candidate = st.session_state.get("pending_candidate")
     if pending_candidate:
-        st.markdown("### Visual search queries (optional)")
+        st.markdown("### Ready for production")
         st.caption(
-            "Leave this blank to use the current Full AI visual flow. "
-            "If you enter queries, separate them with semicolons (;). "
-            "The factory will intelligently assign them to the most relevant slides."
-        )
-        st.text_input(
-            "Search queries",
-            placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
-            key="visual_search_queries",
-            label_visibility="collapsed",
+            "The script will be shown after research. You can then enter a separate image-search query for each slide before visuals are sourced."
         )
         st.markdown(
             f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
@@ -1063,9 +1055,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key="start_selected_topic",
             ):
                 config = dict(st.session_state.web_config)
-                config["visual_search_queries"] = str(
-                    st.session_state.get("visual_search_queries", "") or ""
-                ).strip()
                 if config.get("editorial_mode") == "AI":
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
@@ -1081,7 +1070,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key="cancel_selected_topic",
             ):
                 st.session_state.pending_candidate = None
-                st.session_state.visual_search_queries = ""
                 st.rerun()
         return
 
@@ -1166,7 +1154,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             st.rerun()
 
     if not controller.snapshot().get("thread_alive"):
-        st.info("Choose a headline to continue to the optional image-search query step.")
+        st.info("Choose a headline to review its script and set optional per-slide image-search queries.")
 
 
 
