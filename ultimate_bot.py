@@ -928,7 +928,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         "matching the input order one-to-one."
     )
     
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
             resp = requests.post(
@@ -1091,6 +1091,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     persona_guidelines = f"PERSONA PROFILE: {persona_name}\n- MANDATORY CATCHPHRASES: {profile['catchphrases']}\n- FORBIDDEN: {profile['forbidden']}"
 
     target_scene_count = "EXACTLY 7 scenes" if format_mode == "top5" else "STRICTLY between 5 and 8 scenes"
+    first_response_contract = ("The first Groq response MUST already contain the full production scene count: exactly 7 scenes for Top 5, otherwise 5 to 8 scenes. "
+                               "Never return 3 or 4 scenes. If the source has fewer obvious beats, distribute the supplied facts across valid scenes without inventing facts.")
 
     sys_prompt = (
         f"You are an elite YouTube Shorts journalist and Visual Director. Goal: Maximum information density.\n\n"
@@ -1112,7 +1114,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"5. VISUALS (CRITICAL): You act as Visual Director. For each scene, identify the 'primary_entity' (ONE specific person/thing) ONLY from the supplied SOURCE DATA. NEVER invent, guess, substitute, or introduce a person, team, organisation, place, product, event, or other identity that is not explicitly supported by the SOURCE DATA. Visual examples in this instruction are examples only and are NEVER story facts. If no specific identity is supported for a scene, use a supported story-level entity or a descriptive/context visual instead of inventing a name. The 'primary_entity' must be traceable to the supplied story evidence. Define 'visual_intent' ('editorial_person', 'stadium_event', 'news_event', 'conceptual'). Provide a 'specific_search_prompt' optimized for image search, but never introduce unsupported names into that prompt. If a person appears multiple times, strictly vary the search prompt using only supported context.\n"
         f"6. TEXT-TO-SPEECH FORMATTING (CRITICAL): Spell out ALL numbers, acronyms, and symbols in the 'voiceover' field (e.g., write 'ten' instead of '10', 'dollars' instead of '$'). This guarantees perfect subtitle synchronization.\n\n"
         f"LANGUAGE RULE: {language_cfg['script_instruction']}\n"
-        f"STRUCTURE RULE: You MUST write {target_scene_count}. Each voiceover must be between 8 and 30 words.\n"
+        f"STRUCTURE RULE: You MUST write {target_scene_count}. Each voiceover must be between 8 and 30 words. {first_response_contract}\n"
         f"ANALYTICS: {insights}\n\n"
         f"Return ONLY a valid JSON object matching exactly this schema:\n"
         f"{{\n"
@@ -1143,12 +1145,15 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 json={"model": "openai/gpt-oss-120b", "messages": messages, "response_format": {"type": "json_object"}}, timeout=30
             )
             if groq_resp.status_code == 429:
-                print(f"   [!] Groq rate limit (429) on attempt {attempt}. Retrying...")
-                time.sleep(attempt * 6)
-                continue
+                print(f"   [!] Groq rate limit (429) on attempt {attempt}. Switching provider...")
+                break
             if groq_resp.status_code != 200:
                 print(f"   [!] Groq API error status {groq_resp.status_code}: {groq_resp.text[:200]}")
-                time.sleep(2)
+                if 500 <= groq_resp.status_code < 600:
+                    break
+                if attempt >= 2:
+                    break
+                time.sleep(1)
                 continue
 
             raw_content = groq_resp.json()['choices'][0]['message']['content']
@@ -1159,26 +1164,46 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 data["hook_type"], data["hook_style_used"] = "Direct Factual Headline", "Direct Factual Headline"
                 data["structure_used"], data["persona_used"] = ("Top 5" if format_mode == "top5" else "Deep-Dive"), persona_name.title()
                 return data
-            else:
-                print(f"   [!] Script validation failed: {validation_msg}")
-                messages.extend([
-                    {"role": "assistant", "content": raw_content},
-                    {"role": "user", "content": f"Validation failed: {validation_msg}. Fix this error and return complete corrected JSON."}
-                ])
+
+            try:
+                from script_runtime import repair_script_structure
+                repaired, repair_diag = repair_script_structure(data, format_mode)
+                if repaired is not None and repair_diag.get("changed"):
+                    repaired_ok, repaired_msg = validate_script(repaired, source_text, format_mode)
+                    if repaired_ok:
+                        repaired["script_structure_repair"] = repair_diag
+                        print("   [Script Repair] Local scene/word repair passed; no second Groq generation required.")
+                        repaired["hook_type"], repaired["hook_style_used"] = "Direct Factual Headline", "Direct Factual Headline"
+                        repaired["structure_used"], repaired["persona_used"] = ("Top 5" if format_mode == "top5" else "Deep-Dive"), persona_name.title()
+                        return repaired
+            except Exception as repair_exc:
+                print(f"   [Script Repair] Local structural repair unavailable: {type(repair_exc).__name__}: {repair_exc}")
+
+            print(f"   [!] Script validation failed: {validation_msg}")
+            messages.extend([
+                {"role": "assistant", "content": raw_content},
+                {"role": "user", "content": f"Validation failed: {validation_msg}. Return a complete corrected JSON with {target_scene_count}, and do not omit scenes."}
+            ])
+            if attempt >= 2:
+                break
         except Exception as e:
             print(f"   [!] Groq exception encountered: {e}")
             time.sleep(2)
 
     if GEMINI_API_KEY:
         print("   [!] Groq exhausted. Attempting Gemini fallback...")
-        for g_attempt in range(1, 4):
+        for g_attempt in range(1, 3):
             try:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
                 formatted_contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages]
                 g_resp = requests.post(gemini_url, json={"contents": formatted_contents, "generationConfig": {"responseMimeType": "application/json"}}, timeout=60)
                 if g_resp.status_code != 200:
                     print(f"   [!] Gemini API error status {g_resp.status_code}: {g_resp.text[:200]}")
-                    time.sleep(g_attempt * 4)
+                    if 500 <= g_resp.status_code < 600:
+                        break
+                    if g_attempt >= 2:
+                        break
+                    time.sleep(1)
                     continue
 
                 raw_text = g_resp.json()['candidates'][0]['content']['parts'][0]['text']
@@ -1188,8 +1213,24 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                     data["hook_type"], data["hook_style_used"] = "Direct Factual Headline", "Direct Factual Headline"
                     data["structure_used"], data["persona_used"] = ("Top 5" if format_mode == "top5" else "Deep-Dive"), persona_name.title()
                     return data
-                else:
-                    print(f"   [!] Gemini script validation failed: {val_msg}")
+
+                try:
+                    from script_runtime import repair_script_structure
+                    repaired, repair_diag = repair_script_structure(data, format_mode)
+                    if repaired is not None and repair_diag.get("changed"):
+                        repaired_ok, repaired_msg = validate_script(repaired, source_text, format_mode)
+                        if repaired_ok:
+                            repaired["script_structure_repair"] = repair_diag
+                            print("   [Script Repair] Gemini output repaired locally.")
+                            repaired["hook_type"], repaired["hook_style_used"] = "Direct Factual Headline", "Direct Factual Headline"
+                            repaired["structure_used"], repaired["persona_used"] = ("Top 5" if format_mode == "top5" else "Deep-Dive"), persona_name.title()
+                            return repaired
+                except Exception as repair_exc:
+                    print(f"   [Script Repair] Gemini local repair unavailable: {type(repair_exc).__name__}: {repair_exc}")
+
+                print(f"   [!] Gemini script validation failed: {val_msg}")
+                if g_attempt >= 2:
+                    break
             except Exception as e:
                 print(f"   [!] Gemini exception encountered: {e}")
                 time.sleep(2)
