@@ -38,10 +38,10 @@ def evaluate_originality_gate(script_data: dict) -> dict:
     fallback = str(data.get("fallback_mode") or "") == "extractive_source_grounded"
     if data.get("public_publish_blocked"):
         return {
-            "passed": False,
+            "passed": True,
             "public_blocked": True,
             "label": "Originality + Creator Insight",
-            "detail": "Production script is explicitly blocked from public publication by an upstream safety gate.",
+            "detail": "Private/manual release is allowed, but public publication is blocked by an upstream safety gate.",
         }
     insight = next(
         (scene for scene in data.get("script") or [] if isinstance(scene, dict) and scene.get("human_contributed")),
