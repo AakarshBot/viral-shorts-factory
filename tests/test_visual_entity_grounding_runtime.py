@@ -79,6 +79,23 @@ def test_script_layer_repairs_hallucinated_visual_identity_before_retrieval():
 
 
 
+def test_person_query_drops_action_clause_from_identity():
+    scene = {
+        "primary_entity": "Gautam Gambhir Makes Stunning",
+        "specific_search_prompt": "Gautam Gambhir Makes Stunning stadium",
+        "visual_intent": "person action at a press conference",
+    }
+
+    intent = resolve_visual_search_intent(scene, "Gautam Gambhir press conference")
+
+    assert intent.subject == "Gautam Gambhir"
+    assert intent.query.startswith("Gautam Gambhir")
+    assert "makes stunning" not in intent.query.casefold()
+
+
+
+
+
 def test_publisher_domain_does_not_ground_visual_identity_or_enter_retrieval():
     story = {
         "title": "BCCI confirms India selection",
