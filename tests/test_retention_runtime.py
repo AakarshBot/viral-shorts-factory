@@ -80,7 +80,7 @@ def test_description_has_at_most_three_relevant_hashtags():
         "AI",
     )
     assert 0 <= len(tags) <= 3
-    assert tags[0] == "#AIlaunch"
+    assert tags[0] == "#AI"
 
 
 def test_fallback_title_variants_have_no_shorts_suffix():
