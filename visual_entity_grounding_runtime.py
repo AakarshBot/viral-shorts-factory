@@ -193,7 +193,7 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
         score,reason=0.0,"visual identity contains a publisher/source domain"
     else:
         score,reason=_support(original,evidence,role)
-    if score>=0.80 or role in _NON_STABLE: return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
+    if score>=0.80 or (role in _NON_STABLE and not source_name_contamination and not contaminated): return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
     for anchor in _anchors(script_data):
         if _entity_matches_publisher(anchor,script_data) and not explicit_branding:
             continue
