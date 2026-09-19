@@ -749,6 +749,16 @@ def patch_content_first_visuals(bot):
             )
 
         total = len(scenes)
+        provenance_records = []
+        for scene_index, scene in enumerate(scenes):
+            record = dict(scene.get("asset_provenance") or {})
+            if not record:
+                record = rescue_provenance()
+                scene["asset_provenance"] = record
+            if packages[scene_index]:
+                packages[scene_index][0]["asset_provenance"] = record
+            provenance_records.append(record)
+        script_data["visual_provenance"] = provenance_records
         script_data["ai_image_ratio"] = round(ai_count / max(1, total), 2)
         script_data["visual_coverage"] = round(verified_count / max(1, total), 2)
         script_data["visuals_verified"] = verified_count == total
