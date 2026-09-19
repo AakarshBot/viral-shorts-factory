@@ -757,6 +757,11 @@ class DashboardWorkflowController(WorkflowController):
                 return result
 
             dashboard_script_review._dashboard_script_review = True
+            # Preserve the research marker so Streamlit reruns do not install
+            # a second Phase 2 evidence-pack wrapper around this review gate.
+            dashboard_script_review._research_layer_live = bool(
+                getattr(current_script, "_research_layer_live", False)
+            )
             namespace["write_script"] = dashboard_script_review
             self.bot.write_script = dashboard_script_review
 

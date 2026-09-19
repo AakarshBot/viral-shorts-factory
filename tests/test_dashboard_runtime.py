@@ -21,6 +21,33 @@ class _Bot:
         self.run_robot = run_robot
 
 
+
+def test_dashboard_script_review_preserves_research_layer_marker(monkeypatch):
+    def fake_write_script(*_args, **_kwargs):
+        return {
+            "title": "Marker story",
+            "script": [
+                {"voiceover": "A sufficiently long generated scene.", "primary_entity": "Story"},
+                {"voiceover": "Another sufficiently long generated scene.", "primary_entity": "Story"},
+            ],
+        }
+
+    fake_write_script._research_layer_live = True
+
+    def fake_install(self):
+        self._patched = True
+        self.bot.run_robot.__globals__["write_script"] = fake_write_script
+        self.bot.write_script = fake_write_script
+
+    monkeypatch.setattr(WorkflowController, "_install_production_wrappers", fake_install)
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._install_production_wrappers()
+
+    wrapped = controller.bot.run_robot.__globals__["write_script"]
+    assert wrapped._dashboard_script_review is True
+    assert wrapped._research_layer_live is True
+
 def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
     def fake_write_script(*_args, **_kwargs):
         return {
