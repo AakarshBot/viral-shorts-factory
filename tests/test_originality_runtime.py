@@ -1,4 +1,4 @@
-from script_runtime import append_research_sources, check_script_originality
+from script_runtime import append_research_sources, check_script_originality, _run_real_critique
 from final_qc_runtime import evaluate_originality_gate
 
 
@@ -42,3 +42,25 @@ def test_research_sources_append_to_description():
     )
     assert "Sources:" in description
     assert "Reuters – https://example.test/story" in description
+
+
+def test_real_critique_normalizes_required_json(monkeypatch):
+    import script_runtime
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setattr(
+        script_runtime,
+        "_originality_llm",
+        lambda *_args, **_kwargs: {
+            "score": 8,
+            "unsupported_claims": [],
+            "exaggerations": ["too strong"],
+            "fixes": ["soften wording"],
+        },
+    )
+    result = _run_real_critique(
+        {"script": [{"voiceover": "The team announced the change.", "human_contributed": False}]},
+        {"research_evidence_text": "The team announced the change."},
+    )
+    assert result["score"] == 8
+    assert result["unsupported_claims"] == []
+    assert result["provider"] == "groq"
