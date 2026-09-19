@@ -30,6 +30,103 @@ def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
     )
 
 
+_ARTIFACT_QC_CACHE: dict[tuple[str, int], tuple[bool, str]] = {}
+
+def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """Evaluate the dashboard's real release gates from the current production state."""
+    snapshot = snapshot or {}
+    script = snapshot.get("script_data") or {}
+    scenes = script.get("script") if isinstance(script, dict) else None
+    scenes = scenes if isinstance(scenes, list) else []
+    format_mode = str((snapshot.get("selected_story") or {}).get("format_mode") or "regular").lower()
+    minimum = 7 if format_mode == "top5" else 5
+    maximum = 7 if format_mode == "top5" else 8
+    selected = snapshot.get("selected_story") or {}
+    story_ok = bool(
+        str(selected.get("title") or "").strip()
+        and str(selected.get("story_key") or "").strip()
+        and str(selected.get("discovery_rank") or "").isdigit()
+    )
+    script_ok = (
+        minimum <= len(scenes) <= maximum
+        and len(script.get("titles") or []) == 3
+        and script.get("recommended_title_index") in (0, 1, 2)
+        and len(str(script.get("seo_description") or "").split()) >= 10
+        and all(
+            isinstance(scene, dict)
+            and str(scene.get("voiceover") or "").strip()
+            and str(scene.get("primary_entity") or "").strip()
+            and len(str(scene.get("specific_search_prompt") or "").split()) >= 2
+            for scene in scenes
+        )
+    )
+    audio_paths = [str(path).strip() for path in (snapshot.get("audio_paths") or []) if str(path or "").strip()]
+    audio_ok = bool(scenes) and len(audio_paths) >= len(scenes) and all(os.path.isfile(path) for path in audio_paths)
+    packages = snapshot.get("visual_packages") or []
+    visual_items = []
+    for package in packages:
+        layer = package[0] if isinstance(package, list) and package else package
+        if isinstance(layer, dict):
+            visual_items.append(layer)
+    visual_package_ok = (
+        bool(scenes)
+        and len(visual_items) == len(scenes)
+        and all(str(item.get("image") or "").strip() and os.path.isfile(str(item.get("image") or "").strip()) for item in visual_items)
+    )
+    visual_verified_ok = visual_package_ok and all(bool(item.get("visual_verified")) for item in visual_items)
+    video_path = str(snapshot.get("video_path") or "").strip()
+    render_ok = bool(video_path) and os.path.isfile(video_path)
+
+    artifact_ok = False
+    artifact_detail = "Final artifact is not available yet."
+    if render_ok:
+        try:
+            stat = os.stat(video_path)
+            cache_key = (video_path, int(stat.st_mtime_ns))
+            cached = _ARTIFACT_QC_CACHE.get(cache_key)
+            if cached is None:
+                from final_qc_runtime import _validate_final_artifact
+                cached = _validate_final_artifact(video_path)
+                _ARTIFACT_QC_CACHE.clear()
+                _ARTIFACT_QC_CACHE[cache_key] = cached
+            artifact_ok, artifact_detail = cached
+        except Exception as exc:
+            artifact_detail = f"Artifact QC error: {type(exc).__name__}: {exc}"
+
+    md = metadata or {}
+    title = str(md.get("title") or script.get("title") or "").strip()
+    description = str(md.get("description") or script.get("seo_description") or "").strip()
+    comment = str(md.get("comment") or script.get("pinned_comment") or "").strip()
+    try:
+        from final_qc_runtime import _validate_metadata
+        metadata_ok, metadata_detail = _validate_metadata(title, description, comment)
+    except Exception as exc:
+        metadata_ok, metadata_detail = False, f"Metadata QC error: {type(exc).__name__}: {exc}"
+
+    return [
+        {"key": "story_lock", "label": "Verified story selection", "passed": story_ok,
+         "detail": "Selected headline is tied to the discovery pool." if story_ok else "Production input is not tied to a verified discovery selection."},
+        {"key": "script_contract", "label": "Script contract", "passed": script_ok,
+         "detail": f"{len(scenes)} scenes satisfy the structure and metadata contract." if script_ok else f"Script contract failed: {len(scenes)} scenes; required {minimum}-{maximum} plus required metadata."},
+        {"key": "narration", "label": "Narration + timings", "passed": audio_ok,
+         "detail": f"{len(audio_paths)} narration track(s) are present." if audio_ok else "Narration tracks are missing or incomplete."},
+        {"key": "visual_package", "label": "Visual package", "passed": visual_package_ok,
+         "detail": f"{len(visual_items)} renderable scene visual(s) are present." if visual_package_ok else "Visual package is incomplete or contains missing files."},
+        {"key": "visual_semantic_qc", "label": "Visual semantic QC", "passed": visual_verified_ok,
+         "detail": "Every scene visual carries a verified QC verdict." if visual_verified_ok else "At least one scene visual is not semantically verified."},
+        {"key": "visual_review", "label": "Human visual review", "passed": bool(snapshot.get("visual_review_approved")),
+         "detail": "Visual review was explicitly approved." if snapshot.get("visual_review_approved") else "Human visual approval is still required."},
+        {"key": "render", "label": "Final render", "passed": render_ok,
+         "detail": "Final video file exists." if render_ok else "Final rendered video is missing."},
+        {"key": "artifact_qc", "label": "Final artifact QC", "passed": artifact_ok, "detail": artifact_detail},
+        {"key": "metadata_qc", "label": "Upload metadata QC", "passed": metadata_ok, "detail": metadata_detail},
+        {"key": "run_identity", "label": "Exact production run identity", "passed": bool(str(snapshot.get("run_id") or "").strip()),
+         "detail": "Current run has an exact run identifier." if snapshot.get("run_id") else "Exact run identity is missing; upload is blocked."},
+    ]
+
+def live_qc_passes(snapshot: dict[str, Any], metadata: dict[str, str] | None = None) -> bool:
+    return all(bool(gate.get("passed")) for gate in evaluate_live_qc_gates(snapshot, metadata))
+
 def build_discovery_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
     """Return a compact, explainable evidence profile for one event candidate."""
     dimensions = candidate.get("discovery_dimensions") or {}
