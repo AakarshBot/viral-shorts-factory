@@ -1741,9 +1741,9 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             # MoviePy render. This avoids a second full-video FFmpeg encode.
             from branding_runtime import build_scene_branding_overlays
 
-            source_credit = str(
+            source_provenance = layer_paths[0].get("asset_provenance") or {}
+            source_credit = source_provenance if isinstance(source_provenance, dict) else str(
                 layer_paths[0].get("source_credit")
-                or layer_paths[0].get("source_type")
                 or ""
             ).strip()
             branding_layers = [
@@ -1868,6 +1868,11 @@ def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_ke
         description = (
             f"{desc_body}\n\n{hashtags_str}\n\nFollow for daily updates!"
         ).strip()
+        description = append_image_credits(
+            description,
+            script_data.get("visual_provenance") or [],
+            max_bytes=5000,
+        )
 
         tags = script_data.get("tags", ["Shorts", genre_cfg.get("label", "Shorts")])
         if not isinstance(tags, list):
@@ -2201,7 +2206,7 @@ def run_robot(web_config=None):
             """UPDATE vault SET video_id=?, title_used=?, hook_type=?,
             structure_used=?, persona_used=?, hook_strength=?,
             narrative_completeness=?, audience_fit=?, monetization_risk=?,
-            shelf_life=?, composite_score=?, ai_image_ratio=?, voice_gender=?,
+            shelf_life=?, composite_score=?, asset_credits_json=?, ai_image_ratio=?, voice_gender=?,
             format_used=?, language_used=?, combo_key=?, hook_style_used=?,
             trend_keyword=? WHERE topic=?""",
             (
@@ -2216,6 +2221,7 @@ def run_robot(web_config=None):
                 story_payload.get("monetization_risk"),
                 story_payload.get("shelf_life"),
                 story_payload.get("composite_score"),
+                json.dumps(script_data.get("visual_provenance") or [], ensure_ascii=False),
                 script_data.get("ai_image_ratio", 0.0),
                 script_data.get("voice_gender", ""),
                 format_mode,
