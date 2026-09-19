@@ -76,3 +76,31 @@ def test_script_layer_repairs_hallucinated_visual_identity_before_retrieval():
     assert scene['primary_entity'] == "India women's team"
     assert scene['specific_search_prompt'] == "India women's team"
     assert diagnostics['visual_entity_grounding_changes'] == 1
+
+
+
+def test_publisher_domain_does_not_ground_visual_identity_or_enter_retrieval():
+    story = {
+        "title": "BCCI confirms India selection",
+        "research_sources": [
+            {
+                "title": "BCCI confirms India selection",
+                "snippet": "India selection confirmed.",
+                "source": "India.com",
+            }
+        ],
+    }
+    scene = {
+        "primary_entity": "India India.com",
+        "visual_type": "PERSON",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "India India.com portrait",
+    }
+
+    grounded = ground_scene_entity(scene, story)
+    assert grounded["grounded"] is False
+
+    prepared = apply_grounding(scene, story)
+    assert prepared["visual_entity_grounded"] is False
+    assert prepared["primary_entity"] == ""
+    assert prepared["visual_search_subject"] == ""

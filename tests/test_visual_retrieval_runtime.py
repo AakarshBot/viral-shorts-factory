@@ -259,3 +259,70 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
+
+
+
+def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_candidate(monkeypatch):
+    image_bytes = _jpeg_bytes()
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 2
+
+        @staticmethod
+        def _build_search_variants(seg, video_title=""):
+            return ["BCCI headquarters"], "ORGANIZATION"
+
+        @staticmethod
+        def _verification_tier(seg, visual_type, source):
+            return "STRICT"
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+        @staticmethod
+        def _strict_gate(*args, **kwargs):
+            raise TypeError("simulated QA bridge mismatch")
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("DDG", lambda *args: [image_bytes])],
+    )
+
+    _image, _used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        {
+            "primary_entity": "BCCI",
+            "factual_primary_entity": "BCCI",
+            "visual_intent": "headquarters",
+            "specific_search_prompt": "BCCI headquarters",
+            "voiceover": "The BCCI headquarters is shown.",
+        },
+        "cricket",
+        set(),
+        set(),
+        "BCCI headquarters story",
+    )
+
+    assert source == "visual-rescue"
+
+
+def test_strict_gemini_bridge_accepts_visual_genre_argument():
+    import inspect
+    import visual_runtime
+
+    params = inspect.signature(visual_runtime._strict_gemini_check).parameters
+    assert "visual_genre" in params

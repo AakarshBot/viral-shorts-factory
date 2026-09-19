@@ -233,3 +233,20 @@ def test_manual_visual_query_stays_exact():
     assert intent.manual is True
     assert intent.query == "Mohammad Rizwan"
     assert intent.queries == ("Mohammad Rizwan",)
+
+
+
+def test_manual_logo_query_is_exact_but_routes_as_branding():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    intent = resolve_visual_search_intent(
+        {
+            "primary_entity": "IPL",
+            "manual_visual_query": "IPL logo",
+            "visual_intent": "logo",
+        }
+    )
+
+    assert intent.query == "IPL logo"
+    assert intent.queries == ("IPL logo",)
+    assert intent.visual_genre == "ORG_BRANDING"
