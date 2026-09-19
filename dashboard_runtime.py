@@ -258,6 +258,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _candidate_reason,
         _cheap_filter,
         _discovery_query_lanes,
+        _recent_topic_cooldown,
         _deduplicate_stage,
         _editorial_score,
         _fact_source_stage,
