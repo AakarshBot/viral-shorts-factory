@@ -443,7 +443,7 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     sports_match = _has(
         words,
         "match", "fixture", "game", "vs", "versus", "scoreline", "innings",
-        "semi final", "quarter final", "final", "tournament",
+        "semi final", "quarter final", "final",
     )
     if vt == "PERSON" and (sports_action or _has(words, "interview", "speaking", "speaks", "appearing", "on stage")):
         return "PERSON_ACTION"
@@ -479,6 +479,8 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
 
     if _has(words, "landmark", "monument", "statue", "bridge", "tower", "temple", "mosque", "church", "palace", "fort"):
         return "LANDMARK"
+    if vt == "ORGANIZATION" and _has(words, "headquarters", "office", "campus"):
+        return "ORG_HEADQUARTERS"
     if _has(words, "architecture", "building", "buildings", "interior", "office", "headquarters", "campus"):
         return "ARCHITECTURE"
 
