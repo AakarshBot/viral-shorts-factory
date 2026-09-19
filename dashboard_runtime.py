@@ -759,6 +759,9 @@ class DashboardWorkflowController(WorkflowController):
             "sport_or_topic_category": str(
                 script_scenes[-1].get("sport_or_topic_category") or ""
             ),
+            # Creator Insight is part of the final narration contract once
+            # the dashboard user explicitly submits it.
+            "narration_source": "validated_script",
             "human_contributed": True,
         }
         insert_at = len(script_scenes) - 1

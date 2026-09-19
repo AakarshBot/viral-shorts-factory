@@ -251,17 +251,25 @@ def _wrap_script_writer(bot):
 
 
 def _prepare_audio_handoff(script_data):
-    """Normalize the one known source-grounded scene-count repair handoff."""
+    """Revalidate the final narration list after dashboard/script-stage mutations.
+
+    The dashboard may intentionally append a human Creator Insight after the
+    main script validator has run. That contribution is now part of the
+    authoritative narration, but it may not yet carry the internal source tag.
+    Normalize only that explicitly human-contributed case; leave other unknown
+    source tags untouched so the strict guard can still fail closed.
+    """
     if not isinstance(script_data, dict):
         return script_data
-    if script_data.get("authoritative_narration") is True:
-        return script_data
-    if script_data.get("fallback_reason") != "scene_count_contract":
-        return script_data
-    candidate = dict(script_data)
-    scenes = candidate.get("script")
+
+    scenes = script_data.get("script")
+    is_scene_count_fallback = script_data.get("fallback_reason") == "scene_count_contract"
     if not isinstance(scenes, list) or not scenes:
         return script_data
+    if not script_data.get("authoritative_narration") is True and not is_scene_count_fallback:
+        return script_data
+
+    candidate = dict(script_data)
     normalized = []
     for index, scene in enumerate(scenes, 1):
         if not isinstance(scene, dict):
@@ -269,11 +277,25 @@ def _prepare_audio_handoff(script_data):
         voiceover = clean_narration(scene.get("voiceover", ""))
         if not voiceover or is_noise(voiceover):
             return script_data
+
         copy = dict(scene)
         copy["voiceover"] = voiceover
         copy["scene_id"] = index
-        copy["narration_source"] = "validated_script"
+
+        source = str(copy.get("narration_source") or "").strip()
+        if source:
+            copy["narration_source"] = source
+        elif bool(copy.get("human_contributed")):
+            # Dashboard-approved Creator Insight is an intentional human
+            # addition to the final narration, not visual/UI text.
+            copy["narration_source"] = "validated_script"
+        elif is_scene_count_fallback:
+            copy["narration_source"] = "validated_script"
+        else:
+            return script_data
+
         normalized.append(copy)
+
     candidate["script"] = normalized
     candidate["authoritative_narration"] = True
     candidate["integrity_version"] = VERSION
