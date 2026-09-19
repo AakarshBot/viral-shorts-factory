@@ -9,6 +9,8 @@ _STOP={"the","and","for","with","from","into","after","before","over","under","a
 _NON_STABLE={"GENERAL_CONTEXT","PROCESS","CONCEPT","QUOTE","STATISTIC","COMPARISON","TIMELINE"}
 _CUES={"team","squad","club","federation","association","company","corporation","organisation","organization","government","ministry","agency","board","committee","university","institute","foundation","product","phone","device","car","stadium","arena","landmark","country","city","women","woman","men","man","player","coach"}
 
+_DOMAIN_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s<>]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+\b")
+
 def _norm(value: Any)->str:
     text=clean_text(value).replace("’","'").replace("–","-").replace("—","-")
     return re.sub(r"\s+"," ",text).strip()
@@ -20,18 +22,52 @@ def _tokens(value: Any)->list[str]:
         if t and t not in _GENERIC and t not in _STOP: out.append(t)
     return out
 
+def _strip_domains(value: Any) -> str:
+    return _norm(_DOMAIN_RE.sub(" ", str(value or "")))
+
+
+def _publisher_domains(script_data:dict[str,Any])->set[str]:
+    domains=set()
+    if not isinstance(script_data,dict):
+        return domains
+    sources=script_data.get("research_sources")
+    if not isinstance(sources,list):
+        return domains
+    for source in sources:
+        if not isinstance(source,dict):
+            continue
+        for field in ("source", "url", "link"):
+            raw=_norm(source.get(field,""))
+            if not raw:
+                continue
+            match=re.search(r"(?i)(?:https?://|www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)",raw)
+            if match:
+                domains.add(match.group(1).casefold())
+    return domains
+
+
+def _entity_contains_publisher_domain(entity:str,script_data:dict[str,Any])->bool:
+    entity_text=_norm(entity).casefold()
+    if not entity_text:
+        return False
+    publisher_domains=_publisher_domains(script_data)
+    if not publisher_domains:
+        return False
+    return any(domain in entity_text for domain in publisher_domains)
+
+
 def _evidence(script_data:dict[str,Any])->str:
     if not isinstance(script_data,dict): return ""
     parts=[]
     for field in ("title","step_1_headline","step_2_data_points","text","summary","description","research_bundle"):
         value=script_data.get(field)
-        if value: parts.append(_norm(value))
+        if value: parts.append(_strip_domains(value))
     sources=script_data.get("research_sources")
     if isinstance(sources,list):
         for source in sources:
             if isinstance(source,dict):
                 parts.extend(
-                    _norm(source.get(f, ""))
+                    _strip_domains(source.get(f, ""))
                     for f in ("title", "snippet", "summary", "description")
                     if source.get(f)
                 )
@@ -116,7 +152,12 @@ def _anchors(script_data:dict[str,Any])->list[str]:
 def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
     original=_norm(scene.get("factual_primary_entity") or scene.get("primary_entity") or scene.get("visual_search_subject") or "")
     if not original: return {"entity":"","grounded":False,"changed":False,"reason":"no visual entity supplied","confidence":0.0}
-    evidence=_evidence(script_data); role=_role(scene,original); score,reason=_support(original,evidence,role)
+    evidence=_evidence(script_data); role=_role(scene,original)
+    contaminated=_entity_contains_publisher_domain(original,script_data)
+    if contaminated:
+        score,reason=0.0,"visual identity contains a publisher/source domain"
+    else:
+        score,reason=_support(original,evidence,role)
     if score>=0.80 or role in _NON_STABLE: return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
     for anchor in _anchors(script_data):
         a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
@@ -130,7 +171,13 @@ def apply_grounding(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any
     result=ground_scene_entity(scene,script_data)
     original=scene.get("primary_entity","")
     if result.get("changed"):
-        scene["original_primary_entity"]=original; scene["primary_entity"]=result["entity"]; scene["visual_search_subject"]=result["entity"]
+        repaired=str(result["entity"] or "").strip()
+        scene["original_primary_entity"]=original
+        scene["primary_entity"]=repaired
+        scene["factual_primary_entity"]=repaired
+        scene["visual_search_subject"]=repaired
+        scene["specific_search_prompt"]=repaired
+        scene["visual_context"]=""
     scene["visual_entity_grounded"]=bool(result.get("grounded"))
     scene["visual_entity_grounding_confidence"]=float(result.get("confidence") or 0.0)
     scene["visual_entity_grounding_reason"]=str(result.get("reason") or "")

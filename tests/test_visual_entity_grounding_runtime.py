@@ -98,9 +98,46 @@ def test_publisher_domain_does_not_ground_visual_identity_or_enter_retrieval():
     }
 
     grounded = ground_scene_entity(scene, story)
-    assert grounded["grounded"] is False
+    assert grounded["grounded"] is True
+    assert grounded["changed"] is True
+    assert grounded["entity"] == "BCCI"
 
     prepared = apply_grounding(scene, story)
-    assert prepared["visual_entity_grounded"] is False
-    assert prepared["primary_entity"] == ""
-    assert prepared["visual_search_subject"] == ""
+    assert prepared["visual_entity_grounded"] is True
+    assert prepared["primary_entity"] == "BCCI"
+    assert prepared["factual_primary_entity"] == "BCCI"
+    assert prepared["visual_search_subject"] == "BCCI"
+    assert prepared["specific_search_prompt"] == "BCCI"
+    assert "India.com" not in prepared["primary_entity"]
+
+
+def test_publisher_domain_contamination_is_repaired_before_visual_querying():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    story = {
+        "title": "BCCI confirms India selection",
+        "research_bundle": "Read more about the selection at India.com.",
+        "research_sources": [
+            {
+                "title": "BCCI confirms India selection",
+                "snippet": "India selection confirmed.",
+                "source": "India.com",
+            }
+        ],
+    }
+    scene = {
+        "primary_entity": "India India.com",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "India India.com portrait",
+    }
+
+    grounded = apply_grounding(scene, story)
+
+    assert grounded["primary_entity"] == "BCCI"
+    assert grounded["factual_primary_entity"] == "BCCI"
+    assert grounded["visual_search_subject"] == "BCCI"
+    assert grounded["specific_search_prompt"] == "BCCI"
+
+    intent = resolve_visual_search_intent(grounded, story["title"])
+    assert intent.subject == "BCCI"
+    assert "India.com" not in " ".join(intent.queries)
