@@ -464,9 +464,14 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
             "title": f"{title} changes the {subject} market",
             "url": f"https://reuters.example/story-{index}",
             "source": "Reuters",
-            "publishedAt": "2026-09-18T00:00:00+00:00",
+            "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
             "description": f"Current reporting about {subject} with verified details.",
             "genre": "technology",
+            "event_actions": ["launch"],
+            "event_article_count": 3,
+            "event_source_count": 2,
+            "event_source_domains": ["reuters.com", "bbc.com"],
+            "event_evidence_publishers": ["Reuters", "BBC"],
         }
         for index, (title, subject) in enumerate(topic_specs, 1)
     ]
