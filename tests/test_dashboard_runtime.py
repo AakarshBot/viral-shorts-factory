@@ -494,7 +494,9 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
         custom_gnews_q=None,
         custom_rss_url=None,
         ai_cricket=False,
+        broad_discovery=False,
     ):
+        assert broad_discovery is True
         return list(topics), []
 
     monkeypatch.setattr(
@@ -664,8 +666,10 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'Visual semantic QC blocked:' in app_source
 
 
-def test_dashboard_ai_discovery_uses_bounded_query_lanes():
+def test_dashboard_ai_discovery_uses_broad_bounded_query_lanes():
     source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
     assert "_discovery_query_lanes" in source
     assert "ThreadPoolExecutor(max_workers=8" in source
-    assert "_discovery_query_lanes(query, genre_key=category)[:2]" in source
+    assert "_discovery_query_lanes(query, genre_key=category, broad=True)[:4]" in source
+    assert "global_scope=True" in source
+    assert "max_gdelt_records=150" in source
