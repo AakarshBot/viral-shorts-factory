@@ -473,8 +473,83 @@ def render_script(snapshot: Dict[str, Any]) -> None:
     if not text:
         return
     st.markdown("### Script")
-    st.caption("Written automatically from the selected story. No script approval step is required.")
+    st.caption("Written automatically from the selected story.")
     st.text_area("Generated narration", value=text, height=320, disabled=True, key="dashboard_script_preview")
+
+
+def render_script_visual_query_review(
+    controller: DashboardWorkflowController,
+    snapshot: Dict[str, Any],
+) -> None:
+    script_data = snapshot.get("script_data") or {}
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    if not isinstance(scenes, list) or not scenes:
+        st.warning("The script is not available for visual-query review yet.")
+        return
+
+    run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
+    st.markdown(
+        "<div class='section-kicker'>Step 04 · Visual planning</div>"
+        "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Each slide has its own optional image-search query. Keep a box blank to use the normal automatic visual search for that slide."
+    )
+
+    with st.form(key=f"script_visual_query_review_{run_id}"):
+        for index, scene in enumerate(scenes, 1):
+            if not isinstance(scene, dict):
+                continue
+            voiceover = str(scene.get("voiceover") or "").strip()
+            automatic_subject = str(
+                scene.get("factual_primary_entity")
+                or scene.get("primary_entity")
+                or scene.get("visual_search_subject")
+                or ""
+            ).strip()
+
+            st.markdown(f"### Slide {index}")
+            if voiceover:
+                st.markdown(
+                    f"<div class='panel'><div class='small-muted'>SCRIPT</div>{voiceover}</div>",
+                    unsafe_allow_html=True,
+                )
+            if automatic_subject:
+                st.caption(f"Automatic visual subject: {automatic_subject}")
+
+            st.text_input(
+                "Manual image search query (optional)",
+                placeholder="e.g. Rishabh Pant press conference",
+                key=f"script_visual_query_{run_id}_{index}",
+            )
+
+        st.caption(
+            "Manual queries are used only on the slides where you enter them. "
+            "There is no query-number-to-slide assignment anymore."
+        )
+        submitted = st.form_submit_button(
+            "✅ Save slide queries & continue",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if submitted:
+        queries = [
+            str(
+                st.session_state.get(
+                    f"script_visual_query_{run_id}_{index}",
+                    "",
+                )
+                or ""
+            ).strip()
+            for index in range(1, len(scenes) + 1)
+        ]
+        if controller.submit_script_visual_queries(queries):
+            st.rerun()
+        else:
+            st.error("The script review is no longer active. Refreshing the dashboard.")
+            st.rerun()
 
 
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
