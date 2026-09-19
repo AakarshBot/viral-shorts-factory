@@ -53,7 +53,11 @@ def test_news_source_ranking_does_not_force_first_slide_for_manual_query():
     assert ranked[0] == 1
 
 
-def test_news_source_candidate_skips_person_scenes(monkeypatch, tmp_path):
+def test_news_source_candidate_is_opt_in(monkeypatch, tmp_path):
+    import asyncio
+    import news_source_image_runtime
+
+    monkeypatch.setenv("ALLOW_UNLICENSED_VISUALS", "true")
     import asyncio
     import news_source_image_runtime
 
