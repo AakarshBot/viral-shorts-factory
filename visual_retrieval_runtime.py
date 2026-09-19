@@ -727,10 +727,10 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             prepared_candidates.append((source, valid_candidates))
 
         for candidate_offset in range(MAX_CANDIDATES_PER_SOURCE):
-            if verification_attempts >= max_verification:
+            if verification_attempts >= max_verification or qa_hard_stop:
                 break
             for source, candidates in prepared_candidates:
-                if verification_attempts >= max_verification:
+                if verification_attempts >= max_verification or qa_hard_stop:
                     break
                 if candidate_offset >= len(candidates):
                     continue
