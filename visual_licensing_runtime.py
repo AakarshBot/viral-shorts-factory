@@ -1,0 +1,172 @@
+"""Central visual licensing, provenance and attribution policy.
+
+The production visual boundary is deliberately conservative: monetized videos
+accept only assets with an explicit commercial-use-compatible license. Search
+providers may still exist for compatibility, but unlicensed providers are
+disabled unless ALLOW_UNLICENSED_VISUALS is explicitly enabled.
+"""
+from __future__ import annotations
+
+import html
+import json
+import os
+import re
+from typing import Any
+
+ALLOW_UNLICENSED_ENV = "ALLOW_UNLICENSED_VISUALS"
+UNLICENSED_PROVIDERS = {"ddg", "duckduckgo", "news_source", "article_source"}
+ALLOW_LISTED_OPEN_LICENSES = {"cc0", "pdm", "by", "by-sa"}
+LICENSE_URLS = {
+    "cc0": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "pdm": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "by": "https://creativecommons.org/licenses/by/4.0/",
+    "by-sa": "https://creativecommons.org/licenses/by-sa/4.0/",
+}
+PROVIDER_DEFAULTS = {
+    "pexels": ("Pexels", "Pexels License", "https://www.pexels.com/license/"),
+    "unsplash": ("Unsplash", "Unsplash License", "https://unsplash.com/license"),
+    "pixabay": ("Pixabay", "Pixabay Content License", "https://pixabay.com/service/license-summary/"),
+}
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def allow_unlicensed_visuals() -> bool:
+    return _truthy(os.getenv(ALLOW_UNLICENSED_ENV, "false"))
+
+
+def provider_allowed(provider: str) -> bool:
+    return allow_unlicensed_visuals() or str(provider or "").strip().casefold() not in UNLICENSED_PROVIDERS
+
+
+def normalize_license_code(value: Any) -> str:
+    text = re.sub(r"\s+", "-", str(value or "").strip().casefold())
+    text = re.sub(r"[^a-z0-9-]+", "", text)
+    if text.startswith("cc-"):
+        text = text[3:]
+    return text
+
+
+def is_allowed_license(value: Any) -> bool:
+    code = normalize_license_code(value)
+    if not code or "-nc" in code or "-nd" in code:
+        return False
+    return code in ALLOW_LISTED_OPEN_LICENSES
+
+
+def _strip_markup(value: Any) -> str:
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def provenance(
+    provider: str,
+    url: str = "",
+    author: str = "",
+    license: str = "",
+    license_url: str = "",
+) -> dict[str, str]:
+    provider_name = str(provider or "").strip()
+    default = PROVIDER_DEFAULTS.get(provider_name.casefold())
+    if default:
+        provider_name = default[0]
+        license = license or default[1]
+        license_url = license_url or default[2]
+    return {
+        "provider": provider_name,
+        "url": str(url or "").strip(),
+        "author": _strip_markup(author),
+        "license": _strip_markup(license),
+        "license_url": str(license_url or "").strip(),
+    }
+
+
+def licensed_candidate(data: bytes, metadata: dict[str, Any]) -> dict[str, Any]:
+    """Attach auditable provenance without changing the image bytes contract."""
+    return {"bytes": bytes(data), "provenance": provenance(**metadata)}
+
+
+def candidate_bytes(value: Any) -> bytes | None:
+    if isinstance(value, dict) and "bytes" in value:
+        value = value["bytes"]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    return None
+
+
+def candidate_provenance(value: Any) -> dict[str, str]:
+    if isinstance(value, dict) and isinstance(value.get("provenance"), dict):
+        return provenance(**value["provenance"])
+    return provenance("unknown")
+
+
+def attribution_required(record: dict[str, Any]) -> bool:
+    code = normalize_license_code(record.get("license"))
+    return code in {"by", "by-sa"}
+
+
+def build_image_credits(records: list[dict[str, Any]]) -> str:
+    lines = []
+    seen = set()
+    for raw in records or []:
+        record = provenance(
+            raw.get("provider", ""),
+            raw.get("url", ""),
+            raw.get("author", ""),
+            raw.get("license", ""),
+            raw.get("license_url", ""),
+        )
+        if not attribution_required(record):
+            continue
+        key = tuple(record.values())
+        if key in seen:
+            continue
+        seen.add(key)
+        author = record["author"] or "Unknown author"
+        license_name = record["license"] or "CC license"
+        url = record["url"] or record["license_url"]
+        lines.append(f"- {author} — {license_name} — {url}")
+    if not lines:
+        return ""
+    return "Image credits\n" + "\n".join(lines)
+
+
+def ai_provenance() -> dict[str, str]:
+    return provenance(
+        "AI-generated",
+        url="",
+        author="",
+        license="AI-generated",
+        license_url="",
+    )
+
+
+def rescue_provenance() -> dict[str, str]:
+    return provenance(
+        "Factory visual",
+        url="",
+        author="",
+        license="Original factory graphic",
+        license_url="",
+    )
+
+
+__all__ = [
+    "ALLOW_LISTED_OPEN_LICENSES",
+    "ALLOW_UNLICENSED_ENV",
+    "allow_unlicensed_visuals",
+    "attribution_required",
+    "build_image_credits",
+    "candidate_bytes",
+    "candidate_provenance",
+    "is_allowed_license",
+    "licensed_candidate",
+    "normalize_license_code",
+    "provider_allowed",
+    "provenance",
+    "rescue_provenance",
+    "ai_provenance",
+]
