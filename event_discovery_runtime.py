@@ -262,8 +262,14 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
     right_actions = set(right.get("identity_actions") or _action_context(right))
     shared_actions = left_actions & right_actions
 
+    # Conflicting event actions are a hard stop. Similar wording alone
+    # must not collapse a launch, delay, cancellation, appointment, etc.
+    # into the same event.
+    if left_actions and right_actions and not shared_actions:
+        return False
+
     # Keep clustering deliberately small and evidence-based:
-    # 1) very similar headlines must also agree on the event action;
+    # 1) very similar headlines can merge when there is no action conflict;
     # 2) differently worded reports can merge when they share two entities
     #    and the same action;
     # 3) a single shared entity is enough only when there is also a shared
