@@ -529,6 +529,43 @@ def test_build_discovery_evidence_summarises_event_support_and_signals():
     assert evidence["channel_history"] == 4.0
     assert len(evidence["sources"]) == 2
 
+def test_live_qc_gates_are_real_blocking_checks(tmp_path):
+    from dashboard_runtime import evaluate_live_qc_gates, live_qc_passes
+
+    video = Path(tmp_path) / "final.mp4"
+    video.write_bytes(b"not a real video")
+    scene = {"voiceover": "One", "primary_entity": "Subject", "specific_search_prompt": "Subject event"}
+    snapshot = {
+        "run_id": "run-test",
+        "selected_story": {"title": "Selected story", "story_key": "selected story", "discovery_rank": 1},
+        "script_data": {
+            "title": "Selected story",
+            "titles": ["One", "Two", "Three"],
+            "recommended_title_index": 0,
+            "seo_description": "This is a sufficiently long description for the release metadata check.",
+            "script": [dict(scene) for _ in range(5)],
+        },
+        "audio_paths": [],
+        "visual_packages": [],
+        "visual_review_approved": False,
+        "video_path": str(video),
+    }
+    metadata = {
+        "title": "Selected story",
+        "description": "This is a sufficiently long description for the release metadata check.",
+        "comment": "",
+    }
+
+    gates = evaluate_live_qc_gates(snapshot, metadata)
+    by_key = {gate["key"]: gate for gate in gates}
+    assert by_key["story_lock"]["passed"] is True
+    assert by_key["script_contract"]["passed"] is True
+    assert by_key["visual_package"]["passed"] is False
+    assert by_key["visual_review"]["passed"] is False
+    assert by_key["artifact_qc"]["passed"] is False
+    assert live_qc_passes(snapshot, metadata) is False
+
+
 def test_dashboard_primary_menu_and_generated_outputs_contract():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
