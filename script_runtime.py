@@ -552,7 +552,36 @@ def wrap_write_script(bot):
             if not ok:
                 raise ValueError(f"Content-density gate failed after deterministic fallback: {reason}")
             cleaned["fallback_diagnostics"] = fallback_diag
+            cleaned["originality_overlap"] = check_script_originality(cleaned, story_data)
+            cleaned["originality_critique"] = {"score": None, "unsupported_claims": ["Extractive source-grounded fallback is not eligible for public publication."], "exaggerations": [], "fixes": [], "provider": "fallback"}
             return cleaned
+
+        originality = check_script_originality(cleaned, story_data)
+        if not originality["passed"]:
+            print(
+                f"   [Script Originality] Overlap detected: {len(originality['failures'])} scene(s). Requesting one rewrite.",
+                flush=True,
+            )
+            rewritten = _rewrite_for_originality_once(cleaned, story_data, originality)
+            if rewritten is None:
+                raise ValueError("Originality gate failed and the one-shot LLM rewrite was unavailable.")
+            cleaned, rewrite_diag = clean_script_data(rewritten, story_data, format_mode)
+            ok, reason = validate_content_density(cleaned, story_data, format_mode)
+            if not ok:
+                raise ValueError(f"Originality rewrite failed script validation: {reason}")
+            originality = check_script_originality(cleaned, story_data)
+            cleaned["originality_rewrite_diagnostics"] = rewrite_diag
+            if not originality["passed"]:
+                raise ValueError("Originality gate failed after the one-shot LLM rewrite.")
+        cleaned["originality_overlap"] = originality
+
+        critique = _run_real_critique(cleaned, story_data)
+        cleaned["originality_critique"] = critique
+        if critique.get("unsupported_claims"):
+            raise ValueError(
+                "Originality critique found unsupported claims: "
+                + "; ".join(critique["unsupported_claims"][:3])
+            )
 
         return cleaned
 
