@@ -78,6 +78,85 @@ def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
     assert "manual_visual_query" not in script["script"][1]
     assert controller.snapshot()["stage"] == "audio"
 
+
+def test_dashboard_start_production_reaches_script_review(monkeypatch):
+    import workflow_runtime
+
+    def fake_write_script(*_args, **_kwargs):
+        return {
+            "title": "Live integration story",
+            "script": [
+                {"primary_entity": "Gautam Gambhir", "voiceover": "Gautam Gambhir speaks."},
+                {"primary_entity": "India", "voiceover": "India prepares for the match."},
+            ],
+        }
+
+    class LiveBot:
+        CONTENT_CATEGORIES = {"national_global_affairs": {"label": "News"}}
+
+        def __init__(self):
+            def run_robot(web_config=None):
+                return run_robot.__globals__["write_script"](
+                    {}, {}, "national_global_affairs", None, "regular"
+                )
+
+            self.run_robot = run_robot
+            self.run_robot.__globals__["write_script"] = fake_write_script
+
+    bot = LiveBot()
+    controller = DashboardWorkflowController(bot)
+
+    monkeypatch.setattr(
+        workflow_runtime,
+        "run_robot_with_exact_identity",
+        lambda bot_obj, web_config=None: bot_obj.run_robot(web_config=web_config),
+    )
+    monkeypatch.setattr(controller, "_mark_latest_run_ready_for_qc", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        workflow_runtime,
+        "_build_clean_metadata",
+        lambda *_args, **_kwargs: ("Title", "Description", []),
+    )
+    monkeypatch.setattr(
+        workflow_runtime,
+        "build_pinned_comment",
+        lambda *_args, **_kwargs: "Comment",
+    )
+
+    controller.start_production(
+        {
+            "format_mode": "regular",
+            "category": "national_global_affairs",
+            "language": "english",
+        },
+        {
+            "title": "Live integration story",
+            "story_key": "live integration story",
+            "dashboard_discovery_pool": True,
+        },
+    )
+
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        if controller.snapshot()["stage"] == "script_review":
+            break
+        time.sleep(0.01)
+
+    snapshot = controller.snapshot()
+    assert snapshot["script_review_required"] is True
+    assert len(snapshot["script_data"]["script"]) == 2
+
+    assert controller.submit_script_visual_queries(
+        ["Gautam Gambhir press conference", ""]
+    ) is True
+
+    deadline = time.time() + 2
+    while time.time() < deadline and controller.snapshot()["thread_alive"]:
+        time.sleep(0.01)
+
+    assert not controller.snapshot()["thread_alive"]
+
+
 def test_dashboard_controller_pauses_after_visuals_until_approval(monkeypatch):
     async def fake_visuals(*_args, **_kwargs):
         return [[{"image": "/tmp/scene_1.jpg", "source_type": "Pexels"}]]
