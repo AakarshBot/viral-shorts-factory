@@ -30,11 +30,12 @@ _CACHE = {}
 
 
 def reset_visual_qa_video_budget():
-    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN
+    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN, LAST_VISUAL_QA_FAILURE
     with _LOCK:
         _VIDEO_CALLS = 0
         _SCENE_CALLS = 0
         _CIRCUIT_OPEN = False
+        LAST_VISUAL_QA_FAILURE = ""
 
 
 def start_visual_qa_scene():
