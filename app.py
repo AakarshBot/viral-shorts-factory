@@ -954,7 +954,10 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
             )
 
         render_research_summary(snapshot)
-        render_script(snapshot)
+        if snapshot.get("script_review_required"):
+            render_script_visual_query_review(controller, snapshot)
+        else:
+            render_script(snapshot)
         render_audio_preview(snapshot)
         render_generated_outputs(snapshot)
 
