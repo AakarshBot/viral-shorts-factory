@@ -64,3 +64,55 @@ def test_real_critique_normalizes_required_json(monkeypatch):
     assert result["score"] == 8
     assert result["unsupported_claims"] == []
     assert result["provider"] == "groq"
+
+def test_originality_rewrite_falls_through_to_openrouter_free(monkeypatch):
+    import script_runtime
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    calls = []
+
+    def fake_llm(url, payload, headers):
+        calls.append(url)
+        if "groq.com" in url:
+            return None
+        return {"script": [{"index": 1, "voiceover": "A genuinely rewritten factual scene with the same supported information."}]}
+
+    monkeypatch.setattr(script_runtime, "_originality_llm", fake_llm)
+    result = script_runtime._rewrite_for_originality_once(
+        {"script": [{"voiceover": "A source-derived scene with overlapping wording.", "human_contributed": False}]},
+        {"research_evidence_text": "A source-derived scene with overlapping wording and supported facts."},
+        {"passed": False, "failures": [{"scene": 1}]},
+    )
+
+    assert result["script"][0]["voiceover"].startswith("A genuinely rewritten")
+    assert calls[0].startswith("https://api.groq.com/")
+    assert calls[1].startswith("https://openrouter.ai/")
+
+
+def test_emergency_enrichment_reuses_phase2_evidence_pack():
+    from production_hardening_runtime import _enrich_emergency_story
+
+    result = _enrich_emergency_story(
+        None,
+        {
+            "title": "Rinku Singh signing",
+            "text": "Rinku Singh joined a new cricket organization.",
+            "research_evidence_pack": {
+                "claims": [
+                    {"status": "corroborated", "text": "Rinku Singh became the first cricket signing for EMW Global."},
+                    {"status": "conflicted", "text": "This disputed claim must not enter fallback narration."},
+                ],
+                "sources": [
+                    {"clean_text_preview": "The organization announced its expansion into India through cricket."}
+                ],
+            },
+        },
+    )
+
+    assert "Rinku Singh became the first cricket signing for EMW Global." in result["text"]
+    assert "This disputed claim must not enter fallback narration." not in result["text"]
+    assert "expansion into India through cricket" in result["text"]
+
