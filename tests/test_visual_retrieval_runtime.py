@@ -409,16 +409,17 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
         lambda bot, visual_type: [("DDG", lambda *args: [image_bytes])],
     )
 
+    scene = {
+        "primary_entity": "Sanju Samson",
+        "factual_primary_entity": "Sanju Samson",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "Sanju Samson",
+        "voiceover": "Sanju Samson is in focus.",
+    }
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
-        {
-            "primary_entity": "Sanju Samson",
-            "factual_primary_entity": "Sanju Samson",
-            "visual_intent": "person portrait",
-            "specific_search_prompt": "Sanju Samson",
-            "voiceover": "Sanju Samson is in focus.",
-        },
+        scene,
         "cricket",
         set(),
         set(),
@@ -428,6 +429,8 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
+    assert scene["visual_rejection_counts"]["semantic_qc_reject"] == 1
+    assert scene["visual_rejection_counts"]["final_rescue"] == 1
 
 
 
