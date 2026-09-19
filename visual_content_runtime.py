@@ -14,6 +14,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from branding_runtime import source_credit_for_type
 from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
+from visual_licensing_runtime import allow_unlicensed_visuals, provenance, rescue_provenance
+from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
@@ -160,7 +162,9 @@ def _rank_news_source_scene_indices(scenes, article_title=""):
 
 
 async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, active_config):
-    """Extract the selected article image once, then run it through the normal visual QC."""
+    """Extract the selected article image only when explicitly opted in."""
+    if not allow_unlicensed_visuals():
+        return None
     try:
         from news_source_image_runtime import extract_news_source_image, compose_news_source_image
     except Exception as exc:
@@ -252,16 +256,26 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, acti
         scene["visual_verified"] = True
         scene["visual_query_used"] = "selected article lead image"
         scene["visual_source"] = "news_source"
+        image_url = str(source_pack.get("image_url") or "")
+        page_url = str(source_pack.get("page_url") or article_url)
+        publisher_name = str(source_pack.get("publisher") or publisher or "News source").strip()
         return {
             "scene_index": scene_index,
             "image": compose_news_source_image(image, (1080, 1920)),
             "source_type": "news_source",
             "credit": str(
                 source_pack.get("credit")
-                or f"Source: {source_pack.get('publisher') or publisher or 'News source'}"
+                or f"Source: {publisher_name}"
             ).strip(),
-            "image_url": str(source_pack.get("image_url") or ""),
-            "page_url": str(source_pack.get("page_url") or article_url),
+            "image_url": image_url,
+            "page_url": page_url,
+            "provenance": provenance(
+                "Article source",
+                url=image_url or page_url,
+                author=publisher_name,
+                license="Unverified article-source license",
+                license_url=page_url,
+            ),
         }
 
     print("   [News Source Image] Extracted image failed the normal visual QC for every relevant scene; discarded.", flush=True)
@@ -399,6 +413,7 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
+        reset_visual_qa_video_budget()
 
         # Preserve the original global manual-query control as a compatibility
         # path. New per-slide queries remain authoritative and are never
@@ -509,6 +524,7 @@ def patch_content_first_visuals(bot):
 
         print("\n🎨 Rendering content-first visual package (multi-source retrieval + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
+            start_visual_qa_scene()
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
@@ -517,6 +533,7 @@ def patch_content_first_visuals(bot):
                 used_ai = False
                 source_type = news_source_candidate["source_type"]
                 source_credit = news_source_candidate["credit"]
+                seg["asset_provenance"] = dict(news_source_candidate.get("provenance") or {})
                 print(
                     f"   [News Source Image] Accepted for scene {idx + 1} after normal visual QC.",
                     flush=True,
@@ -603,6 +620,9 @@ def patch_content_first_visuals(bot):
                 "visual_type": visual_type,
                 "visual_genre": seg.get("visual_genre", "GENERAL_CONTEXT"),
                 "visual_verified": scene_verified,
+                "visual_qc_blocked": bool(seg.get("visual_qc_blocked", False)),
+                "visual_qc_block_reason": seg.get("visual_qc_block_reason", ""),
+                "visual_rejection_counts": dict(seg.get("visual_rejection_counts") or {}),
                 "visual_rescue_reason": seg.get("visual_rescue_reason", ""),
                 "visual_fallback_reason": "",
                 "visual_query_used": seg.get("visual_query_used", ""),
@@ -610,6 +630,7 @@ def patch_content_first_visuals(bot):
                 "manual_visual_query_score": seg.get("manual_visual_query_score", 0),
                 "source_credit": source_credit,
                 "source_image_url": news_source_candidate.get("image_url", "") if source_type == "news_source" and isinstance(news_source_candidate, dict) else "",
+                "asset_provenance": dict(seg.get("asset_provenance") or {}),
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
@@ -703,11 +724,15 @@ def patch_content_first_visuals(bot):
                     "visual_type": visual_type,
                     "visual_genre": seg.get("visual_genre", "GENERAL_CONTEXT"),
                     "visual_verified": True,
+                    "visual_qc_blocked": False,
+                    "visual_qc_block_reason": "",
+                    "visual_rejection_counts": dict(seg.get("visual_rejection_counts") or {}),
                     "visual_rescue_reason": seg["visual_rescue_reason"],
                     "visual_fallback_reason": "",
                     "visual_query_used": seg["visual_query_used"],
                     "source_credit": source_credit_for_type(related_source),
                     "source_image_url": "",
+                    "asset_provenance": dict(asset.get("provenance") or {}),
                     "related_reuse": True,
                     "related_subject": str(asset.get("subject") or "").strip(),
                     "related_source_type": related_source,
@@ -733,6 +758,16 @@ def patch_content_first_visuals(bot):
             )
 
         total = len(scenes)
+        provenance_records = []
+        for scene_index, scene in enumerate(scenes):
+            record = dict(scene.get("asset_provenance") or {})
+            if not record:
+                record = rescue_provenance()
+                scene["asset_provenance"] = record
+            if packages[scene_index]:
+                packages[scene_index][0]["asset_provenance"] = record
+            provenance_records.append(record)
+        script_data["visual_provenance"] = provenance_records
         script_data["ai_image_ratio"] = round(ai_count / max(1, total), 2)
         script_data["visual_coverage"] = round(verified_count / max(1, total), 2)
         script_data["visuals_verified"] = verified_count == total

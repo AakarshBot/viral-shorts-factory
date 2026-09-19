@@ -17,6 +17,13 @@ from urllib.parse import urlparse
 
 import requests
 
+from visual_licensing_runtime import (
+    LICENSE_URLS,
+    is_allowed_license,
+    licensed_candidate,
+    normalize_license_code,
+)
+
 
 OPENVERSE_API = "https://api.openverse.org/v1/images/"
 PIXABAY_API = "https://pixabay.com/api/"
@@ -70,7 +77,7 @@ def _remember_url(used_urls: set[str] | None, url: str) -> bool:
     return True
 
 
-def _download(url: str, used_urls: set[str] | None = None) -> bytes | None:
+def _download(url: str, used_urls: set[str] | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any] | None:
     parsed = urlparse(str(url or ""))
     if parsed.scheme not in {"http", "https"} or not _remember_url(used_urls, str(url)):
         return None
@@ -86,7 +93,9 @@ def _download(url: str, used_urls: set[str] | None = None) -> bytes | None:
         data = response.content
         if not data or (content_type and "image" not in content_type and not content_type.startswith("application/octet-stream")):
             return None
-        return data
+        meta = dict(metadata or {})
+        meta.setdefault("url", response.url or str(url))
+        return licensed_candidate(data, meta)
     except Exception:
         return None
 
@@ -101,7 +110,13 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
         try:
             response = requests.get(
                 OPENVERSE_API,
-                params={"q": q, "page_size": 15, "mature": "false"},
+                params={
+                    "q": q,
+                    "page_size": 15,
+                    "mature": "false",
+                    "license_type": "commercial",
+                    "license": ["cc0", "pdm", "by", "by-sa"],
+                },
                 timeout=DEFAULT_TIMEOUT,
                 headers={"User-Agent": "ViralShortsFactory/1.0 (+image-retrieval)"},
             )
@@ -118,11 +133,18 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
     for item in payload.get("results", []) if isinstance(payload, dict) else []:
         if not isinstance(item, dict):
             continue
-        license_code = str(item.get("license") or "").lower()
-        if license_code in {"", "all-rights-reserved", "arr"}:
+        license_code = normalize_license_code(item.get("license"))
+        if not is_allowed_license(license_code):
             continue
+        metadata = {
+            "provider": "Openverse",
+            "url": str(item.get("url") or ""),
+            "author": str(item.get("creator") or ""),
+            "license": license_code,
+            "license_url": str(item.get("license_url") or LICENSE_URLS.get(license_code, "")),
+        }
         for candidate in (item.get("url"), item.get("thumbnail")):
-            data = _download(candidate, used_urls)
+            data = _download(candidate, used_urls, metadata)
             if data:
                 candidates.append(data)
                 break
@@ -173,8 +195,15 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
     for item in payload.get("hits", []) if isinstance(payload, dict) else []:
         if not isinstance(item, dict):
             continue
+        metadata = {
+            "provider": "Pixabay",
+            "url": str(item.get("largeImageURL") or item.get("webformatURL") or ""),
+            "author": str(item.get("user") or ""),
+            "license": "Pixabay Content License",
+            "license_url": "https://pixabay.com/service/license-summary/",
+        }
         for candidate in (item.get("largeImageURL"), item.get("webformatURL")):
-            data = _download(candidate, used_urls)
+            data = _download(candidate, used_urls, metadata)
             if data:
                 candidates.append(data)
                 break

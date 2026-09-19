@@ -186,9 +186,19 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
         return True, tier, 100, False
     if result is False:
         print(f"   [Visual QA] {tier} | REJECTED: semantic check returned NO for '{entity}'.", flush=True)
-        return False, tier, max(0, source_score - 20), True
-    print(f"   [Visual QA] {tier} | semantic verification unavailable/uncertain; candidate rejected.", flush=True)
-    return False, tier, source_score, False
+        return False, f"{tier}:SEMANTIC_NO", max(0, source_score - 20), True
+    try:
+        import visual_qa_runtime
+        failure = str(getattr(visual_qa_runtime, "LAST_VISUAL_QA_FAILURE", "") or "").strip()
+    except Exception:
+        failure = ""
+    normalized_failure = re.sub(r"[^A-Za-z0-9]+", "_", failure).upper().strip("_") or "UNCERTAIN"
+    print(
+        f"   [Visual QA] {tier} | semantic verification unavailable/uncertain; "
+        f"reason={failure or 'uncertain'}; candidate rejected.",
+        flush=True,
+    )
+    return False, f"{tier}:QA_{normalized_failure}", source_score, False
 
 
 def _build_search_variants(seg, video_title=""):

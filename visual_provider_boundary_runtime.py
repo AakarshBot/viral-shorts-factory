@@ -17,6 +17,13 @@ from typing import Any
 import requests
 
 from visual_taxonomy_runtime import preferred_sources
+from visual_licensing_runtime import (
+    LICENSE_URLS,
+    allow_unlicensed_visuals,
+    is_allowed_license,
+    licensed_candidate,
+    normalize_license_code,
+)
 
 DEFAULT_TIMEOUT = max(3, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "8")))
 MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "4"))))
@@ -26,7 +33,7 @@ def _clean_query(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:240]
 
 
-def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> bytes | None:
+def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> dict[str, Any] | None:
     if not data:
         return None
     if used_urls is not None and url in used_urls:
@@ -36,7 +43,7 @@ def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) 
     return data
 
 
-def _download_image(url: str, used_urls: set[str] | None = None) -> bytes | None:
+def _download_image(url: str, used_urls: set[str] | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any] | None:
     url = str(url or "").strip()
     if not url or not url.startswith(("http://", "https://")):
         return None
@@ -56,7 +63,12 @@ def _download_image(url: str, used_urls: set[str] | None = None) -> bytes | None
             return None
         if content_type and not ("image" in content_type or content_type.startswith("application/octet-stream")):
             return None
-        return _remember_success(used_urls, response.url or url, data)
+        accepted = _remember_success(used_urls, response.url or url, data)
+        if not accepted:
+            return None
+        meta = dict(metadata or {})
+        meta.setdefault("url", response.url or url)
+        return licensed_candidate(accepted, meta)
     except Exception:
         return None
 
@@ -82,15 +94,20 @@ def _api_json(
         return None
 
 
-def _bounded_downloads(urls: list[str], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[bytes]:
+def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[dict[str, Any]]:
     candidates: list[bytes] = []
     seen_urls: set[str] = set()
-    for url in urls:
+    for item in urls:
+        metadata = {}
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            url, metadata = item[0], item[1] if isinstance(item[1], dict) else {}
+        else:
+            url = item
         url = str(url or "").strip()
         if not url or url in seen_urls:
             continue
         seen_urls.add(url)
-        data = _download_image(url, used_urls)
+        data = _download_image(url, used_urls, metadata)
         if data:
             candidates.append(data)
             if len(candidates) >= limit:
@@ -109,7 +126,7 @@ def _title_is_entity(title: str, entity: str) -> bool:
     return wanted == actual or all(token in actual for token in wanted)
 
 
-def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Resolve near-exact Wikipedia person pages in one API call."""
     entity = _clean_query(query)
     if not entity:
@@ -123,28 +140,63 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             "gsrnamespace": 0,
             "gsrlimit": MAX_PROVIDER_CANDIDATES,
             "prop": "pageimages",
-            "piprop": "original|thumbnail",
+            "piprop": "name|original|thumbnail",
+            "pilicense": "free",
             "pithumbsize": 1600,
             "format": "json",
         },
     )
     pages = payload.get("query", {}).get("pages", {}) if payload else {}
-    urls: list[str] = []
+    urls: list[Any] = []
     for page in pages.values() if isinstance(pages, dict) else []:
         if not isinstance(page, dict):
             continue
         title = str(page.get("title", "")).strip()
         if not _title_is_entity(title, entity):
             continue
-        # Prefer Wikimedia's generated thumbnail. This is important for SVG
-        # logos and other vector/page-image assets that Pillow cannot decode
-        # directly. MediaWiki can return a raster thumbnail while preserving
-        # the source image's visual content.
-        thumbnail = ((page.get("thumbnail") or {}).get("source"))
-        original = ((page.get("original") or {}).get("source"))
-        source = thumbnail or original
+        file_name = str(page.get("pageimage") or "").strip()
+        if not file_name:
+            continue
+        info_payload = _api_json(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "imageinfo",
+                "titles": "File:" + file_name,
+                "iiprop": "url|mime|extmetadata",
+                "iiurlwidth": 1600,
+                "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl",
+                "format": "json",
+            },
+        )
+        file_pages = info_payload.get("query", {}).get("pages", {}) if info_payload else {}
+        info = None
+        for file_page in file_pages.values() if isinstance(file_pages, dict) else []:
+            imageinfo = file_page.get("imageinfo") or [] if isinstance(file_page, dict) else []
+            if imageinfo and isinstance(imageinfo[0], dict):
+                info = imageinfo[0]
+                break
+        if not info:
+            continue
+        ext = info.get("extmetadata") or {}
+        def _meta_value(key):
+            value = ext.get(key)
+            return value.get("value", "") if isinstance(value, dict) else str(value or "")
+        license_code = normalize_license_code(_meta_value("LicenseShortName"))
+        if not is_allowed_license(license_code):
+            continue
+        source = info.get("thumburl") or info.get("url") or ((page.get("thumbnail") or {}).get("source"))
         if source:
-            urls.append(str(source))
+            urls.append((
+                str(source),
+                {
+                    "provider": "Wikipedia",
+                    "url": str(info.get("descriptionurl") or ("https://en.wikipedia.org/wiki/File:" + file_name)),
+                    "author": _meta_value("Artist"),
+                    "license": license_code,
+                    "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
+                },
+            ))
     return _bounded_downloads(urls, used_urls)
 
 
@@ -175,25 +227,39 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
             "gsrnamespace": 6,
             "gsrlimit": MAX_PROVIDER_CANDIDATES,
             "prop": "imageinfo",
-            "iiprop": "url|mime",
+            "iiprop": "url|mime|extmetadata",
             "iiurlwidth": 1600,
+            "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl",
             "format": "json",
         },
     )
     pages = payload.get("query", {}).get("pages", {}) if payload else {}
-    urls: list[str] = []
+    urls: list[Any] = []
     for page in pages.values() if isinstance(pages, dict) else []:
         if not isinstance(page, dict):
             continue
         imageinfo = page.get("imageinfo") or []
         if imageinfo and isinstance(imageinfo[0], dict):
             info = imageinfo[0]
-            # Prefer Wikimedia's server-rendered thumbnail. Besides keeping
-            # downloads bounded, this transparently rasterizes SVG logos and
-            # other formats that are not directly supported by Pillow.
+            ext = info.get("extmetadata") or {}
+            def _meta_value(key):
+                value = ext.get(key)
+                return value.get("value", "") if isinstance(value, dict) else str(value or "")
+            license_code = normalize_license_code(_meta_value("LicenseShortName"))
+            if not is_allowed_license(license_code):
+                continue
             source = info.get("thumburl") or info.get("url")
             if source:
-                urls.append(str(source))
+                urls.append((
+                    str(source),
+                    {
+                        "provider": "Commons",
+                        "url": str(info.get("descriptionurl") or ("https://commons.wikimedia.org/wiki/" + str(page.get("title", "")))),
+                        "author": _meta_value("Artist"),
+                        "license": license_code,
+                        "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
+                    },
+                ))
     return _bounded_downloads(urls, used_urls)
 
 
@@ -202,7 +268,9 @@ def fetch_commons(query: str, used_urls: set[str] | None = None, *_args) -> byte
     return candidates[0] if candidates else None
 
 
-def fetch_duckduckgo_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_duckduckgo_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
+    if not allow_unlicensed_visuals():
+        return []
     q = _clean_query(query)
     if not q:
         return []
@@ -225,7 +293,7 @@ def fetch_duckduckgo_candidates(query: str, used_urls: set[str] | None = None, *
         return []
 
 
-def fetch_duckduckgo(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
+def fetch_duckduckgo(query: str, used_urls: set[str] | None = None, *_args) -> dict[str, Any] | None:
     candidates = fetch_duckduckgo_candidates(query, used_urls, *_args)
     return candidates[0] if candidates else None
 
@@ -246,7 +314,16 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
             continue
         src = photo.get("src") or {}
         if isinstance(src, dict):
-            urls.extend(str(url) for url in (src.get("large2x"), src.get("large"), src.get("original")) if url)
+            author = str(photo.get("photographer") or "")
+            for url in (src.get("large2x"), src.get("large"), src.get("original")):
+                if url:
+                    urls.append((str(url), {
+                        "provider": "Pexels",
+                        "url": str(url),
+                        "author": author,
+                        "license": "Pexels License",
+                        "license_url": "https://www.pexels.com/license/",
+                    }))
     return _bounded_downloads(urls, used_urls)
 
 
@@ -271,7 +348,17 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
             continue
         urls_meta = item.get("urls") or {}
         if isinstance(urls_meta, dict):
-            urls.extend(str(url) for url in (urls_meta.get("regular"), urls_meta.get("full"), urls_meta.get("raw")) if url)
+            user = item.get("user") or {}
+            author = str(user.get("name") or user.get("username") or "") if isinstance(user, dict) else ""
+            for url in (urls_meta.get("regular"), urls_meta.get("full"), urls_meta.get("raw")):
+                if url:
+                    urls.append((str(url), {
+                        "provider": "Unsplash",
+                        "url": str(url),
+                        "author": author,
+                        "license": "Unsplash License",
+                        "license_url": "https://unsplash.com/license",
+                    }))
     return _bounded_downloads(urls, used_urls)
 
 
@@ -317,13 +404,15 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
     except Exception:
         fetch_openverse = fetch_pixabay = None
 
-    plan.extend([
-        ("Openverse", fetch_openverse_candidates),
-        ("DDG", fetch_duckduckgo_candidates),
-        ("Pixabay", fetch_pixabay_candidates),
-        ("Pexels", fetch_pexels_candidates),
-        ("Unsplash", fetch_unsplash_candidates),
-    ])
+    plan.append(("Openverse", fetch_openverse_candidates))
+    if str(os.getenv("PIXABAY_API_KEY", "")).strip():
+        plan.append(("Pixabay", fetch_pixabay_candidates))
+    if str(os.getenv("PEXELS_API_KEY", "")).strip():
+        plan.append(("Pexels", fetch_pexels_candidates))
+    if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
+        plan.append(("Unsplash", fetch_unsplash_candidates))
+    if allow_unlicensed_visuals():
+        plan.append(("DDG", fetch_duckduckgo_candidates))
 
     plan = [(name, fn) for name, fn in plan if callable(fn)]
     preferred = preferred_sources(genre)

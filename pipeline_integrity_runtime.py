@@ -381,8 +381,9 @@ def _wrap_compile(bot):
         return
 
     def guarded_compile(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
-        # The canonical compile_video already owns the active karaoke subtitles.
-        # Do not run a second FFmpeg subtitles filter on the finished video.
+        # The canonical compile_video owns motion, word-highlight captions, the
+        # scene-one hook overlay and final loudness normalization. Do not add a
+        # second subtitle filter or re-encode here.
         return current(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode)
 
     guarded_compile._pipeline_integrity_wrapped = True

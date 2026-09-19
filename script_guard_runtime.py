@@ -169,9 +169,9 @@ def source_only_fallback(story_data, language_cfg, genre_key, format_mode):
         "step_3_critique": "Source-grounded emergency fallback.",
         "step_4_metadata": subject,
         "titles": [
-            f"{title[:92]} #shorts",
-            f"{title[:92]} | Latest Update #shorts",
-            f"{title[:92]} | What We Know #shorts",
+            title[:100].strip(),
+            f"{title[:84].strip()} | Latest Update",
+            f"{title[:84].strip()} | What We Know",
         ],
         "recommended_title_index": 1,
         "seo_description": description,

@@ -53,7 +53,11 @@ def test_news_source_ranking_does_not_force_first_slide_for_manual_query():
     assert ranked[0] == 1
 
 
-def test_news_source_candidate_skips_person_scenes(monkeypatch, tmp_path):
+def test_news_source_candidate_is_opt_in(monkeypatch, tmp_path):
+    import asyncio
+    import news_source_image_runtime
+
+    monkeypatch.setenv("ALLOW_UNLICENSED_VISUALS", "true")
     import asyncio
     import news_source_image_runtime
 
@@ -123,6 +127,46 @@ def test_news_source_candidate_skips_person_scenes(monkeypatch, tmp_path):
 
 
 
+
+
+def test_visual_process_resets_qa_state_for_run_and_each_scene(monkeypatch, tmp_path):
+    calls = {"run": 0, "scene": 0}
+    monkeypatch.setattr(
+        content_runtime,
+        "reset_visual_qa_video_budget",
+        lambda: calls.__setitem__("run", calls["run"] + 1),
+    )
+    monkeypatch.setattr(
+        content_runtime,
+        "start_visual_qa_scene",
+        lambda: calls.__setitem__("scene", calls["scene"] + 1),
+    )
+
+    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
+    monkeypatch.setattr(
+        visual_query_entities_runtime,
+        "search_slide_visual",
+        lambda *args, **kwargs: (bg.copy(), False, "commons"),
+    )
+    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
+    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
+    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
+
+    bot = _fake_bot(tmp_path)
+    script_data = {
+        "title": "QA reset test",
+        "script": [
+            {"primary_entity": "Scene One", "voiceover": "One scene."},
+            {"primary_entity": "Scene Two", "voiceover": "Two scene."},
+            {"primary_entity": "Scene Three", "voiceover": "Three scene."},
+        ],
+    }
+
+    packages = _run_process(bot, script_data, "regular")
+
+    assert len(packages) == 3
+    assert calls["run"] == 1
+    assert calls["scene"] == 3
 
 def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
     calls = []

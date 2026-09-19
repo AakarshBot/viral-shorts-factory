@@ -499,11 +499,30 @@ def render_script_visual_query_review(
         "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
         unsafe_allow_html=True,
     )
+    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+    if fallback_mode == "extractive_source_grounded":
+        st.error(
+            "PUBLIC UPLOAD BLOCKED — this script used an extractive source-grounded fallback. "
+            "It may continue as a private draft, but it cannot be published publicly.",
+            icon="⛔",
+        )
+
+    critique = script_data.get("originality_critique") or {}
+    if critique.get("unsupported_claims"):
+        st.error("ORIGINALITY GATE BLOCKED — the critique found unsupported claims.", icon="⛔")
+
     st.caption(
-        "Each slide has its own optional image-search query. Keep a box blank to use the normal automatic visual search for that slide."
+        "Add 1–2 sentences of your own analysis or context that is NOT in the source. "
+        "It will become the second-to-last spoken scene and is marked as human-contributed."
     )
 
     with st.form(key=f"script_visual_query_review_{run_id}"):
+        st.text_area(
+            "Creator Insight — required",
+            placeholder="Add your own analysis or context that is not stated in the source...",
+            key=f"creator_insight_{run_id}",
+            height=100,
+        )
         for index, scene in enumerate(scenes, 1):
             if not isinstance(scene, dict):
                 continue
@@ -551,7 +570,11 @@ def render_script_visual_query_review(
             ).strip()
             for index in range(1, len(scenes) + 1)
         ]
-        if controller.submit_script_visual_queries(queries):
+        insight = str(st.session_state.get(f"creator_insight_{run_id}", "") or "").strip()
+        if len(insight.split()) < 12:
+            st.error("Creator Insight must contain at least 12 words.")
+            return
+        if controller.submit_script_visual_queries(queries, insight):
             st.rerun()
         else:
             st.error("The script review is no longer active. Refreshing the dashboard.")
@@ -561,28 +584,38 @@ def render_script_visual_query_review(
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
     items = []
     for index, package in enumerate(snapshot.get("visual_packages") or [], 1):
-        if not package:
-            continue
-        layer = package[0] if isinstance(package, list) else package
+        layer = package[0] if isinstance(package, list) and package else package
         if not isinstance(layer, dict):
-            continue
+            layer = {}
+
         path = str(layer.get("image") or "").strip()
-        if path and os.path.isfile(path):
-            items.append(
-                {
-                    "index": index,
-                    "path": path,
-                    "source": str(layer.get("source_type") or "visual"),
-                    "visual_type": str(layer.get("visual_type") or "visual"),
-                    "verified": bool(layer.get("visual_verified", False)),
-                    "qc_passed": bool(layer.get("visual_verified", False)),
-                    "qc_reason": str(layer.get("visual_rescue_reason") or "").strip(),
-                    "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
-                    "manual_query": str(layer.get("manual_visual_query") or "").strip(),
-                    "query_used": str(layer.get("visual_query_used") or "").strip(),
-                    "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
-                }
-            )
+        missing = not path or not os.path.isfile(path)
+        verified = bool(layer.get("visual_verified", False))
+        items.append(
+            {
+                "index": index,
+                "path": path if not missing else "",
+                "missing": missing,
+                "source": str(layer.get("source_type") or "visual"),
+                "visual_type": str(layer.get("visual_type") or "visual"),
+                "verified": verified,
+                "qc_passed": verified and not missing,
+                "qc_reason": (
+                    "Rendered image file is missing from the dashboard host."
+                    if missing
+                    else str(
+                        layer.get("visual_qc_block_reason")
+                        or layer.get("visual_rescue_reason")
+                        or "Visual has no verified semantic QC verdict."
+                    ).strip()
+                ),
+                "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
+                "rejection_counts": dict(layer.get("visual_rejection_counts") or {}),
+                "manual_query": str(layer.get("manual_visual_query") or "").strip(),
+                "query_used": str(layer.get("visual_query_used") or "").strip(),
+                "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
+            }
+        )
     return items
 
 
@@ -603,7 +636,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     columns = st.columns(3, gap="medium")
     for offset, item in enumerate(items):
         with columns[offset % 3]:
-            st.image(item["path"], use_container_width=True)
+            if item.get("missing"):
+                st.error(
+                    "No rendered image file is available for this slide.",
+                    icon="⛔",
+                )
+            else:
+                st.image(item["path"], use_container_width=True)
             status = "QC PASS" if item["qc_passed"] else "QC BLOCKED"
             replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
             replacement_count = len(replacement_history)
@@ -623,6 +662,10 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 reason = item.get("qc_reason") or "Visual has no verified semantic QC verdict."
                 st.error(f"Visual semantic QC blocked: {reason}", icon="⛔")
             st.caption(f"Search: {query}")
+            rejection_counts = item.get("rejection_counts") or {}
+            if rejection_counts and not item["qc_passed"]:
+                summary = ", ".join(f"{key.replace('_', ' ')}={value}" for key, value in list(rejection_counts.items())[:4])
+                st.caption(f"Automatic QC: {summary}")
             if replacement_count:
                 st.caption(f"Replacement attempt: {replacement_count}")
 
@@ -828,7 +871,13 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
             cols = st.columns(3)
             for index, item in enumerate(visuals):
                 with cols[index % 3]:
-                    st.image(item["path"], use_container_width=True)
+                    if item.get("missing"):
+                        st.error(
+                            f"Visual {item['index']} has no rendered image file available.",
+                            icon="⛔",
+                        )
+                    else:
+                        st.image(item["path"], use_container_width=True)
                     st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
     if video_path and os.path.isfile(video_path):
         with st.expander("Final rendered video", expanded=True):
@@ -872,6 +921,14 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     )
     passed_count = sum(1 for gate in gates if gate["passed"])
     qc_ready = passed_count == len(gates)
+    public_blocked = any(bool(gate.get("public_blocked")) for gate in gates)
+    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+    if fallback_mode == "extractive_source_grounded":
+        st.error(
+            "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
+            "Private upload remains available after the other QC gates pass.",
+            icon="⛔",
+        )
     st.markdown(f"**Live gate status: {passed_count}/{len(gates)} passing**")
     gate_cols = st.columns(2)
     for index, gate in enumerate(gates):
@@ -977,7 +1034,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
-        st.caption("Public: full release QC + explicit publish confirmation.")
+        st.caption("Public: full release QC + explicit publish confirmation." + (" · BLOCKED by originality policy" if public_blocked else ""))
     with private_col:
         if st.button(
             "🔒 Upload Privately",
