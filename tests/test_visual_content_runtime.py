@@ -153,7 +153,7 @@ def test_failed_scene_reuses_verified_same_subject_asset_once(monkeypatch, tmp_p
 
     bot = _fake_bot(tmp_path)
     script_data = {
-        "title": "Related asset rescue test",
+        "title": "Rishabh Pant related asset rescue test",
         "script": [
             {
                 "primary_entity": "Rishabh Pant",
