@@ -472,6 +472,16 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
             "event_source_count": 2,
             "event_source_domains": ["reuters.com", "bbc.com"],
             "event_evidence_publishers": ["Reuters", "BBC"],
+            "event_evidence": [
+                {
+                    "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),
+                },
+                {
+                    "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
+                },
+            ],
+            "velocity_score": 5.0,
+            "trend_bonus": 2.0,
         }
         for index, (title, subject) in enumerate(topic_specs, 1)
     ]
