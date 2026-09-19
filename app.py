@@ -603,9 +603,14 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "qc_reason": (
                     "Rendered image file is missing from the dashboard host."
                     if missing
-                    else str(layer.get("visual_rescue_reason") or "").strip()
+                    else str(
+                        layer.get("visual_qc_block_reason")
+                        or layer.get("visual_rescue_reason")
+                        or "Visual has no verified semantic QC verdict."
+                    ).strip()
                 ),
                 "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
+                "rejection_counts": dict(layer.get("visual_rejection_counts") or {}),
                 "manual_query": str(layer.get("manual_visual_query") or "").strip(),
                 "query_used": str(layer.get("visual_query_used") or "").strip(),
                 "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
@@ -657,6 +662,10 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 reason = item.get("qc_reason") or "Visual has no verified semantic QC verdict."
                 st.error(f"Visual semantic QC blocked: {reason}", icon="⛔")
             st.caption(f"Search: {query}")
+            rejection_counts = item.get("rejection_counts") or {}
+            if rejection_counts and not item["qc_passed"]:
+                summary = ", ".join(f"{key.replace('_', ' ')}={value}" for key, value in list(rejection_counts.items())[:4])
+                st.caption(f"Automatic QC: {summary}")
             if replacement_count:
                 st.caption(f"Replacement attempt: {replacement_count}")
 
