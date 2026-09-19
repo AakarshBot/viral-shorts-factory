@@ -345,6 +345,61 @@ def _load_used_topics(conn):
         return []
 
 
+def _recent_topic_cooldown(conn, stories, hours=72):
+    """Remove recently covered topics while allowing genuinely new developments."""
+    if conn is None:
+        return list(stories or [])
+    try:
+        rows = conn.execute(
+            "SELECT topic, COALESCE(date_used, created_at) FROM vault "
+            "WHERE topic IS NOT NULL AND topic != ''"
+        ).fetchall()
+    except Exception:
+        return list(stories or [])
+    now = datetime.now(timezone.utc)
+    recent = []
+    for topic, raw_date in rows:
+        if not topic or not raw_date:
+            continue
+        try:
+            when = raw_date if isinstance(raw_date, datetime) else datetime.fromisoformat(
+                str(raw_date).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            try:
+                when = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d")
+            except ValueError:
+                continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        age = (now - when.astimezone(timezone.utc)).total_seconds() / 3600.0
+        if 0 <= age <= hours:
+            recent.append(str(topic))
+    if not recent:
+        return list(stories or [])
+    kept = []
+    for story in stories or []:
+        title = str(story.get("title") or "")
+        current_tokens = _tokens(title)
+        candidate_actions = set(story.get("event_actions") or _event_actions(title))
+        repeated = False
+        for old_topic in recent:
+            overlap = _topic_overlap(title, old_topic)
+            shared = len(current_tokens & _tokens(old_topic))
+            if overlap < 0.55 and not (shared >= 3 and overlap >= 0.32):
+                continue
+            old_actions = set(_event_actions(old_topic))
+            if candidate_actions and old_actions and candidate_actions - old_actions:
+                continue
+            repeated = True
+            break
+        if repeated:
+            story["discovery_rejection"] = "Recent topic cooldown"
+            continue
+        kept.append(story)
+    return kept
+
+
 def _eligible(row):
     status = _clean(row.get("status"))
     video_id = _clean(row.get("video_id"))
@@ -752,6 +807,9 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
         age = _age_hours(story)
         if age == 9999.0 or age > max_age_hours:
             story["discovery_rejection"] = "Missing or stale publication date"
+            continue
+        if age > 48.0 and _event_momentum_score(story) < 0.5:
+            story["discovery_rejection"] = "Stale event without recent development"
             continue
         url = _canonical_url(_source_url_from_item(story))
         if url and url in seen_urls:
@@ -1229,7 +1287,8 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
     social_titles = social_titles or []
 
     stage60 = _cheap_filter(stories, max_items=60, max_age_hours=72)
-    stage30 = _deduplicate_stage(stage60, max_items=30)
+    stage50 = _recent_topic_cooldown(conn, stage60, hours=72)
+    stage30 = _deduplicate_stage(stage50, max_items=30)
     stage15 = _fact_source_stage(stage30, max_items=15)
     stage8 = _originality_stage(stage15, used_topics, max_items=8)
     ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage5]
@@ -1240,7 +1299,7 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
 
     print(
         "   [Discovery Funnel] %d -> %d -> %d -> %d -> %d -> ranked top %d"
-        % (len(stories), len(stage60), len(stage30), len(stage15), len(stage8), min(3, len(ranked))),
+        % (len(stories), len(stage60), len(stage50), len(stage30), len(stage15), min(3, len(ranked))),
         flush=True,
     )
     return ranked[:3]
@@ -1263,7 +1322,8 @@ def rank_discovery_candidates(
     social_titles = social_titles or []
 
     stage120 = _cheap_filter(stories, max_items=120, max_age_hours=72)
-    stage80 = _deduplicate_stage(stage120, max_items=80)
+    stage100 = _recent_topic_cooldown(conn, stage120, hours=72)
+    stage80 = _deduplicate_stage(stage100, max_items=80)
     stage60 = _fact_source_stage(stage80, max_items=60)
     stage50 = _originality_stage(stage60, used_topics, max_items=50)
 
@@ -1293,6 +1353,7 @@ def rank_discovery_candidates(
         % (
             len(stories),
             len(stage120),
+            len(stage100),
             len(stage80),
             len(stage60),
             len(stage50),
