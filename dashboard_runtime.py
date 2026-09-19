@@ -526,6 +526,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approved = False
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
+        self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
         self._dashboard_logs: list[str] = []
         self._activity_events: list[dict[str, Any]] = []
         self._audio_paths: list[str] = []
@@ -547,6 +548,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approved = False
         self._visual_rejected = False
         self._visual_packages = []
+        self._visual_replacement_history = {}
         self._dashboard_logs = []
         self._activity_events = []
         self._audio_paths = []
@@ -783,6 +785,196 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approval_event.set()
         return True
 
+    def replace_visual(self, visual_index: int, replacement_query: str) -> tuple[bool, str]:
+        """Replace exactly one reviewed visual while the production worker is paused."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+
+        try:
+            index = int(visual_index)
+        except (TypeError, ValueError):
+            return False, "Invalid visual number."
+
+        query = str(replacement_query or "").strip()
+        packages = snapshot.get("visual_packages") or []
+        script_data = snapshot.get("script_data") or {}
+        scenes = script_data.get("script") if isinstance(script_data, dict) else None
+        if index < 1 or index > len(packages) or not isinstance(scenes, list) or index > len(scenes):
+            return False, "That visual is no longer available."
+        if not query:
+            return False, "Enter a search term for this visual."
+
+        scene = scenes[index - 1]
+        if not isinstance(scene, dict):
+            return False, "The selected slide is invalid."
+
+        # Work on a copy. A failed replacement must leave the current approved
+        # candidate untouched so the reviewer never loses a usable visual.
+        import copy
+        replacement_scene = copy.deepcopy(scene)
+
+        try:
+            from visual_query_entities_runtime import search_slide_visual
+            from visual_quality_runtime import fit_visual_image
+            from visual_content_runtime import _related_subject_key
+            import visual_runtime
+            from branding_runtime import source_credit_for_type
+            from visual_retrieval_runtime import _hash_image
+            from visual_strategy_runtime import classify_scene
+
+            bot = self.bot
+            video_title = str(
+                script_data.get("title")
+                or (script_data.get("titles") or [""])[0]
+                or ""
+            ).strip()
+            category = str(
+                replacement_scene.get("sport_or_topic_category")
+                or ""
+            ).lower()
+
+            used_urls: set[str] = set()
+            used_hashes: set[str] = set()
+            for package in packages:
+                layer = package[0] if isinstance(package, list) and package else package
+                if not isinstance(layer, dict):
+                    continue
+                source_url = str(layer.get("source_image_url") or "").strip()
+                if source_url:
+                    used_urls.add(source_url)
+                image_path = str(layer.get("image") or "").strip()
+                if image_path and os.path.isfile(image_path):
+                    try:
+                        with open(image_path, "rb") as fh:
+                            image_hash = _hash_image(bot, fh.read())
+                        if image_hash:
+                            used_hashes.add(image_hash)
+                    except Exception:
+                        pass
+
+            replacement_scene["manual_visual_query"] = query
+            replacement_scene["manual_visual_query_source"] = "dashboard_replacement"
+            bg_img, used_ai, source_type = search_slide_visual(
+                visual_runtime,
+                bot,
+                replacement_scene,
+                category,
+                used_urls,
+                used_hashes,
+                video_title,
+                manual_query=query,
+            )
+
+            if bg_img is None:
+                return False, "No replacement visual was returned."
+
+            format_mode = str(
+                getattr(bot, "_active_web_config", {}).get("format_mode", "regular")
+            ).lower()
+            language_cfg = {}
+            active_config = getattr(bot, "_active_web_config", {}) or {}
+            language_key = str(active_config.get("language") or "english")
+            language_cfg = getattr(bot, "LANGUAGES", {}).get(language_key, {})
+            target_size = (1080, 1920)
+            font_choice = language_cfg.get("font")
+            bg_img = fit_visual_image(
+                bg_img,
+                target_size,
+                str(replacement_scene.get("visual_genre") or "GENERAL_CONTEXT"),
+            ).convert("RGBA")
+
+            try:
+                visual_type = classify_scene(replacement_scene, category)
+            except Exception:
+                visual_type = str(replacement_scene.get("visual_type") or "GENERAL_CONTEXT")
+
+            history = self._visual_replacement_history.setdefault(index, [])
+            attempt = len(history) + 1
+            old_layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+            old_path = str(old_layer.get("image") or "").strip() if isinstance(old_layer, dict) else ""
+            old_query = str(old_layer.get("manual_visual_query") or "").strip() if isinstance(old_layer, dict) else ""
+
+            if format_mode == "top5" and index == 1:
+                rendered = visual_runtime._render_image_slide(
+                    bot,
+                    bg_img,
+                    video_title or replacement_scene.get("voiceover", "Top 5"),
+                    "TODAY'S TOP 5",
+                    font_choice,
+                )
+            elif format_mode == "top5":
+                clean = re.sub(
+                    r"(number\s*\d+|story\s*#?\d+|#\d+)",
+                    "",
+                    str(replacement_scene.get("voiceover", "")),
+                    flags=re.IGNORECASE,
+                ).strip()
+                rendered = bot.render_top5_card(
+                    bg_img,
+                    max(1, 6 - index),
+                    5,
+                    clean or replacement_scene.get("voiceover", ""),
+                    font_choice=font_choice,
+                )
+            else:
+                rendered = bg_img
+
+            replacement_path = os.path.join(
+                bot.ASSETS_DIR,
+                f"scene_{index}_replacement_{attempt}.jpg",
+            )
+            rendered.convert("RGBA").convert("RGB").save(replacement_path, "JPEG", quality=95)
+
+            if str(source_type).lower() != "news_source":
+                source_credit = source_credit_for_type(source_type)
+            else:
+                source_credit = str(old_layer.get("source_credit") or "").strip() if isinstance(old_layer, dict) else ""
+
+            new_layer = {
+                "image": replacement_path,
+                "text": "" if format_mode == "top5" else replacement_scene.get("voiceover", ""),
+                "ai_generated": used_ai,
+                "source_type": source_type,
+                "visual_type": visual_type,
+                "visual_genre": replacement_scene.get("visual_genre", "GENERAL_CONTEXT"),
+                "visual_verified": bool(replacement_scene.get("visual_verified", False)),
+                "visual_rescue_reason": replacement_scene.get("visual_rescue_reason", ""),
+                "visual_fallback_reason": "",
+                "visual_query_used": replacement_scene.get("visual_query_used", ""),
+                "manual_visual_query": query,
+                "manual_visual_query_score": replacement_scene.get("manual_visual_query_score", 0),
+                "source_credit": source_credit,
+                "source_image_url": "",
+            }
+
+            with self._lock:
+                self._visual_packages[index - 1] = [new_layer]
+                live_script = self.state.script_data
+                if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
+                    live_script["script"][index - 1] = replacement_scene
+                history.append(
+                    {
+                        "old_path": old_path,
+                        "old_query": old_query,
+                        "new_query": query,
+                        "attempt": attempt,
+                        "time": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                self._visual_approved = False
+                self._visual_rejected = False
+
+            self.update(
+                "visual_approval",
+                76,
+                f"Visual {index} replaced. Review the new image before continuing.",
+            )
+            return True, f"Visual {index} replaced successfully."
+
+        except Exception as exc:
+            return False, f"Replacement search failed: {type(exc).__name__}: {exc}"
+
     def reject_visuals(self) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
@@ -803,6 +995,10 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_packages": list(self._visual_packages),
                     "visual_review_required": data.get("stage") == "visual_approval",
                     "visual_review_approved": self._visual_approved,
+                    "visual_replacement_history": {
+                        key: list(value)
+                        for key, value in self._visual_replacement_history.items()
+                    },
                     "dashboard_logs": list(self._dashboard_logs),
                     "activity_events": list(self._activity_events),
                     "audio_paths": list(self._audio_paths),
