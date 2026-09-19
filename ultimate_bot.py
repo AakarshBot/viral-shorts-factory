@@ -928,7 +928,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         "matching the input order one-to-one."
     )
     
-    for attempt in range(1, 3):
+    for attempt in range(1, 4):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
             resp = requests.post(
@@ -955,7 +955,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
 
     if GEMINI_API_KEY:
         print("   [!] Groq editorial gate exhausted. Falling back to Gemini API...")
-        for g_attempt in range(1, 2):
+        for g_attempt in range(1, 3):
             try:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
                 gemini_payload = {
@@ -1106,11 +1106,11 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"EDITORIAL LAWS:\n"
         f"1. THE FACTUAL HOOK (Scene 1): NO performative noise. Start instantly with the headline fact.\n"
         f"2. INFORMATIVE BODY (Scenes 2 to N-1): Deliver hard facts directly from the SOURCE DATA.\n"
-        f"3. STANDARDIZED OUTRO (Final Scene): Ask ONE tight question about the story, followed EXACTLY by: 'Like, Share, and Subscribe to our channel for more {genre_label}.'\n"
+        f"3. STANDARDIZED OUTRO (Final Scene): End on the most useful consequence, implication, comparison, or final factual point. Do not include a spoken CTA.\n"
         f"4. METADATA LAWS:\n"
         f"   - Titles: Generate exactly 3 titles based ON THE FINAL SCRIPT KEYWORDS. Do not add a forced #shorts suffix. Front-load keywords into the first 45 chars.\n"
         f"   - Description: A 2-sentence summary of the script, followed by '\\n\\n👇 Follow for daily updates!\\n\\n', followed by 5-7 hashtags (2 broad, 2-3 specific, and #Trending).\n"
-        f"   - Pinned Comment: Match the engaging question asked in the final scene.\n"
+        f"   - Pinned Comment: Use a concise engagement question about the story; do not require a question in the spoken narration.\n"
         f"5. VISUALS (CRITICAL): You act as Visual Director. For each scene, identify the 'primary_entity' (ONE specific person/thing) ONLY from the supplied SOURCE DATA. NEVER invent, guess, substitute, or introduce a person, team, organisation, place, product, event, or other identity that is not explicitly supported by the SOURCE DATA. Visual examples in this instruction are examples only and are NEVER story facts. If no specific identity is supported for a scene, use a supported story-level entity or a descriptive/context visual instead of inventing a name. The 'primary_entity' must be traceable to the supplied story evidence. Define 'visual_intent' ('editorial_person', 'stadium_event', 'news_event', 'conceptual'). Provide a 'specific_search_prompt' optimized for image search, but never introduce unsupported names into that prompt. If a person appears multiple times, strictly vary the search prompt using only supported context.\n"
         f"6. TEXT-TO-SPEECH FORMATTING (CRITICAL): Spell out ALL numbers, acronyms, and symbols in the 'voiceover' field (e.g., write 'ten' instead of '10', 'dollars' instead of '$'). This guarantees perfect subtitle synchronization.\n\n"
         f"LANGUAGE RULE: {language_cfg['script_instruction']}\n"
@@ -1137,7 +1137,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
 
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": f"STORY DATA: {source_text}"}]
     
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
             groq_resp = requests.post(
@@ -1192,7 +1192,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
 
     if GEMINI_API_KEY:
         print("   [!] Groq exhausted. Attempting Gemini fallback...")
-        for g_attempt in range(1, 3):
+        for g_attempt in range(1, 2):
             try:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
                 formatted_contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages]
