@@ -206,6 +206,17 @@ def _candidate_items(data: Any) -> list[Any]:
     return [data]
 
 
+def _record_visual_rejection(seg: dict, bucket: str, detail: str = "") -> None:
+    """Record why a candidate was discarded without changing acceptance behavior."""
+    counts = seg.setdefault("visual_rejection_counts", {})
+    key = str(bucket or "unknown").strip() or "unknown"
+    counts[key] = int(counts.get(key) or 0) + 1
+    if detail:
+        details = seg.setdefault("_visual_rejection_details", [])
+        if len(details) < 20:
+            details.append(str(detail)[:240])
+
+
 _VISUAL_DESCRIPTOR_WORDS = {
     "logo", "logos", "portrait", "portraits", "headshot", "headshots", "icon", "icons",
     "badge", "badges", "emblem", "emblems", "symbol", "symbols", "seal", "seals",
@@ -337,7 +348,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     visual_type = str(visual_intent.visual_type or "GENERAL_CONTEXT").upper()
     visual_genre = str(visual_intent.visual_genre or classify_visual_genre(seg, visual_anchor, visual_type) or "GENERAL_CONTEXT").upper()
     seg["visual_genre"] = visual_genre
+    seg["visual_rejection_counts"] = {}
+    seg.pop("_visual_rejection_details", None)
+
     if not visual_anchor or not queries:
+        _record_visual_rejection(seg, "no_grounded_query", "No grounded visual query could be resolved.")
         rescue = make_visual_rescue(visual_anchor or factual_entity, visual_type)
         seg["visual_verified"] = False
         seg["visual_rescue_reason"] = "no-grounded-query"
@@ -364,18 +379,22 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         except Exception:
             cached_img = None
         if cached_img is not None and not provenance_is_usable(cached_provenance):
+            _record_visual_rejection(seg, "cache_provenance", "Cached image had unusable provenance.")
             cached_img = None
     if cached_img is not None:
         buffer = io.BytesIO()
         cached_img.save(buffer, format="JPEG", quality=95)
         cached_bytes = buffer.getvalue()
         cached_hash = _hash_image(bot, cached_bytes)
+        if cached_hash in used_hashes:
+            _record_visual_rejection(seg, "duplicate", "cache:duplicate")
         if cached_hash not in used_hashes:
             try:
                 cached_ok, cached_tier, cached_score, cached_hard_reject = runtime._strict_gate(
                     bot, cached_bytes, seg, video_title, source="cache"
                 )
             except Exception as exc:
+                _record_visual_rejection(seg, "cache_qc_exception", f"cache:{type(exc).__name__}:{exc}")
                 cached_ok = False
                 cached_hard_reject = True
                 print(
@@ -392,6 +411,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 seg["visual_verification_attempts"] = int(seg.get("visual_verification_attempts") or 0) + 1
                 seg["asset_provenance"] = cached_provenance
                 return cached_img.convert("RGB"), False, "cached"
+            _record_visual_rejection(
+                seg,
+                "cache_qc_reject",
+                f"cache:{cached_tier if 'cached_tier' in locals() else 'UNKNOWN'}",
+            )
             print(
                 f"   [Visual Cache] QC rejected cached candidate | tier={cached_tier if 'cached_tier' in locals() else 'UNKNOWN'}",
                 flush=True,
@@ -459,6 +483,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     source = source_plan[source_index][0]
                     local_used_urls = set()
                     candidates = []
+                    _record_visual_rejection(seg, "provider_task_error", f"{source}:{type(exc).__name__}:{exc}")
                     print(
                         f"   [Visual Source] {source} | provider task failed: "
                         f"{type(exc).__name__}: {exc} | query='{query}'",
@@ -475,6 +500,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         prepared_candidates = []
         for source, candidates in provider_results:
             if not candidates:
+                _record_visual_rejection(seg, "provider_empty", f"{source}:{query}")
                 print(
                     f"   [Visual Source] {source} | no candidate returned | query='{query}'",
                     flush=True,
@@ -487,12 +513,31 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 valid, reason, normalized = _preflight_image(data)
                 if not valid:
                     if reason.startswith("provider-returned-"):
+                        _record_visual_rejection(
+                            seg,
+                            "provider_payload",
+                            f"{source}:candidate {candidate_index}:{reason}",
+                        )
                         print(
                             f"   [Visual Source] {source} | candidate {candidate_index}/{len(candidates)} "
                             f"unavailable | query='{query}'",
                             flush=True,
                         )
                     else:
+                        bucket = (
+                            "resolution"
+                            if reason.startswith("resolution-too-low")
+                            else "aspect_ratio"
+                            if reason.startswith("extreme-aspect")
+                            else "invalid_image"
+                            if reason == "invalid-image"
+                            else "preflight_reject"
+                        )
+                        _record_visual_rejection(
+                            seg,
+                            bucket,
+                            f"{source}:candidate {candidate_index}:{reason}",
+                        )
                         print(
                             f"   [Visual Quality] REJECTED | {reason} | source={source} "
                             f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
@@ -501,6 +546,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     continue
                 image_hash = _hash_image(bot, normalized)
                 if image_hash in used_hashes:
+                    _record_visual_rejection(seg, "duplicate", f"{source}:candidate {candidate_index}")
                     print(
                         f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'",
                         flush=True,
@@ -528,6 +574,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         bot, normalized, qa_scene, video_title, source=source
                     )
                 except Exception as exc:
+                    _record_visual_rejection(
+                        seg,
+                        "qa_exception",
+                        f"{source}:candidate {candidate_index}:{type(exc).__name__}:{exc}",
+                    )
                     print(
                         f"   [Visual QA] candidate check failed; rejecting candidate: "
                         f"{type(exc).__name__}: {exc}",
@@ -536,6 +587,18 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     continue
 
                 if hard_reject or not accepted:
+                    bucket = (
+                        "quality_gate"
+                        if str(tier_name).upper() == "LOCAL-QUALITY"
+                        else "local_reject"
+                        if str(tier_name).upper() == "LOCAL-REJECT"
+                        else "semantic_qc_reject"
+                    )
+                    _record_visual_rejection(
+                        seg,
+                        bucket,
+                        f"{source}:candidate {candidate_index}:{tier_name}",
+                    )
                     print(
                         f"   [Visual QA] semantic/QC rejection | source={source} | "
                         f"query='{query}' | tier={tier_name}",
@@ -545,6 +608,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
                 record = candidate_provenance(data)
                 if not provenance_is_usable(record):
+                    _record_visual_rejection(seg, "licensing_provenance", f"{source}:candidate {candidate_index}")
                     print(
                         f"   [Visual Licensing] rejected candidate without usable provenance | source={source}",
                         flush=True,
@@ -597,6 +661,18 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
 
         if provider_checks >= max_provider_checks:
+            if verification_attempts >= max_verification:
+                _record_visual_rejection(
+                    seg,
+                    "qa_budget_exhausted",
+                    f"semantic QA limit {max_verification}",
+                )
+            else:
+                _record_visual_rejection(
+                    seg,
+                    "provider_budget_exhausted",
+                    f"provider checks {provider_checks}/{max_provider_checks}",
+                )
             break
 
     if (visual_type in ABSTRACT_TYPES or genre_allows_ai(visual_genre)) and callable(getattr(bot, "fetch_hf_ai_image", None)):
@@ -604,14 +680,20 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{prompt_text[:180]}'", flush=True)
         ai = runtime._call_fetcher_with_timeout(bot.fetch_hf_ai_image, (prompt_text,), "HF-AI", prompt_text)
         valid, reason, normalized = _preflight_image(ai)
-        if valid and normalized is not None and _hash_image(bot, normalized) not in used_hashes:
-            if verification_attempts < max_verification:
+        if not valid or normalized is None:
+            _record_visual_rejection(seg, "ai_preflight", f"AI:{reason}")
+        else:
+            ai_hash = _hash_image(bot, normalized)
+            if ai_hash in used_hashes:
+                _record_visual_rejection(seg, "duplicate", "AI:duplicate")
+            elif verification_attempts < max_verification:
                 verification_attempts += 1
                 try:
                     accepted, tier_name, score, hard_reject = runtime._strict_gate(
                         bot, normalized, qa_scene, video_title, source="ai-generated"
                     )
                 except Exception as exc:
+                    _record_visual_rejection(seg, "ai_qa_exception", f"AI:{type(exc).__name__}:{exc}")
                     accepted, tier_name, score, hard_reject = False, "AI-QA-ERROR", 0, True
                     print(
                         f"   [Visual QA] AI check failed; rejecting generated candidate: "
@@ -619,7 +701,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         flush=True,
                     )
                 if accepted:
-                    used_hashes.add(_hash_image(bot, normalized))
+                    used_hashes.add(ai_hash)
                     seg["visual_verified"] = True
                     seg["visual_rescue_reason"] = ""
                     seg["visual_fallback_reason"] = ""
@@ -627,9 +709,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     seg["visual_verification_attempts"] = verification_attempts
                     seg["asset_provenance"] = ai_provenance()
                     return Image.open(io.BytesIO(normalized)).convert("RGB"), True, "ai-generated"
-        else:
-            print(f"   [Visual Source] AI image rejected before QA: {reason}", flush=True)
+                _record_visual_rejection(seg, "ai_semantic_qc_reject", f"AI:{tier_name}")
+            else:
+                _record_visual_rejection(seg, "qa_budget_exhausted", f"AI semantic QA limit {max_verification}")
 
+    _record_visual_rejection(seg, "final_rescue", "No accepted real or AI visual remained.")
     rescue = make_visual_rescue(entity or factual_entity, visual_type)
     seg["visual_verified"] = False
     seg["visual_rescue_reason"] = "real-and-ai-sources-exhausted"
@@ -637,6 +721,17 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     seg["visual_query_used"] = ""
     seg["visual_verification_attempts"] = verification_attempts
     seg["asset_provenance"] = rescue_provenance()
+    ordered_rejections = dict(
+        sorted(
+            (seg.get("visual_rejection_counts") or {}).items(),
+            key=lambda item: (-int(item[1]), str(item[0])),
+        )
+    )
+    seg["visual_rejection_counts"] = ordered_rejections
+    print(
+        f"   [Visual Diagnostics] rejection breakdown={ordered_rejections}",
+        flush=True,
+    )
     print(
         f"   [Visual Rescue] Real sources exhausted; generated guaranteed non-blank visual | "
         f"type={visual_type} genre={visual_genre} phrases={len(queries)} provider_checks={provider_checks} "
