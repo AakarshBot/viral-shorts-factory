@@ -21,6 +21,63 @@ class _Bot:
         self.run_robot = run_robot
 
 
+def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
+    def fake_write_script(*_args, **_kwargs):
+        return {
+            "title": "Synthetic story",
+            "script": [
+                {
+                    "primary_entity": "Rishabh Pant",
+                    "voiceover": "Rishabh Pant speaks at a press conference.",
+                },
+                {
+                    "primary_entity": "India",
+                    "voiceover": "India announced the squad.",
+                },
+            ],
+        }
+
+    def fake_install(self):
+        self._patched = True
+        self.bot.run_robot.__globals__["write_script"] = fake_write_script
+        self.bot.write_script = fake_write_script
+
+    monkeypatch.setattr(WorkflowController, "_install_production_wrappers", fake_install)
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._install_production_wrappers()
+
+    result = {}
+    namespace = controller.bot.run_robot.__globals__
+
+    def runner():
+        result["script"] = namespace["write_script"]()
+
+    thread = threading.Thread(target=runner)
+    thread.start()
+
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        if controller.snapshot()["stage"] == "script_review":
+            break
+        time.sleep(0.01)
+
+    snapshot = controller.snapshot()
+    assert snapshot["script_review_required"] is True
+    assert len(snapshot["script_data"]["script"]) == 2
+
+    assert controller.submit_script_visual_queries(
+        ["Rishabh Pant press conference", ""]
+    ) is True
+
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+
+    script = result["script"]
+    assert script["script"][0]["manual_visual_query"] == "Rishabh Pant press conference"
+    assert "manual_visual_query" not in script["script"][1]
+    assert controller.snapshot()["stage"] == "audio"
+
 def test_dashboard_controller_pauses_after_visuals_until_approval(monkeypatch):
     async def fake_visuals(*_args, **_kwargs):
         return [[{"image": "/tmp/scene_1.jpg", "source_type": "Pexels"}]]
@@ -399,3 +456,6 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert '["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"]' not in app_source
     assert 'def render_generated_outputs(snapshot: Dict[str, Any]) -> None:' in app_source
     assert 'render_generated_outputs(snapshot)' in app_source
+    assert 'def render_script_visual_query_review(' in app_source
+    assert 'visual_search_queries' not in app_source
+    assert 'assign_manual_queries' not in app_source
