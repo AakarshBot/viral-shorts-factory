@@ -529,7 +529,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             f"{clean_title[:81].strip()} | What We Know",
         ],
         "recommended_title_index": 1,
-        "seo_description": f"{description_source}\n\n#News #Sports #Trending",
+        "seo_description": description_source,
         "tags": [entity, category_label, "Shorts"],
         "pinned_comment": "What do you make of this latest development?",
         "hook_type": "Direct Factual Headline",
