@@ -166,3 +166,34 @@ def test_recent_topic_cooldown_allows_a_new_event_action():
     }
     kept = story_ranker._recent_topic_cooldown(Conn(), [candidate], hours=72)
     assert kept == [candidate]
+
+
+def test_candidate_quality_floor_rejects_stale_low_value_topic():
+    story = {
+        "candidate_score": 20.0,
+        "discovery_dimensions": {
+            "freshness": 0.0,
+            "event_momentum": 0.0,
+            "importance": 7.0,
+            "shorts_viability": 7.0,
+            "corroboration": 3.0,
+            "source_quality": 3.0,
+        },
+    }
+    assert story_ranker._candidate_quality_pass(story) is False
+    assert story["discovery_rejection"] == "Insufficient current-event signal"
+
+
+def test_candidate_quality_floor_keeps_current_supported_topic():
+    story = {
+        "candidate_score": 24.0,
+        "discovery_dimensions": {
+            "freshness": 8.0,
+            "event_momentum": 5.0,
+            "importance": 7.0,
+            "shorts_viability": 6.0,
+            "corroboration": 4.0,
+            "source_quality": 3.0,
+        },
+    }
+    assert story_ranker._candidate_quality_pass(story) is True
