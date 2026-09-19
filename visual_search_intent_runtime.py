@@ -334,23 +334,11 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         query = _compose_query(subject, anchor)
         queries = [query] if query else []
 
-        # A second automatic query is allowed only when the scene contains a
-        # different concrete visual anchor. Do not fall back to the bare
-        # subject: for events and matchups that usually produces a generic
-        # image rather than the actual scene.
-        if query:
-            subject_keys = {key(word) for word in tokens(subject)}
-            query_keys = {key(word) for word in tokens(query)}
-            for alternate in scene_terms:
-                alt_keys = {key(word) for word in tokens(alternate)}
-                if not alt_keys or alt_keys <= subject_keys or alt_keys <= query_keys:
-                    continue
-                if not (alt_keys & _SEARCH_STRONG):
-                    continue
-                alternate_query = _compose_query(subject, alternate)
-                if alternate_query.casefold() != query.casefold():
-                    queries.append(alternate_query)
-                    break
+        # Keep the canonical second query as the exact factual identity.
+        # The primary query carries the scene anchor; the fallback protects
+        # identity retrieval without creating a blind query ladder.
+        if query and subject and query.casefold() != subject.casefold():
+            queries.append(subject)
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))
