@@ -40,7 +40,16 @@ def test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods():
     names = [name.casefold() for name, _fetcher in plan]
     assert "ddg" not in names
     assert "news_source" not in names
-    assert len(plan) >= 6
+    assert names[:2] == ["wikipedia", "commons"]
+    assert "openverse" in names
+    optional = {
+        "pixabay": "PIXABAY_API_KEY",
+        "pexels": "PEXELS_API_KEY",
+        "unsplash": "UNSPLASH_ACCESS_KEY",
+    }
+    for provider, env_name in optional.items():
+        configured = bool(str(__import__("os").getenv(env_name, "")).strip())
+        assert (provider in names) is configured
 
 
 def test_commons_candidate_adapter_is_bounded():
