@@ -175,17 +175,6 @@ def _static_brand_overlay(logo_path: str, width: int, height: int) -> np.ndarray
         outline=_WHITE,
         width=2,
     )
-    draw.rounded_rectangle(
-        (x + 6, y + 6, x + LOGO_BOX_SIZE - 7, y + 48),
-        radius=20,
-        fill=_GLASS_HIGHLIGHT,
-    )
-    draw.line(
-        (x + 30, y + 4, x + LOGO_BOX_SIZE - 30, y + 4),
-        fill=(255, 255, 255, 110),
-        width=2,
-    )
-
     if logo_path:
         logo = _contain_logo(Path(logo_path), LOGO_INNER_SIZE)
         lx = x + (LOGO_BOX_SIZE - logo.width) // 2
