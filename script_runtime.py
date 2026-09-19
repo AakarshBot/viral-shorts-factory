@@ -524,9 +524,9 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         "step_3_critique": "Deterministic source-grounded fallback used because script providers were unavailable.",
         "step_4_metadata": entity,
         "titles": [
-            f"{clean_title} #shorts",
-            f"{clean_title} | Latest Update #shorts",
-            f"{clean_title} | What We Know #shorts",
+            clean_title[:100].strip(),
+            f"{clean_title[:81].strip()} | Latest Update",
+            f"{clean_title[:81].strip()} | What We Know",
         ],
         "recommended_title_index": 1,
         "seo_description": f"{description_source}\n\n#News #Sports #Trending",
