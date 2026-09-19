@@ -1742,9 +1742,14 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             for cut_idx in range(segment_count):
                 bg_clip = ImageClip(bg_image_file).with_duration(segment_duration)
 
-                def scale_at(t, scene_index=idx, cut_index=cut_idx):
+                def scale_at(
+                    t,
+                    scene_index=idx,
+                    cut_index=cut_idx,
+                    segment_time=segment_duration,
+                ):
                     progress = min(
-                        max(0.0, float(t)) / max(0.1, segment_duration),
+                        max(0.0, float(t)) / max(0.1, segment_time),
                         1.0,
                     )
                     if scene_index == 0:
@@ -1754,9 +1759,14 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                         return base + 0.07 * progress
                     return base + 0.07 * (1.0 - progress)
 
-                def position_at(t, scene_index=idx, cut_index=cut_idx):
+                def position_at(
+                    t,
+                    scene_index=idx,
+                    cut_index=cut_idx,
+                    segment_time=segment_duration,
+                ):
                     progress = min(
-                        max(0.0, float(t)) / max(0.1, segment_duration),
+                        max(0.0, float(t)) / max(0.1, segment_time),
                         1.0,
                     )
                     scale = scale_at(t, scene_index, cut_index)
