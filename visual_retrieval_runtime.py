@@ -79,8 +79,9 @@ def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
 def _as_image_bytes(data: Any) -> bytes | None:
     if data is None:
         return None
-    if isinstance(data, (bytes, bytearray, memoryview)):
-        return bytes(data)
+    candidate = candidate_bytes(data)
+    if candidate is not None:
+        return candidate
     if isinstance(data, Image.Image):
         try:
             buffer = io.BytesIO()
