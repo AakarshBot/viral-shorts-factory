@@ -574,6 +574,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
+        self._manual_visual_review_complete_id = None
         self._dashboard_logs: list[str] = []
         self._activity_events: list[dict[str, Any]] = []
         self._audio_paths: list[str] = []
@@ -611,6 +612,7 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_audio_capture_wrapper = None
         self._dashboard_visual_gate_wrapper = None
         self._manual_gate_state = None
+        self._manual_visual_review_complete_id = None
         super().reset()
 
     @staticmethod
@@ -795,6 +797,13 @@ class DashboardWorkflowController(WorkflowController):
         if not packages:
             raise RuntimeError("Visual review could not start because no visual packages were returned.")
 
+        package_id = id(packages)
+        if (
+            self._manual_visual_review_complete_id == package_id
+            and self._visual_approved
+        ):
+            return packages
+
         gate = self._ensure_manual_gate_state()
 
         self._visual_packages = packages
@@ -822,6 +831,7 @@ class DashboardWorkflowController(WorkflowController):
             if isinstance(layer, dict):
                 layer["human_visual_approved"] = True
 
+        self._manual_visual_review_complete_id = package_id
         self.update("render", 77, "Visuals approved. Rendering the final Short now.")
         return packages
 
