@@ -103,6 +103,14 @@ def candidate_provenance(value: Any) -> dict[str, str]:
     return provenance("unknown")
 
 
+def provenance_is_usable(record: dict[str, Any]) -> bool:
+    provider = str(record.get("provider") or "").strip().casefold()
+    license_name = str(record.get("license") or "").strip().casefold()
+    if provider in {"pexels", "unsplash", "pixabay"}:
+        return bool(license_name) and "-nc" not in license_name and "-nd" not in license_name
+    return is_allowed_license(record.get("license"))
+
+
 def attribution_required(record: dict[str, Any]) -> bool:
     code = normalize_license_code(record.get("license"))
     return code in {"by", "by-sa"}
@@ -166,6 +174,7 @@ __all__ = [
     "licensed_candidate",
     "normalize_license_code",
     "provider_allowed",
+    "provenance_is_usable",
     "provenance",
     "rescue_provenance",
     "ai_provenance",
