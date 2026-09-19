@@ -179,4 +179,4 @@ def test_originality_allows_new_development_for_same_entity():
     assert [item["title"] for item in result] == [
         "OpenAI launches new model for enterprise users",
     ]
-\n
+
