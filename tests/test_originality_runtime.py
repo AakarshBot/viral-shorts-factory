@@ -18,7 +18,7 @@ def test_sixgram_overlap_blocks_above_fifteen_percent():
     assert result["failures"][0]["sixgram_ratio"] > 0.15
 
 
-def test_final_qc_does_not_require_human_contributed_narration():
+def test_final_qc_does_not_require_extra_narration():
     script = {"script": [{"voiceover": "Generated factual scene."}]}
     gate = evaluate_originality_gate(script)
     assert gate["passed"] is True
