@@ -53,12 +53,21 @@ def post_creator_comment(youtube, video_id, script_data, video_title, genre_labe
     return comment_id, comment_text
 
 
+
+def ensure_shorts_title(title):
+    """Normalize every factory title to include the Shorts hashtag within 100 characters."""
+    base = re.sub(r"\s*#shorts\b", "", str(title or ""), flags=re.IGNORECASE).strip()
+    suffix = " #shorts"
+    if not base:
+        base = "Shorts"
+    return (base[: max(1, 100 - len(suffix))].rstrip() + suffix).strip()
+
 def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
     raw_title = str(script_data.get("title") or genre_cfg.get("label", "Shorts")).strip()
     raw_title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip()
     if trend_keyword and str(trend_keyword).lower() not in raw_title.lower():
         raw_title = f"{trend_keyword}: {raw_title}"
-    title = raw_title[:100].strip()
+    title = ensure_shorts_title(raw_title)
 
     desc_body = str(script_data.get("seo_description") or "").strip()
     if trend_keyword and str(trend_keyword).lower() not in desc_body.lower():
