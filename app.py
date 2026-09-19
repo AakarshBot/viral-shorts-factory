@@ -575,6 +575,9 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                     "source": str(layer.get("source_type") or "visual"),
                     "visual_type": str(layer.get("visual_type") or "visual"),
                     "verified": bool(layer.get("visual_verified", False)),
+                    "qc_passed": bool(layer.get("visual_verified", False)),
+                    "qc_reason": str(layer.get("visual_rescue_reason") or "").strip(),
+                    "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
                     "manual_query": str(layer.get("manual_visual_query") or "").strip(),
                     "query_used": str(layer.get("visual_query_used") or "").strip(),
                     "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
@@ -601,7 +604,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     for offset, item in enumerate(items):
         with columns[offset % 3]:
             st.image(item["path"], use_container_width=True)
-            status = "Verified" if item["verified"] else "Needs attention"
+            status = "QC PASS" if item["qc_passed"] else "QC BLOCKED"
             replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
             replacement_count = len(replacement_history)
             query = item["manual_query"] or item["query_used"] or "automatic query"
@@ -610,6 +613,15 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 f"<span class='small-muted'>{item['source']} · {status}</span>",
                 unsafe_allow_html=True,
             )
+            if item["qc_passed"]:
+                attempts = item.get("qc_attempts", 0)
+                st.success(
+                    f"Visual semantic QC passed{f' after {attempts} QA check(s)' if attempts else ''}.",
+                    icon="✅",
+                )
+            else:
+                reason = item.get("qc_reason") or "Visual has no verified semantic QC verdict."
+                st.error(f"Visual semantic QC blocked: {reason}", icon="⛔")
             st.caption(f"Search: {query}")
             if replacement_count:
                 st.caption(f"Replacement attempt: {replacement_count}")
@@ -646,6 +658,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         st.error(message)
 
     st.markdown("---")
+    qc_blocked = [item for item in items if not item["qc_passed"]]
     approve_col, reject_col = st.columns(2)
     with approve_col:
         if st.button(
@@ -653,9 +666,15 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             type="primary",
             use_container_width=True,
             key="approve_visuals",
+            disabled=bool(qc_blocked),
         ):
             controller.approve_visuals()
             st.rerun()
+        if qc_blocked:
+            st.caption(
+                f"Approval is locked until {len(qc_blocked)} visual(s) pass semantic QC. "
+                "Use Reject & replace on the blocked visual(s)."
+            )
     with reject_col:
         if st.button(
             "⛔ Reject visuals & stop production",
