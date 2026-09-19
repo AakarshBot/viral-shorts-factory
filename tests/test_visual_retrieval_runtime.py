@@ -268,7 +268,7 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [image_bytes])],
+        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
     image, used_ai, source = retrieval.run_visual_retrieval(
