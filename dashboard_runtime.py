@@ -423,6 +423,9 @@ class DashboardWorkflowController(WorkflowController):
     def __init__(self, bot):
         super().__init__(bot)
         self._visual_approval_event = threading.Event()
+        self._script_review_event = threading.Event()
+        self._script_review_submitted = False
+        self._script_visual_queries: list[str] = []
         self._visual_approved = False
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
@@ -441,6 +444,9 @@ class DashboardWorkflowController(WorkflowController):
         if getattr(self, "state", None) is not None and self.state.thread_alive:
             return
         self._visual_approval_event.clear()
+        self._script_review_event.clear()
+        self._script_review_submitted = False
+        self._script_visual_queries = []
         self._visual_approved = False
         self._visual_rejected = False
         self._visual_packages = []
@@ -525,6 +531,63 @@ class DashboardWorkflowController(WorkflowController):
         if not isinstance(namespace, dict):
             return
 
+        current_script = namespace.get("write_script")
+        if callable(current_script) and not getattr(current_script, "_dashboard_script_review", False):
+            def dashboard_script_review(*args, **kwargs):
+                result = current_script(*args, **kwargs)
+                if not isinstance(result, dict):
+                    return result
+
+                scenes = result.get("script") or []
+                if not isinstance(scenes, list) or not scenes:
+                    raise RuntimeError("Script review could not start because no script scenes were returned.")
+
+                self._script_review_event.clear()
+                self._script_review_submitted = False
+                with self._lock:
+                    self._script_visual_queries = [""] * len(scenes)
+                    self.state.script_data = result
+
+                self.update(
+                    "script_review",
+                    40,
+                    f"The script is ready. Review {len(scenes)} slides and add optional image-search queries.",
+                )
+                self._script_review_event.wait(timeout=24 * 60 * 60)
+
+                if not self._script_review_submitted:
+                    raise RuntimeError(
+                        "Script visual-query review timed out. The production run was stopped."
+                    )
+
+                with self._lock:
+                    queries = list(self._script_visual_queries)
+                    script_scenes = result.get("script") or []
+
+                for index, scene in enumerate(script_scenes):
+                    if not isinstance(scene, dict):
+                        continue
+                    query = queries[index] if index < len(queries) else ""
+                    if query:
+                        scene["manual_visual_query"] = query
+                        scene["manual_visual_query_source"] = "dashboard_slide"
+                    else:
+                        scene.pop("manual_visual_query", None)
+                        scene.pop("manual_visual_query_score", None)
+                        scene.pop("manual_visual_query_index", None)
+                        scene.pop("manual_visual_query_source", None)
+
+                self.update(
+                    "audio",
+                    42,
+                    "Slide queries saved. Creating the voiceover and preparing visuals.",
+                )
+                return result
+
+            dashboard_script_review._dashboard_script_review = True
+            namespace["write_script"] = dashboard_script_review
+            self.bot.write_script = dashboard_script_review
+
         current_audio = namespace.get("generate_voiceover_and_timestamps")
         if callable(current_audio) and not getattr(current_audio, "_dashboard_audio_capture", False):
             async def dashboard_audio_capture(*args, **kwargs):
@@ -575,6 +638,45 @@ class DashboardWorkflowController(WorkflowController):
         self.bot.process_visuals_async = dashboard_visual_gate
         self._dashboard_visual_gate_bound = True
 
+    def submit_script_visual_queries(self, queries: list[str]) -> bool:
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "script_review":
+            return False
+
+        script_data = snapshot.get("script_data") or {}
+        scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+        if not isinstance(scenes, list) or not scenes:
+            return False
+
+        cleaned = [str(query or "").strip() for query in list(queries or [])]
+        cleaned = (cleaned + [""] * len(scenes))[:len(scenes)]
+
+        with self._lock:
+            self._script_visual_queries = cleaned
+            live_script = self.state.script_data
+            if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
+                for index, scene in enumerate(live_script["script"]):
+                    if not isinstance(scene, dict):
+                        continue
+                    query = cleaned[index] if index < len(cleaned) else ""
+                    if query:
+                        scene["manual_visual_query"] = query
+                        scene["manual_visual_query_source"] = "dashboard_slide"
+                    else:
+                        scene.pop("manual_visual_query", None)
+                        scene.pop("manual_visual_query_score", None)
+                        scene.pop("manual_visual_query_index", None)
+                        scene.pop("manual_visual_query_source", None)
+            self._script_review_submitted = True
+
+        self.update(
+            "audio",
+            42,
+            "Slide queries saved. Creating the voiceover and preparing visuals.",
+        )
+        self._script_review_event.set()
+        return True
+
     def approve_visuals(self) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
@@ -599,6 +701,8 @@ class DashboardWorkflowController(WorkflowController):
         with self._lock:
             data.update(
                 {
+                    "script_review_required": data.get("stage") == "script_review",
+                    "script_visual_queries": list(self._script_visual_queries),
                     "visual_packages": list(self._visual_packages),
                     "visual_review_required": data.get("stage") == "visual_approval",
                     "visual_review_approved": self._visual_approved,
@@ -828,28 +932,6 @@ def run_demo_section(section: str) -> dict[str, Any]:
         "dashboard_architecture": _test_dashboard_architecture,
         "factory_function_coverage": _test_factory_function_coverage,
     }
-
-    if section == "manual_visual_queries":
-        try:
-            from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
-            queries = parse_manual_visual_queries(
-                "India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium"
-            )
-            scenes = [
-                {"primary_entity": "India Afghanistan", "voiceover": "India and Afghanistan play the final match."},
-                {"primary_entity": "Shubman Gill", "voiceover": "Shubman Gill leads India's batting."},
-                {"primary_entity": "New Delhi", "voiceover": "The match is being played in New Delhi."},
-            ]
-            assignments = assign_manual_queries(scenes, queries)
-            if len(assignments) != len(scenes) or any(not item.get("query") for item in assignments):
-                raise AssertionError("Manual visual queries could not be assigned to all demo scenes.")
-            return {
-                "status": "PASS",
-                "detail": "Semicolon-separated visual queries were parsed and intelligently assigned to the matching demo scenes.",
-                "assignments": assignments,
-            }
-        except Exception as exc:
-            return {"status": "FAIL", "detail": f"{type(exc).__name__}: {exc}"}
 
     if section == "scene_branding":
         return _run_scene_branding_demo()

@@ -31,6 +31,28 @@ def _run_process(bot, script_data, format_mode):
     return asyncio.run(bot.process_visuals_async(script_data, {"font": ""}, format_mode=format_mode))
 
 
+def test_news_source_ranking_does_not_force_first_slide_for_manual_query():
+    scenes = [
+        {
+            "primary_entity": "Unrelated Presenter",
+            "manual_visual_query": "Unrelated Presenter",
+            "voiceover": "A presenter comments on the story.",
+        },
+        {
+            "primary_entity": "Target Story",
+            "manual_visual_query": "Target Story",
+            "voiceover": "The Target Story is the main development.",
+        },
+    ]
+
+    ranked = content_runtime._rank_news_source_scene_indices(
+        scenes,
+        "Target Story",
+    )
+
+    assert ranked[0] == 1
+
+
 def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
     calls = []
     bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))

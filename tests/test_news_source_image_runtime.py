@@ -32,7 +32,7 @@ def test_compose_news_source_image_is_vertical():
     result = compose_news_source_image(image, (1080, 1920))
     assert result.size == (1080, 1920)
 
-def test_news_source_scene_routing_does_not_steal_manual_first_frame():
+def test_news_source_scene_routing_can_use_any_manual_query_slide():
     from visual_content_runtime import _rank_news_source_scene_indices
 
     scenes = [
@@ -43,8 +43,7 @@ def test_news_source_scene_routing_does_not_steal_manual_first_frame():
     ranked = _rank_news_source_scene_indices(
         scenes,
         "India Afghanistan final cricket match in New Delhi",
-        ["India Afghanistan cricket match", "Shubman Gill batting"],
     )
     assert ranked
-    assert ranked[0] != 0
+    assert ranked[0] == 0
 

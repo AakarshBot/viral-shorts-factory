@@ -161,7 +161,6 @@ def _init_state() -> None:
         "show_offline_diagnostics": False,
         "offline_diagnostics": {},
         "pending_candidate": None,
-        "visual_search_queries": "",
         "discovery_headline_selection": None,
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
@@ -187,7 +186,6 @@ def reset_run() -> None:
         "final_description": "",
         "final_comment": "",
         "pending_candidate": None,
-        "visual_search_queries": "",
         "discovery_headline_selection": None,
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
@@ -405,7 +403,8 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     stages = [
         ("Discovery", "discovery", 10, 14),
         ("Research", "research", 15, 23),
-        ("Script", "script", 24, 40),
+        ("Script", "script", 24, 38),
+        ("Script Review", "script_review", 39, 40),
         ("Voiceover", "audio", 41, 54),
         ("Visuals", "visuals", 55, 75),
         ("Visual Review", "visual_approval", 76, 76),
@@ -426,28 +425,30 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     overall = max(0.0, min(1.0, percent / 100))
     st.progress(overall, text=f"Overall progress · {percent}%")
 
-    cols = st.columns(4, gap="small")
-    for index, (label, key, lo, hi) in enumerate(stages):
-        if current == "error":
-            value = 0.0
-            icon = "⚠️"
-            state = "Stopped"
-        elif percent >= hi:
-            value = 1.0
-            icon = "✓"
-            state = "Complete"
-        elif current == key:
-            value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
-            icon = "●"
-            state = "Active"
-        else:
-            value = 0.0
-            icon = "○"
-            state = "Waiting"
-        with cols[index % 4]:
-            st.markdown(f"**{icon} {label}**")
-            st.progress(value)
-            st.caption(state)
+    for row_start in range(0, len(stages), 4):
+        row = stages[row_start:row_start + 4]
+        cols = st.columns(len(row), gap="small")
+        for column, (label, key, lo, hi) in zip(cols, row):
+            if current == "error":
+                value = 0.0
+                icon = "⚠️"
+                state = "Stopped"
+            elif percent >= hi:
+                value = 1.0
+                icon = "✓"
+                state = "Complete"
+            elif current == key:
+                value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
+                icon = "●"
+                state = "Active"
+            else:
+                value = 0.0
+                icon = "○"
+                state = "Waiting"
+            with column:
+                st.markdown(f"**{icon} {label}**")
+                st.progress(value)
+                st.caption(state)
 
     message = str(snapshot.get("message") or "").strip()
     if message:
@@ -474,8 +475,83 @@ def render_script(snapshot: Dict[str, Any]) -> None:
     if not text:
         return
     st.markdown("### Script")
-    st.caption("Written automatically from the selected story. No script approval step is required.")
+    st.caption("Written automatically from the selected story.")
     st.text_area("Generated narration", value=text, height=320, disabled=True, key="dashboard_script_preview")
+
+
+def render_script_visual_query_review(
+    controller: DashboardWorkflowController,
+    snapshot: Dict[str, Any],
+) -> None:
+    script_data = snapshot.get("script_data") or {}
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    if not isinstance(scenes, list) or not scenes:
+        st.warning("The script is not available for visual-query review yet.")
+        return
+
+    run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
+    st.markdown(
+        "<div class='section-kicker'>Step 04 · Visual planning</div>"
+        "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Each slide has its own optional image-search query. Keep a box blank to use the normal automatic visual search for that slide."
+    )
+
+    with st.form(key=f"script_visual_query_review_{run_id}"):
+        for index, scene in enumerate(scenes, 1):
+            if not isinstance(scene, dict):
+                continue
+            voiceover = str(scene.get("voiceover") or "").strip()
+            automatic_subject = str(
+                scene.get("factual_primary_entity")
+                or scene.get("primary_entity")
+                or scene.get("visual_search_subject")
+                or ""
+            ).strip()
+
+            st.markdown(f"### Slide {index}")
+            if voiceover:
+                st.markdown(
+                    f"<div class='panel'><div class='small-muted'>SCRIPT</div>{voiceover}</div>",
+                    unsafe_allow_html=True,
+                )
+            if automatic_subject:
+                st.caption(f"Automatic visual subject: {automatic_subject}")
+
+            st.text_input(
+                "Manual image search query (optional)",
+                placeholder="e.g. Rishabh Pant press conference",
+                key=f"script_visual_query_{run_id}_{index}",
+            )
+
+        st.caption(
+            "Manual queries are used only on the slides where you enter them. "
+            "There is no query-number-to-slide assignment anymore."
+        )
+        submitted = st.form_submit_button(
+            "✅ Save slide queries & continue",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if submitted:
+        queries = [
+            str(
+                st.session_state.get(
+                    f"script_visual_query_{run_id}_{index}",
+                    "",
+                )
+                or ""
+            ).strip()
+            for index in range(1, len(scenes) + 1)
+        ]
+        if controller.submit_script_visual_queries(queries):
+            st.rerun()
+        else:
+            st.error("The script review is no longer active. Refreshing the dashboard.")
+            st.rerun()
 
 
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
@@ -880,7 +956,10 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
             )
 
         render_research_summary(snapshot)
-        render_script(snapshot)
+        if snapshot.get("script_review_required"):
+            render_script_visual_query_review(controller, snapshot)
+        else:
+            render_script(snapshot)
         render_audio_preview(snapshot)
         render_generated_outputs(snapshot)
 
@@ -960,17 +1039,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     pending_candidate = st.session_state.get("pending_candidate")
     if pending_candidate:
-        st.markdown("### Visual search queries (optional)")
+        st.markdown("### Ready for production")
         st.caption(
-            "Leave this blank to use the current Full AI visual flow. "
-            "If you enter queries, separate them with semicolons (;). "
-            "The factory will intelligently assign them to the most relevant slides."
-        )
-        st.text_input(
-            "Search queries",
-            placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
-            key="visual_search_queries",
-            label_visibility="collapsed",
+            "The script will be shown after research. You can then enter a separate image-search query for each slide before visuals are sourced."
         )
         st.markdown(
             f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
@@ -986,9 +1057,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key="start_selected_topic",
             ):
                 config = dict(st.session_state.web_config)
-                config["visual_search_queries"] = str(
-                    st.session_state.get("visual_search_queries", "") or ""
-                ).strip()
                 if config.get("editorial_mode") == "AI":
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
@@ -1004,7 +1072,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 key="cancel_selected_topic",
             ):
                 st.session_state.pending_candidate = None
-                st.session_state.visual_search_queries = ""
                 st.rerun()
         return
 
@@ -1059,7 +1126,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                     key=f"use_candidate_{start_index + offset}",
                 ):
                     st.session_state.pending_candidate = dict(candidate)
-                    st.session_state.visual_search_queries = ""
                     st.rerun()
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
@@ -1089,7 +1155,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             st.rerun()
 
     if not controller.snapshot().get("thread_alive"):
-        st.info("Choose a headline to continue to the optional image-search query step.")
+        st.info("Choose a headline to review its script and set optional per-slide image-search queries.")
 
 
 
@@ -1253,7 +1319,6 @@ def render_demo_page() -> None:
         ("runtime_bindings", "Runtime bindings"),
         ("provider_boundary", "Raw provider boundary"),
         ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
-        ("manual_visual_queries", "Manual visual query routing"),
         ("dashboard_architecture", "Dashboard architecture"),
         ("factory_function_coverage", "Factory function coverage"),
     ]
