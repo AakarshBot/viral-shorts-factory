@@ -2356,9 +2356,8 @@ def run_robot(web_config=None):
             return
 
         script_data = _run_manual_workflow_hook(
-            web_config,
-            "_manual_script_review_hook",
             script_data,
+            "_manual_script_review_hook",
             "Manual script review is active. Waiting for the dashboard decision.",
         )
         if not isinstance(script_data, dict):
@@ -2418,9 +2417,8 @@ def run_robot(web_config=None):
                 )
 
             visuals = _run_manual_workflow_hook(
-                web_config,
-                "_manual_visual_review_hook",
                 visuals,
+                "_manual_visual_review_hook",
                 "Manual visual review is active. Rendering is paused until the dashboard decision.",
             )
             if not isinstance(visuals, list):
