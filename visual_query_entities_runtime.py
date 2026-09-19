@@ -170,8 +170,8 @@ def search_slide_visual(
         lock_visual_subject(scene, video_title),
         video_title,
     )
-    manual_query = clean_text(manual_query)
-    if not manual_query and candidate.get("visual_entity_grounded") is not True:
+    manual_query = clean_text(manual_query or candidate.get("manual_visual_query", ""))
+    if not manual_query and candidate.get("visual_entity_grounded") is False:
         raise RuntimeError(
             "Automatic visual identity is not grounded in story evidence; "
             "refusing to search the ungrounded entity."
