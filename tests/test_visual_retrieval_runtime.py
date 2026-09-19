@@ -585,7 +585,7 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type: [("DDG", lambda *args: [image_bytes])],
+        lambda bot, visual_type: [("DDG", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
     scene = {
