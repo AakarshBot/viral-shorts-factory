@@ -585,9 +585,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     if not items:
         return
 
+    run_id = str(snapshot.get("run_id") or "active")
+    history = snapshot.get("visual_replacement_history") or {}
+
     st.markdown("<div class='section-kicker'>Approval gate</div><h2 style='margin-top:0'>Visual review</h2>", unsafe_allow_html=True)
     st.caption(
-        f"{len(items)} visuals are ready. Review every image below. Rendering will not continue until you approve them."
+        f"{len(items)} visuals are ready. Approve the set when it is correct. "
+        "If one image is wrong, reject only that visual and give it a new search term."
     )
 
     columns = st.columns(3, gap="medium")
@@ -595,12 +599,50 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         with columns[offset % 3]:
             st.image(item["path"], use_container_width=True)
             status = "Verified" if item["verified"] else "Needs attention"
+            replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
+            replacement_count = len(replacement_history)
+            query = item["manual_query"] or "automatic query"
             st.markdown(
                 f"**Visual {item['index']}** · {item['visual_type']}  \\n"
                 f"<span class='small-muted'>{item['source']} · {status}</span>",
                 unsafe_allow_html=True,
             )
+            st.caption(f"Search: {query}")
+            if replacement_count:
+                st.caption(f"Replacement attempt: {replacement_count}")
 
+            replace_key = f"replace_visual_{run_id}_{item['index']}"
+            if st.button(
+                "⛔ Reject & replace this visual",
+                use_container_width=True,
+                key=replace_key,
+            ):
+                st.session_state[f"{replace_key}_active"] = True
+                st.rerun()
+
+            if st.session_state.get(f"{replace_key}_active", False):
+                query_key = f"{replace_key}_query"
+                replacement_query = st.text_input(
+                    "New search term",
+                    placeholder="e.g. Rishabh Pant press conference",
+                    key=query_key,
+                )
+                if st.button(
+                    "🔎 Search replacement",
+                    type="secondary",
+                    use_container_width=True,
+                    key=f"{replace_key}_search",
+                ):
+                    ok, message = controller.replace_visual(item["index"], replacement_query)
+                    if ok:
+                        st.session_state[f"{replace_key}_active"] = False
+                        st.session_state.pop(query_key, None)
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+
+    st.markdown("---")
     approve_col, reject_col = st.columns(2)
     with approve_col:
         if st.button(
@@ -613,7 +655,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             st.rerun()
     with reject_col:
         if st.button(
-            "⛔ Reject visuals & stop",
+            "⛔ Reject visuals & stop production",
             use_container_width=True,
             key="reject_visuals",
         ):
