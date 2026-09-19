@@ -613,7 +613,7 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
         int(rejection_counts.get(key) or 0)
         for key in ("semantic_no", "semantic_qc_reject")
     ) >= 1
-    assert scene["visual_rejection_counts"]["final_rescue"] == 1
+    assert scene["visual_qc_blocked"] is True
 
 
 
