@@ -97,7 +97,7 @@ def _jpeg_bytes(size=(900, 1200)):
     return buffer.getvalue()
 
 
-def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeypatch):
+def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
 
     class FakeBot:
@@ -105,10 +105,7 @@ def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeyp
 
     class FakeRuntime:
         VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
-
-        @staticmethod
-        def _build_search_variants(seg, video_title=""):
-            return ["Sanju Samson"], "PERSON"
+        calls = 0
 
         @staticmethod
         def _verification_tier(seg, visual_type, source):
@@ -120,8 +117,8 @@ def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeyp
 
         @staticmethod
         def _strict_gate(*args, **kwargs):
-            # Simulate the exact failure that used to throw away the real image.
-            return False, "STRICT(person)", 50, True
+            FakeRuntime.calls += 1
+            return True, "STRICT(person)", 100, False
 
         @staticmethod
         def get_cached_asset(*args, **kwargs):
@@ -134,7 +131,7 @@ def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeyp
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type: [("Wikipedia", lambda *args: [image_bytes])],
+        lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [image_bytes])],
     )
 
     image, used_ai, source = retrieval.run_visual_retrieval(
@@ -156,6 +153,7 @@ def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeyp
     assert image.size == (900, 1200)
     assert used_ai is False
     assert source == "Wikipedia"
+    assert FakeRuntime.calls == 1
 
 
 def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatch):
@@ -219,7 +217,7 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
     )[0] is False
 
 
-def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch):
+def test_commons_logo_still_passes_visual_qc(monkeypatch):
     from visual_taxonomy_runtime import classify_visual_genre
 
     assert classify_visual_genre({"visual_intent": "logo", "voiceover": "The BCCI logo appears on screen."}, "BCCI logo", "ORGANIZATION") == "ORG_BRANDING"
@@ -231,10 +229,7 @@ def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch
 
     class FakeRuntime:
         VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
-
-        @staticmethod
-        def _build_search_variants(seg, video_title=""):
-            return ["BCCI logo"], "ORGANIZATION"
+        calls = 0
 
         @staticmethod
         def _verification_tier(seg, visual_type, source):
@@ -246,7 +241,8 @@ def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch
 
         @staticmethod
         def _strict_gate(*args, **kwargs):
-            return False, "STRICT", 45, True
+            FakeRuntime.calls += 1
+            return True, "STRICT", 100, False
 
         @staticmethod
         def get_cached_asset(*args, **kwargs):
@@ -259,7 +255,7 @@ def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type: [("Commons", lambda *args: [image_bytes])],
+        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [image_bytes])],
     )
 
     image, used_ai, source = retrieval.run_visual_retrieval(
@@ -281,6 +277,7 @@ def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch
     assert image.size == (900, 900)
     assert used_ai is False
     assert source == "Commons"
+    assert FakeRuntime.calls == 1
 
 
 def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
