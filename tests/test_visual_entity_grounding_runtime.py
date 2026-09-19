@@ -158,3 +158,40 @@ def test_publisher_domain_contamination_is_repaired_before_visual_querying():
     intent = resolve_visual_search_intent(grounded, story["title"])
     assert intent.subject == "BCCI"
     assert "India.com" not in " ".join(intent.queries)
+
+
+def test_publisher_name_does_not_become_automatic_visual_subject():
+    story = {
+        "title": "India selection confirmed",
+        "research_sources": [
+            {
+                "title": "India selection confirmed",
+                "source": "The Indian Express",
+            }
+        ],
+    }
+    scene = {
+        "primary_entity": "The Indian Express",
+        "visual_intent": "India selection update",
+        "specific_search_prompt": "The Indian Express",
+    }
+
+    grounded = apply_grounding(scene, story)
+
+    assert grounded["visual_entity_grounded"] is False
+    assert grounded["primary_entity"] == ""
+    assert grounded["visual_search_subject"] == ""
+
+
+def test_match_query_uses_concrete_format_anchor():
+    scene = {
+        "primary_entity": "India vs England Cricket",
+        "visual_intent": "India vs England ODI match",
+        "specific_search_prompt": "India vs England Cricket",
+        "voiceover": "India and England face each other in an ODI.",
+    }
+    intent = resolve_visual_search_intent(scene, "India vs England ODI")
+
+    assert intent.queries
+    assert any("odi" in query.casefold() for query in intent.queries)
+    assert all("scene" not in query.casefold() for query in intent.queries)
