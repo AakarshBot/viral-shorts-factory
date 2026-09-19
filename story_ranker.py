@@ -215,6 +215,71 @@ def _visual_potential(story):
     return min(10.0, score)
 
 
+SHORTS_STAKES_TERMS = {
+    "win", "won", "wins", "record", "first", "final", "launch", "launched",
+    "unveils", "reveals", "ban", "banned", "approve", "approved", "acquire",
+    "acquired", "qualify", "qualified", "eliminate", "eliminated", "release",
+    "released", "price", "deal", "breakthrough", "historic", "surprise",
+    "controversy", "viral", "million", "billion", "%",
+}
+
+
+def _clamp_score(value, maximum=10.0):
+    return round(max(0.0, min(float(maximum), float(value))), 2)
+
+
+def _shorts_viability(story, visual=None):
+    """Estimate whether an event can compress cleanly into a compelling Short."""
+    text = _text_blob(story)
+    title = _clean(story.get("title") or story.get("event_search_text") or "")
+    tokens = _tokens(title)
+    actions = set(story.get("event_actions") or _event_actions(title))
+    visual = _visual_potential(story) if visual is None else float(visual)
+
+    clarity = 2.0 if 1 <= len(actions) <= 2 else (1.0 if actions else 0.0)
+    stakes = min(2.0, float(len(_tokens(text) & SHORTS_STAKES_TERMS)) * 0.5)
+    compression = 2.0 if len(tokens) <= 14 else (1.0 if len(tokens) <= 22 else 0.0)
+
+    article_count = int(story.get("event_article_count") or 1)
+    update_density = 2.0 if 2 <= article_count <= 8 else (1.0 if article_count > 1 else 0.0)
+    visual_component = min(2.0, visual * 0.20)
+
+    return _clamp_score(
+        clarity + stakes + compression + update_density + visual_component
+    )
+
+
+def _audience_potential(story, social, google_trend, event_momentum, originality):
+    """Score audience-interest signals separately from factual importance."""
+    velocity = _safe_float(story.get("velocity_score")) or 0.0
+    trend = _safe_float(story.get("trend_bonus")) or 0.0
+    social = float(social or 0.0)
+    google_trend = float(google_trend or 0.0)
+
+    return _clamp_score(
+        social * 0.32
+        + google_trend * 0.32
+        + min(10.0, velocity) * 0.16
+        + min(10.0, trend) * 0.10
+        + min(10.0, event_momentum) * 0.06
+        + min(10.0, originality) * 0.04
+    )
+
+
+def _historical_context_score(story, rows, target_category, target_format, target_language):
+    """Keep history useful without letting token overlap dominate ranking."""
+    history, matches = _historical_score(
+        story, rows, target_category, target_format, target_language
+    )
+    if not matches:
+        return 0.0, 0
+
+    # The raw historical signal is a percentage-like value. Compress it to a
+    # stable 0-10 channel so one unusually high-performing old video cannot
+    # overwhelm current-event evidence.
+    return _clamp_score(history * 0.10), matches
+
+
 def _topic_overlap(a, b):
     aa, bb = _tokens(a), _tokens(b)
     if not aa or not bb:
@@ -378,6 +443,33 @@ def _trend_signal(title):
         return 0.0
     terms = _india_trend_terms()
     return min(4.0, sum(1.0 for term in terms if term and term in title_text))
+
+
+def _adaptive_discovery_query(base_query, social_titles):
+    """Build at most one supplemental query from public-interest novelty."""
+    base_tokens = _tokens(base_query)
+    if not social_titles:
+        return ""
+
+    frequency = {}
+    for title in social_titles[:50]:
+        for token in _tokens(title):
+            if token in base_tokens or token in {"india", "indian", "world", "news", "reddit"}:
+                continue
+            frequency[token] = frequency.get(token, 0) + 1
+
+    candidates = sorted(
+        frequency.items(),
+        key=lambda item: (-item[1], -len(item[0]), item[0]),
+    )
+    selected = [token for token, count in candidates if count >= 2][:3]
+    if not selected:
+        return ""
+
+    query = " ".join(selected)
+    if _topic_overlap(query, base_query) >= 0.50:
+        return ""
+    return query
 
 
 def _social_signal(title, social_titles):
@@ -709,13 +801,28 @@ def _originality_stage(stories, used_topics, max_items=5):
     selected = []
     for story in stories:
         overlap = _same_topic(story, used_topics)
-        if overlap >= 0.55:
+
+        # Historical cooldown is deliberately conservative: high lexical
+        # overlap indicates the same covered topic, while moderate overlap can
+        # simply mean the same entity has a genuinely new development.
+        if overlap >= 0.72:
             story["discovery_rejection"] = "Previously covered topic/angle"
             continue
-        title_overlap = max((_topic_overlap(story.get("title", ""), old.get("title", "")) for old in selected), default=0.0)
+
+        title_overlap = max(
+            (
+                _topic_overlap(story.get("title", ""), old.get("title", ""))
+                for old in selected
+            ),
+            default=0.0,
+        )
         if title_overlap >= 0.58:
             continue
-        story["originality_score"] = round(max(0.0, 10.0 - overlap * 12.0 - title_overlap * 6.0), 2)
+
+        story["originality_score"] = round(
+            max(0.0, 10.0 - overlap * 9.0 - title_overlap * 6.0),
+            2,
+        )
         story["originality_pass"] = True
         selected.append(story)
         if len(selected) >= max_items:
@@ -735,42 +842,72 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     event_text = story.get("event_search_text") or story.get("title", "")
     social = _social_signal(event_text, social_titles)
     google_trend = _trend_signal(event_text)
-    history, history_matches = _historical_score(story, rows, target_category, target_format, target_language)
+    history, history_matches = _historical_context_score(
+        story,
+        rows,
+        target_category,
+        target_format,
+        target_language,
+    )
     niche = _apply_sports_niche_bonus(story, target_category)
     originality = _safe_float(story.get("originality_score")) or 5.0
     event_momentum = _event_momentum_score(story)
     independent_corroboration = _independent_corroboration_score(story)
 
-    momentum = velocity + trend
-    momentum_weight = 1.45 if ai_cricket else 1.25
+    momentum = min(10.0, velocity + trend)
+    importance = _clamp_score(
+        momentum * 0.28
+        + min(10.0, event_momentum) * 0.18
+        + min(10.0, freshness) * 0.16
+        + min(10.0, corroboration) * 0.16
+        + min(10.0, independent_corroboration) * 0.10
+        + min(10.0, article_support) * 0.04
+        + min(10.0, source_quality) * 0.08
+        - min(10.0, risk * 2.0) * 0.18
+    )
+
+    audience = _audience_potential(
+        story,
+        social,
+        google_trend,
+        event_momentum,
+        originality,
+    )
+    shorts_viability = _shorts_viability(story, visual)
+    channel_history = history
+    momentum_weight = 1.08 if ai_cricket else 1.0
+
+    # candidate_score remains a single ranking score, but its components are
+    # now explicitly separated so audience interest does not masquerade as
+    # factual importance and correlated coverage signals are capped.
     final_score = (
-        momentum * momentum_weight
-        + event_momentum * 0.85
-        + freshness * 1.35
-        + corroboration * 1.15
-        + independent_corroboration * 0.55
-        + article_support * 0.80
-        + source_quality * 0.85
-        + visual * 0.60
-        + originality * 1.00
-        + social * 1.15
-        + google_trend * 1.20
-        + niche
-        + min(8.0, history * 0.08)
-        - risk * 2.25
+        importance * 1.55
+        + audience * 1.35 * momentum_weight
+        + shorts_viability * 1.20
+        + originality * 0.45
+        + visual * 0.20
+        + channel_history * 0.70
+        + niche * 0.20
+        - risk * 0.55
     )
     story["candidate_score"] = round(final_score, 3)
     story["event_momentum_score"] = event_momentum
     story["independent_corroboration_score"] = independent_corroboration
-    story["historical_topic_signal"] = round(history, 3)
+    story["historical_topic_signal"] = round(history * 10.0, 3)
     story["historical_topic_matches"] = history_matches
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
+    story["shorts_viability_score"] = round(shorts_viability, 2)
+    story["importance_score"] = round(importance, 2)
+    story["audience_potential_score"] = round(audience, 2)
     story["risk_signal_count"] = risk
     story["social_signal"] = round(social, 2)
     story["google_trends_signal"] = round(google_trend, 2)
     story["sports_niche_bonus"] = niche
     story["discovery_dimensions"] = {
+        "importance": round(importance, 2),
+        "audience_potential": round(audience, 2),
+        "shorts_viability": round(shorts_viability, 2),
         "momentum": round(momentum, 2),
         "event_momentum": round(event_momentum, 2),
         "freshness": round(freshness, 2),
@@ -780,7 +917,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "source_quality": round(source_quality, 2),
         "social_signal": round(social, 2),
         "google_trends": round(google_trend, 2),
-        "channel_history": round(min(10.0, history * 0.10), 2),
+        "channel_history": round(history, 2),
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
         "safety_risk": risk,
@@ -791,6 +928,12 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
 def _candidate_reason(story):
     dimensions = story.get("discovery_dimensions") or {}
     parts = []
+    if _safe_float(dimensions.get("importance")) >= 7:
+        parts.append("strong editorial importance")
+    if _safe_float(dimensions.get("audience_potential")) >= 7:
+        parts.append("strong audience-interest signal")
+    if _safe_float(dimensions.get("shorts_viability")) >= 7:
+        parts.append("strong Shorts potential")
     if _safe_float(dimensions.get("momentum")) >= 5:
         parts.append("strong current momentum")
     if _safe_float(dimensions.get("event_momentum")) >= 4:
@@ -888,7 +1031,33 @@ def diversity_rerank(stories, max_items=28):
             )
             novelty_bonus = 1.5 if selected and max_similarity < 0.20 else 0.0
             repetition_penalty = max_similarity * 10.0
-            adjusted = base_score + novelty_bonus - repetition_penalty
+
+            candidate_entities = _topic_entities(candidate)
+            repeated_entity_penalty = 0.0
+            if candidate_entities:
+                entity_repeats = sum(
+                    1
+                    for old in selected
+                    if candidate_entities & _topic_entities(old)
+                )
+                repeated_entity_penalty = min(4.0, entity_repeats * 1.25)
+
+            candidate_genre = _clean(candidate.get("primary_genre") or candidate.get("genre"))
+            same_genre_repeats = sum(
+                1
+                for old in selected
+                if candidate_genre
+                and candidate_genre == _clean(old.get("primary_genre") or old.get("genre"))
+            )
+            portfolio_penalty = min(3.0, max(0, same_genre_repeats - 2) * 0.75)
+
+            adjusted = (
+                base_score
+                + novelty_bonus
+                - repetition_penalty
+                - repeated_entity_penalty
+                - portfolio_penalty
+            )
 
             if adjusted > best_adjusted:
                 best_adjusted = adjusted
@@ -932,6 +1101,21 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
 
     social_titles = [row.get("title", "") for row in social_rows]
     raw.extend(social_rows)
+
+    # One bounded adaptive lane: if public-interest signals surface a
+    # genuinely new vocabulary not covered by the base query, let GNews
+    # explore that vocabulary once. This improves recall without restoring
+    # blind multi-query fanout.
+    adaptive_query = _adaptive_discovery_query(base_query, social_titles)
+    if adaptive_query and api_key and adaptive_query != _clean(base_query):
+        adaptive_rows = _gnews_items(adaptive_query, api_key, genre_key)
+        if adaptive_rows:
+            raw.extend(adaptive_rows)
+            social_titles.extend(
+                row.get("title", "")
+                for row in adaptive_rows[:8]
+                if row.get("title")
+            )
 
     for story in raw:
         story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
