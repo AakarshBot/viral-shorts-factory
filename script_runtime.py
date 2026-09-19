@@ -365,29 +365,91 @@ def clean_script_data(script_data, story_data, format_mode):
 def _rewrite_for_originality_once(script_data, story_data, overlap):
     scenes = [{"index": i, "voiceover": str(s.get("voiceover") or "")} for i, s in enumerate(script_data.get("script") or [], 1) if isinstance(s, dict) and not s.get("human_contributed")]
     evidence = "\n\n".join(_originality_sources(story_data)[:10])
-    prompt = ("Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts and order. "
-              "Do not add facts or quote sources. Return JSON with script entries containing index and voiceover.\nDetected overlap:"
-              + json.dumps(overlap) + "\nSCENES:\n" + json.dumps(scenes, ensure_ascii=False) + "\nEVIDENCE:\n" + evidence[:16000])
-    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
-    gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
-    if groq:
-        result = _originality_llm("https://api.groq.com/openai/v1/chat/completions",
-            {"model":"openai/gpt-oss-120b","messages":[{"role":"system","content":"Rewrite for originality while preserving facts."},{"role":"user","content":prompt}],"response_format":{"type":"json_object"},"temperature":0.2},
-            {"Authorization":"Bearer "+groq,"Content-Type":"application/json"})
-    elif gemini:
-        result = _originality_llm("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
-            {"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseMimeType":"application/json","temperature":0.2}},
-            {"x-goog-api-key":gemini,"Content-Type":"application/json"})
-    else:
+    prompt = (
+        "Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts and order. "
+        "Do not add facts or quote sources. Return JSON with script entries containing index and voiceover.\n"
+        "Detected overlap:" + json.dumps(overlap) + "\nSCENES:\n" + json.dumps(scenes, ensure_ascii=False)
+        + "\nEVIDENCE:\n" + evidence[:16000]
+    )
+
+    def call_provider(provider_name, url, payload, headers):
+        print(f"   [Script Originality] Trying {provider_name} rewrite.", flush=True)
+        result = _originality_llm(url, payload, headers)
+        if isinstance(result, dict) and isinstance(result.get("script"), list):
+            return result
+        print(f"   [Script Originality] {provider_name} rewrite unavailable.", flush=True)
         return None
+
+    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
+    if groq:
+        result = call_provider(
+            "Groq",
+            "https://api.groq.com/openai/v1/chat/completions",
+            {
+                "model": "openai/gpt-oss-120b",
+                "messages": [
+                    {"role": "system", "content": "Rewrite for originality while preserving facts."},
+                    {"role": "user", "content": prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.2,
+            },
+            {"Authorization": "Bearer " + groq, "Content-Type": "application/json"},
+        )
+    else:
+        result = None
+
+    if result is None:
+        openrouter = str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+        if openrouter:
+            result = call_provider(
+                "OpenRouter free",
+                "https://openrouter.ai/api/v1/chat/completions",
+                {
+                    "model": "openrouter/free",
+                    "messages": [
+                        {"role": "system", "content": "Rewrite for originality while preserving facts."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.2,
+                },
+                {
+                    "Authorization": "Bearer " + openrouter,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/AakarshBot/viral-shorts-factory",
+                    "X-Title": "Viral Shorts Factory",
+                },
+            )
+
+    if result is None:
+        gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
+        if gemini:
+            result = call_provider(
+                "Gemini",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+                {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+                },
+                {"x-goog-api-key": gemini, "Content-Type": "application/json"},
+            )
+
     if not isinstance(result, dict) or not isinstance(result.get("script"), list):
         return None
-    replacements = {int(x.get("index")): str(x.get("voiceover") or "").strip() for x in result["script"] if isinstance(x, dict) and str(x.get("index") or "").isdigit()}
+
+    replacements = {
+        int(x.get("index")): str(x.get("voiceover") or "").strip()
+        for x in result["script"]
+        if isinstance(x, dict) and str(x.get("index") or "").isdigit()
+    }
     rewritten = dict(script_data)
-    rewritten["script"] = [dict(s, voiceover=replacements.get(i, s.get("voiceover", ""))) for i, s in enumerate(script_data.get("script") or [], 1)]
+    rewritten["script"] = [
+        dict(s, voiceover=replacements.get(i, s.get("voiceover", "")))
+        for i, s in enumerate(script_data.get("script") or [], 1)
+    ]
     rewritten["originality_rewrite_attempted"] = True
     return rewritten
-
 
 def validate_content_density(script_data, story_data, format_mode):
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
