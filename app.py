@@ -38,6 +38,8 @@ from dashboard_runtime import (
     factory_function_coverage,
     run_demo_section,
     upload_ready_for_manual_decision,
+    evaluate_live_qc_gates,
+    live_qc_passes,
 )
 
 
@@ -796,15 +798,24 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     st.markdown("---")
     st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
 
-    qc_checks = [
-        ("Rendered video", bool(video_path)),
-        ("Script generated", bool(snapshot.get("script_data"))),
-        ("Visual package", bool(snapshot.get("visual_packages"))),
-        ("Visual approval", bool(snapshot.get("visual_review_approved"))),
-    ]
-    qc_cols = st.columns(len(qc_checks))
-    for col, (label, ok) in zip(qc_cols, qc_checks):
-        col.metric(label, "PASS" if ok else "CHECK")
+    gates = evaluate_live_qc_gates(
+        snapshot,
+        {
+            "title": str(st.session_state.get("final_title") or metadata.get("title") or script_data.get("title") or ""),
+            "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
+            "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
+        },
+    )
+    passed_count = sum(1 for gate in gates if gate["passed"])
+    st.markdown(f"**Live gate status: {passed_count}/{len(gates)} passing**")
+    gate_cols = st.columns(2)
+    for index, gate in enumerate(gates):
+        with gate_cols[index % 2]:
+            if gate["passed"]:
+                st.success(f"✓ {gate['label']} — PASS", icon="✅")
+            else:
+                st.error(f"✕ {gate['label']} — BLOCKED", icon="⛔")
+            st.caption(gate["detail"])
 
     st.markdown("### Final video")
     if video_path and os.path.isfile(video_path):
@@ -874,25 +885,16 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     public_col, private_col = st.columns(2)
     with public_col:
         if st.button("🌐 Upload Publicly", type="primary", use_container_width=True, key="upload_public"):
-            st.session_state["confirm_public_upload"] = True
-            st.rerun()
+            if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
+                st.error("Upload blocked: one or more live QC gates are not passing.")
+            else:
+                st.session_state["confirm_public_upload"] = True
+                st.rerun()
     with private_col:
         if st.button("🔒 Upload Privately", use_container_width=True, key="upload_private"):
-            st.session_state["confirm_public_upload"] = False
-            _perform_upload(
-                controller,
-                snapshot,
-                st.session_state["final_title"],
-                st.session_state["final_description"],
-                st.session_state["final_comment"],
-                "private",
-            )
-
-    if st.session_state.get("confirm_public_upload"):
-        st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
-        confirm_col, cancel_col = st.columns(2)
-        with confirm_col:
-            if st.button("✅ Yes, upload publicly", type="primary", use_container_width=True, key="confirm_upload_public"):
+            if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
+                st.error("Upload blocked: one or more live QC gates are not passing.")
+            else:
                 st.session_state["confirm_public_upload"] = False
                 _perform_upload(
                     controller,
@@ -900,8 +902,26 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     st.session_state["final_title"],
                     st.session_state["final_description"],
                     st.session_state["final_comment"],
-                    "public",
+                    "private",
                 )
+
+    if st.session_state.get("confirm_public_upload"):
+        st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("✅ Yes, upload publicly", type="primary", use_container_width=True, key="confirm_upload_public"):
+                if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
+                    st.error("Upload blocked: one or more live QC gates are not passing.")
+                else:
+                    st.session_state["confirm_public_upload"] = False
+                    _perform_upload(
+                        controller,
+                        snapshot,
+                        st.session_state["final_title"],
+                        st.session_state["final_description"],
+                        st.session_state["final_comment"],
+                        "public",
+                    )
         with cancel_col:
             if st.button("← Cancel", use_container_width=True, key="cancel_upload_public"):
                 st.session_state["confirm_public_upload"] = False
