@@ -94,11 +94,6 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
     desc_body = str(script_data.get("seo_description") or "").strip()
     if trend_keyword and str(trend_keyword).lower() not in desc_body.lower():
         desc_body = f"Trending now: {trend_keyword}. {desc_body}"
-    hashtags = list(genre_cfg.get("hashtags", ["#Trending"]))
-    if trend_keyword:
-        trend_tag = re.sub(r"[^a-zA-Z0-9]", "", str(trend_keyword))
-        if trend_tag:
-            hashtags.insert(0, f"#{trend_tag}")
     description = f"{desc_body}\n\n{' '.join(build_description_hashtags(genre_cfg, trend_keyword))}".strip()[:5000]
 
     tags = script_data.get("tags", ["Shorts", genre_cfg.get("label", "Shorts")])
