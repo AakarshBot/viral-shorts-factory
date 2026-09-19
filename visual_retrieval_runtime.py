@@ -571,12 +571,12 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
                 used_hashes.add(image_hash)
 
-                if trusted and candidate_index < len(candidates):
+                if trusted and candidate_offset + 1 < len(candidates):
                     _record_trusted_related_assets(
                         seg,
                         bot,
                         [item[1] for item in candidates],
-                        candidate_index,
+                        candidate_offset + 1,
                         source,
                         query,
                         visual_type,
