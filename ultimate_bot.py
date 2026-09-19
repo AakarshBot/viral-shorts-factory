@@ -1960,6 +1960,11 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 os.remove(pre_loudness_path)
             except OSError:
                 pass
+        if os.path.exists(video_output_path):
+            try:
+                os.remove(video_output_path)
+            except OSError:
+                pass
 
         print("   [+] Writing video file to disk for Quality Control...")
         final_master.write_videofile(
