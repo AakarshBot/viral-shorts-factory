@@ -104,7 +104,21 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
     except Exception as exc:
         metadata_ok, metadata_detail = False, f"Metadata QC error: {type(exc).__name__}: {exc}"
 
+    try:
+        from final_qc_runtime import evaluate_originality_gate
+        originality_gate = evaluate_originality_gate(script)
+    except Exception as exc:
+        originality_gate = {
+            "passed": False,
+            "public_blocked": True,
+            "label": "Originality + Creator Insight",
+            "detail": f"Originality QC unavailable: {type(exc).__name__}: {exc}",
+        }
+
     return [
+        {"key": "originality", "label": originality_gate["label"], "passed": originality_gate["passed"],
+         "public_blocked": bool(originality_gate.get("public_blocked")),
+         "detail": originality_gate["detail"]},
         {"key": "story_lock", "label": "Verified story selection", "passed": story_ok,
          "detail": "Selected headline is tied to the discovery pool." if story_ok else "Production input is not tied to a verified discovery selection."},
         {"key": "script_contract", "label": "Script contract", "passed": script_ok,
