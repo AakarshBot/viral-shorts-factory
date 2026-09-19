@@ -404,11 +404,27 @@ def patch_content_first_visuals(bot):
         manual_queries = parse_manual_visual_queries(manual_raw)
         if manual_queries and callable(assign_manual_queries):
             manual_assignments = assign_manual_queries(scenes, manual_queries)
+            assigned_query_indices = {
+                int(assignment.get("query_index") or 0)
+                for assignment in manual_assignments
+                if assignment.get("query")
+            }
+            unused_manual_queries = [
+                (index, query)
+                for index, query in enumerate(manual_queries, 1)
+                if index not in assigned_query_indices
+            ]
             print(
-                f"   [Manual Visual Queries] {len(manual_queries)} supplied query/queries; "
-                f"assigned across {len(scenes)} scene(s).",
+                f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
+                f"assigned={len(assigned_query_indices)}; "
+                f"unused={len(unused_manual_queries)} across {len(scenes)} scene(s).",
                 flush=True,
             )
+            for query_index, query in unused_manual_queries:
+                print(
+                    f"   [Manual Visual Queries] UNUSED #{query_index}: '{query}'",
+                    flush=True,
+                )
             for scene_index, assignment in enumerate(manual_assignments, 1):
                 if assignment.get("query"):
                     scenes[scene_index - 1]["manual_visual_query"] = assignment["query"]

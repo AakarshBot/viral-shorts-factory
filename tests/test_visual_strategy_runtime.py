@@ -236,6 +236,72 @@ def test_manual_visual_query_stays_exact():
 
 
 
+def test_manual_query_ignores_stale_generated_visual_metadata():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    portrait = resolve_visual_search_intent(
+        {
+            "primary_entity": "Cheteshwar Pujara",
+            "manual_visual_query": "Cheteshwar Pujara",
+            "visual_type": "PERSON",
+            "visual_genre": "CHART_GRAPH",
+            "factual_visual_intent": "chart graph statistics",
+            "visual_context": "statistics chart context",
+            "visual_intent": "person portrait",
+        }
+    )
+    assert portrait.visual_genre == "PERSON_PORTRAIT"
+    assert portrait.query == "Cheteshwar Pujara"
+    assert portrait.intent == "person portrait"
+
+    cricket = resolve_visual_search_intent(
+        {
+            "primary_entity": "Pujara",
+            "manual_visual_query": "Pujara Cricket",
+            "visual_type": "PERSON",
+            "visual_genre": "SPORTS_MATCH",
+            "factual_visual_intent": "match score statistics",
+            "visual_context": "sports match",
+            "visual_intent": "person portrait",
+        }
+    )
+    assert cricket.visual_genre == "PERSON_PORTRAIT"
+    assert cricket.query == "Pujara Cricket"
+    assert cricket.intent == "person portrait"
+
+
+def test_manual_query_assignment_can_report_unused_query():
+    from manual_visual_query_runtime import assign_manual_queries
+
+    queries = [
+        "Pat Cummins",
+        "Pujara Cricket",
+        "Cheteshwar Pujara",
+        "Virat Kohli Rohit Sharma",
+        "unused query",
+    ]
+    scenes = [
+        {"primary_entity": "Pat Cummins", "voiceover": "Pat Cummins"},
+        {"primary_entity": "Pujara Cricket", "voiceover": "Pujara Cricket"},
+        {"primary_entity": "Cheteshwar Pujara", "voiceover": "Cheteshwar Pujara"},
+        {"primary_entity": "Virat Kohli Rohit Sharma", "voiceover": "Virat Kohli Rohit Sharma"},
+        {"primary_entity": "Unrelated scene one", "voiceover": "Unrelated scene one"},
+        {"primary_entity": "Unrelated scene two", "voiceover": "Unrelated scene two"},
+        {"primary_entity": "Unrelated scene three", "voiceover": "Unrelated scene three"},
+    ]
+
+    assignments = assign_manual_queries(scenes, queries)
+    used_indices = {
+        int(item["query_index"])
+        for item in assignments
+        if item.get("query")
+    }
+
+    assert len(used_indices) == 4
+    assert 5 not in used_indices
+    assert sum(bool(item.get("query")) for item in assignments) == 4
+
+
 def test_manual_logo_query_is_exact_but_routes_as_branding():
     from visual_search_intent_runtime import resolve_visual_search_intent
 

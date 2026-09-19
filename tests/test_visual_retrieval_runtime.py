@@ -137,6 +137,67 @@ def test_canonical_person_source_bypasses_strict_semantic_false_positive(monkeyp
     assert source == "Wikipedia"
 
 
+def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatch):
+    image_bytes = _jpeg_bytes()
+
+    class FakeBot:
+        pass
+
+    calls = {"qa": 0}
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
+
+        @staticmethod
+        def _verification_tier(seg, visual_type, source):
+            return "STRICT(person)"
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+        @staticmethod
+        def _strict_gate(*args, **kwargs):
+            calls["qa"] += 1
+            return False, "STRICT(person)", 35, True
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return retrieval.Image.open(io.BytesIO(image_bytes)).convert("RGB"), "cached"
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [image_bytes])],
+    )
+
+    _image, _used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        {
+            "primary_entity": "Pat Cummins",
+            "factual_primary_entity": "Pat Cummins",
+            "visual_intent": "interview",
+            "specific_search_prompt": "Pat Cummins interview",
+            "voiceover": "Pat Cummins is speaking in an interview.",
+        },
+        "cricket",
+        set(),
+        set(),
+        "Pat Cummins interview",
+    )
+
+    assert calls["qa"] == 1
+    assert source == "visual-rescue"
+    assert retrieval._trusted_source_evidence(
+        "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
+    )[0] is False
+
+
 def test_commons_logo_source_bypasses_strict_semantic_false_positive(monkeypatch):
     from visual_taxonomy_runtime import classify_visual_genre
 
