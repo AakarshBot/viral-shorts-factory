@@ -46,6 +46,34 @@ def _publisher_domains(script_data:dict[str,Any])->set[str]:
     return domains
 
 
+def _publisher_names(script_data:dict[str,Any])->set[str]:
+    names=set()
+    if not isinstance(script_data,dict):
+        return names
+    sources=script_data.get("research_sources")
+    if not isinstance(sources,list):
+        return names
+    for source in sources:
+        if not isinstance(source,dict):
+            continue
+        for field in ("source", "source_name", "publisher", "publisher_name"):
+            value=_norm(source.get(field,""))
+            if value:
+                names.add(value.casefold())
+    return names
+
+
+def _entity_matches_publisher(entity:str,script_data:dict[str,Any])->bool:
+    entity_tokens=set(_tokens(entity))
+    if not entity_tokens:
+        return False
+    for name in _publisher_names(script_data):
+        name_tokens=set(_tokens(name))
+        if name_tokens and entity_tokens == name_tokens:
+            return True
+    return False
+
+
 def _entity_contains_publisher_domain(entity:str,script_data:dict[str,Any])->bool:
     entity_text=_norm(entity).casefold()
     if not entity_text:
@@ -153,13 +181,22 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
     original=_norm(scene.get("factual_primary_entity") or scene.get("primary_entity") or scene.get("visual_search_subject") or "")
     if not original: return {"entity":"","grounded":False,"changed":False,"reason":"no visual entity supplied","confidence":0.0}
     evidence=_evidence(script_data); role=_role(scene,original)
+    source_name_contamination=_entity_matches_publisher(original,script_data)
     contaminated=_entity_contains_publisher_domain(original,script_data)
-    if contaminated:
+    explicit_branding=any(
+        key(word) in {"logo","branding","brand","newspaper","publication","publisher","masthead"}
+        for word in _tokens(scene.get("visual_intent",""))
+    )
+    if source_name_contamination and not explicit_branding:
+        score,reason=0.0,"visual identity matches the research publisher/source name"
+    elif contaminated:
         score,reason=0.0,"visual identity contains a publisher/source domain"
     else:
         score,reason=_support(original,evidence,role)
     if score>=0.80 or role in _NON_STABLE: return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
     for anchor in _anchors(script_data):
+        if _entity_matches_publisher(anchor,script_data) and not explicit_branding:
+            continue
         a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
         if a_score>=0.80: return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
     return {"entity":original,"grounded":False,"changed":False,"reason":reason,"confidence":0.0,"original_entity":original}
