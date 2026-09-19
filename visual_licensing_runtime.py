@@ -116,6 +116,21 @@ def attribution_required(record: dict[str, Any]) -> bool:
     return code in {"by", "by-sa"}
 
 
+def append_image_credits(description: str, records: list[dict[str, Any]], max_bytes: int = 5000) -> str:
+    """Append required CC attribution while preserving YouTube's byte limit."""
+    base = str(description or "").strip()
+    credits = build_image_credits(records)
+    if not credits:
+        return base
+    separator = "\n\n"
+    suffix = separator + credits
+    available = max(0, int(max_bytes) - len(suffix.encode("utf-8")))
+    base_bytes = base.encode("utf-8")
+    if len(base_bytes) > available:
+        base = base_bytes[:available].decode("utf-8", errors="ignore").rstrip()
+    return base + suffix
+
+
 def build_image_credits(records: list[dict[str, Any]]) -> str:
     lines = []
     seen = set()
@@ -166,6 +181,7 @@ __all__ = [
     "ALLOW_LISTED_OPEN_LICENSES",
     "ALLOW_UNLICENSED_ENV",
     "allow_unlicensed_visuals",
+    "append_image_credits",
     "attribution_required",
     "build_image_credits",
     "candidate_bytes",
