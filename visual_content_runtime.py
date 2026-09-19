@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from branding_runtime import source_credit_for_type
 from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
 from visual_licensing_runtime import allow_unlicensed_visuals, provenance, rescue_provenance
+from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
@@ -412,6 +413,7 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
+        reset_visual_qa_video_budget()
 
         # Preserve the original global manual-query control as a compatibility
         # path. New per-slide queries remain authoritative and are never
@@ -522,6 +524,7 @@ def patch_content_first_visuals(bot):
 
         print("\n🎨 Rendering content-first visual package (multi-source retrieval + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
+            start_visual_qa_scene()
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
 

@@ -18,6 +18,7 @@ import hashlib
 import io
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -427,24 +428,70 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         query = queries[query_index]
         query_index += 1
         print(f"   [Visual Search] {query_index}/{len(queries)} | '{query}'", flush=True)
-        for source, fetcher in source_plan:
-            if provider_checks >= max_provider_checks:
-                break
-            provider_checks += 1
-            tier = runtime._verification_tier(qa_scene, visual_type, source)
+
+        # Fetch providers concurrently, but keep their URL state isolated until
+        # all providers finish. This removes serial provider wait time without
+        # introducing a race into the global deduplication set.
+        def fetch_provider(source, fetcher):
+            local_used_urls = set(used_urls)
             fetch_entity = cache_entity if source == "Wikipedia" else query
-            args = (fetch_entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
+            args = (
+                (fetch_entity, local_used_urls, query, video_title)
+                if source == "Wikipedia"
+                else (query, local_used_urls, query, video_title)
+            )
             raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
-            candidates = _candidate_items(raw_data)
+            return source, local_used_urls, _candidate_items(raw_data)
+
+        provider_results = []
+        with ThreadPoolExecutor(
+            max_workers=max(1, min(6, len(source_plan))),
+            thread_name_prefix="visual-provider",
+        ) as pool:
+            futures = [
+                pool.submit(fetch_provider, source, fetcher)
+                for source, fetcher in source_plan
+            ]
+            for source_index, future in enumerate(futures):
+                try:
+                    source, local_used_urls, candidates = future.result()
+                except Exception as exc:
+                    source = source_plan[source_index][0]
+                    local_used_urls = set()
+                    candidates = []
+                    print(
+                        f"   [Visual Source] {source} | provider task failed: "
+                        f"{type(exc).__name__}: {exc} | query='{query}'",
+                        flush=True,
+                    )
+                used_urls.update(local_used_urls)
+                provider_results.append((source, candidates))
+
+        provider_checks += len(provider_results)
+
+        # Spread the finite semantic-QA budget across providers. A provider
+        # returning four candidates must not consume all QA checks before the
+        # next provider gets a chance to offer a better image.
+        prepared_candidates = []
+        for source, candidates in provider_results:
             if not candidates:
-                print(f"   [Visual Source] {source} | no candidate returned | query='{query}'", flush=True)
+                print(
+                    f"   [Visual Source] {source} | no candidate returned | query='{query}'",
+                    flush=True,
+                )
+                prepared_candidates.append((source, []))
                 continue
 
+            valid_candidates = []
             for candidate_index, data in enumerate(candidates, 1):
                 valid, reason, normalized = _preflight_image(data)
                 if not valid:
                     if reason.startswith("provider-returned-"):
-                        print(f"   [Visual Source] {source} | candidate {candidate_index}/{len(candidates)} unavailable | query='{query}'", flush=True)
+                        print(
+                            f"   [Visual Source] {source} | candidate {candidate_index}/{len(candidates)} "
+                            f"unavailable | query='{query}'",
+                            flush=True,
+                        )
                     else:
                         print(
                             f"   [Visual Quality] REJECTED | {reason} | source={source} "
@@ -452,33 +499,42 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                             flush=True,
                         )
                     continue
-
                 image_hash = _hash_image(bot, normalized)
                 if image_hash in used_hashes:
-                    print(f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'", flush=True)
+                    print(
+                        f"   [Visual Search] duplicate image skipped | source={source} | query='{query}'",
+                        flush=True,
+                    )
+                    continue
+                valid_candidates.append((candidate_index, data, normalized, image_hash))
+            prepared_candidates.append((source, valid_candidates))
+
+        for candidate_offset in range(MAX_CANDIDATES_PER_SOURCE):
+            if verification_attempts >= max_verification:
+                break
+            for source, candidates in prepared_candidates:
+                if verification_attempts >= max_verification:
+                    break
+                if candidate_offset >= len(candidates):
                     continue
 
-                trusted, trusted_tier, trusted_score = _trusted_source_evidence(source, visual_type, query, visual_genre)
-                verification_available = verification_attempts < max_verification
-                if verification_available:
-                    verification_attempts += 1
-                    try:
-                        accepted, tier_name, score, hard_reject = runtime._strict_gate(
-                            bot, normalized, qa_scene, video_title, source=source
-                        )
-                    except Exception as exc:
-                        print(
-                            f"   [Visual QA] candidate check failed; rejecting candidate: "
-                            f"{type(exc).__name__}: {exc}",
-                            flush=True,
-                        )
-                        continue
-                else:
-                    accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
+                candidate_index, data, normalized, image_hash = candidates[candidate_offset]
+                trusted, trusted_tier, trusted_score = _trusted_source_evidence(
+                    source, visual_type, query, visual_genre
+                )
+                verification_attempts += 1
+                try:
+                    accepted, tier_name, score, hard_reject = runtime._strict_gate(
+                        bot, normalized, qa_scene, video_title, source=source
+                    )
+                except Exception as exc:
+                    print(
+                        f"   [Visual QA] candidate check failed; rejecting candidate: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    continue
 
-                # Every automatic candidate must pass the same semantic QC
-                # boundary. Source authority can help rank/retain alternatives,
-                # but it never overrides the scene-fit gate.
                 if hard_reject or not accepted:
                     print(
                         f"   [Visual QA] semantic/QC rejection | source={source} | "
@@ -487,64 +543,62 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     )
                     continue
 
-                if accepted:
-                    record = candidate_provenance(data)
-                    if not provenance_is_usable(record):
-                        print(
-                            f"   [Visual Licensing] rejected candidate without usable provenance | source={source}",
-                            flush=True,
-                        )
-                        continue
-                    try:
-                        cache_path = runtime.save_to_cache(
-                            bot, normalized, cache_entity, visual_type, source, context
-                        )
-                        if cache_path:
-                            import json
-                            meta_path = os.path.splitext(str(cache_path))[0] + ".json"
-                            try:
-                                with open(meta_path, "r", encoding="utf-8") as fh:
-                                    meta = json.load(fh)
-                            except Exception:
-                                meta = {}
-                            meta["provenance"] = record
-                            meta["verified"] = True
-                            with open(meta_path, "w", encoding="utf-8") as fh:
-                                json.dump(meta, fh, ensure_ascii=False, indent=2)
-                    except Exception:
-                        pass
-
-                    used_hashes.add(image_hash)
-
-                    if trusted and candidate_index < len(candidates):
-                        _record_trusted_related_assets(
-                            seg,
-                            bot,
-                            candidates,
-                            candidate_index,
-                            source,
-                            query,
-                            visual_type,
-                            visual_genre,
-                            used_hashes,
-                        )
-                    seg["visual_verified"] = True
-                    seg["visual_rescue_reason"] = ""
-                    seg["visual_fallback_reason"] = ""
-                    seg["visual_query_used"] = query
-                    seg["visual_verification_attempts"] = verification_attempts
-                    seg["asset_provenance"] = record
+                record = candidate_provenance(data)
+                if not provenance_is_usable(record):
                     print(
-                        f"   [Visual Source] {source} | VERIFIED | tier={tier_name} | score={score} | "
-                        f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
+                        f"   [Visual Licensing] rejected candidate without usable provenance | source={source}",
                         flush=True,
                     )
-                    return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
+                    continue
+                try:
+                    cache_path = runtime.save_to_cache(
+                        bot, normalized, cache_entity, visual_type, source, context
+                    )
+                    if cache_path:
+                        import json
+                        meta_path = os.path.splitext(str(cache_path))[0] + ".json"
+                        try:
+                            with open(meta_path, "r", encoding="utf-8") as fh:
+                                meta = json.load(fh)
+                        except Exception:
+                            meta = {}
+                        meta["provenance"] = record
+                        meta["verified"] = True
+                        with open(meta_path, "w", encoding="utf-8") as fh:
+                            json.dump(meta, fh, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+
+                used_hashes.add(image_hash)
+
+                if trusted and candidate_offset + 1 < len(candidates):
+                    _record_trusted_related_assets(
+                        seg,
+                        bot,
+                        [item[1] for item in candidates],
+                        candidate_offset + 1,
+                        source,
+                        query,
+                        visual_type,
+                        visual_genre,
+                        used_hashes,
+                    )
+                seg["visual_verified"] = True
+                seg["visual_rescue_reason"] = ""
+                seg["visual_fallback_reason"] = ""
+                seg["visual_query_used"] = query
+                seg["visual_verification_attempts"] = verification_attempts
+                seg["asset_provenance"] = record
+                print(
+                    f"   [Visual Source] {source} | VERIFIED | tier={tier_name} | score={score} | "
+                    f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
+                    flush=True,
+                )
+                return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
+
         if provider_checks >= max_provider_checks:
             break
 
-        # No second-stage query synthesis here. The canonical intent already
-        # supplied the complete bounded query set for this scene.
     if (visual_type in ABSTRACT_TYPES or genre_allows_ai(visual_genre)) and callable(getattr(bot, "fetch_hf_ai_image", None)):
         prompt_text = _ai_prompt(entity, visual_type)
         print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{prompt_text[:180]}'", flush=True)

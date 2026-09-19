@@ -80,6 +80,55 @@ def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
     assert controller.snapshot()["stage"] == "audio"
 
 
+
+def test_dashboard_creator_insight_preserves_original_slide_query_alignment(monkeypatch):
+    def fake_write_script(*_args, **_kwargs):
+        return {
+            "title": "Alignment story",
+            "script": [
+                {"primary_entity": "One", "voiceover": "One scene."},
+                {"primary_entity": "Two", "voiceover": "Two scene."},
+                {"primary_entity": "Three", "voiceover": "Three scene."},
+            ],
+        }
+
+    def fake_install(self):
+        self._patched = True
+        self.bot.run_robot.__globals__["write_script"] = fake_write_script
+        self.bot.write_script = fake_write_script
+
+    monkeypatch.setattr(WorkflowController, "_install_production_wrappers", fake_install)
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._install_production_wrappers()
+    result = {}
+    namespace = controller.bot.run_robot.__globals__
+
+    def runner():
+        result["script"] = namespace["write_script"]()
+
+    thread = threading.Thread(target=runner)
+    thread.start()
+
+    deadline = time.time() + 2
+    while time.time() < deadline and controller.snapshot()["stage"] != "script_review":
+        time.sleep(0.01)
+
+    assert controller.submit_script_visual_queries(
+        ["query one", "query two", "query three"],
+        "This creator context adds original analysis beyond the source material for the selected story today.",
+    ) is True
+
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+
+    scenes = result["script"]["script"]
+    assert len(scenes) == 4
+    assert scenes[0]["manual_visual_query"] == "query one"
+    assert scenes[1]["manual_visual_query"] == "query two"
+    assert "manual_visual_query" not in scenes[2]
+    assert scenes[3]["manual_visual_query"] == "query three"
+
 def test_dashboard_start_production_reaches_script_review(monkeypatch):
     import workflow_runtime
 
@@ -653,6 +702,13 @@ def test_live_qc_gates_are_real_blocking_checks(tmp_path):
     assert live_qc_passes(snapshot, metadata) is False
 
 
+
+def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
+    source = Path("app.py").read_text(encoding="utf-8")
+    assert '"missing": missing' in source
+    assert '"qc_passed": verified and not missing' in source
+    assert 'if item.get("missing"):' in source
+
 def test_dashboard_primary_menu_and_generated_outputs_contract():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
@@ -663,7 +719,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'def render_script_visual_query_review(' in app_source
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
-    assert '"qc_passed": bool(layer.get("visual_verified", False))' in app_source
+    assert '"qc_passed": verified and not missing' in app_source
     assert 'disabled=bool(qc_blocked)' in app_source
     assert 'Visual semantic QC blocked:' in app_source
 

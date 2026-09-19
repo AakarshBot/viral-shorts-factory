@@ -110,6 +110,83 @@ def _jpeg_bytes(size=(900, 1200)):
     return buffer.getvalue()
 
 
+
+def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
+    candidates_one = []
+    candidates_two = []
+    for index in range(4):
+        image = Image.new("RGB", (900, 1200), (40 + index * 20, 70, 100))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=95)
+        candidates_one.append(_licensed_candidate(buffer.getvalue(), "cc0"))
+        image = Image.new("RGB", (900, 1200), (100, 70 + index * 20, 40))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=95)
+        candidates_two.append(_licensed_candidate(buffer.getvalue(), "cc0"))
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 4
+
+        @staticmethod
+        def _verification_tier(seg, visual_type, source):
+            return "STRICT"
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher()
+
+        @staticmethod
+        def _strict_gate(bot, data, seg, video_title="", source=""):
+            # The second provider has the acceptable first candidate. Under the
+            # old serial candidate loop, the first provider could consume all
+            # four QA checks before this provider was considered.
+            return (
+                source == "ProviderTwo",
+                "STRICT",
+                100 if source == "ProviderTwo" else 0,
+                source != "ProviderTwo",
+            )
+
+        @staticmethod
+        def get_cached_asset(bot, entity, visual_type, context=""):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("ProviderOne", lambda *args: list(candidates_one)),
+            ("ProviderTwo", lambda *args: list(candidates_two)),
+        ],
+    )
+
+    image, used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        {
+            "primary_entity": "India",
+            "factual_primary_entity": "India",
+            "visual_intent": "match",
+            "specific_search_prompt": "India match",
+            "voiceover": "India match update.",
+        },
+        "news",
+        set(),
+        set(),
+        "India match",
+    )
+
+    assert image.size == (900, 1200)
+    assert used_ai is False
+    assert source == "ProviderTwo"
+
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
 

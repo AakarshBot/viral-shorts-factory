@@ -584,28 +584,33 @@ def render_script_visual_query_review(
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
     items = []
     for index, package in enumerate(snapshot.get("visual_packages") or [], 1):
-        if not package:
-            continue
-        layer = package[0] if isinstance(package, list) else package
+        layer = package[0] if isinstance(package, list) and package else package
         if not isinstance(layer, dict):
-            continue
+            layer = {}
+
         path = str(layer.get("image") or "").strip()
-        if path and os.path.isfile(path):
-            items.append(
-                {
-                    "index": index,
-                    "path": path,
-                    "source": str(layer.get("source_type") or "visual"),
-                    "visual_type": str(layer.get("visual_type") or "visual"),
-                    "verified": bool(layer.get("visual_verified", False)),
-                    "qc_passed": bool(layer.get("visual_verified", False)),
-                    "qc_reason": str(layer.get("visual_rescue_reason") or "").strip(),
-                    "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
-                    "manual_query": str(layer.get("manual_visual_query") or "").strip(),
-                    "query_used": str(layer.get("visual_query_used") or "").strip(),
-                    "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
-                }
-            )
+        missing = not path or not os.path.isfile(path)
+        verified = bool(layer.get("visual_verified", False))
+        items.append(
+            {
+                "index": index,
+                "path": path if not missing else "",
+                "missing": missing,
+                "source": str(layer.get("source_type") or "visual"),
+                "visual_type": str(layer.get("visual_type") or "visual"),
+                "verified": verified,
+                "qc_passed": verified and not missing,
+                "qc_reason": (
+                    "Rendered image file is missing from the dashboard host."
+                    if missing
+                    else str(layer.get("visual_rescue_reason") or "").strip()
+                ),
+                "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
+                "manual_query": str(layer.get("manual_visual_query") or "").strip(),
+                "query_used": str(layer.get("visual_query_used") or "").strip(),
+                "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
+            }
+        )
     return items
 
 
@@ -626,7 +631,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     columns = st.columns(3, gap="medium")
     for offset, item in enumerate(items):
         with columns[offset % 3]:
-            st.image(item["path"], use_container_width=True)
+            if item.get("missing"):
+                st.error(
+                    "No rendered image file is available for this slide.",
+                    icon="⛔",
+                )
+            else:
+                st.image(item["path"], use_container_width=True)
             status = "QC PASS" if item["qc_passed"] else "QC BLOCKED"
             replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
             replacement_count = len(replacement_history)
@@ -851,7 +862,13 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
             cols = st.columns(3)
             for index, item in enumerate(visuals):
                 with cols[index % 3]:
-                    st.image(item["path"], use_container_width=True)
+                    if item.get("missing"):
+                        st.error(
+                            f"Visual {item['index']} has no rendered image file available.",
+                            icon="⛔",
+                        )
+                    else:
+                        st.image(item["path"], use_container_width=True)
                     st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
     if video_path and os.path.isfile(video_path):
         with st.expander("Final rendered video", expanded=True):
