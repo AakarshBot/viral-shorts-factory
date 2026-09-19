@@ -1148,8 +1148,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         )
         st.markdown(
             f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
-        st.markdown(
-            f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
             f"<b>{pending_candidate.get('title', '')}</b></div>",
             unsafe_allow_html=True,
         )
