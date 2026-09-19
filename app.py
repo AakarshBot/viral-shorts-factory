@@ -403,7 +403,8 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     stages = [
         ("Discovery", "discovery", 10, 14),
         ("Research", "research", 15, 23),
-        ("Script", "script", 24, 40),
+        ("Script", "script", 24, 38),
+        ("Script Review", "script_review", 39, 40),
         ("Voiceover", "audio", 41, 54),
         ("Visuals", "visuals", 55, 75),
         ("Visual Review", "visual_approval", 76, 76),
