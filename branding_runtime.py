@@ -157,6 +157,16 @@ def _static_brand_overlay(logo_path: str, width: int, height: int) -> np.ndarray
     x = width - TOP_RIGHT_MARGIN - LOGO_BOX_SIZE
     y = TOP_RIGHT_MARGIN
 
+    # The logo badge sits over the persistent frame. Clear the frame only
+    # beneath the badge so the frame corner cannot read as a second box.
+    frame_clear = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(frame_clear).rounded_rectangle(
+        (x - 3, y - 3, x + LOGO_BOX_SIZE + 2, y + LOGO_BOX_SIZE + 2),
+        radius=31,
+        fill=255,
+    )
+    canvas.paste((0, 0, 0, 0), (0, 0, width, height), frame_clear)
+
     shadow = Image.new("RGBA", (LOGO_BOX_SIZE + 18, LOGO_BOX_SIZE + 18), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
     sd.rounded_rectangle(
