@@ -311,14 +311,14 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         confidence = float(resolution.get("confidence") or 0.0)
         scene_terms = _scene_terms(scene, subject)
         visual_genre = classify_visual_genre(scene, subject, visual_type)
-        anchor = _primary_visual_anchor(scene_terms)
 
-        # Automatic retrieval gets one compact story-grounded query. Only a
-        # concrete anchor that actually appears in the scene evidence is added.
-        # Identity-only is the fallback; no invented location, office, action or
-        # year is appended just because a genre classifier suggested it.
-        if not anchor and visual_genre in {"PERSON_PORTRAIT", "ORG_BRANDING", "TEAM_BRANDING"}:
+        # Portraits and explicit identity assets stay identity-first. Do not
+        # let a narrative phrase such as "press conference" outrank the person
+        # identity when the requested visual is a portrait.
+        if visual_genre in {"PERSON_PORTRAIT", "ORG_BRANDING", "TEAM_BRANDING"}:
             anchor = _genre_hint_anchor(visual_genre, scene_terms)
+        else:
+            anchor = _primary_visual_anchor(scene_terms)
 
         query = _compose_query(subject, anchor)
         queries = [query] if query else []
