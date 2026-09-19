@@ -467,6 +467,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 used_urls.update(local_used_urls)
                 provider_results.append((source, candidates))
 
+        provider_checks += len(provider_results)
+
         # Spread the finite semantic-QA budget across providers. A provider
         # returning four candidates must not consume all QA checks before the
         # next provider gets a chance to offer a better image.
