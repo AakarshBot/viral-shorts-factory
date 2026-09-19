@@ -34,32 +34,21 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
 
 
 def evaluate_originality_gate(script_data: dict) -> dict:
+    """Validate originality/factuality for the final public-release decision."""
     data = script_data if isinstance(script_data, dict) else {}
     fallback = str(data.get("fallback_mode") or "") == "extractive_source_grounded"
     if data.get("public_publish_blocked"):
         return {
             "passed": True,
             "public_blocked": True,
-            "label": "Originality + Creator Insight",
+            "label": "Originality + factuality",
             "detail": "Private/manual release is allowed, but public publication is blocked by an upstream safety gate.",
-        }
-    insight = next(
-        (scene for scene in data.get("script") or [] if isinstance(scene, dict) and scene.get("human_contributed")),
-        None,
-    )
-    insight_words = len(re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", str((insight or {}).get("voiceover") or "")))
-    if insight_words < 12:
-        return {
-            "passed": False,
-            "public_blocked": False,
-            "label": "Originality + Creator Insight",
-            "detail": f"Creator Insight must contain at least 12 words (currently {insight_words}).",
         }
     if fallback:
         return {
             "passed": True,
             "public_blocked": True,
-            "label": "Originality + Creator Insight",
+            "label": "Originality + factuality",
             "detail": "PASS for private-only release. Extractive source-grounded fallback blocks public upload.",
         }
     originality = check_script_originality(data, data)
@@ -67,7 +56,7 @@ def evaluate_originality_gate(script_data: dict) -> dict:
         return {
             "passed": False,
             "public_blocked": True,
-            "label": "Originality + Creator Insight",
+            "label": "Originality + factuality",
             "detail": f"Verbatim-overlap gate failed in {len(originality.get('failures') or [])} scene(s).",
         }
     critique = data.get("originality_critique") or {}
@@ -75,14 +64,14 @@ def evaluate_originality_gate(script_data: dict) -> dict:
         return {
             "passed": False,
             "public_blocked": True,
-            "label": "Originality + Creator Insight",
-            "detail": "Real critique found unsupported claims.",
+            "label": "Originality + factuality",
+            "detail": "Factual critique found unsupported claims or the critique provider was unavailable.",
         }
     return {
         "passed": True,
         "public_blocked": False,
-        "label": "Originality + Creator Insight",
-        "detail": "Originality overlap, factual critique and Creator Insight all passed.",
+        "label": "Originality + factuality",
+        "detail": "Originality overlap and factual critique passed.",
     }
 
 
@@ -190,7 +179,7 @@ def patch_workflow_qc(bot) -> bool:
         originality = evaluate_originality_gate(script_data)
         if not originality["passed"]:
             raise RuntimeError(originality["detail"])
-        print("   [Final QC] READY_FOR_UPLOAD originality gate passed.", flush=True)
+        print("   [Final QC] READY_FOR_UPLOAD originality and factuality gate passed.", flush=True)
         return _mark_exact_run_ready_for_upload(self, original_ready, topic)
 
     def guarded_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword=""):
@@ -201,7 +190,7 @@ def patch_workflow_qc(bot) -> bool:
             raise RuntimeError(originality["detail"])
         if originality.get("public_blocked") and str(publish_mode).lower() == "public":
             raise RuntimeError("Public upload blocked: extractive source-grounded fallback is private-only.")
-        print("   [Final QC] Manual-upload originality gate passed.", flush=True)
+        print("   [Final QC] Manual-upload originality and factuality gate passed.", flush=True)
         return original_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword)
 
     guarded_ready._final_qc_wrapped = True

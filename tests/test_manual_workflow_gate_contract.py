@@ -53,14 +53,14 @@ def test_dashboard_manual_script_gate_is_core_and_waits():
     assert thread.is_alive()
     assert controller.submit_script_visual_queries(
         ["India cricket team", "", "India cricket team"],
-        "This is the human creator insight that must be present before the factory continues.",
     )
 
     thread.join(timeout=2)
     assert not thread.is_alive()
     assert "value" in result
-    assert result["value"]["creator_insight_required"] is True
-    assert result["value"]["script"][-2]["human_contributed"] is True
+    assert len(result["value"]["script"]) == 3
+    assert result["value"]["script"][0]["manual_visual_query"] == "India cricket team"
+    assert "human_contributed" not in result["value"]["script"][-1]
 
 
 def test_dashboard_manual_visual_gate_is_core_and_blocks_render_until_approved():
