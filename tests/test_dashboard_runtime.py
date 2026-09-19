@@ -719,7 +719,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'def render_script_visual_query_review(' in app_source
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
-    assert '"qc_passed": bool(layer.get("visual_verified", False))' in app_source
+    assert '"qc_passed": verified and not missing' in app_source
     assert 'disabled=bool(qc_blocked)' in app_source
     assert 'Visual semantic QC blocked:' in app_source
 
