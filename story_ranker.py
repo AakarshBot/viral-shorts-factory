@@ -1043,6 +1043,35 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     return story
 
 
+def _candidate_quality_pass(story):
+    """Keep weak candidates out of the dashboard instead of padding the list."""
+    dimensions = story.get("discovery_dimensions") or {}
+    freshness = _safe_float(dimensions.get("freshness")) or 0.0
+    momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
+    importance = _safe_float(dimensions.get("importance")) or 0.0
+    shorts = _safe_float(dimensions.get("shorts_viability")) or 0.0
+    corroboration = _safe_float(dimensions.get("corroboration")) or 0.0
+    source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
+    score = _safe_float(story.get("candidate_score")) or 0.0
+
+    if freshness < 2.0 and momentum < 2.0:
+        story["discovery_rejection"] = "Insufficient current-event signal"
+        return False
+    if importance < 3.5:
+        story["discovery_rejection"] = "Insufficient editorial importance"
+        return False
+    if shorts < 3.0:
+        story["discovery_rejection"] = "Weak Shorts viability"
+        return False
+    if source_quality < 1.0 and corroboration < 2.0:
+        story["discovery_rejection"] = "Insufficient source support"
+        return False
+    if score < 14.0:
+        story["discovery_rejection"] = "Below discovery quality floor"
+        return False
+    return True
+
+
 def _candidate_reason(story):
     dimensions = story.get("discovery_dimensions") or {}
     parts = []
@@ -1293,6 +1322,7 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
     stage8 = _originality_stage(stage15, used_topics, max_items=8)
     ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage8]
     ranked.sort(key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0, reverse=True)
+    ranked = [item for item in ranked if _candidate_quality_pass(item)]
 
     for story in ranked:
         story["discovery_reason"] = _candidate_reason(story)
@@ -1343,6 +1373,7 @@ def rank_discovery_candidates(
         key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0,
         reverse=True,
     )
+    ranked = [item for item in ranked if _candidate_quality_pass(item)]
 
     selected = diversity_rerank(ranked, max_items=max_candidates)
     for story in selected:
