@@ -187,7 +187,7 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
     if result is False:
         print(f"   [Visual QA] {tier} | REJECTED: semantic check returned NO for '{entity}'.", flush=True)
         return False, tier, max(0, source_score - 20), True
-    print(f"   [Visual QA] {tier} | soft reject: semantic verification unavailable/uncertain; candidate retained as fallback.", flush=True)
+    print(f"   [Visual QA] {tier} | semantic verification unavailable/uncertain; candidate rejected.", flush=True)
     return False, tier, source_score, False
 
 
