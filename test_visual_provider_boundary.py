@@ -37,7 +37,10 @@ def test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods():
             raise AssertionError("legacy Unsplash fetcher must not be used by the active retrieval path")
 
     plan = retrieval._source_plan(ExplosiveBot(), "PERSON")
-    assert len(plan) >= 7
+    names = [name.casefold() for name, _fetcher in plan]
+    assert "ddg" not in names
+    assert "news_source" not in names
+    assert len(plan) >= 6
 
 
 def test_commons_candidate_adapter_is_bounded():
@@ -78,7 +81,23 @@ def test_retrieval_accepts_multi_candidate_provider_payloads(monkeypatch):
     class ProviderRuntime(FakeRuntime):
         pass
 
-    monkeypatch.setattr(retrieval, "_source_plan", lambda _bot, _visual_type: [("Commons", lambda *args: [first.getvalue(), second.getvalue()])])
+    candidates = [
+        {"bytes": first.getvalue(), "provenance": {
+            "provider": "Commons",
+            "url": "https://commons.wikimedia.org/wiki/File:Northstar.jpg",
+            "author": "Test Author",
+            "license": "by",
+            "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        }},
+        {"bytes": second.getvalue(), "provenance": {
+            "provider": "Commons",
+            "url": "https://commons.wikimedia.org/wiki/File:Northstar-2.jpg",
+            "author": "Test Author 2",
+            "license": "cc0",
+            "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        }},
+    ]
+    monkeypatch.setattr(retrieval, "_source_plan", lambda _bot, _visual_type: [("Commons", lambda *args: candidates)])
     monkeypatch.setattr(retrieval, "_hash_image", lambda _bot, data: __import__("hashlib").sha256(data).hexdigest())
 
     seg = {"primary_entity": "Northstar Research Summit", "specific_search_prompt": "Northstar Research Summit", "voiceover": "Northstar Research Summit opened today"}
@@ -87,6 +106,7 @@ def test_retrieval_accepts_multi_candidate_provider_payloads(monkeypatch):
     assert used_ai is False
     assert source == "Commons"
     assert seg["visual_verified"] is True
+    assert seg["asset_provenance"]["license"] == "by"
 
 
 if __name__ == "__main__":
