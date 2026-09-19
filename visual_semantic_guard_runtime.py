@@ -338,6 +338,16 @@ def _stable_identity_from_prompt(candidate: str, prompt: str, role: str) -> str:
     if len(candidate_words) <= 2 or not prompt_words:
         return candidate
 
+    # Model-generated person identities sometimes absorb the beginning of an
+    # action/headline, e.g. "Gautam Gambhir Makes Stunning".  Existing auxiliary
+    # verbs already used by the query ranker are a safe generic boundary: keep
+    # the proper-name prefix and never make the action part of the identity.
+    if role == "PERSON":
+        for index, word in enumerate(candidate_words[2:], start=2):
+            if key(word) in AUXILIARY_WORDS:
+                candidate_words = candidate_words[:index]
+                break
+
     prompt_keys = [key(word) for word in prompt_words]
     candidate_keys = [key(word) for word in candidate_words]
     best: list[str] = []
