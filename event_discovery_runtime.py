@@ -314,7 +314,13 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
     ):
         return True
 
-    meaningful = {token for token in shared if len(token) >= 5 and not token.isdigit()}
+    meaningful = {
+        token
+        for token in shared
+        if len(token) >= 5
+        and not token.isdigit()
+        and token not in GENERIC_EVENT_TOPIC_TOKENS
+    }
     return len(meaningful) >= 4 and overlap >= 0.42 and (
         not left_actions or not right_actions or shared_actions
     )
