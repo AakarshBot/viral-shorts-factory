@@ -124,31 +124,25 @@ def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
         or ""
     ).strip()
 
-    sources = enriched.get("research_sources")
     snippets: list[str] = []
-    if isinstance(sources, list):
-        for source in sources:
-            if isinstance(source, dict):
-                snippet = re.sub(r"\s+", " ", str(source.get("snippet") or "")).strip()
-                if len(snippet.split()) >= 5:
-                    snippets.append(snippet)
 
-    if not snippets:
-        try:
-            from research_runtime import collect_source_bundle
-            collected = collect_source_bundle(bot, enriched, max_sources=5)
-            for source in collected:
-                if isinstance(source, dict):
-                    snippet = re.sub(r"\s+", " ", str(source.get("snippet") or "")).strip()
-                    if len(snippet.split()) >= 5:
-                        snippets.append(snippet)
-            if collected:
-                enriched["research_sources"] = collected
-        except Exception as exc:
-            print(
-                f"   [Script Hardening] Emergency research enrichment unavailable: {type(exc).__name__}: {exc}",
-                flush=True,
-            )
+    # Phase 2 already built the authoritative evidence pack for this story.
+    # Reuse its verified claims/source previews instead of calling the removed
+    # legacy collect_source_bundle() API and performing a second discovery pass.
+    pack = enriched.get("research_evidence_pack")
+    if isinstance(pack, dict):
+        for claim in pack.get("claims") or []:
+            if not isinstance(claim, dict) or str(claim.get("status") or "").lower() == "conflicted":
+                continue
+            text = re.sub(r"\s+", " ", str(claim.get("text") or "")).strip()
+            if len(text.split()) >= 8:
+                snippets.append(text)
+        for source in pack.get("sources") or []:
+            if not isinstance(source, dict):
+                continue
+            text = re.sub(r"\s+", " ", str(source.get("clean_text_preview") or "")).strip()
+            if len(text.split()) >= 8:
+                snippets.append(text)
 
     if snippets:
         evidence_text = " ".join(dict.fromkeys(snippets))
