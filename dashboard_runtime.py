@@ -817,7 +817,6 @@ class DashboardWorkflowController(WorkflowController):
         try:
             from visual_query_entities_runtime import search_slide_visual
             from visual_quality_runtime import fit_visual_image
-            from visual_content_runtime import _related_subject_key
             import visual_runtime
             from branding_runtime import source_credit_for_type
             from visual_retrieval_runtime import _hash_image
