@@ -15,6 +15,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
+from visual_licensing_runtime import attribution_required, normalize_license_code
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -66,7 +67,7 @@ def _assets(bot) -> Path | None:
 
 
 def source_credit_for_type(source_type: str, explicit: str = "") -> str:
-    """Normalize trusted visual provenance into the short label shown on-screen."""
+    """Normalize trusted visual provenance into the legacy short label."""
     value = re.sub(r"\s+", " ", str(explicit or "")).strip()
     if value:
         value = re.sub(r"^source\s*[:·-]\s*", "", value, flags=re.I).strip()
@@ -76,6 +77,29 @@ def source_credit_for_type(source_type: str, explicit: str = "") -> str:
     if not value:
         value = "Visual source"
     return f"SOURCE · {value[:44]}"
+
+
+def source_badge_for_provenance(record: dict | None) -> str:
+    """Return only the attribution/AI label that should be visible on-screen."""
+    if not isinstance(record, dict):
+        return ""
+    provider = str(record.get("provider") or "").strip()
+    author = str(record.get("author") or "").strip()
+    license_name = str(record.get("license") or "").strip()
+    provider_key = provider.casefold()
+    if provider_key in {"ai-generated", "ai"}:
+        return "AI · Generated"
+    if provider_key in {"factory visual", "visual rescue"}:
+        return ""
+    if attribution_required(record):
+        return author[:44] if author else provider[:44]
+    if normalize_license_code(license_name) in {"cc0", "pdm"}:
+        return ""
+    if provider_key in {"pexels", "unsplash", "pixabay"}:
+        return ""
+    if provider:
+        return provider[:44]
+    return ""
 
 
 def _font(size: int, bold: bool = False):
@@ -253,22 +277,26 @@ def _source_overlay(label: str, width: int, height: int) -> np.ndarray:
     return np.asarray(canvas)
 
 
-def build_scene_branding_overlays(bot, width: int, height: int, source_credit: str = "") -> list[np.ndarray]:
+def build_scene_branding_overlays(bot, width: int, height: int, source_credit: str | dict = "") -> list[np.ndarray]:
     """Return the final overlay layers for one scene.
 
-    Logo/frame is cached for the entire run. Source badges are cached by label.
-    No image files are written and no second video encode is performed.
+    Logo/frame is cached for the entire run. A source badge is rendered only
+    when attribution is required or the asset is explicitly labelled AI.
     """
     logo_path = _assets(bot)
     if logo_path is None:
         print("   [Branding] Logo asset missing; frame signature remains active.", flush=True)
 
-    # The final compositor owns the on-screen provenance label.
-    label = source_credit_for_type("", source_credit)
-    return [
+    if isinstance(source_credit, dict):
+        label = source_badge_for_provenance(source_credit)
+    else:
+        label = source_credit_for_type("", source_credit) if source_credit else ""
+    overlays = [
         _static_brand_overlay(str(logo_path or ""), int(width), int(height)),
-        _source_overlay(label, int(width), int(height)),
     ]
+    if label:
+        overlays.append(_source_overlay(label, int(width), int(height)))
+    return overlays
 
 
 
@@ -277,5 +305,6 @@ __all__ = [
     "LOGO_BOX_SIZE",
     "LOGO_INNER_SIZE",
     "source_credit_for_type",
+    "source_badge_for_provenance",
     "build_scene_branding_overlays",
 ]
