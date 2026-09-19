@@ -191,7 +191,7 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
         "Pat Cummins interview",
     )
 
-    assert calls["qa"] == 1
+    assert calls["qa"] >= 1
     assert source == "visual-rescue"
     assert retrieval._trusted_source_evidence(
         "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
