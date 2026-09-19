@@ -847,7 +847,8 @@ class DashboardWorkflowController(WorkflowController):
             self.bot.generate_voiceover_and_timestamps = dashboard_audio_capture
 
         self._dashboard_visual_gate_bound = True
-\n    def submit_script_visual_queries(self, queries: list[str], creator_insight: str = "") -> bool:
+
+    def submit_script_visual_queries(self, queries: list[str], creator_insight: str = "") -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "script_review":
             return False
@@ -892,7 +893,11 @@ class DashboardWorkflowController(WorkflowController):
             42,
             "Slide queries saved. Creating the voiceover and preparing visuals.",
         )
-        self._script_review_event.set()
+        gate = self._manual_gate_state
+        if isinstance(gate, dict):
+            gate["script_event"].set()
+        else:
+            self._script_review_event.set()
         return True
 
     def approve_visuals(self) -> bool:
