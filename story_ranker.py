@@ -510,7 +510,7 @@ def _discovery_query_lanes(base_query, genre_key="", ai_cricket=False):
     if not base:
         return []
     key = _clean(genre_key)
-    if ai_cricket or key == "sports_stories_of_day":
+    if ai_cricket or key in {"sports", "sports_stories_of_day"}:
         lenses = [
             f"({base}) AND (latest OR today OR breaking)",
             f"({base}) AND (record OR result OR squad OR selection OR injury OR announcement)",
