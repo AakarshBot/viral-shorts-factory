@@ -567,7 +567,7 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
 
         @staticmethod
         def _strict_gate(*args, **kwargs):
-            return False, "STRICT", 70, True
+            return False, "STRICT:SEMANTIC_NO", 70, True
 
         @staticmethod
         def get_cached_asset(*args, **kwargs):
@@ -603,7 +603,7 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
-    assert scene["visual_rejection_counts"]["semantic_qc_reject"] == 1
+    assert scene["visual_rejection_counts"]["semantic_no"] == 2
     assert scene["visual_rejection_counts"]["final_rescue"] == 1
 
 
