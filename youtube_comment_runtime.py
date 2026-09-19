@@ -55,12 +55,34 @@ def post_creator_comment(youtube, video_id, script_data, video_title, genre_labe
 
 
 def ensure_shorts_title(title):
-    """Normalize every factory title to include the Shorts hashtag within 100 characters."""
+    """Normalize legacy title input without forcing a Shorts hashtag."""
     base = re.sub(r"\s*#shorts\b", "", str(title or ""), flags=re.IGNORECASE).strip()
-    suffix = " #shorts"
-    if not base:
-        base = "Shorts"
-    return (base[: max(1, 100 - len(suffix))].rstrip() + suffix).strip()
+    return (base[:100].rstrip() or "Shorts").strip()
+
+
+def build_description_hashtags(genre_cfg, trend_keyword=""):
+    """Return at most three relevant hashtags for the description."""
+    candidates = []
+    if trend_keyword:
+        trend_tag = re.sub(r"[^a-zA-Z0-9]", "", str(trend_keyword))
+        if trend_tag:
+            candidates.append(f"#{trend_tag}")
+    for value in (genre_cfg or {}).get("hashtags", []):
+        tag = str(value or "").strip()
+        if tag and not tag.startswith("#"):
+            tag = "#" + re.sub(r"[^a-zA-Z0-9]", "", tag)
+        if tag:
+            candidates.append(tag)
+    result = []
+    seen = set()
+    for tag in candidates:
+        key = tag.casefold()
+        if key not in seen:
+            seen.add(key)
+            result.append(tag)
+        if len(result) == 3:
+            break
+    return result
 
 def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
     raw_title = str(script_data.get("title") or genre_cfg.get("label", "Shorts")).strip()
@@ -77,7 +99,7 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
         trend_tag = re.sub(r"[^a-zA-Z0-9]", "", str(trend_keyword))
         if trend_tag:
             hashtags.insert(0, f"#{trend_tag}")
-    description = f"{desc_body}\n\n{' '.join(hashtags[:5])}".strip()[:5000]
+    description = f"{desc_body}\n\n{' '.join(build_description_hashtags(genre_cfg, trend_keyword))}".strip()[:5000]
 
     tags = script_data.get("tags", ["Shorts", genre_cfg.get("label", "Shorts")])
     if not isinstance(tags, list):
@@ -114,7 +136,7 @@ def patch_youtube_upload(bot):
             generated_title, generated_description, tags = _build_clean_metadata(
                 script_data, genre_cfg, trend_keyword
             )
-            title = str(title_override).strip()[:100] if title_override is not None else generated_title
+            title = ensure_shorts_title(title_override) if title_override is not None else generated_title
             description = str(description_override).strip()[:5000] if description_override is not None else generated_description
             comment_text = _clean_comment(comment_override) if comment_override is not None else build_pinned_comment(
                 script_data, title, genre_cfg.get("label", "")
