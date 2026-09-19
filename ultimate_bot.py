@@ -955,7 +955,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
 
     if GEMINI_API_KEY:
         print("   [!] Groq editorial gate exhausted. Falling back to Gemini API...")
-        for g_attempt in range(1, 3):
+        for g_attempt in range(1, 2):
             try:
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
                 gemini_payload = {
