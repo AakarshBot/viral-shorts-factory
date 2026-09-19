@@ -16,7 +16,7 @@ from PIL import Image
 from visual_taxonomy_runtime import genre_acceptance_rule
 
 GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "16")))
-GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "16")))
+GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
 VISUAL_QA_RUNTIME_VERSION = "2026-09-18-v14-identity-aware-uncertainty"
@@ -64,7 +64,7 @@ def _identity_prompt(entity, visual_type="", intent="", search_prompt="", visual
     genre_rule = genre_acceptance_rule(visual_genre)
     return f"""Look at this image and answer one question only.
 
-Does this image visibly represent the requested visual subject and visual intent?
+Does this image visibly represent the requested visual subject AND the requested visual intent?
 
 Locked visual subject: {entity}
 Subject type: {visual_type}
@@ -76,16 +76,17 @@ Search phrase used: {search_prompt}
 Rules:
 1. Judge the IMAGE, not the narration alone.
 2. The locked visual subject must be visibly identifiable when the subject is identity-specific.
-3. The search phrase is the retrieval target. When it contains a concrete visual descriptor such as logo, portrait, headshot, map, emblem, badge, seal, screenshot, poster or flag, that descriptor is authoritative for what should be visible.
-4. Broader narrative context is supporting context, not a requirement that can override the concrete search target. For example, a newspaper logo requested during a news story should be judged as a logo/branding image, not rejected merely because it is not a photograph of the news event.
-5. For a PERSON, the image must depict that specific person, not another person from the same field.
-6. For a TEAM or GROUP, the visible team/group identity must correspond to the requested subject.
-7. For an ORGANISATION, accept a genuine image that visibly represents that organisation, such as its logo/branding, people, headquarters, office, official setting or clearly identifiable branding.
-8. For a LOCATION or LANDMARK, the image must visibly depict that place or landmark.
-9. For an EVENT or TOURNAMENT, the image must visibly correspond to that named event/tournament, rather than merely a generic event of the same type.
-10. Reject memes, unrelated stock imagery, generic illustrations, search-page screenshots, or images where the requested subject cannot actually be identified.
-11. If the image is genuinely ambiguous or the subject cannot be established from visible evidence, return UNCERTAIN rather than guessing.
-12. A valid contextual representation is acceptable when it matches the genre-specific acceptance target, even when it is not a literal portrait.
+3. Concrete descriptors in the search phrase such as logo, portrait, headshot, map, emblem, badge, seal, screenshot, poster or flag are requirements, not suggestions.
+4. For an action, match, event, ceremony, speech, interview or other scene-specific visual, the requested action/event must be visibly present. A generic stadium, fan, crowd, team photo or related environment is NOT sufficient.
+5. For a PERSON, the image must depict that specific person. If the scene asks for that person's action, the visible action/context must also match.
+6. For a TEAM or GROUP, the visible team/group identity must correspond to the requested subject and any requested action/context must also be visible.
+7. For an ORGANISATION, accept genuine visible branding, headquarters, office or clearly identifiable organisational setting only when it matches the requested genre.
+8. For a LOCATION or LANDMARK, the image must visibly depict that specific place.
+9. For an EVENT or TOURNAMENT, the image must visibly correspond to that named event/tournament, not merely a generic event of the same type.
+10. Do not accept a merely conceptual representation when the request is for a factual photograph or specific real-world scene.
+11. Reject memes, unrelated stock imagery, generic illustrations, search-page screenshots, or images where the requested subject/scene cannot actually be identified.
+12. If the image is genuinely ambiguous or any required subject/action cannot be established from visible evidence, return UNCERTAIN rather than guessing.
+13. A contextual image is acceptable only when the genre-specific acceptance target explicitly allows context and all required visual elements are present.
 
 Return exactly YES, NO, or UNCERTAIN followed by one short reason."""
 
@@ -119,11 +120,15 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
     print(f"   [Visual QA] IDENTITY | Gemini request {call_no}/{GEMINI_VISUAL_MAX_REQUESTS}.", flush=True)
     try:
         from google import genai
+        from google.genai import types
         client = genai.Client(api_key=api_key)
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         response = client.models.generate_content(
             model=GEMINI_VISUAL_MODEL,
             contents=[_identity_prompt(entity, visual_type, intent, prompt, visual_genre), image],
+            config=types.GenerateContentConfig(
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            ),
         )
         raw_text = str(getattr(response, "text", "") or "").strip()
         display_text = raw_text if len(raw_text) <= 1000 else raw_text[:1000] + "...[truncated]"
