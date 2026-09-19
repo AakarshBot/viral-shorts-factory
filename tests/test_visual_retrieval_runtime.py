@@ -605,9 +605,9 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
         "Sanju Samson story",
     )
 
-    assert image.size == (1080, 1920)
+    assert image.size == (900, 1200)
     assert used_ai is False
-    assert source == "visual-rescue"
+    assert source == "DDG"
     rejection_counts = scene["visual_rejection_counts"]
     assert sum(
         int(rejection_counts.get(key) or 0)
