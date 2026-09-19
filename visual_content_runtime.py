@@ -363,7 +363,7 @@ def patch_content_first_visuals(bot):
     try:
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
-        from visual_quality_runtime import cover_crop, install as install_visual_quality
+        from visual_quality_runtime import fit_visual_image, install as install_visual_quality
         from visual_retrieval_runtime import make_visual_rescue
         from visual_entity_grounding_runtime import apply_grounding
     except Exception as exc:
@@ -536,7 +536,11 @@ def patch_content_first_visuals(bot):
             if source_type == "news_source":
                 bg_img = bg_img.convert("RGBA")
             else:
-                bg_img = cover_crop(bg_img, target_size).convert("RGBA")
+                bg_img = fit_visual_image(
+                    bg_img,
+                    target_size,
+                    str(seg.get("visual_genre") or "GENERAL_CONTEXT"),
+                ).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
             try:
@@ -611,7 +615,11 @@ def patch_content_first_visuals(bot):
 
             video_title = script_data.get("title", "") or (script_data.get("titles") or [""])[0]
             category = str(seg.get("sport_or_topic_category", "")).lower()
-            related_img = cover_crop(related_img, target_size).convert("RGBA")
+            related_img = fit_visual_image(
+                related_img,
+                target_size,
+                str(seg.get("visual_genre") or "GENERAL_CONTEXT"),
+            ).convert("RGBA")
 
             try:
                 from visual_strategy_runtime import classify_scene

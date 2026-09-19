@@ -107,6 +107,38 @@ def _estimate_crop_focus(img: Image.Image) -> tuple[float, float, float]:
         return 0.5, 0.5, 0.0
 
 
+def fit_visual_image(img: Image.Image, size=(1080, 1920), visual_genre="") -> Image.Image:
+    """Fit branding assets without cutting the logo/crest off the canvas."""
+    genre = str(visual_genre or "").strip().upper()
+    if genre not in {"ORG_BRANDING", "TEAM_BRANDING"}:
+        return cover_crop(img, size)
+
+    target_w, target_h = [max(2, int(v)) for v in size]
+    base = img.convert("RGBA")
+
+    alpha = base.getchannel("A")
+    bbox = alpha.getbbox()
+    if bbox:
+        base = base.crop(bbox)
+
+    max_w = max(2, int(target_w * 0.88))
+    max_h = max(2, int(target_h * 0.55))
+    scale = min(max_w / max(1, base.width), max_h / max(1, base.height))
+    resized = base.resize(
+        (
+            max(2, int(round(base.width * scale))),
+            max(2, int(round(base.height * scale))),
+        ),
+        Image.Resampling.LANCZOS,
+    )
+
+    canvas = Image.new("RGBA", (target_w, target_h), (248, 248, 244, 255))
+    left = (target_w - resized.width) // 2
+    top = (target_h - resized.height) // 2
+    canvas.alpha_composite(resized, (left, top))
+    return canvas.convert("RGB")
+
+
 def cover_crop(img: Image.Image, size=(1080, 1920)) -> Image.Image:
     """Scale-to-cover without blindly assuming the subject is centred."""
     target_w, target_h = size

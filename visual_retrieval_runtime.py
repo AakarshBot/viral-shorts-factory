@@ -436,8 +436,12 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                                 bot, normalized, qa_scene, video_title, source=source
                             )
                         except Exception as exc:
-                            accepted, tier_name, score, hard_reject = False, tier, 0, False
-                            print(f"   [Visual QA] candidate check unavailable; keeping as uncertain: {type(exc).__name__}: {exc}", flush=True)
+                            print(
+                                f"   [Visual QA] candidate check failed; rejecting candidate: "
+                                f"{type(exc).__name__}: {exc}",
+                                flush=True,
+                            )
+                            continue
                     elif semantic_required:
                         accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
                     else:
@@ -533,8 +537,12 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         bot, normalized, qa_scene, video_title, source="ai-generated"
                     )
                 except Exception as exc:
-                    accepted, tier_name, score, hard_reject = False, "AI-UNCERTAIN", 40, False
-                    print(f"   [Visual QA] AI check unavailable; using generated image as uncertain: {type(exc).__name__}: {exc}", flush=True)
+                    accepted, tier_name, score, hard_reject = False, "AI-QA-ERROR", 0, True
+                    print(
+                        f"   [Visual QA] AI check failed; rejecting generated candidate: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
                 if accepted:
                     used_hashes.add(_hash_image(bot, normalized))
                     seg["visual_verified"] = True

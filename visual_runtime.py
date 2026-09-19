@@ -121,10 +121,32 @@ def _verification_tier(seg, visual_type, source):
     return __import__(__name__)._verification_tier(seg, visual_type, source)
 
 
-def _strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="STRICT", visual_type=""):
+def _strict_gemini_check(
+    img_bytes,
+    entity,
+    intent,
+    prompt,
+    voice,
+    video_title,
+    api_key,
+    tier="STRICT",
+    visual_type="",
+    visual_genre="",
+):
     try:
         from visual_qa_runtime import strict_gemini_check
-        return strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier=tier, visual_type=visual_type)
+        return strict_gemini_check(
+            img_bytes,
+            entity,
+            intent,
+            prompt,
+            voice,
+            video_title,
+            api_key,
+            tier=tier,
+            visual_type=visual_type,
+            visual_genre=visual_genre,
+        )
     except Exception as exc:
         print(f"   [Visual QA] Gemini bridge unavailable: {exc}", flush=True)
         return None

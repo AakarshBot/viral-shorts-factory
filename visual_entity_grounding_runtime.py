@@ -30,7 +30,11 @@ def _evidence(script_data:dict[str,Any])->str:
     if isinstance(sources,list):
         for source in sources:
             if isinstance(source,dict):
-                parts.extend(_norm(source.get(f,"")) for f in ("title","snippet","summary","description","source") if source.get(f))
+                parts.extend(
+                    _norm(source.get(f, ""))
+                    for f in ("title", "snippet", "summary", "description")
+                    if source.get(f)
+                )
     return "\n".join(x for x in parts if x)
 
 def _role(scene:dict[str,Any],entity:str)->str:
@@ -131,6 +135,18 @@ def apply_grounding(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any
     scene["visual_entity_grounding_confidence"]=float(result.get("confidence") or 0.0)
     scene["visual_entity_grounding_reason"]=str(result.get("reason") or "")
     scene["visual_entity_original"]=str(result.get("original_entity") or original)
+
+    if not result.get("grounded"):
+        role = _role(scene, str(result.get("original_entity") or original))
+        if role in {"PERSON", "ORGANIZATION", "PRODUCT", "LOCATION"}:
+            original_key = str(result.get("original_entity") or original).casefold().strip()
+            scene["primary_entity"] = ""
+            scene["visual_search_subject"] = ""
+            if str(scene.get("factual_primary_entity") or "").casefold().strip() == original_key:
+                scene["factual_primary_entity"] = ""
+            scene["specific_search_prompt"] = ""
+            scene["visual_context"] = ""
+
     return scene
 
 __all__=["apply_grounding","ground_scene_entity"]
