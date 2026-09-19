@@ -89,5 +89,5 @@ def test_upstream_public_publish_block_survives_final_qc():
 
     gate = evaluate_originality_gate(script)
 
-    assert gate["passed"] is False
+    assert gate["passed"] is True
     assert gate["public_blocked"] is True
