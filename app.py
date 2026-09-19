@@ -499,30 +499,11 @@ def render_script_visual_query_review(
         "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
         unsafe_allow_html=True,
     )
-    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
-    if fallback_mode == "extractive_source_grounded":
-        st.error(
-            "PUBLIC UPLOAD BLOCKED — this script used an extractive source-grounded fallback. "
-            "It may continue as a private draft, but it cannot be published publicly.",
-            icon="⛔",
-        )
-
-    critique = script_data.get("originality_critique") or {}
-    if critique.get("unsupported_claims"):
-        st.error("ORIGINALITY GATE BLOCKED — the critique found unsupported claims.", icon="⛔")
-
     st.caption(
-        "Add 1–2 sentences of your own analysis or context that is NOT in the source. "
-        "It will become the second-to-last spoken scene and is marked as human-contributed."
+        "This is a lightweight visual-query check. Add a manual search only where you think the automatic subject/query could miss the important image."
     )
 
     with st.form(key=f"script_visual_query_review_{run_id}"):
-        st.text_area(
-            "Creator Insight — required",
-            placeholder="Add your own analysis or context that is not stated in the source...",
-            key=f"creator_insight_{run_id}",
-            height=100,
-        )
         for index, scene in enumerate(scenes, 1):
             if not isinstance(scene, dict):
                 continue
@@ -550,8 +531,7 @@ def render_script_visual_query_review(
             )
 
         st.caption(
-            "Manual queries are used only on the slides where you enter them. "
-            "There is no query-number-to-slide assignment anymore."
+            "Only the slides where you enter a query are overridden. Blank slides keep the automatic visual-search logic."
         )
         submitted = st.form_submit_button(
             "✅ Save slide queries & continue",
@@ -570,11 +550,7 @@ def render_script_visual_query_review(
             ).strip()
             for index in range(1, len(scenes) + 1)
         ]
-        insight = str(st.session_state.get(f"creator_insight_{run_id}", "") or "").strip()
-        if len(insight.split()) < 12:
-            st.error("Creator Insight must contain at least 12 words.")
-            return
-        if controller.submit_script_visual_queries(queries, insight):
+        if controller.submit_script_visual_queries(queries):
             st.rerun()
         else:
             st.error("The script review is no longer active. Refreshing the dashboard.")

@@ -87,7 +87,7 @@ def _entity_contains_publisher_domain(entity:str,script_data:dict[str,Any])->boo
 def _evidence(script_data:dict[str,Any])->str:
     if not isinstance(script_data,dict): return ""
     parts=[]
-    for field in ("title","step_1_headline","step_2_data_points","text","summary","description","research_bundle"):
+    for field in ("step_2_data_points","text","summary","description","research_bundle"):
         value=script_data.get(field)
         if value: parts.append(_strip_domains(value))
     sources=script_data.get("research_sources")
@@ -96,14 +96,14 @@ def _evidence(script_data:dict[str,Any])->str:
             if isinstance(source,dict):
                 parts.extend(
                     _strip_domains(source.get(f, ""))
-                    for f in ("title", "snippet", "summary", "description")
+                    for f in ("snippet", "summary", "description")
                     if source.get(f)
                 )
 
     # Phase 2 evidence is the authoritative research layer used to build the
-    # script. Grounding must see its claims and source previews; otherwise valid
-    # people/teams/events can be treated as unsupported and collapsed to a
-    # generic headline anchor such as "Asian Games".
+    # script. Headline/title fields are deliberately excluded from identity
+    # support: headline phrasing is not a reliable entity proof source and can
+    # contain title-case action fragments that look like names.
     pack = script_data.get("research_evidence_pack")
     if isinstance(pack,dict):
         for claim in pack.get("claims") or []:
@@ -118,7 +118,7 @@ def _evidence(script_data:dict[str,Any])->str:
         for source in pack.get("sources") or []:
             if not isinstance(source,dict):
                 continue
-            for field in ("title", "snippet", "summary", "description", "clean_text_preview"):
+            for field in ("snippet", "summary", "description", "clean_text_preview"):
                 value = _strip_domains(source.get(field, ""))
                 if value:
                     parts.append(value)
@@ -162,8 +162,7 @@ def _anchors(script_data:dict[str,Any])->list[str]:
     low=[key(w) for w in words]
 
     # Teams/collectives: take the identity through the cue, never the action
-    # that follows it (for example, 'India women\'s team' from a headline that
-    # continues with 'win the T20 World Cup').
+    # that follows it.
     for i, token in enumerate(low):
         if token in gender_words and i + 1 < len(words) and low[i + 1] in {'team','squad'}:
             start=max(0,i-2)
@@ -183,17 +182,39 @@ def _anchors(script_data:dict[str,Any])->list[str]:
                 start-=1; steps+=1
             found.append(' '.join(words[start:i+1]))
 
-    # Also keep short title-cased names as fallback anchors (for example NASA,
-    # OpenAI, or a two-word organisation/person name).
-    for size in range(min(4,len(words)),1,-1):
-        for start in range(0,len(words)-size+1):
-            group=words[start:start+size]
-            if group and all(w[:1].isupper() for w in group):
-                found.append(' '.join(group))
-    if not found:
-        for token in words:
-            if token[:1].isupper() and len(token)>2:
-                found.append(token)
+    # Safe proper-name fallback for mixed-case headlines. A title whose words
+    # are broadly title-cased is treated as headline formatting, not entity
+    # evidence, so fragments like "India To Play Historic" are never grouped.
+    headline_title_case_ratio = (
+        sum(1 for word in words if word[:1].isupper())
+        / max(1, len(words))
+    )
+    if headline_title_case_ratio < 0.60:
+        for start in range(max(0, len(words) - 1)):
+            first, second = words[start], words[start + 1]
+            first_key, second_key = key(first), key(second)
+            if (
+                first[:1].isupper()
+                and second[:1].isupper()
+                and len(first) > 2
+                and len(second) > 2
+                and first_key not in _GENERIC
+                and second_key not in _GENERIC
+                and first_key not in _STOP
+                and second_key not in _STOP
+            ):
+                found.append(f"{first} {second}")
+
+    # All-uppercase tokens remain safe acronym anchors such as "BCCI" or "NASA".
+    for word in words:
+        token=key(word)
+        if (
+            word.isupper()
+            and len(word) >= 3
+            and token not in _GENERIC
+            and token not in _STOP
+        ):
+            found.append(word)
 
     result=[]
     for item in found:
@@ -204,7 +225,11 @@ def _anchors(script_data:dict[str,Any])->list[str]:
 def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
     original=_norm(scene.get("factual_primary_entity") or scene.get("primary_entity") or scene.get("visual_search_subject") or "")
     if not original: return {"entity":"","grounded":False,"changed":False,"reason":"no visual entity supplied","confidence":0.0}
-    evidence=_evidence(script_data); role=_role(scene,original)
+    evidence=_evidence(script_data)
+    scene_voiceover = _strip_domains(scene.get("voiceover") or "")
+    if scene_voiceover:
+        evidence = (evidence + "\n" + scene_voiceover).strip()
+    role=_role(scene,original)
     source_name_contamination=_entity_matches_publisher(original,script_data)
     contaminated=_entity_contains_publisher_domain(original,script_data)
     explicit_branding=any(
@@ -219,11 +244,17 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
         score,reason=_support(original,evidence,role)
     if score>=0.80 or (role in _NON_STABLE and not source_name_contamination and not contaminated): return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
     if not (source_name_contamination and not explicit_branding):
+        # Headline text is not general identity evidence. It is allowed only as
+        # support for the narrowly constrained anchors produced above.
+        anchor_support = (evidence + "\n" + _strip_domains(
+            script_data.get("title") or script_data.get("step_1_headline") or ""
+        )).strip()
         for anchor in _anchors(script_data):
             if _entity_matches_publisher(anchor,script_data) and not explicit_branding:
                 continue
-            a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
-            if a_score>=0.80: return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
+            a_score,a_reason=_support(anchor,anchor_support,_role(scene,anchor))
+            if a_score>=0.80:
+                return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
     return {"entity":original,"grounded":False,"changed":False,"reason":reason,"confidence":0.0,"original_entity":original}
 
 def apply_grounding(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:

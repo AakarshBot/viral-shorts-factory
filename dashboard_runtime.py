@@ -114,7 +114,7 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
         originality_gate = {
             "passed": False,
             "public_blocked": True,
-            "label": "Originality + Creator Insight",
+            "label": "Originality + factuality",
             "detail": f"Originality QC unavailable: {type(exc).__name__}: {exc}",
         }
 
@@ -567,8 +567,6 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approval_event = threading.Event()
         self._script_review_event = threading.Event()
         self._script_review_submitted = False
-        self._creator_insight = ""
-        self._creator_insight_submitted = False
         self._script_visual_queries: list[str] = []
         self._visual_approved = False
         self._visual_rejected = False
@@ -593,8 +591,6 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approval_event.clear()
         self._script_review_event.clear()
         self._script_review_submitted = False
-        self._creator_insight = ""
-        self._creator_insight_submitted = False
         self._script_visual_queries = []
         self._visual_approved = False
         self._visual_rejected = False
@@ -681,7 +677,6 @@ class DashboardWorkflowController(WorkflowController):
                 "script_event": threading.Event(),
                 "visual_event": threading.Event(),
                 "script_submitted": False,
-                "creator_insight_submitted": False,
                 "visual_approved": False,
                 "visual_rejected": False,
             }
@@ -694,7 +689,6 @@ class DashboardWorkflowController(WorkflowController):
         gate["script_event"].clear()
         gate["visual_event"].clear()
         gate["script_submitted"] = False
-        gate["creator_insight_submitted"] = False
         gate["visual_approved"] = False
         gate["visual_rejected"] = False
         config["manual_qc_required"] = True
@@ -705,7 +699,7 @@ class DashboardWorkflowController(WorkflowController):
         return config
 
     def _manual_script_review_hook(self, result: dict[str, Any]) -> dict[str, Any]:
-        """Pause the core factory until script queries and Creator Insight are submitted."""
+        """Pause only for the user's per-slide manual visual-query check."""
         if not isinstance(result, dict):
             raise RuntimeError("Script review could not start because the script payload is invalid.")
 
@@ -714,12 +708,8 @@ class DashboardWorkflowController(WorkflowController):
             raise RuntimeError("Script review could not start because no script scenes were returned.")
 
         gate = self._ensure_manual_gate_state()
-
         gate["script_event"].clear()
         gate["script_submitted"] = False
-        gate["creator_insight_submitted"] = False
-        self._creator_insight = ""
-        self._creator_insight_submitted = False
 
         with self._lock:
             self._script_visual_queries = [""] * len(scenes)
@@ -728,56 +718,27 @@ class DashboardWorkflowController(WorkflowController):
         self.update(
             "script_review",
             40,
-            f"The script is ready. Add your Creator Insight and review {len(scenes)} slides.",
+            f"The script is ready. Check {len(scenes)} slides for any missing manual image searches.",
         )
         gate["script_event"].wait(timeout=24 * 60 * 60)
 
-        if not gate["script_submitted"] or not gate["creator_insight_submitted"]:
+        if not gate["script_submitted"]:
             raise RuntimeError(
-                "Script review timed out or Creator Insight was not submitted. The production run was stopped."
+                "Script review timed out or manual visual-query review was not submitted. "
+                "The production run was stopped."
             )
 
         with self._lock:
             queries = list(self._script_visual_queries)
-            script_scenes = result.get("script") or []
-            insight = str(self._creator_insight or "").strip()
+            live_script = self.state.script_data if isinstance(self.state.script_data, dict) else result
 
-        if len(insight.split()) < 12:
-            raise RuntimeError("Creator Insight must contain at least 12 words.")
-        if len(script_scenes) < 2:
-            raise RuntimeError("Creator Insight requires at least two generated scenes.")
-
-        insight_scene = {
-            "voiceover": insight,
-            "primary_entity": str(
-                script_scenes[-1].get("primary_entity")
-                or script_scenes[0].get("primary_entity")
-                or ""
-            ).strip(),
-            "visual_intent": "conceptual",
-            "specific_search_prompt": "creator insight context",
-            "sport_or_topic_category": str(
-                script_scenes[-1].get("sport_or_topic_category") or ""
-            ),
-            # Creator Insight is part of the final narration contract once
-            # the dashboard user explicitly submits it.
-            "narration_source": "validated_script",
-            "human_contributed": True,
-        }
-        insert_at = len(script_scenes) - 1
-        script_scenes.insert(insert_at, insight_scene)
-        queries = queries[:insert_at] + [""] + queries[insert_at:]
-        result["script"] = script_scenes
-        result["creator_insight"] = insight
-        result["creator_insight_required"] = True
-
-        with self._lock:
-            self.state.script_data = result
-            self._script_visual_queries = queries[:len(script_scenes)]
+        script_scenes = live_script.get("script") or []
+        if not isinstance(script_scenes, list) or len(script_scenes) != len(scenes):
+            raise RuntimeError("Script review returned an invalid scene list.")
 
         for index, scene in enumerate(script_scenes):
             if not isinstance(scene, dict):
-                continue
+                raise RuntimeError(f"Script review returned an invalid scene at position {index + 1}.")
             query = queries[index] if index < len(queries) else ""
             if query:
                 scene["manual_visual_query"] = query
@@ -788,12 +749,13 @@ class DashboardWorkflowController(WorkflowController):
                 scene.pop("manual_visual_query_index", None)
                 scene.pop("manual_visual_query_source", None)
 
+        live_script["script"] = script_scenes
         self.update(
             "audio",
             42,
             "Slide queries saved. Creating the voiceover and preparing visuals.",
         )
-        return result
+        return live_script
 
     def _manual_visual_review_hook(self, packages: list[Any]) -> list[Any]:
         """Pause the core factory until every generated visual has been reviewed."""
@@ -905,7 +867,7 @@ class DashboardWorkflowController(WorkflowController):
 
         self._dashboard_visual_gate_bound = True
 
-    def submit_script_visual_queries(self, queries: list[str], creator_insight: str = "") -> bool:
+    def submit_script_visual_queries(self, queries: list[str]) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "script_review":
             return False
@@ -917,17 +879,10 @@ class DashboardWorkflowController(WorkflowController):
 
         cleaned = [str(query or "").strip() for query in list(queries or [])]
         cleaned = (cleaned + [""] * len(scenes))[:len(scenes)]
-        insight = str(creator_insight or "").strip()
-        if len(insight.split()) < 12:
-            return False
-
         with self._lock:
-            self._creator_insight = insight
-            self._creator_insight_submitted = True
             gate = self._manual_gate_state
             if isinstance(gate, dict):
                 gate["script_submitted"] = True
-                gate["creator_insight_submitted"] = True
             self._script_visual_queries = cleaned
             live_script = self.state.script_data
             if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
@@ -1180,8 +1135,6 @@ class DashboardWorkflowController(WorkflowController):
             data.update(
                 {
                     "script_review_required": data.get("stage") == "script_review",
-                    "creator_insight": self._creator_insight,
-                    "creator_insight_required": data.get("stage") == "script_review",
                     "script_visual_queries": list(self._script_visual_queries),
                     "visual_packages": list(self._visual_packages),
                     "visual_review_required": data.get("stage") == "visual_approval",

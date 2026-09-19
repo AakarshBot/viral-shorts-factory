@@ -95,7 +95,6 @@ def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
 
     assert controller.submit_script_visual_queries(
         ["Rishabh Pant press conference", ""],
-        "The important context is that this decision changes the timeline for the team.",
     ) is True
 
     thread.join(timeout=2)
@@ -108,7 +107,7 @@ def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
 
 
 
-def test_dashboard_creator_insight_preserves_original_slide_query_alignment(monkeypatch):
+def test_dashboard_manual_slide_query_alignment(monkeypatch):
     def fake_write_script(*_args, **_kwargs):
         return {
             "title": "Alignment story",
@@ -143,18 +142,19 @@ def test_dashboard_creator_insight_preserves_original_slide_query_alignment(monk
 
     assert controller.submit_script_visual_queries(
         ["query one", "query two", "query three"],
-        "This creator context adds original analysis beyond the source material for the selected story today.",
     ) is True
 
     thread.join(timeout=2)
     assert not thread.is_alive()
 
     scenes = result["script"]["script"]
-    assert len(scenes) == 4
+    assert len(scenes) == 3
     assert scenes[0]["manual_visual_query"] == "query one"
     assert scenes[1]["manual_visual_query"] == "query two"
-    assert "manual_visual_query" not in scenes[2]
-    assert scenes[3]["manual_visual_query"] == "query three"
+    assert scenes[2]["manual_visual_query"] == "query three"
+    assert "human_contributed" not in scenes[0]
+    assert "human_contributed" not in scenes[1]
+    assert "human_contributed" not in scenes[2]
 
 def test_dashboard_start_production_reaches_script_review(monkeypatch):
     import workflow_runtime
@@ -226,7 +226,6 @@ def test_dashboard_start_production_reaches_script_review(monkeypatch):
 
     assert controller.submit_script_visual_queries(
         ["Gautam Gambhir press conference", ""],
-        "My context is that this decision matters because it changes the team's preparation.",
     ) is True
 
     deadline = time.time() + 2

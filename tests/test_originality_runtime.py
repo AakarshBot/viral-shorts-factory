@@ -4,7 +4,7 @@ from final_qc_runtime import evaluate_originality_gate
 
 def test_verbatim_overlap_blocks_eight_word_run():
     source = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda."
-    script = {"script": [{"voiceover": "Alpha beta gamma delta epsilon zeta eta theta is copied.", "human_contributed": False}]}
+    script = {"script": [{"voiceover": "Alpha beta gamma delta epsilon zeta eta theta is copied."}]}
     result = check_script_originality(script, {"research_evidence_pack": {"sources": [{"text": source}]}})
     assert result["passed"] is False
     assert result["failures"][0]["longest_run"] >= 8
@@ -12,23 +12,23 @@ def test_verbatim_overlap_blocks_eight_word_run():
 
 def test_sixgram_overlap_blocks_above_fifteen_percent():
     source = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"
-    script = {"script": [{"voiceover": "one two three four five six seven eight nine ten eleven twelve seventeen eighteen", "human_contributed": False}]}
+    script = {"script": [{"voiceover": "one two three four five six seven eight nine ten eleven twelve seventeen eighteen"}]}
     result = check_script_originality(script, {"research_evidence_pack": {"sources": [{"text": source}]}})
     assert result["passed"] is False
     assert result["failures"][0]["sixgram_ratio"] > 0.15
 
 
-def test_creator_insight_is_required_at_final_qc():
-    script = {"script": [{"voiceover": "Generated factual scene.", "human_contributed": False}]}
+def test_final_qc_does_not_require_extra_narration():
+    script = {"script": [{"voiceover": "Generated factual scene."}]}
     gate = evaluate_originality_gate(script)
-    assert gate["passed"] is False
-    assert "Creator Insight" in gate["detail"]
+    assert gate["passed"] is True
+    assert gate["public_blocked"] is False
 
 
 def test_extract_fallback_is_private_only():
     script = {
         "fallback_mode": "extractive_source_grounded",
-        "script": [{"voiceover": "This is a sufficiently long creator insight with original context about why this development matters.", "human_contributed": True}],
+        "script": [{"voiceover": "This is a sufficiently long source-grounded fallback scene."}],
     }
     gate = evaluate_originality_gate(script)
     assert gate["passed"] is True
@@ -58,7 +58,7 @@ def test_real_critique_normalizes_required_json(monkeypatch):
         },
     )
     result = _run_real_critique(
-        {"script": [{"voiceover": "The team announced the change.", "human_contributed": False}]},
+        {"script": [{"voiceover": "The team announced the change."}]},
         {"research_evidence_text": "The team announced the change."},
     )
     assert result["score"] == 8
@@ -82,7 +82,7 @@ def test_originality_rewrite_falls_through_to_openrouter_free(monkeypatch):
 
     monkeypatch.setattr(script_runtime, "_originality_llm", fake_llm)
     result = script_runtime._rewrite_for_originality_once(
-        {"script": [{"voiceover": "A source-derived scene with overlapping wording.", "human_contributed": False}]},
+        {"script": [{"voiceover": "A source-derived scene with overlapping wording."}]},
         {"research_evidence_text": "A source-derived scene with overlapping wording and supported facts."},
         {"passed": False, "failures": [{"scene": 1}]},
     )
