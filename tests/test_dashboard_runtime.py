@@ -227,6 +227,74 @@ def test_dashboard_controller_captures_generated_audio_paths(tmp_path):
     assert controller.snapshot()["stage"] == "audio"
 
 
+def test_dashboard_controller_replaces_only_requested_visual(monkeypatch, tmp_path):
+    from PIL import Image
+    import visual_query_entities_runtime
+    import visual_quality_runtime
+    import branding_runtime
+    import visual_strategy_runtime
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    old_one = tmp_path / "scene_1_img.jpg"
+    old_two = tmp_path / "scene_2_img.jpg"
+    Image.new("RGB", (1080, 1920), "white").save(old_one, "JPEG")
+    Image.new("RGB", (1080, 1920), "black").save(old_two, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Replacement test",
+        "script": [
+            {
+                "primary_entity": "Subject One",
+                "voiceover": "Subject one appears.",
+                "sport_or_topic_category": "news",
+                "visual_genre": "GENERAL_CONTEXT",
+            },
+            {
+                "primary_entity": "Subject Two",
+                "voiceover": "Subject two appears.",
+                "sport_or_topic_category": "news",
+                "visual_genre": "GENERAL_CONTEXT",
+            },
+        ],
+    }
+    controller._visual_packages = [
+        [{"image": str(old_one), "manual_visual_query": "old query one", "source_type": "pexels", "visual_verified": True}],
+        [{"image": str(old_two), "manual_visual_query": "old query two", "source_type": "pexels", "visual_verified": True}],
+    ]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    def fake_search(*_args, **kwargs):
+        scene = _args[2]
+        assert kwargs["manual_query"] == "new query for slide one"
+        scene["visual_verified"] = True
+        scene["visual_query_used"] = "new query for slide one"
+        scene["visual_genre"] = "GENERAL_CONTEXT"
+        return Image.new("RGB", (900, 1200), "gray"), False, "pexels"
+
+    monkeypatch.setattr(visual_query_entities_runtime, "search_slide_visual", fake_search)
+    monkeypatch.setattr(visual_quality_runtime, "fit_visual_image", lambda image, *_args: image)
+    monkeypatch.setattr(branding_runtime, "source_credit_for_type", lambda source: f"credit:{source}")
+    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *_args: "GENERAL_CONTEXT")
+
+    ok, message = controller.replace_visual(1, "new query for slide one")
+
+    assert ok is True
+    assert "replaced successfully" in message.lower()
+    snapshot = controller.snapshot()
+    assert snapshot["visual_packages"][0][0]["manual_visual_query"] == "new query for slide one"
+    assert snapshot["visual_packages"][1][0]["image"] == str(old_two)
+    assert snapshot["visual_replacement_history"][1][0]["old_path"] == str(old_one)
+    assert snapshot["visual_replacement_history"][1][0]["new_query"] == "new query for slide one"
+    assert snapshot["visual_review_approved"] is False
+    assert Path(snapshot["visual_packages"][0][0]["image"]).is_file()
+    assert Path(snapshot["visual_packages"][0][0]["image"]) != old_one
+
+
 def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
     async def fake_visuals(*_args, **_kwargs):
         return [[{"image": "/tmp/scene_1.jpg"}]]
