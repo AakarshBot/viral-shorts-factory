@@ -77,15 +77,6 @@ GENERIC_ENTITY_TOKENS = {
     "court", "police", "officials", "people", "agency", "official",
 }
 
-GENERIC_EVENT_TOPIC_TOKENS = {
-    "action", "actions", "announcement", "announcements", "decision", "decisions",
-    "deal", "deals", "development", "developments", "event", "events", "funding",
-    "initiative", "initiatives", "investment", "investments", "issue", "issues",
-    "measure", "measures", "move", "moves", "plan", "plans", "program", "programs",
-    "programme", "programmes", "project", "projects", "proposal", "proposals",
-    "statement", "statements", "step", "steps", "support", "talks", "update", "updates",
-}
-
 ENTITY_NOISE = {
     "today", "latest", "breaking", "update", "news", "report", "reports",
     "says", "said", "after", "before", "new", "first", "major", "live",
@@ -262,21 +253,20 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
     right_actions = set(right.get("identity_actions") or _action_context(right))
     shared_actions = left_actions & right_actions
 
-    # Conflicting actions are strong evidence of different events even when
-    # the same people/organisations are involved.
-    if left_actions and right_actions and not shared_actions and overlap < 0.78:
-        return False
+    # Keep clustering deliberately small and evidence-based:
+    # 1) very similar headlines must also agree on the event action;
+    # 2) differently worded reports can merge when they share two entities
+    #    and the same action;
+    # 3) a single shared entity is enough only when there is also a shared
+    #    action and a distinctive topical anchor.
+    if overlap >= 0.62 and (
+        not left_actions or not right_actions or shared_actions
+    ):
+        return True
 
-    # A strong entity match plus a compatible action is our best no-LLM signal
-    # for differently worded reporting of the same event.
     if len(shared_entities) >= 2 and shared_actions:
         return True
 
-    # When only one salient entity is available, require an additional shared
-    # topical token (outside the entity/action vocabulary) before merging.
-    # This captures paraphrases such as "OpenAI announces new model release"
-    # vs "OpenAI releases new model after announcement", while avoiding the
-    # common-company/different-event case such as two separate NASA launches.
     shared_topical_tokens = (
         _tokens(left.get("title"))
         & _tokens(right.get("title"))
@@ -290,39 +280,10 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
         for token in shared_topical_tokens
         if token not in GENERIC_EVENT_TOPIC_TOKENS
     }
-    if len(shared_entities) >= 1 and shared_actions and distinctive_topical_tokens:
-        return True
-
-    if len(shared_entities) >= 3 and (
-        not left_actions or not right_actions or shared_actions
-    ):
-        return True
-
-    # Preserve the existing high-confidence headline matching path.
-    if overlap >= 0.62:
-        return True
-
-    left_tokens = _tokens(left.get("title"))
-    right_tokens = _tokens(right.get("title"))
-    shared = left_tokens & right_tokens
-    if len(shared) < 4:
-        return False
-
-    smaller = min(len(left_tokens), len(right_tokens))
-    if smaller and len(shared) / smaller >= 0.78 and (
-        not left_actions or not right_actions or shared_actions
-    ):
-        return True
-
-    meaningful = {
-        token
-        for token in shared
-        if len(token) >= 5
-        and not token.isdigit()
-        and token not in GENERIC_EVENT_TOPIC_TOKENS
-    }
-    return len(meaningful) >= 4 and overlap >= 0.42 and (
-        not left_actions or not right_actions or shared_actions
+    return bool(
+        len(shared_entities) >= 1
+        and shared_actions
+        and distinctive_topical_tokens
     )
 
 
