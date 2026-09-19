@@ -295,6 +295,23 @@ def _run_real_critique(script_data, story_data):
     return {"score": None, "unsupported_claims": ["Critique provider unavailable."], "exaggerations": [], "fixes": ["Run critique with Groq or Gemini."], "provider": "unavailable"}
 
 
+def append_research_sources(description, research_sources, max_chars=5000):
+    lines, seen = [], set()
+    for source in research_sources if isinstance(research_sources, list) else []:
+        if not isinstance(source, dict):
+            continue
+        publisher = str(source.get("publisher") or source.get("source_name") or source.get("source") or source.get("domain") or "Publisher").strip()
+        url = str(source.get("url") or source.get("link") or source.get("source_url") or "").strip()
+        if url and (publisher, url) not in seen:
+            seen.add((publisher, url))
+            lines.append(publisher + " – " + url)
+    if not lines:
+        return str(description or "").strip()
+    suffix = "\n\nSources:\n" + "\n".join(lines)
+    base = str(description or "").strip()
+    return base[:max(0, max_chars - len(suffix))].rstrip() + suffix
+
+
 def clean_script_data(script_data, story_data, format_mode):
     if not isinstance(script_data, dict):
         return script_data, {"removed_cta": False, "removed_scenes": 0, "changed_scenes": 0}
