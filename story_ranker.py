@@ -1151,7 +1151,7 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         f"   [Discovery Funnel] article intake={event_pool['article_count']} "
         f"(GDELT={initial_gdelt_count}) -> "
         f"distinct events={event_pool['event_count']}; "
-        f"single-pass intake complete.",
+        f"bounded adaptive intake complete.",
         flush=True,
     )
     return events, social_titles
