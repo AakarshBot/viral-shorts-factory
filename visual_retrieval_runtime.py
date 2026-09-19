@@ -343,19 +343,36 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     cache_entity = visual_anchor
 
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
-    if cached_img is not None and visual_genre != "PERSON_ACTION":
+    if cached_img is not None:
         buffer = io.BytesIO()
         cached_img.save(buffer, format="JPEG", quality=95)
-        cached_hash = _hash_image(bot, buffer.getvalue())
+        cached_bytes = buffer.getvalue()
+        cached_hash = _hash_image(bot, cached_bytes)
         if cached_hash not in used_hashes:
-            used_hashes.add(cached_hash)
-            seg["visual_verified"] = True
-            seg["visual_rescue_reason"] = ""
-            seg["visual_fallback_reason"] = ""
-            seg["visual_query_used"] = "cache"
-            return cached_img.convert("RGB"), False, "cached"
-    elif cached_img is not None:
-        print("   [Visual Cache] PERSON_ACTION cache bypassed; semantic QA required.", flush=True)
+            try:
+                cached_ok, cached_tier, cached_score, cached_hard_reject = runtime._strict_gate(
+                    bot, cached_bytes, seg, video_title, source="cache"
+                )
+            except Exception as exc:
+                cached_ok = False
+                cached_hard_reject = True
+                print(
+                    f"   [Visual Cache] QC failed; cache candidate rejected: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+            if cached_ok:
+                used_hashes.add(cached_hash)
+                seg["visual_verified"] = True
+                seg["visual_rescue_reason"] = ""
+                seg["visual_fallback_reason"] = ""
+                seg["visual_query_used"] = "cache"
+                seg["visual_verification_attempts"] = int(seg.get("visual_verification_attempts") or 0) + 1
+                return cached_img.convert("RGB"), False, "cached"
+            print(
+                f"   [Visual Cache] QC rejected cached candidate | tier={cached_tier if 'cached_tier' in locals() else 'UNKNOWN'}",
+                flush=True,
+            )
 
     verification_attempts = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))
@@ -432,43 +449,33 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     continue
 
                 trusted, trusted_tier, trusted_score = _trusted_source_evidence(source, visual_type, query, visual_genre)
-                if trusted:
-                    # Canonical-source evidence is stronger than a generic
-                    # multimodal YES/NO gate. Do not waste a Gemini request on
-                    # an exact person page or an explicit Commons logo asset.
-                    accepted, tier_name, score, hard_reject = True, trusted_tier, trusted_score, False
-                else:
-                    verification_available = semantic_required and verification_attempts < max_verification
-                    if verification_available:
-                        verification_attempts += 1
-                        try:
-                            accepted, tier_name, score, hard_reject = runtime._strict_gate(
-                                bot, normalized, qa_scene, video_title, source=source
-                            )
-                        except Exception as exc:
-                            print(
-                                f"   [Visual QA] candidate check failed; rejecting candidate: "
-                                f"{type(exc).__name__}: {exc}",
-                                flush=True,
-                            )
-                            continue
-                    elif semantic_required:
-                        accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
-                    else:
-                        accepted, tier_name, score, hard_reject = True, tier, REAL_SOURCE_SCORES.get(source.lower(), 50), False
-
-                    # An explicit semantic NO is a hard rejection. Keeping a
-                    # candidate that QA says is the wrong subject is worse than
-                    # falling through to the bounded retry/rescue path. Only a
-                    # verifier that is unavailable/uncertain may feed the
-                    # unverified-real fallback below.
-                    if hard_reject:
+                verification_available = verification_attempts < max_verification
+                if verification_available:
+                    verification_attempts += 1
+                    try:
+                        accepted, tier_name, score, hard_reject = runtime._strict_gate(
+                            bot, normalized, qa_scene, video_title, source=source
+                        )
+                    except Exception as exc:
                         print(
-                            f"   [Visual QA] semantic mismatch | rejected | "
-                            f"source={source} | query='{query}'",
+                            f"   [Visual QA] candidate check failed; rejecting candidate: "
+                            f"{type(exc).__name__}: {exc}",
                             flush=True,
                         )
                         continue
+                else:
+                    accepted, tier_name, score, hard_reject = False, "QA-BUDGET", REAL_SOURCE_SCORES.get(source.lower(), 50), False
+
+                # Every automatic candidate must pass the same semantic QC
+                # boundary. Source authority can help rank/retain alternatives,
+                # but it never overrides the scene-fit gate.
+                if hard_reject or not accepted:
+                    print(
+                        f"   [Visual QA] semantic/QC rejection | source={source} | "
+                        f"query='{query}' | tier={tier_name}",
+                        flush=True,
+                    )
+                    continue
 
                 if accepted:
                     try:
@@ -517,22 +524,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         # No second-stage query synthesis here. The canonical intent already
         # supplied the complete bounded query set for this scene.
 
+    # An uncertain candidate is never silently promoted to production.
+    # It can remain telemetry for diagnostics, but the renderer must receive
+    # either a QC-passed visual or the explicit rescue frame.
     if best_uncertain is not None:
-        score, normalized, source, query = best_uncertain
-        image_hash = _hash_image(bot, normalized)
-        if image_hash not in used_hashes:
-            used_hashes.add(image_hash)
-            seg["visual_verified"] = False
-            seg["visual_rescue_reason"] = "real-source-unverified"
-            seg["visual_fallback_reason"] = ""
-            seg["visual_query_used"] = query
-            seg["visual_verification_attempts"] = verification_attempts
-            print(
-                f"   [Visual Source] {source} | USED-UNVERIFIED-REAL | score={score:.0f} | query='{query}' | "
-                f"QA={verification_attempts}/{max_verification}",
-                flush=True,
-            )
-            return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
+        print(
+            f"   [Visual Source] candidates remained uncertain; no unverified image will be used "
+            f"| best_score={best_uncertain[0]:.0f}",
+            flush=True,
+        )
 
     if (visual_type in ABSTRACT_TYPES or genre_allows_ai(visual_genre)) and callable(getattr(bot, "fetch_hf_ai_image", None)):
         prompt_text = _ai_prompt(entity, visual_type)
