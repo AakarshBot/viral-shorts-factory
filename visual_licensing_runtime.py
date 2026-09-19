@@ -46,6 +46,7 @@ def normalize_license_code(value: Any) -> str:
     text = re.sub(r"[^a-z0-9-]+", "", text)
     if text.startswith("cc-"):
         text = text[3:]
+    text = re.sub(r"-[0-9]+(?:-[0-9]+)?$", "", text)
     return text
 
 
