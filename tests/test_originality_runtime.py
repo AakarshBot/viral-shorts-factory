@@ -28,7 +28,7 @@ def test_creator_insight_is_required_at_final_qc():
 def test_extract_fallback_is_private_only():
     script = {
         "fallback_mode": "extractive_source_grounded",
-        "script": [{"voiceover": "This is a sufficiently long creator insight with original context.", "human_contributed": True}],
+        "script": [{"voiceover": "This is a sufficiently long creator insight with original context about why this development matters.", "human_contributed": True}],
     }
     gate = evaluate_originality_gate(script)
     assert gate["passed"] is True
