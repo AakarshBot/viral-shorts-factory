@@ -531,6 +531,63 @@ class DashboardWorkflowController(WorkflowController):
         if not isinstance(namespace, dict):
             return
 
+        current_script = namespace.get("write_script")
+        if callable(current_script) and not getattr(current_script, "_dashboard_script_review", False):
+            def dashboard_script_review(*args, **kwargs):
+                result = current_script(*args, **kwargs)
+                if not isinstance(result, dict):
+                    return result
+
+                scenes = result.get("script") or []
+                if not isinstance(scenes, list) or not scenes:
+                    raise RuntimeError("Script review could not start because no script scenes were returned.")
+
+                self._script_review_event.clear()
+                self._script_review_submitted = False
+                with self._lock:
+                    self._script_visual_queries = [""] * len(scenes)
+                    self.state.script_data = result
+
+                self.update(
+                    "script_review",
+                    40,
+                    f"The script is ready. Review {len(scenes)} slides and add optional image-search queries.",
+                )
+                self._script_review_event.wait(timeout=24 * 60 * 60)
+
+                if not self._script_review_submitted:
+                    raise RuntimeError(
+                        "Script visual-query review timed out. The production run was stopped."
+                    )
+
+                with self._lock:
+                    queries = list(self._script_visual_queries)
+                    script_scenes = result.get("script") or []
+
+                for index, scene in enumerate(script_scenes):
+                    if not isinstance(scene, dict):
+                        continue
+                    query = queries[index] if index < len(queries) else ""
+                    if query:
+                        scene["manual_visual_query"] = query
+                        scene["manual_visual_query_source"] = "dashboard_slide"
+                    else:
+                        scene.pop("manual_visual_query", None)
+                        scene.pop("manual_visual_query_score", None)
+                        scene.pop("manual_visual_query_index", None)
+                        scene.pop("manual_visual_query_source", None)
+
+                self.update(
+                    "audio",
+                    42,
+                    "Slide queries saved. Creating the voiceover and preparing visuals.",
+                )
+                return result
+
+            dashboard_script_review._dashboard_script_review = True
+            namespace["write_script"] = dashboard_script_review
+            self.bot.write_script = dashboard_script_review
+
         current_audio = namespace.get("generate_voiceover_and_timestamps")
         if callable(current_audio) and not getattr(current_audio, "_dashboard_audio_capture", False):
             async def dashboard_audio_capture(*args, **kwargs):
