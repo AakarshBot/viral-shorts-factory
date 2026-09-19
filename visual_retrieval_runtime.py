@@ -412,16 +412,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 break
             provider_checks += 1
             tier = runtime._verification_tier(qa_scene, visual_type, source)
-            # Retrieval is type-agnostic. A search source may have its own
-            # provider-specific identity guarantees, but those guarantees belong
-            # to the acceptance gate -- never to query routing. Every non-
-            # conceptual candidate is therefore eligible for the same semantic
-            # verification path, regardless of PERSON/ORG/EVENT/LOCATION/etc.
-            # If the gate can establish provider-level identity (for example an
-            # exact entity resolver), it can accept the candidate without a
-            # Gemini call; otherwise Gemini/uncertain fallback handles it.
-            semantic_required = tier != "SKIPPED(conceptual)"
-
             fetch_entity = cache_entity if source == "Wikipedia" else query
             args = (fetch_entity, used_urls, query, video_title) if source == "Wikipedia" else (query, used_urls, query, video_title)
             raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
@@ -508,16 +498,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         flush=True,
                     )
                     return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
-
-
-                candidate_score = float(score or REAL_SOURCE_SCORES.get(source.lower(), 50))
-                if best_uncertain is None or candidate_score > best_uncertain[0]:
-                    best_uncertain = (candidate_score, normalized, source, query)
-                print(
-                    f"   [Visual Candidate] retained as uncertain | source={source} | score={candidate_score:.0f} | "
-                    f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
-                    flush=True,
-                )
         if provider_checks >= max_provider_checks:
             break
 
