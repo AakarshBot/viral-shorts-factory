@@ -1072,6 +1072,32 @@ def _candidate_quality_pass(story):
     return True
 
 
+
+def _discovery_portfolio_pass(story):
+    """Keep the dashboard broad without weakening the production selection gate.
+
+    The dashboard is a human exploration surface, so niche but current,
+    source-supported stories should remain visible even when they are not
+    strong enough for automatic production selection.
+    """
+    dimensions = story.get("discovery_dimensions") or {}
+    freshness = _safe_float(dimensions.get("freshness")) or 0.0
+    momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
+    score = _safe_float(story.get("candidate_score")) or 0.0
+
+    if freshness < 2.0 and momentum < 2.0:
+        story["discovery_rejection"] = "Insufficient current-event signal"
+        return False
+    if score < 10.0:
+        story["discovery_rejection"] = "Below exploration quality floor"
+        return False
+
+    story["discovery_tier"] = (
+        "production-ready" if _candidate_quality_pass(story) else "exploratory"
+    )
+    return True
+
+
 def _candidate_reason(story):
     dimensions = story.get("discovery_dimensions") or {}
     parts = []
@@ -1373,7 +1399,7 @@ def rank_discovery_candidates(
         key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0,
         reverse=True,
     )
-    ranked = [item for item in ranked if _candidate_quality_pass(item)]
+    ranked = [item for item in ranked if _discovery_portfolio_pass(item)]
 
     selected = diversity_rerank(ranked, max_items=max_candidates)
     for story in selected:
