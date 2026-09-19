@@ -425,28 +425,30 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     overall = max(0.0, min(1.0, percent / 100))
     st.progress(overall, text=f"Overall progress · {percent}%")
 
-    cols = st.columns(4, gap="small")
-    for index, (label, key, lo, hi) in enumerate(stages):
-        if current == "error":
-            value = 0.0
-            icon = "⚠️"
-            state = "Stopped"
-        elif percent >= hi:
-            value = 1.0
-            icon = "✓"
-            state = "Complete"
-        elif current == key:
-            value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
-            icon = "●"
-            state = "Active"
-        else:
-            value = 0.0
-            icon = "○"
-            state = "Waiting"
-        with cols[index % 4]:
-            st.markdown(f"**{icon} {label}**")
-            st.progress(value)
-            st.caption(state)
+    for row_start in range(0, len(stages), 4):
+        row = stages[row_start:row_start + 4]
+        cols = st.columns(len(row), gap="small")
+        for column, (label, key, lo, hi) in zip(cols, row):
+            if current == "error":
+                value = 0.0
+                icon = "⚠️"
+                state = "Stopped"
+            elif percent >= hi:
+                value = 1.0
+                icon = "✓"
+                state = "Complete"
+            elif current == key:
+                value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
+                icon = "●"
+                state = "Active"
+            else:
+                value = 0.0
+                icon = "○"
+                state = "Waiting"
+            with column:
+                st.markdown(f"**{icon} {label}**")
+                st.progress(value)
+                st.caption(state)
 
     message = str(snapshot.get("message") or "").strip()
     if message:
