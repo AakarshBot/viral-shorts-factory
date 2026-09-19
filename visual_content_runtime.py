@@ -13,6 +13,7 @@ import re
 from PIL import Image, ImageDraw, ImageFont
 
 from branding_runtime import source_credit_for_type
+from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
@@ -398,12 +399,42 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
-        # Manual queries are injected directly into their individual scenes by
-        # the dashboard script-review checkpoint. Blank scenes stay automatic.
-        manual_scene_count = sum(
-            1 for scene in scenes
-            if str(scene.get("manual_visual_query") or "").strip()
-        )
+
+        # Preserve the original global manual-query control as a compatibility
+        # path. New per-slide queries remain authoritative and are never
+        # overwritten by the legacy/global list.
+        manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
+        manual_queries = parse_manual_visual_queries(manual_raw)
+        if manual_queries:
+            assignments = assign_manual_queries(scenes, manual_queries)
+            for index, assignment in enumerate(assignments):
+                if index >= len(scenes) or not isinstance(scenes[index], dict):
+                    continue
+                if str(scenes[index].get("manual_visual_query") or "").strip():
+                    continue
+                query = str(assignment.get("query") or "").strip()
+                if query:
+                    scenes[index]["manual_visual_query"] = query
+                    scenes[index]["manual_visual_query_score"] = assignment.get("score", 0)
+                    scenes[index]["manual_visual_query_index"] = assignment.get("query_index", 0)
+                    scenes[index]["manual_visual_query_source"] = "dashboard_global"
+
+            assigned = sum(
+                1
+                for scene in scenes
+                if str(scene.get("manual_visual_query") or "").strip()
+            )
+            print(
+                f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
+                f"assigned={assigned} across {len(scenes)} scene(s).",
+                flush=True,
+            )
+        else:
+            print(
+                "   [Manual Visual Queries] No global manual queries supplied; "
+                "using scene-level/automatic visual flow.",
+                flush=True,
+            )
         print(
             f"   [Manual Visual Queries] Scene-level dashboard queries={manual_scene_count}/{len(scenes)}; "
             "blank scenes use the automatic visual flow.",
