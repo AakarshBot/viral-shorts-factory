@@ -1,6 +1,9 @@
 """Runtime safeguards and generation contract for compact, information-dense Shorts."""
 
+import json
+import os
 import re
+import urllib.request
 from difflib import SequenceMatcher
 
 _PERFORMATIVE_PATTERNS = (
@@ -34,6 +37,63 @@ _STRUCTURE_HINTS = {
     "how_to": "headline → explain the mechanism/process → key evidence → practical consequence",
     "explainer": "headline → core facts → useful context → important development → consequence",
 }
+
+
+def _originality_words(text):
+    return re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", str(text or "").casefold())
+
+
+def _originality_sources(story_data):
+    story = story_data if isinstance(story_data, dict) else {}
+    values = []
+    def collect(value):
+        if isinstance(value, str):
+            if value.strip(): values.append(value)
+        elif isinstance(value, dict):
+            for key in ("text","content","extracted_text","body","summary","snippet","title","claim","claims","evidence","source_text","sources","articles","items"):
+                if key in value: collect(value[key])
+        elif isinstance(value, (list, tuple)):
+            for item in value: collect(item)
+    pack = story.get("research_evidence_pack")
+    collect(pack.get("sources") if isinstance(pack, dict) else pack)
+    for key in ("research_evidence_text","research_bundle","text","summary","description"):
+        collect(story.get(key))
+    seen, unique = set(), []
+    for value in values:
+        clean = re.sub(r"\s+", " ", value).strip()
+        if clean and clean not in seen:
+            seen.add(clean); unique.append(clean)
+    return unique
+
+
+def _longest_originality_run(left, right):
+    previous = [0] * (len(right) + 1)
+    best = 0
+    for token in left:
+        current = [0]
+        for index, other in enumerate(right, 1):
+            current.append(previous[index - 1] + 1 if token == other else 0)
+            best = max(best, current[-1])
+        previous = current
+    return best
+
+
+def check_script_originality(script_data, story_data):
+    sources = _originality_sources(story_data)
+    failures = []
+    for scene_index, scene in enumerate(script_data.get("script", []) if isinstance(script_data, dict) else [], 1):
+        if not isinstance(scene, dict) or scene.get("human_contributed"): continue
+        words = _originality_words(scene.get("voiceover"))
+        sixgrams = {tuple(words[i:i+6]) for i in range(max(0, len(words)-5))}
+        for source_index, source in enumerate(sources):
+            source_words = _originality_words(source)
+            source_sixgrams = {tuple(source_words[i:i+6]) for i in range(max(0, len(source_words)-5))}
+            longest = _longest_originality_run(words, source_words)
+            ratio = len(sixgrams & source_sixgrams) / max(1, len(sixgrams))
+            if longest >= 8 or ratio > 0.15:
+                failures.append({"scene": scene_index, "source_index": source_index, "longest_run": longest, "sixgram_ratio": ratio})
+                break
+    return {"passed": not failures, "failures": failures, "source_count": len(sources)}
 
 
 def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
@@ -181,6 +241,77 @@ def _add_editorial_contract(story_data, format_mode):
     return copy
 
 
+def _originality_json(raw):
+    text = str(raw or "").strip()
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, dict) else None
+    except Exception:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        try:
+            value = json.loads(match.group(0)) if match else None
+            return value if isinstance(value, dict) else None
+        except Exception:
+            return None
+
+
+def _originality_llm(url, payload, headers):
+    try:
+        request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = json.loads(response.read().decode())
+        return _originality_json(body.get("choices", [{}])[0].get("message", {}).get("content", ""))
+    except Exception:
+        return None
+
+
+def _normalise_critique(value, provider):
+    unsupported = value.get("unsupported_claims") if isinstance(value.get("unsupported_claims"), list) else []
+    exaggerations = value.get("exaggerations") if isinstance(value.get("exaggerations"), list) else []
+    fixes = value.get("fixes") if isinstance(value.get("fixes"), list) else []
+    try: score = float(value.get("score"))
+    except (TypeError, ValueError): score = None
+    return {"score": score, "unsupported_claims": [str(x).strip() for x in unsupported if str(x).strip()], "exaggerations": [str(x).strip() for x in exaggerations if str(x).strip()], "fixes": [str(x).strip() for x in fixes if str(x).strip()], "provider": provider}
+
+
+def _run_real_critique(script_data, story_data):
+    script_text = "\n".join(str(s.get("voiceover") or "").strip() for s in script_data.get("script") or [] if isinstance(s, dict) and not s.get("human_contributed"))
+    evidence = "\n\n".join(_originality_sources(story_data)[:12])
+    prompt = ("Return ONLY JSON with keys score, unsupported_claims, exaggerations, fixes. "
+              "unsupported_claims are claims not supported by evidence; exaggerations are overstated wording; fixes are concrete corrections. "
+              "Do not invent criticism.\n\nSCRIPT:\n" + script_text + "\n\nEVIDENCE:\n" + evidence[:18000])
+    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
+    if groq:
+        result = _originality_llm("https://api.groq.com/openai/v1/chat/completions",
+            {"model":"openai/gpt-oss-120b","messages":[{"role":"system","content":prompt},{"role":"user","content":prompt}],"response_format":{"type":"json_object"},"temperature":0},
+            {"Authorization":"Bearer "+groq,"Content-Type":"application/json"})
+        if result is not None: return _normalise_critique(result, "groq")
+    gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
+    if gemini:
+        result = _originality_llm("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            {"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseMimeType":"application/json","temperature":0}},
+            {"x-goog-api-key":gemini,"Content-Type":"application/json"})
+        if result is not None: return _normalise_critique(result, "gemini")
+    return {"score": None, "unsupported_claims": ["Critique provider unavailable."], "exaggerations": [], "fixes": ["Run critique with Groq or Gemini."], "provider": "unavailable"}
+
+
+def append_research_sources(description, research_sources, max_chars=5000):
+    lines, seen = [], set()
+    for source in research_sources if isinstance(research_sources, list) else []:
+        if not isinstance(source, dict):
+            continue
+        publisher = str(source.get("publisher") or source.get("source_name") or source.get("source") or source.get("domain") or "Publisher").strip()
+        url = str(source.get("url") or source.get("link") or source.get("source_url") or "").strip()
+        if url and (publisher, url) not in seen:
+            seen.add((publisher, url))
+            lines.append(publisher + " – " + url)
+    if not lines:
+        return str(description or "").strip()
+    suffix = "\n\nSources:\n" + "\n".join(lines)
+    base = str(description or "").strip()
+    return base[:max(0, max_chars - len(suffix))].rstrip() + suffix
+
+
 def clean_script_data(script_data, story_data, format_mode):
     if not isinstance(script_data, dict):
         return script_data, {"removed_cta": False, "removed_scenes": 0, "changed_scenes": 0}
@@ -229,6 +360,33 @@ def clean_script_data(script_data, story_data, format_mode):
         "changed_scenes": changed_scenes,
         "visual_entity_grounding_changes": grounding_changed,
     }
+
+
+def _rewrite_for_originality_once(script_data, story_data, overlap):
+    scenes = [{"index": i, "voiceover": str(s.get("voiceover") or "")} for i, s in enumerate(script_data.get("script") or [], 1) if isinstance(s, dict) and not s.get("human_contributed")]
+    evidence = "\n\n".join(_originality_sources(story_data)[:10])
+    prompt = ("Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts and order. "
+              "Do not add facts or quote sources. Return JSON with script entries containing index and voiceover.\nDetected overlap:"
+              + json.dumps(overlap) + "\nSCENES:\n" + json.dumps(scenes, ensure_ascii=False) + "\nEVIDENCE:\n" + evidence[:16000])
+    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
+    gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
+    if groq:
+        result = _originality_llm("https://api.groq.com/openai/v1/chat/completions",
+            {"model":"openai/gpt-oss-120b","messages":[{"role":"system","content":"Rewrite for originality while preserving facts."},{"role":"user","content":prompt}],"response_format":{"type":"json_object"},"temperature":0.2},
+            {"Authorization":"Bearer "+groq,"Content-Type":"application/json"})
+    elif gemini:
+        result = _originality_llm("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            {"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseMimeType":"application/json","temperature":0.2}},
+            {"x-goog-api-key":gemini,"Content-Type":"application/json"})
+    else:
+        return None
+    if not isinstance(result, dict) or not isinstance(result.get("script"), list):
+        return None
+    replacements = {int(x.get("index")): str(x.get("voiceover") or "").strip() for x in result["script"] if isinstance(x, dict) and str(x.get("index") or "").isdigit()}
+    rewritten = dict(script_data)
+    rewritten["script"] = [dict(s, voiceover=replacements.get(i, s.get("voiceover", ""))) for i, s in enumerate(script_data.get("script") or [], 1)]
+    rewritten["originality_rewrite_attempted"] = True
+    return rewritten
 
 
 def validate_content_density(script_data, story_data, format_mode):
@@ -411,7 +569,36 @@ def wrap_write_script(bot):
             if not ok:
                 raise ValueError(f"Content-density gate failed after deterministic fallback: {reason}")
             cleaned["fallback_diagnostics"] = fallback_diag
+            cleaned["originality_overlap"] = check_script_originality(cleaned, story_data)
+            cleaned["originality_critique"] = {"score": None, "unsupported_claims": ["Extractive source-grounded fallback is not eligible for public publication."], "exaggerations": [], "fixes": [], "provider": "fallback"}
             return cleaned
+
+        originality = check_script_originality(cleaned, story_data)
+        if not originality["passed"]:
+            print(
+                f"   [Script Originality] Overlap detected: {len(originality['failures'])} scene(s). Requesting one rewrite.",
+                flush=True,
+            )
+            rewritten = _rewrite_for_originality_once(cleaned, story_data, originality)
+            if rewritten is None:
+                raise ValueError("Originality gate failed and the one-shot LLM rewrite was unavailable.")
+            cleaned, rewrite_diag = clean_script_data(rewritten, story_data, format_mode)
+            ok, reason = validate_content_density(cleaned, story_data, format_mode)
+            if not ok:
+                raise ValueError(f"Originality rewrite failed script validation: {reason}")
+            originality = check_script_originality(cleaned, story_data)
+            cleaned["originality_rewrite_diagnostics"] = rewrite_diag
+            if not originality["passed"]:
+                raise ValueError("Originality gate failed after the one-shot LLM rewrite.")
+        cleaned["originality_overlap"] = originality
+
+        critique = _run_real_critique(cleaned, story_data)
+        cleaned["originality_critique"] = critique
+        if critique.get("unsupported_claims"):
+            raise ValueError(
+                "Originality critique found unsupported claims: "
+                + "; ".join(critique["unsupported_claims"][:3])
+            )
 
         return cleaned
 

@@ -499,11 +499,30 @@ def render_script_visual_query_review(
         "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
         unsafe_allow_html=True,
     )
+    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+    if fallback_mode == "extractive_source_grounded":
+        st.error(
+            "PUBLIC UPLOAD BLOCKED — this script used an extractive source-grounded fallback. "
+            "It may continue as a private draft, but it cannot be published publicly.",
+            icon="⛔",
+        )
+
+    critique = script_data.get("originality_critique") or {}
+    if critique.get("unsupported_claims"):
+        st.error("ORIGINALITY GATE BLOCKED — the critique found unsupported claims.", icon="⛔")
+
     st.caption(
-        "Each slide has its own optional image-search query. Keep a box blank to use the normal automatic visual search for that slide."
+        "Add 1–2 sentences of your own analysis or context that is NOT in the source. "
+        "It will become the second-to-last spoken scene and is marked as human-contributed."
     )
 
     with st.form(key=f"script_visual_query_review_{run_id}"):
+        st.text_area(
+            "Creator Insight — required",
+            placeholder="Add your own analysis or context that is not stated in the source...",
+            key=f"creator_insight_{run_id}",
+            height=100,
+        )
         for index, scene in enumerate(scenes, 1):
             if not isinstance(scene, dict):
                 continue
@@ -551,7 +570,11 @@ def render_script_visual_query_review(
             ).strip()
             for index in range(1, len(scenes) + 1)
         ]
-        if controller.submit_script_visual_queries(queries):
+        insight = str(st.session_state.get(f"creator_insight_{run_id}", "") or "").strip()
+        if len(insight.split()) < 12:
+            st.error("Creator Insight must contain at least 12 words.")
+            return
+        if controller.submit_script_visual_queries(queries, insight):
             st.rerun()
         else:
             st.error("The script review is no longer active. Refreshing the dashboard.")
@@ -872,6 +895,14 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     )
     passed_count = sum(1 for gate in gates if gate["passed"])
     qc_ready = passed_count == len(gates)
+    public_blocked = any(bool(gate.get("public_blocked")) for gate in gates)
+    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+    if fallback_mode == "extractive_source_grounded":
+        st.error(
+            "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
+            "Private upload remains available after the other QC gates pass.",
+            icon="⛔",
+        )
     st.markdown(f"**Live gate status: {passed_count}/{len(gates)} passing**")
     gate_cols = st.columns(2)
     for index, gate in enumerate(gates):
@@ -977,7 +1008,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
-        st.caption("Public: full release QC + explicit publish confirmation.")
+        st.caption("Public: full release QC + explicit publish confirmation." + (" · BLOCKED by originality policy" if public_blocked else ""))
     with private_col:
         if st.button(
             "🔒 Upload Privately",

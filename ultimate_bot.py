@@ -24,6 +24,7 @@ import traceback
 load_dotenv()
 
 from visual_licensing_runtime import allow_unlicensed_visuals, append_image_credits
+from script_runtime import append_research_sources
 
 
 def global_exception_hook(exctype, value, tb):
@@ -1872,6 +1873,11 @@ def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_ke
             description,
             script_data.get("visual_provenance") or [],
             max_bytes=5000,
+        )
+        description = append_research_sources(
+            description,
+            script_data.get("research_sources") or [],
+            max_chars=5000,
         )
 
         tags = script_data.get("tags", ["Shorts", genre_cfg.get("label", "Shorts")])

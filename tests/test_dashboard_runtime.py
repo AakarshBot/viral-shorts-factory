@@ -67,7 +67,8 @@ def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
     assert len(snapshot["script_data"]["script"]) == 2
 
     assert controller.submit_script_visual_queries(
-        ["Rishabh Pant press conference", ""]
+        ["Rishabh Pant press conference", ""],
+        "The important context is that this decision changes the timeline for the team.",
     ) is True
 
     thread.join(timeout=2)
@@ -148,7 +149,8 @@ def test_dashboard_start_production_reaches_script_review(monkeypatch):
     assert len(snapshot["script_data"]["script"]) == 2
 
     assert controller.submit_script_visual_queries(
-        ["Gautam Gambhir press conference", ""]
+        ["Gautam Gambhir press conference", ""],
+        "My context is that this decision matters because it changes the team's preparation.",
     ) is True
 
     deadline = time.time() + 2
