@@ -33,7 +33,7 @@ def _clean_query(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:240]
 
 
-def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> bytes | None:
+def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> dict[str, Any] | None:
     if not data:
         return None
     if used_urls is not None and url in used_urls:
@@ -126,7 +126,7 @@ def _title_is_entity(title: str, entity: str) -> bool:
     return wanted == actual or all(token in actual for token in wanted)
 
 
-def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Resolve near-exact Wikipedia person pages in one API call."""
     entity = _clean_query(query)
     if not entity:
