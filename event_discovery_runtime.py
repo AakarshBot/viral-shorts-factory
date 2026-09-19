@@ -287,13 +287,12 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
         & _tokens(right.get("title"))
         - left_entities
         - right_entities
-        - left_actions
-        - right_actions
     )
     distinctive_topical_tokens = {
         token
         for token in shared_topical_tokens
-        if token not in GENERIC_EVENT_TOPIC_TOKENS
+        if token not in EVENT_ACTION_LOOKUP
+        and token not in GENERIC_EVENT_TOPIC_TOKENS
     }
     return bool(
         len(shared_entities) >= 1
