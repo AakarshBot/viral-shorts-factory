@@ -257,6 +257,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _canonical_url,
         _candidate_reason,
         _cheap_filter,
+        _discovery_source_pass,
         _discovery_query_lanes,
         _recent_topic_cooldown,
         _deduplicate_stage,
@@ -342,6 +343,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     stage30 = _cheap_filter(candidates, max_items=90, max_age_hours=48)
     stage20 = _deduplicate_stage(stage30, max_items=70)
     stage20 = _recent_topic_cooldown(conn, stage20, hours=36)
+    stage20 = [item for item in stage20 if _discovery_source_pass(item)]
     # Dashboard discovery keeps provenance on every event but does not require
     # multi-source corroboration before showing it to the human selector.
     stage12 = stage20
