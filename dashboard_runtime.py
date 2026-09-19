@@ -574,6 +574,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
+        self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
         self._dashboard_logs: list[str] = []
         self._activity_events: list[dict[str, Any]] = []
