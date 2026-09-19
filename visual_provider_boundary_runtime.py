@@ -153,9 +153,17 @@ def fetch_wikipedia_person(query: str, used_urls: set[str] | None = None, *_args
     return candidates[0] if candidates else None
 
 
+def _commons_search_query(query: str) -> str:
+    """Use the vocabulary Commons actually uses for match/event media."""
+    q = _clean_query(query)
+    q = re.sub(r"\bversus\b", "v", q, flags=re.IGNORECASE)
+    q = re.sub(r"\bvs\.?\b", "v", q, flags=re.IGNORECASE)
+    return q
+
+
 def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
     """Search Commons in one API request and return several image candidates."""
-    q = _clean_query(query)
+    q = _commons_search_query(query)
     if not q:
         return []
     payload = _api_json(
