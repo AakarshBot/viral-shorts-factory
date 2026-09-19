@@ -41,7 +41,8 @@ def validate_final_video(path: str) -> None:
 
 
 def validate_final_upload_metadata(title: str, description: str, comment: str = "") -> tuple[str, str, str]:
-    cleaned_title = str(title or "").strip()
+    from youtube_comment_runtime import ensure_shorts_title
+    cleaned_title = ensure_shorts_title(title)
     cleaned_description = str(description or "").strip()
     cleaned_comment = str(comment or "").strip()
     ok, reason = _validate_metadata(cleaned_title, cleaned_description, cleaned_comment)
