@@ -331,28 +331,9 @@ _RELATED_SUBJECT_ASSET_LIMIT = 3
 
 
 def _related_source_is_safe(source: str, visual_genre: str) -> bool:
-    """Return whether provider identity evidence is strong enough for reuse."""
+    """Allow only real, licensed sources for verified same-subject reuse."""
     source_l = str(source or "").strip().casefold()
-    genre_l = str(visual_genre or "").strip().upper()
-
-    # Wikipedia person candidates are title-filtered by the provider before
-    # their images reach this layer. Commons does not return equivalent
-    # per-image identity metadata, so do not reuse arbitrary person candidates.
-    if genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"}:
-        return source_l == "wikipedia"
-
-    # Commons is appropriate for explicit identity assets where the query and
-    # asset class itself provide strong source-level evidence.
-    return (
-        source_l == "commons"
-        and genre_l in {
-            "ORG_BRANDING",
-            "TEAM_BRANDING",
-            "MONEY_CURRENCY",
-            "FLAG_SYMBOL",
-            "TROPHY_AWARD",
-        }
-    )
+    return bool(source_l) and source_l not in {"visual-rescue", "cache", "ai-generated"}
 
 
 def _record_trusted_related_assets(
@@ -408,6 +389,61 @@ def _record_trusted_related_assets(
 
     if existing:
         seg["_verified_subject_assets"] = existing
+
+def _qa_stop_tier(tier_name: str) -> bool:
+    """Return True when semantic QA says retrieval cannot continue safely."""
+    text = str(tier_name or "").upper()
+    return any(
+        token in text
+        for token in (
+            "QA_VIDEO_BUDGET_EXHAUSTED",
+            "QA_SCENE_BUDGET_EXHAUSTED",
+            "QA_CIRCUIT_BREAKER",
+            "QA_QUOTA_OR_RATE_LIMIT",
+            "QA_NO_API_KEY",
+        )
+    )
+
+
+def _record_verified_related_assets(
+    seg: dict,
+    candidates: list[tuple],
+    source: str,
+    query: str,
+    visual_type: str,
+    visual_genre: str,
+) -> None:
+    """Store a small pool of candidates that passed the same semantic QA gate."""
+    existing = list(seg.get("_verified_subject_assets") or [])
+    existing_hashes = {
+        str(item.get("hash") or "")
+        for item in existing
+        if isinstance(item, dict)
+    }
+    if not _related_source_is_safe(source, visual_genre):
+        return
+    for candidate in candidates:
+        if len(existing) >= _RELATED_SUBJECT_ASSET_LIMIT:
+            break
+        _index, _data, normalized, image_hash, _priority, provenance = candidate
+        if image_hash in existing_hashes or not provenance_is_usable(provenance):
+            continue
+        existing.append(
+            {
+                "subject": str(seg.get("primary_entity") or "").strip(),
+                "bytes": normalized,
+                "hash": image_hash,
+                "source": str(source or "").strip(),
+                "query": str(query or "").strip(),
+                "visual_type": str(visual_type or "").strip().upper(),
+                "visual_genre": str(visual_genre or "").strip().upper(),
+                "provenance": dict(provenance),
+            }
+        )
+        existing_hashes.add(image_hash)
+    if existing:
+        seg["_verified_subject_assets"] = existing
+
 
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Search grounded phrases through raw providers and apply one QA boundary."""
@@ -499,6 +535,17 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 seg["asset_provenance"] = cached_provenance
                 return cached_img.convert("RGB"), False, "cached"
             cache_tier = str(cached_tier if "cached_tier" in locals() else "UNKNOWN")
+            if _qa_stop_tier(cache_tier):
+                _record_visual_rejection(
+                    seg,
+                    "qa_budget_exhausted",
+                    f"cache:{cache_tier}",
+                )
+                print(
+                    f"   [Visual QA] Hard stop at cache boundary: tier={cache_tier}",
+                    flush=True,
+                )
+                return make_visual_rescue(cache_entity, visual_type), False, "visual-rescue"
             if cached_provenance:
                 best_blocked_candidate = _remember_blocked_candidate(
                     best_blocked_candidate,
@@ -549,6 +596,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     )
 
     query_index = 0
+    qa_hard_stop = False
     while query_index < len(queries):
         query = queries[query_index]
         query_index += 1
@@ -720,6 +768,20 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     )
                     continue
 
+                if _qa_stop_tier(tier_name):
+                    _record_visual_rejection(
+                        seg,
+                        "qa_budget_exhausted",
+                        f"{source}:candidate {candidate_index}:{tier_name}",
+                    )
+                    print(
+                        f"   [Visual QA] Hard stop; no further candidates will be checked | "
+                        f"source={source} | query='{query}' | tier={tier_name}",
+                        flush=True,
+                    )
+                    qa_hard_stop = True
+                    break
+
                 if hard_reject or not accepted:
                     bucket = _gate_rejection_bucket(tier_name)
                     _record_visual_rejection(
@@ -766,18 +828,51 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
                 used_hashes.add(image_hash)
 
-                if trusted and candidate_offset + 1 < len(candidates):
-                    _record_trusted_related_assets(
-                        seg,
-                        bot,
-                        [item[1] for item in candidates],
-                        candidate_offset + 1,
-                        source,
-                        query,
-                        visual_type,
-                        visual_genre,
-                        used_hashes,
-                    )
+                if (
+                    bool(seg.get("_related_asset_rescue_eligible"))
+                    and candidate_offset + 1 < len(candidates)
+                    and verification_attempts < max_verification
+                ):
+                    related_candidates = []
+                    for extra_offset in range(1, min(
+                        _RELATED_SUBJECT_ASSET_LIMIT + 1,
+                        len(candidates) - candidate_offset,
+                    )):
+                        if verification_attempts >= max_verification:
+                            break
+                        extra = candidates[candidate_offset + extra_offset]
+                        verification_attempts += 1
+                        try:
+                            extra_ok, extra_tier, _extra_score, _extra_hard_reject = runtime._strict_gate(
+                                bot, extra[2], qa_scene, video_title, source=source
+                            )
+                        except Exception as exc:
+                            print(
+                                f"   [Visual QA] Related candidate verification failed: "
+                                f"{type(exc).__name__}: {exc}",
+                                flush=True,
+                            )
+                            continue
+                        if _qa_stop_tier(extra_tier):
+                            _record_visual_rejection(
+                                seg,
+                                "qa_budget_exhausted",
+                                f"{source}:related:{extra[0]}:{extra_tier}",
+                            )
+                            qa_hard_stop = True
+                            break
+                        if extra_ok and provenance_is_usable(extra[5]):
+                            related_candidates.append(extra)
+                    if related_candidates:
+                        _record_verified_related_assets(
+                            seg,
+                            related_candidates,
+                            source,
+                            query,
+                            visual_type,
+                            visual_genre,
+                        )
+
                 seg["visual_verified"] = True
                 seg["visual_rescue_reason"] = ""
                 seg["visual_fallback_reason"] = ""
@@ -790,6 +885,9 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     flush=True,
                 )
                 return Image.open(io.BytesIO(normalized)).convert("RGB"), False, source
+
+        if qa_hard_stop:
+            break
 
         if provider_checks >= max_provider_checks:
             if verification_attempts >= max_verification:
