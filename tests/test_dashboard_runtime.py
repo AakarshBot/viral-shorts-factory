@@ -650,7 +650,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
 
 
 def test_dashboard_ai_discovery_uses_bounded_query_lanes():
-    source = open("dashboard_runtime.py", encoding="utf-8").read()
+    source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
     assert "_discovery_query_lanes" in source
     assert "ThreadPoolExecutor(max_workers=8" in source
     assert "_discovery_query_lanes(query, genre_key=category)[:2]" in source
