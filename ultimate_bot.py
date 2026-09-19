@@ -20,6 +20,7 @@ from tqdm import tqdm
 import hashlib
 import math
 import traceback
+import subprocess
 
 load_dotenv()
 
@@ -1105,7 +1106,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"2. INFORMATIVE BODY (Scenes 2 to N-1): Deliver hard facts directly from the SOURCE DATA.\n"
         f"3. STANDARDIZED OUTRO (Final Scene): Ask ONE tight question about the story, followed EXACTLY by: 'Like, Share, and Subscribe to our channel for more {genre_label}.'\n"
         f"4. METADATA LAWS:\n"
-        f"   - Titles: Generate exactly 3 titles based ON THE FINAL SCRIPT KEYWORDS. Append ' #shorts' to ALL 3. Front-load keywords into the first 45 chars.\n"
+        f"   - Titles: Generate exactly 3 titles based ON THE FINAL SCRIPT KEYWORDS. Do not add a forced #shorts suffix. Front-load keywords into the first 45 chars.\n"
         f"   - Description: A 2-sentence summary of the script, followed by '\\n\\n👇 Follow for daily updates!\\n\\n', followed by 5-7 hashtags (2 broad, 2-3 specific, and #Trending).\n"
         f"   - Pinned Comment: Match the engaging question asked in the final scene.\n"
         f"5. VISUALS (CRITICAL): You act as Visual Director. For each scene, identify the 'primary_entity' (ONE specific person/thing) ONLY from the supplied SOURCE DATA. NEVER invent, guess, substitute, or introduce a person, team, organisation, place, product, event, or other identity that is not explicitly supported by the SOURCE DATA. Visual examples in this instruction are examples only and are NEVER story facts. If no specific identity is supported for a scene, use a supported story-level entity or a descriptive/context visual instead of inventing a name. The 'primary_entity' must be traceable to the supplied story evidence. Define 'visual_intent' ('editorial_person', 'stadium_event', 'news_event', 'conceptual'). Provide a 'specific_search_prompt' optimized for image search, but never introduce unsupported names into that prompt. If a person appears multiple times, strictly vary the search prompt using only supported context.\n"
@@ -1119,7 +1120,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"  \"step_2_data_points\": \"...\",\n"
         f"  \"step_3_critique\": \"...\",\n"
         f"  \"step_4_metadata\": \"...\",\n"
-        f"  \"titles\": [\"Factual Title 1 #shorts\", \"Metric Title 2 #shorts\", \"Question Title 3 #shorts\"],\n"
+        f"  \"titles\": [\"Factual Title 1\", \"Metric Title 2\", \"Question Title 3\"],\n"
         f"  \"recommended_title_index\": 1,\n"
         f"  \"seo_description\": \"...\",\n"
         f"  \"tags\": [\"Tag1\", \"Tag2\"],\n"
@@ -1577,14 +1578,127 @@ def generate_karaoke_clip(chunk, active_index, font_path, video_width, output_pa
 
     img.save(output_path, "PNG")
     return output_path
+
+def _scene_visual_segment_count(scene_duration):
+    """Keep each visual beat no longer than four seconds when narration is long."""
+    try:
+        duration = max(0.0, float(scene_duration))
+    except (TypeError, ValueError):
+        duration = 0.0
+    return max(1, int(math.ceil(duration / 4.0)))
+
+
+def _caption_y_position(video_height, scene_source_type="", format_mode="regular"):
+    """Place captions away from Top-5 ranking text and the lower safe area."""
+    if str(format_mode or "").lower() == "top5":
+        return int(video_height * 0.67)
+    if str(scene_source_type or "").lower() == "person":
+        return int(video_height * 0.60)
+    return int(video_height * 0.52)
+
+
+def _hook_headline_from_scene(scene_text, max_words=8):
+    """Take a compact headline directly from scene-one narration."""
+    text = re.sub(r"\s+", " ", str(scene_text or "")).strip()
+    if not text:
+        return ""
+    sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
+    return " ".join(sentence.split()[:max_words]).strip(" -:|")
+
+
+def _render_hook_headline_overlay(hook_text, font_path, output_path, width=780, height=190):
+    """Render the scene-one hook inside the upper safe area."""
+    hook_text = _hook_headline_from_scene(hook_text)
+    if not hook_text:
+        return None
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle(
+        (2, 2, width - 3, height - 3),
+        radius=28,
+        fill=(7, 13, 23, 222),
+        outline=PALETTE["accent_primary"] + (210,),
+        width=3,
+    )
+    draw.rectangle((28, 22, 170, 28), fill=PALETTE["accent_primary"] + (245,))
+    font, lines = fit_text_in_box(
+        hook_text,
+        font_path,
+        width - 70,
+        height - 54,
+        start_size=58,
+    )
+    line_heights = []
+    for line in lines[:2]:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_heights.append(max(1, bbox[3] - bbox[1]))
+    gap = 10
+    total_h = sum(line_heights) + gap * max(0, len(line_heights) - 1)
+    y = max(28, (height - total_h) // 2)
+    for line, line_h in zip(lines[:2], line_heights):
+        bbox = draw.textbbox((0, 0), line, font=font)
+        text_w = bbox[2] - bbox[0]
+        x = (width - text_w) / 2
+        draw.text(
+            (x + 4, y + 5),
+            line,
+            font=font,
+            fill=(0, 0, 0, 210),
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 210),
+        )
+        draw.text(
+            (x, y),
+            line,
+            font=font,
+            fill=PALETTE["text_primary"],
+            stroke_width=1,
+            stroke_fill=(0, 0, 0, 245),
+        )
+        y += line_h + gap
+    image.save(output_path, "PNG")
+    return output_path
+
+
+def _normalize_audio_loudness(input_path, output_path):
+    """Normalize final program audio to approximately -14 LUFS with FFmpeg."""
+    ffmpeg_bin = os.getenv("IMAGEIO_FFMPEG_EXE", "ffmpeg").strip() or "ffmpeg"
+    if not os.path.isabs(ffmpeg_bin):
+        ffmpeg_bin = shutil.which(ffmpeg_bin) or ffmpeg_bin
+    command = [
+        ffmpeg_bin, "-y", "-i", input_path,
+        "-map", "0:v:0", "-map", "0:a:0",
+        "-c:v", "copy",
+        "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        raise RuntimeError(
+            "Final audio loudness normalization failed: " + str(detail)[-1600:]
+        ) from exc
+    return output_path
+
+
 def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
-    print("\n🎬 Rendering Kinetic Final Video (MoviePy v2+ Standards & Glossy Branding)...")
+    print("\n🎬 Rendering Kinetic Final Video (captions, motion, branding and loudness)...")
     if not scene_visual_packages:
         raise ValueError("No visual packages were supplied.")
     if not audio_paths:
         raise ValueError("No audio files were supplied.")
 
     video_output_path = os.path.join(ASSETS_DIR, "final_video_output.mp4")
+    pre_loudness_path = os.path.join(ASSETS_DIR, "final_video_preloudnorm.mp4")
     from moviepy import (
         ImageClip,
         AudioFileClip,
@@ -1593,11 +1707,11 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
     )
     from moviepy.audio.AudioClip import CompositeAudioClip
     from moviepy.audio.fx import AudioLoop
+    from moviepy.video.fx import FadeIn, FadeOut
 
     width, height = 1080, 1920
     final_clips = []
     audio_clips = []
-    text_clips_all = []
     bgm_clip = None
 
     sfx_files = [
@@ -1621,23 +1735,50 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             scene_duration = max(0.1, (audio.duration + 0.25) if audio else 4.0)
             bg_image_file = layer_paths[0]["image"]
             scene_source_type = layer_paths[0].get("source_type", "bg")
+            segment_count = _scene_visual_segment_count(scene_duration)
+            segment_duration = scene_duration / segment_count
 
-            bg_clip = ImageClip(bg_image_file).with_duration(scene_duration)
+            background_clips = []
+            for cut_idx in range(segment_count):
+                bg_clip = ImageClip(bg_image_file).with_duration(segment_duration)
 
-            if idx % 3 == 0:
-                scale_fn = lambda t: 1.10 + 0.05 * min(
-                    t / max(0.1, scene_duration), 1.0
-                )
-            elif idx % 3 == 1:
-                scale_fn = lambda t: 1.15 - 0.05 * min(
-                    t / max(0.1, scene_duration), 1.0
-                )
-            else:
-                scale_fn = lambda t: 1.05 + 0.03 * min(
-                    t / max(0.1, scene_duration), 1.0
-                )
+                def scale_at(t, scene_index=idx, cut_index=cut_idx):
+                    progress = min(
+                        max(0.0, float(t)) / max(0.1, segment_duration),
+                        1.0,
+                    )
+                    if scene_index == 0:
+                        return 1.18 + 0.10 * progress
+                    base = 1.08 + 0.03 * ((scene_index + cut_index) % 3)
+                    if cut_index % 2 == 0:
+                        return base + 0.07 * progress
+                    return base + 0.07 * (1.0 - progress)
 
-            bg_anim = bg_clip.resized(scale_fn).with_position(("center", "center"))
+                def position_at(t, scene_index=idx, cut_index=cut_idx):
+                    progress = min(
+                        max(0.0, float(t)) / max(0.1, segment_duration),
+                        1.0,
+                    )
+                    scale = scale_at(t, scene_index, cut_index)
+                    overflow_x = max(0.0, (width * scale - width) / 2.0)
+                    overflow_y = max(0.0, (height * scale - height) / 2.0)
+                    if scene_index == 0:
+                        return (
+                            -overflow_x * (0.35 + 0.35 * progress),
+                            -overflow_y * (0.15 + 0.25 * progress),
+                        )
+                    direction = -1.0 if (scene_index + cut_index) % 2 else 1.0
+                    return (
+                        -overflow_x * (0.15 + 0.45 * progress) * direction,
+                        -overflow_y * (0.10 + 0.25 * progress) * (-direction),
+                    )
+
+                background_clips.append(
+                    bg_clip
+                    .resized(scale_at)
+                    .with_position(position_at)
+                    .with_start(cut_idx * segment_duration)
+                )
 
             if idx > 0 and sfx_files:
                 try:
@@ -1647,116 +1788,126 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                         .with_duration(min(0.5, scene_duration))
                     )
                     audio_clips.append(sfx_clip)
-                    if audio is not None:
-                        scene_audio = CompositeAudioClip([audio, sfx_clip])
-                    else:
-                        scene_audio = sfx_clip
+                    scene_audio = (
+                        CompositeAudioClip([audio, sfx_clip])
+                        if audio is not None
+                        else sfx_clip
+                    )
                 except Exception:
                     scene_audio = audio
             else:
                 scene_audio = audio
 
             text_clips = []
-            is_outro_scene = idx == len(scene_visual_packages) - 1
-            is_hook_scene = idx == 0 and format_mode in [
-                "regular", "trending", "tech_reviews"
-            ]
-
-            # Subtitles are intentionally omitted from hook/title and Top-5 cards:
-            # those frames already contain their editorial text. For normal scenes,
-            # render one stable caption image per timing chunk instead of one image
-            # for every word. Word timings still define the chunk's display window.
-            is_top5_scene = format_mode == "top5"
-            if not is_outro_scene and not is_hook_scene and not is_top5_scene and idx < len(word_timings):
-                scene_wt = word_timings[idx]
-                if not scene_wt:
-                    raw_text = layer_paths[0].get("text", "")
-                    words = raw_text.split()
-                    if words:
-                        dur_per_word = max(
-                            0.1, (scene_duration - 0.2) / len(words)
-                        )
-                        curr_t = 0.1
-                        for word in words:
-                            scene_wt.append({
+            scene_wt = word_timings[idx] if idx < len(word_timings) else []
+            if not scene_wt:
+                raw_text = (
+                    layer_paths[0].get("narration_text")
+                    or layer_paths[0].get("text")
+                    or ""
+                )
+                words = str(raw_text).split()
+                if words:
+                    dur_per_word = max(0.1, (scene_duration - 0.2) / len(words))
+                    curr_t = 0.1
+                    scene_wt = []
+                    for word in words:
+                        scene_wt.append(
+                            {
                                 "word": word,
                                 "start": curr_t,
                                 "end": min(scene_duration, curr_t + dur_per_word),
-                            })
-                            curr_t += dur_per_word
+                            }
+                        )
+                        curr_t += dur_per_word
 
-                chunks, current_chunk, current_len = [], [], 0
-                for wt in scene_wt:
-                    if not isinstance(wt, dict):
-                        continue
-                    raw_word = safe_text(wt.get("word"), "")
-                    w_text = re.sub(
-                        r"[^\x00-\x7F\u0900-\u097F\u0C00-\u0C7F]+",
-                        "",
-                        raw_word,
-                    ).strip()
-                    if not w_text:
-                        continue
-                    wt["word"] = w_text
-
-                    if current_len + len(w_text) > 18 and current_chunk:
-                        chunks.append(current_chunk)
-                        current_chunk, current_len = [], 0
-                    current_chunk.append(wt)
-                    current_len += len(w_text) + 1
-                if current_chunk:
+            chunks, current_chunk, current_len = [], [], 0
+            for wt in scene_wt:
+                if not isinstance(wt, dict):
+                    continue
+                raw_word = safe_text(wt.get("word"), "")
+                w_text = re.sub(
+                    r"[^\x00-\x7F\u0900-\u097F\u0C00-\u0C7F]+",
+                    "",
+                    raw_word,
+                ).strip()
+                if not w_text:
+                    continue
+                wt["word"] = w_text
+                if current_len + len(w_text) > 18 and current_chunk:
                     chunks.append(current_chunk)
+                    current_chunk, current_len = [], 0
+                current_chunk.append(wt)
+                current_len += len(w_text) + 1
+            if current_chunk:
+                chunks.append(current_chunk)
 
-                safe_y_pos = int(height * 0.60) if scene_source_type == "person" else int(height * 0.50)
-
-                for chunk_idx, chunk in enumerate(chunks):
-                    if not chunk:
-                        continue
-                    start_t = max(0.0, float(chunk[0].get("start", 0.0)))
+            safe_y_pos = _caption_y_position(height, scene_source_type, format_mode)
+            for chunk_idx, chunk in enumerate(chunks):
+                for active_idx, wt in enumerate(chunk):
+                    start_t = max(0.0, float(wt.get("start", 0.0)))
                     end_t = min(
                         scene_duration,
                         max(
-                            start_t + 0.1,
-                            float(chunk[-1].get("end", start_t + 0.1)) + 0.05,
+                            start_t + 0.08,
+                            float(wt.get("end", start_t + 0.08)),
                         ),
                     )
                     if start_t >= scene_duration or end_t <= start_t:
                         continue
-
                     sub_path = os.path.join(
-                        ASSETS_DIR, f"sub_{idx}_{chunk_idx}.png"
+                        ASSETS_DIR,
+                        f"sub_{idx}_{chunk_idx}_{active_idx}.png",
                     )
                     generate_karaoke_clip(
-                        chunk, 0, font_path, width, sub_path
+                        chunk, active_idx, font_path, width, sub_path
                     )
-                    txt_clip = (
+                    text_clips.append(
                         ImageClip(sub_path)
                         .with_start(start_t)
                         .with_duration(end_t - start_t)
                         .with_position(("center", safe_y_pos))
                     )
-                    text_clips.append(txt_clip)
-                    text_clips_all.append(txt_clip)
 
-            # Canonical final branding is composited here, inside the existing
-            # MoviePy render. This avoids a second full-video FFmpeg encode.
+            if idx == 0:
+                first_scene_text = (
+                    layer_paths[0].get("narration_text")
+                    or layer_paths[0].get("text")
+                    or " ".join(
+                        safe_text(item.get("word"), "")
+                        for item in scene_wt
+                        if isinstance(item, dict)
+                    )
+                )
+                hook_path = os.path.join(ASSETS_DIR, "hook_headline.png")
+                if _render_hook_headline_overlay(
+                    first_scene_text, font_path, hook_path
+                ):
+                    hook_duration = min(2.0, scene_duration)
+                    if hook_duration >= 1.5:
+                        text_clips.append(
+                            ImageClip(hook_path)
+                            .with_start(0)
+                            .with_duration(hook_duration)
+                            .with_position(("center", 220))
+                            .with_effects([FadeIn(0.18), FadeOut(0.30)])
+                        )
+
             from branding_runtime import build_scene_branding_overlays
 
             source_provenance = layer_paths[0].get("asset_provenance") or {}
-            source_credit = source_provenance if isinstance(source_provenance, dict) else str(
-                layer_paths[0].get("source_credit")
-                or ""
-            ).strip()
+            source_credit = (
+                source_provenance
+                if isinstance(source_provenance, dict)
+                else str(layer_paths[0].get("source_credit") or "").strip()
+            )
             branding_layers = [
                 ImageClip(rgba).with_duration(scene_duration)
                 for rgba in build_scene_branding_overlays(
-                    None,
-                    width,
-                    height,
-                    source_credit,
+                    None, width, height, source_credit
                 )
             ]
-            scene_layers = [bg_anim] + text_clips + branding_layers
+            scene_layers = background_clips + text_clips + branding_layers
             scene = CompositeVideoClip(
                 scene_layers, size=(width, height)
             ).with_duration(scene_duration)
@@ -1794,10 +1945,15 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             except Exception:
                 bgm_clip = None
 
-        # Final branding_runtime owns the channel logo and border finish.
+        if os.path.exists(pre_loudness_path):
+            try:
+                os.remove(pre_loudness_path)
+            except OSError:
+                pass
+
         print("   [+] Writing video file to disk for Quality Control...")
         final_master.write_videofile(
-            video_output_path,
+            pre_loudness_path,
             fps=24,
             preset="ultrafast",
             codec="libx264",
@@ -1806,6 +1962,8 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             temp_audiofile=os.path.join(ASSETS_DIR, "temp_audio.m4a"),
             remove_temp=True,
         )
+        print("   [+] Normalizing final audio to approximately -14 LUFS...")
+        _normalize_audio_loudness(pre_loudness_path, video_output_path)
         return video_output_path
 
     finally:
@@ -1829,6 +1987,11 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 final_master.close()
         except Exception:
             pass
+        try:
+            if os.path.exists(pre_loudness_path):
+                os.remove(pre_loudness_path)
+        except OSError:
+            pass
 
 def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_keyword=None):
     print("\n🚀 Initializing Live YouTube Upload...")
@@ -1850,22 +2013,35 @@ def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_ke
         if trend_keyword and trend_keyword.lower() not in raw_title.lower():
             raw_title = f"{trend_keyword}: {raw_title}"
 
-        title_without_suffix = raw_title.replace("#shorts", "").strip()
-        title = f"{title_without_suffix[:91].strip()} #shorts"
+        title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip()[:100]
+        if not title:
+            title = "Shorts"
 
         desc_body = safe_text(script_data.get("seo_description"), "")
         if trend_keyword and trend_keyword.lower() not in desc_body.lower():
             desc_body = f"Trending now: {trend_keyword}. {desc_body}"
 
-        category_tags = list(
-            genre_cfg.get("hashtags", ["#Shorts", "#Trending"])
-        )
+        category_tags = []
         if trend_keyword:
             trend_tag = re.sub(r"[^a-zA-Z0-9]", "", trend_keyword)
             if trend_tag:
-                category_tags.insert(0, f"#{trend_tag}")
-
-        hashtags_str = " ".join(category_tags[:5])
+                category_tags.append(f"#{trend_tag}")
+        for tag in genre_cfg.get("hashtags", []):
+            clean_tag = str(tag or "").strip()
+            if clean_tag and not clean_tag.startswith("#"):
+                clean_tag = "#" + re.sub(r"[^a-zA-Z0-9]", "", clean_tag)
+            if clean_tag:
+                category_tags.append(clean_tag)
+        seen_tags = set()
+        clean_tags = []
+        for tag in category_tags:
+            key = tag.casefold()
+            if key not in seen_tags:
+                seen_tags.add(key)
+                clean_tags.append(tag)
+            if len(clean_tags) == 3:
+                break
+        hashtags_str = " ".join(clean_tags)
         description = (
             f"{desc_body}\n\n{hashtags_str}\n\nFollow for daily updates!"
         ).strip()
