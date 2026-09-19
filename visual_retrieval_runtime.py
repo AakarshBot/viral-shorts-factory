@@ -22,6 +22,13 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from visual_taxonomy_runtime import classify_visual_genre, genre_allows_ai
+from visual_licensing_runtime import (
+    ai_provenance,
+    candidate_bytes,
+    candidate_provenance,
+    provenance_is_usable,
+    rescue_provenance,
+)
 
 
 ABSTRACT_TYPES = {"PROCESS", "CONCEPT", "GENERAL_CONTEXT"}
@@ -286,6 +293,9 @@ def _record_trusted_related_assets(
         if not trusted or not _related_source_is_safe(source, visual_genre):
             continue
 
+        record = candidate_provenance(data)
+        if not provenance_is_usable(record):
+            continue
         existing.append(
             {
                 "subject": str(seg.get("primary_entity") or "").strip(),
@@ -295,6 +305,7 @@ def _record_trusted_related_assets(
                 "query": str(query or "").strip(),
                 "visual_type": str(visual_type or "").strip().upper(),
                 "visual_genre": str(visual_genre or "").strip().upper(),
+                "provenance": record,
             }
         )
         existing_hashes.add(image_hash)
@@ -339,6 +350,19 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     cache_entity = visual_anchor
 
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
+    cached_provenance = {}
+    if cached_img is not None:
+        try:
+            import json
+            import os as _os
+            meta_path = _os.path.splitext(str(_cache_path))[0] + ".json"
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                cached_meta = json.load(fh)
+            cached_provenance = candidate_provenance(cached_meta.get("provenance") or {})
+        except Exception:
+            cached_img = None
+        if cached_img is not None and not provenance_is_usable(cached_provenance):
+            cached_img = None
     if cached_img is not None:
         buffer = io.BytesIO()
         cached_img.save(buffer, format="JPEG", quality=95)
@@ -364,6 +388,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 seg["visual_fallback_reason"] = ""
                 seg["visual_query_used"] = "cache"
                 seg["visual_verification_attempts"] = int(seg.get("visual_verification_attempts") or 0) + 1
+                seg["asset_provenance"] = cached_provenance
                 return cached_img.convert("RGB"), False, "cached"
             print(
                 f"   [Visual Cache] QC rejected cached candidate | tier={cached_tier if 'cached_tier' in locals() else 'UNKNOWN'}",
@@ -462,8 +487,29 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     continue
 
                 if accepted:
+                    record = candidate_provenance(data)
+                    if not provenance_is_usable(record):
+                        print(
+                            f"   [Visual Licensing] rejected candidate without usable provenance | source={source}",
+                            flush=True,
+                        )
+                        continue
                     try:
-                        runtime.save_to_cache(bot, normalized, cache_entity, visual_type, source, context)
+                        cache_path = runtime.save_to_cache(
+                            bot, normalized, cache_entity, visual_type, source, context
+                        )
+                        if cache_path:
+                            import json
+                            meta_path = os.path.splitext(str(cache_path))[0] + ".json"
+                            try:
+                                with open(meta_path, "r", encoding="utf-8") as fh:
+                                    meta = json.load(fh)
+                            except Exception:
+                                meta = {}
+                            meta["provenance"] = record
+                            meta["verified"] = True
+                            with open(meta_path, "w", encoding="utf-8") as fh:
+                                json.dump(meta, fh, ensure_ascii=False, indent=2)
                     except Exception:
                         pass
 
@@ -486,6 +532,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     seg["visual_fallback_reason"] = ""
                     seg["visual_query_used"] = query
                     seg["visual_verification_attempts"] = verification_attempts
+                    seg["asset_provenance"] = record
                     print(
                         f"   [Visual Source] {source} | VERIFIED | tier={tier_name} | score={score} | "
                         f"candidate={candidate_index}/{len(candidates)} | query='{query}'",
@@ -523,6 +570,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     seg["visual_fallback_reason"] = ""
                     seg["visual_query_used"] = prompt_text
                     seg["visual_verification_attempts"] = verification_attempts
+                    seg["asset_provenance"] = ai_provenance()
                     return Image.open(io.BytesIO(normalized)).convert("RGB"), True, "ai-generated"
         else:
             print(f"   [Visual Source] AI image rejected before QA: {reason}", flush=True)
@@ -533,6 +581,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     seg["visual_fallback_reason"] = ""
     seg["visual_query_used"] = ""
     seg["visual_verification_attempts"] = verification_attempts
+    seg["asset_provenance"] = rescue_provenance()
     print(
         f"   [Visual Rescue] Real sources exhausted; generated guaranteed non-blank visual | "
         f"type={visual_type} genre={visual_genre} phrases={len(queries)} provider_checks={provider_checks} "
