@@ -162,8 +162,7 @@ def _anchors(script_data:dict[str,Any])->list[str]:
     low=[key(w) for w in words]
 
     # Teams/collectives: take the identity through the cue, never the action
-    # that follows it (for example, 'India women\'s team' from a headline that
-    # continues with 'win the T20 World Cup').
+    # that follows it.
     for i, token in enumerate(low):
         if token in gender_words and i + 1 < len(words) and low[i + 1] in {'team','squad'}:
             start=max(0,i-2)
@@ -183,14 +182,35 @@ def _anchors(script_data:dict[str,Any])->list[str]:
                 start-=1; steps+=1
             found.append(' '.join(words[start:i+1]))
 
-    # Single title-cased headline tokens can still serve as fallback anchors
-    # (for example "Japan" or "BCCI"), but never promote a multi-word title-case
-    # fragment such as "India To Play Historic" into an entity.
+    # Safe proper-name fallback for mixed-case headlines. A title whose words
+    # are broadly title-cased is treated as headline formatting, not entity
+    # evidence, so fragments like "India To Play Historic" are never grouped.
+    headline_title_case_ratio = (
+        sum(1 for word in words if word[:1].isupper())
+        / max(1, len(words))
+    )
+    if headline_title_case_ratio < 0.60:
+        for start in range(max(0, len(words) - 1)):
+            first, second = words[start], words[start + 1]
+            first_key, second_key = key(first), key(second)
+            if (
+                first[:1].isupper()
+                and second[:1].isupper()
+                and len(first) > 2
+                and len(second) > 2
+                and first_key not in _GENERIC
+                and second_key not in _GENERIC
+                and first_key not in _STOP
+                and second_key not in _STOP
+            ):
+                found.append(f"{first} {second}")
+
+    # All-uppercase tokens remain safe acronym anchors such as "BCCI" or "NASA".
     for word in words:
-        token = key(word)
+        token=key(word)
         if (
-            word[:1].isupper()
-            and len(word) > 2
+            word.isupper()
+            and len(word) >= 3
             and token not in _GENERIC
             and token not in _STOP
         ):
@@ -224,11 +244,17 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
         score,reason=_support(original,evidence,role)
     if score>=0.80 or (role in _NON_STABLE and not source_name_contamination and not contaminated): return {"entity":original,"grounded":True,"changed":False,"reason":reason,"confidence":score or 0.6,"original_entity":original}
     if not (source_name_contamination and not explicit_branding):
+        # Headline text is not general identity evidence. It is allowed only as
+        # support for the narrowly constrained anchors produced above.
+        anchor_support = (evidence + "\n" + _strip_domains(
+            script_data.get("title") or script_data.get("step_1_headline") or ""
+        )).strip()
         for anchor in _anchors(script_data):
             if _entity_matches_publisher(anchor,script_data) and not explicit_branding:
                 continue
-            a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
-            if a_score>=0.80: return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
+            a_score,a_reason=_support(anchor,anchor_support,_role(scene,anchor))
+            if a_score>=0.80:
+                return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
     return {"entity":original,"grounded":False,"changed":False,"reason":reason,"confidence":0.0,"original_entity":original}
 
 def apply_grounding(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
