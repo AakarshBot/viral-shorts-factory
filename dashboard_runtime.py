@@ -550,6 +550,8 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approval_event = threading.Event()
         self._script_review_event = threading.Event()
         self._script_review_submitted = False
+        self._creator_insight = ""
+        self._creator_insight_submitted = False
         self._script_visual_queries: list[str] = []
         self._visual_approved = False
         self._visual_rejected = False
@@ -572,6 +574,8 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_approval_event.clear()
         self._script_review_event.clear()
         self._script_review_submitted = False
+        self._creator_insight = ""
+        self._creator_insight_submitted = False
         self._script_visual_queries = []
         self._visual_approved = False
         self._visual_rejected = False
@@ -671,6 +675,8 @@ class DashboardWorkflowController(WorkflowController):
 
                 self._script_review_event.clear()
                 self._script_review_submitted = False
+                self._creator_insight = ""
+                self._creator_insight_submitted = False
                 with self._lock:
                     self._script_visual_queries = [""] * len(scenes)
                     self.state.script_data = result
@@ -678,18 +684,41 @@ class DashboardWorkflowController(WorkflowController):
                 self.update(
                     "script_review",
                     40,
-                    f"The script is ready. Review {len(scenes)} slides and add optional image-search queries.",
+                    f"The script is ready. Add your Creator Insight and review {len(scenes)} slides.",
                 )
                 self._script_review_event.wait(timeout=24 * 60 * 60)
 
-                if not self._script_review_submitted:
+                if not self._script_review_submitted or not self._creator_insight_submitted:
                     raise RuntimeError(
-                        "Script visual-query review timed out. The production run was stopped."
+                        "Script review timed out or Creator Insight was not submitted. The production run was stopped."
                     )
 
                 with self._lock:
                     queries = list(self._script_visual_queries)
                     script_scenes = result.get("script") or []
+                    insight = str(self._creator_insight or "").strip()
+
+                if len(insight.split()) < 12:
+                    raise RuntimeError("Creator Insight must contain at least 12 words.")
+
+                if len(script_scenes) < 2:
+                    raise RuntimeError("Creator Insight requires at least two generated scenes.")
+
+                insight_scene = {
+                    "voiceover": insight,
+                    "primary_entity": str(script_scenes[-1].get("primary_entity") or script_scenes[0].get("primary_entity") or "").strip(),
+                    "visual_intent": "conceptual",
+                    "specific_search_prompt": "creator insight context",
+                    "sport_or_topic_category": str(script_scenes[-1].get("sport_or_topic_category") or ""),
+                    "human_contributed": True,
+                }
+                script_scenes.insert(len(script_scenes) - 1, insight_scene)
+                result["script"] = script_scenes
+                result["creator_insight"] = insight
+                result["creator_insight_required"] = True
+                with self._lock:
+                    self.state.script_data = result
+                    self._script_visual_queries = (queries + [""])[:len(script_scenes)]
 
                 for index, scene in enumerate(script_scenes):
                     if not isinstance(scene, dict):
@@ -765,7 +794,7 @@ class DashboardWorkflowController(WorkflowController):
         self.bot.process_visuals_async = dashboard_visual_gate
         self._dashboard_visual_gate_bound = True
 
-    def submit_script_visual_queries(self, queries: list[str]) -> bool:
+    def submit_script_visual_queries(self, queries: list[str], creator_insight: str = "") -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "script_review":
             return False
@@ -777,8 +806,13 @@ class DashboardWorkflowController(WorkflowController):
 
         cleaned = [str(query or "").strip() for query in list(queries or [])]
         cleaned = (cleaned + [""] * len(scenes))[:len(scenes)]
+        insight = str(creator_insight or "").strip()
+        if len(insight.split()) < 12:
+            return False
 
         with self._lock:
+            self._creator_insight = insight
+            self._creator_insight_submitted = True
             self._script_visual_queries = cleaned
             live_script = self.state.script_data
             if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
@@ -1018,6 +1052,8 @@ class DashboardWorkflowController(WorkflowController):
             data.update(
                 {
                     "script_review_required": data.get("stage") == "script_review",
+                    "creator_insight": self._creator_insight,
+                    "creator_insight_required": data.get("stage") == "script_review",
                     "script_visual_queries": list(self._script_visual_queries),
                     "visual_packages": list(self._visual_packages),
                     "visual_review_required": data.get("stage") == "visual_approval",
