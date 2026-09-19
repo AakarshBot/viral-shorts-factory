@@ -143,3 +143,53 @@ def test_entity_aware_clustering_blocks_conflicting_actions_for_same_entities():
     events = cluster_news_events(articles)
 
     assert len(events) == 2
+
+
+def test_cluster_tracks_development_velocity_and_gdelt_discovery_gap():
+    articles = [
+        {
+            **_article(
+                "OpenAI announces new model release",
+                "https://gdelt.example/openai-release",
+                "gdelt.example",
+                "2026-09-18T08:00:00+00:00",
+            ),
+            "collection_source": "gdelt",
+        },
+        {
+            **_article(
+                "OpenAI releases new model after announcement",
+                "https://reuters.com/openai-release",
+                "Reuters",
+                "2026-09-18T07:50:00+00:00",
+            ),
+            "collection_source": "test",
+        },
+    ]
+
+    events = cluster_news_events(articles)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_velocity_score"] > 0
+    assert event["event_development_state"] in {"breaking", "developing", "established"}
+    assert event["event_gdelt_article_count"] == 1
+    assert event["event_non_gdelt_article_count"] == 1
+    assert event["event_discovery_gap"] is False
+
+
+def test_cluster_marks_gdelt_only_event_as_discovery_gap():
+    article = {
+        **_article(
+            "New quantum computing breakthrough announced",
+            "https://gdelt.example/quantum",
+            "gdelt.example",
+        ),
+        "collection_source": "gdelt",
+    }
+
+    events = cluster_news_events([article])
+
+    assert len(events) == 1
+    assert events[0]["event_discovery_gap"] is True
+    assert events[0]["event_development_state"] == "single-source"
