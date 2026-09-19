@@ -299,3 +299,18 @@ def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
 
     assert script_data["visual_rescue_count"] == 2
     assert script_data["visual_fallback_count"] == 2
+
+def test_global_manual_queries_remain_available_as_fallback():
+    from manual_visual_query_runtime import assign_manual_queries
+
+    scenes = [
+        {"primary_entity": "India Afghanistan cricket match", "voiceover": "The final match is underway."},
+        {"primary_entity": "Shubman Gill", "voiceover": "Gill is leading the batting."},
+    ]
+    assignments = assign_manual_queries(
+        scenes,
+        "India Afghanistan cricket match; Shubman Gill batting",
+    )
+
+    assert assignments[0]["query"] == "India Afghanistan cricket match"
+    assert assignments[1]["query"] == "Shubman Gill batting"
