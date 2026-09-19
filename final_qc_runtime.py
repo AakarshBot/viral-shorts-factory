@@ -23,8 +23,8 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
         return False, "final title is empty"
     if len(title) > 100:
         return False, "final title exceeds 100 characters"
-    if re.search(r"#shorts\b", title, flags=re.IGNORECASE):
-        return False, "#shorts is not allowed in the title"
+    if not re.search(r"#shorts\b", title, flags=re.IGNORECASE):
+        return False, "title must include #shorts"
     if len(description.split()) < 10:
         return False, "final description is too short"
     if len(description) > 5000:
