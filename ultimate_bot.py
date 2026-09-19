@@ -2177,17 +2177,6 @@ def font_preflight_check(lang_cfg):
         pass
 
 
-def _run_manual_workflow_hook(web_config, hook_key, payload, description):
-    """Run a dashboard/manual workflow checkpoint from the core production path."""
-    if not isinstance(web_config, dict):
-        return payload
-    hook = web_config.get(hook_key)
-    if not callable(hook):
-        return payload
-    print(f"   [Workflow Gate] {description}", flush=True)
-    result = hook(payload)
-    return result if result is not None else payload
-
 # ==========================================
 # STEP 1 UPDATE: STREAMLIT DASHBOARD SUPPORT
 # ==========================================
@@ -2198,6 +2187,17 @@ def run_robot(web_config=None):
 
     # If web_config is passed, it forces headless mode automatically
     is_headless = "--headless" in sys.argv or web_config is not None
+    def _run_manual_workflow_hook(payload, hook_key, description):
+        """Run a dashboard/manual workflow checkpoint from the core production path."""
+        if not isinstance(web_config, dict):
+            return payload
+        hook = web_config.get(hook_key)
+        if not callable(hook):
+            return payload
+        print(f"   [Workflow Gate] {description}", flush=True)
+        result = hook(payload)
+        return result if result is not None else payload
+
     conn = sqlite3.connect(DB_PATH)
 
     try:
