@@ -81,15 +81,11 @@ def _install_runtime_query_guard(visual_runtime_module):
     visual_runtime_module._build_search_variants = guarded_build_search_variants
     visual_runtime_module._verification_tier = generic_verification_tier
 
-    # Lightweight compatibility doubles may intentionally provide their own
-    # _relevant_asset. Only install the production retrieval boundary when the
-    # runtime exposes the production cache/QC/fetch surface.
-    production_retrieval_surface = (
-        callable(getattr(visual_runtime_module, "get_cached_asset", None))
-        and callable(getattr(visual_runtime_module, "_strict_gate", None))
-        and callable(getattr(visual_runtime_module, "_call_fetcher_with_timeout", None))
-    )
-    if production_retrieval_surface:
+    # Preserve an existing runtime-provided retrieval hook. Lightweight
+    # compatibility doubles use this to control the retrieval boundary in tests
+    # and in embedded callers. If no hook exists, install the canonical
+    # production boundary.
+    if not callable(getattr(visual_runtime_module, "_relevant_asset", None)):
         visual_runtime_module._relevant_asset = robust_relevant_asset
         visual_runtime_module._robust_retrieval_boundary = True
 
