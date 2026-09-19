@@ -74,7 +74,10 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
         and len(visual_items) == len(scenes)
         and all(str(item.get("image") or "").strip() and os.path.isfile(str(item.get("image") or "").strip()) for item in visual_items)
     )
-    visual_verified_ok = visual_package_ok and all(bool(item.get("visual_verified")) for item in visual_items)
+    visual_verified_ok = visual_package_ok and all(
+        bool(item.get("visual_verified")) or bool(item.get("human_visual_approved"))
+        for item in visual_items
+    )
     video_path = str(snapshot.get("video_path") or "").strip()
     render_ok = bool(video_path) and os.path.isfile(video_path)
 
