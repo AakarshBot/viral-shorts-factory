@@ -217,6 +217,89 @@ def _record_visual_rejection(seg: dict, bucket: str, detail: str = "") -> None:
             details.append(str(detail)[:240])
 
 
+def _candidate_priority(source: str, normalized: bytes, visual_type: str, query: str, visual_genre: str) -> float:
+    """Rank candidates cheaply for QA ordering; never changes acceptance."""
+    quality_score = 0.0
+    try:
+        from visual_quality_runtime import inspect_image
+
+        info = inspect_image(normalized)
+        if info.get("valid"):
+            short_side = float(info.get("short_side") or 0.0)
+            crop_loss = float(info.get("crop_loss") or 1.0)
+            sharpness = float(info.get("sharpness") or 0.0)
+            quality_score = min(35.0, 35.0 * short_side / 1080.0)
+            quality_score += max(0.0, 35.0 * (1.0 - crop_loss / 0.72))
+            quality_score += min(20.0, sharpness / 18.0)
+            if short_side >= 1080:
+                quality_score += 10.0
+    except Exception:
+        pass
+
+    source_score = REAL_SOURCE_SCORES.get(str(source or "").strip().casefold(), 50.0)
+    trusted, _tier, trusted_score = _trusted_source_evidence(
+        source,
+        visual_type,
+        query,
+        visual_genre,
+    )
+    return round(
+        (quality_score * 0.70)
+        + (source_score * 0.20)
+        + (trusted_score * 0.10 if trusted else 0.0),
+        3,
+    )
+
+
+def _remember_blocked_candidate(
+    best: dict | None,
+    *,
+    source: str,
+    query: str,
+    candidate_index: int,
+    normalized: bytes,
+    provenance: dict,
+    priority: float,
+    reason: str,
+) -> dict:
+    """Keep the strongest licensed, usable failed candidate for manual review."""
+    candidate = {
+        "source": str(source or "").strip(),
+        "query": str(query or "").strip(),
+        "candidate_index": int(candidate_index),
+        "bytes": normalized,
+        "provenance": dict(provenance or {}),
+        "priority": float(priority),
+        "reason": str(reason or "automatic visual QC blocked"),
+    }
+    if best is None or candidate["priority"] > float(best.get("priority") or 0.0):
+        return candidate
+    return best
+
+
+def _gate_rejection_bucket(tier_name: str) -> str:
+    tier = str(tier_name or "").upper()
+    if ":SEMANTIC_NO" in tier:
+        return "semantic_no"
+    if ":QA_NO_API_KEY" in tier:
+        return "qa_unavailable"
+    if ":QA_CIRCUIT_BREAKER" in tier:
+        return "qa_circuit_breaker"
+    if ":QA_VIDEO_BUDGET_EXHAUSTED" in tier or ":QA_SCENE_BUDGET_EXHAUSTED" in tier:
+        return "qa_budget_exhausted"
+    if ":QA_QUOTA_OR_RATE_LIMIT" in tier:
+        return "qa_quota_or_rate_limit"
+    if ":QA_REQUEST_EXCEPTION" in tier:
+        return "qa_exception"
+    if ":QA_AMBIGUOUS_RESPONSE" in tier or ":QA_UNCERTAIN" in tier:
+        return "semantic_uncertain"
+    if tier == "LOCAL-QUALITY":
+        return "quality_gate"
+    if tier == "LOCAL-REJECT":
+        return "local_reject"
+    return "semantic_qc_reject"
+
+
 _VISUAL_DESCRIPTOR_WORDS = {
     "logo", "logos", "portrait", "portraits", "headshot", "headshots", "icon", "icons",
     "badge", "badges", "emblem", "emblems", "symbol", "symbols", "seal", "seals",
@@ -366,6 +449,10 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     context = _context_fingerprint(intent, prompt, voice, video_title)
     cache_entity = visual_anchor
 
+    best_blocked_candidate = None
+    seg["visual_qc_blocked"] = False
+    seg["visual_qc_block_reason"] = ""
+
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
     cached_provenance = {}
     if cached_img is not None:
@@ -411,11 +498,25 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 seg["visual_verification_attempts"] = int(seg.get("visual_verification_attempts") or 0) + 1
                 seg["asset_provenance"] = cached_provenance
                 return cached_img.convert("RGB"), False, "cached"
-            _record_visual_rejection(
-                seg,
-                "cache_qc_reject",
-                f"cache:{cached_tier if 'cached_tier' in locals() else 'UNKNOWN'}",
-            )
+            cache_tier = str(cached_tier if "cached_tier" in locals() else "UNKNOWN")
+            if cached_provenance:
+                best_blocked_candidate = _remember_blocked_candidate(
+                    best_blocked_candidate,
+                    source=str(cached_provenance.get("provider") or "cache"),
+                    query=str(seg.get("specific_search_prompt") or cache_entity),
+                    candidate_index=0,
+                    normalized=cached_bytes,
+                    provenance=cached_provenance,
+                    priority=_candidate_priority(
+                        str(cached_provenance.get("provider") or "cache"),
+                        cached_bytes,
+                        visual_type,
+                        str(seg.get("specific_search_prompt") or cache_entity),
+                        visual_genre,
+                    ),
+                    reason=_gate_rejection_bucket(cache_tier),
+                )
+            _record_visual_rejection(seg, "cache_qc_reject", f"cache:{cache_tier}")
             print(
                 f"   [Visual Cache] QC rejected cached candidate | tier={cached_tier if 'cached_tier' in locals() else 'UNKNOWN'}",
                 flush=True,
@@ -552,7 +653,29 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         flush=True,
                     )
                     continue
-                valid_candidates.append((candidate_index, data, normalized, image_hash))
+                record = candidate_provenance(data)
+                if not provenance_is_usable(record):
+                    _record_visual_rejection(
+                        seg,
+                        "licensing_provenance",
+                        f"{source}:candidate {candidate_index}",
+                    )
+                    print(
+                        f"   [Visual Licensing] rejected candidate without usable provenance | source={source}",
+                        flush=True,
+                    )
+                    continue
+                priority = _candidate_priority(
+                    source,
+                    normalized,
+                    visual_type,
+                    query,
+                    visual_genre,
+                )
+                valid_candidates.append(
+                    (candidate_index, data, normalized, image_hash, priority, record)
+                )
+            valid_candidates.sort(key=lambda item: (-float(item[4]), int(item[0])))
             prepared_candidates.append((source, valid_candidates))
 
         for candidate_offset in range(MAX_CANDIDATES_PER_SOURCE):
@@ -564,7 +687,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 if candidate_offset >= len(candidates):
                     continue
 
-                candidate_index, data, normalized, image_hash = candidates[candidate_offset]
+                candidate_index, data, normalized, image_hash, candidate_priority, candidate_provenance_record = candidates[candidate_offset]
                 trusted, trusted_tier, trusted_score = _trusted_source_evidence(
                     source, visual_type, query, visual_genre
                 )
@@ -574,10 +697,21 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         bot, normalized, qa_scene, video_title, source=source
                     )
                 except Exception as exc:
+                    bucket = "qa_exception"
                     _record_visual_rejection(
                         seg,
-                        "qa_exception",
+                        bucket,
                         f"{source}:candidate {candidate_index}:{type(exc).__name__}:{exc}",
+                    )
+                    best_blocked_candidate = _remember_blocked_candidate(
+                        best_blocked_candidate,
+                        source=source,
+                        query=query,
+                        candidate_index=candidate_index,
+                        normalized=normalized,
+                        provenance=candidate_provenance_record,
+                        priority=candidate_priority,
+                        reason=bucket,
                     )
                     print(
                         f"   [Visual QA] candidate check failed; rejecting candidate: "
@@ -587,17 +721,21 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     continue
 
                 if hard_reject or not accepted:
-                    bucket = (
-                        "quality_gate"
-                        if str(tier_name).upper() == "LOCAL-QUALITY"
-                        else "local_reject"
-                        if str(tier_name).upper() == "LOCAL-REJECT"
-                        else "semantic_qc_reject"
-                    )
+                    bucket = _gate_rejection_bucket(tier_name)
                     _record_visual_rejection(
                         seg,
                         bucket,
                         f"{source}:candidate {candidate_index}:{tier_name}",
+                    )
+                    best_blocked_candidate = _remember_blocked_candidate(
+                        best_blocked_candidate,
+                        source=source,
+                        query=query,
+                        candidate_index=candidate_index,
+                        normalized=normalized,
+                        provenance=candidate_provenance_record,
+                        priority=candidate_priority,
+                        reason=bucket,
                     )
                     print(
                         f"   [Visual QA] semantic/QC rejection | source={source} | "
@@ -606,14 +744,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     )
                     continue
 
-                record = candidate_provenance(data)
-                if not provenance_is_usable(record):
-                    _record_visual_rejection(seg, "licensing_provenance", f"{source}:candidate {candidate_index}")
-                    print(
-                        f"   [Visual Licensing] rejected candidate without usable provenance | source={source}",
-                        flush=True,
-                    )
-                    continue
+                record = candidate_provenance_record
                 try:
                     cache_path = runtime.save_to_cache(
                         bot, normalized, cache_entity, visual_type, source, context
@@ -712,6 +843,33 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 _record_visual_rejection(seg, "ai_semantic_qc_reject", f"AI:{tier_name}")
             else:
                 _record_visual_rejection(seg, "qa_budget_exhausted", f"AI semantic QA limit {max_verification}")
+
+    if best_blocked_candidate is not None:
+        blocked = best_blocked_candidate
+        seg["visual_qc_blocked"] = True
+        seg["visual_qc_block_reason"] = (
+            f"Automatic QC blocked this candidate: {blocked['reason']} "
+            f"(source={blocked['source']}, query='{blocked['query']}')."
+        )
+        seg["visual_verified"] = False
+        seg["visual_rescue_reason"] = ""
+        seg["visual_fallback_reason"] = ""
+        seg["visual_query_used"] = blocked["query"]
+        seg["visual_verification_attempts"] = verification_attempts
+        seg["asset_provenance"] = dict(blocked["provenance"])
+        ordered_rejections = dict(
+            sorted(
+                (seg.get("visual_rejection_counts") or {}).items(),
+                key=lambda item: (-int(item[1]), str(item[0])),
+            )
+        )
+        seg["visual_rejection_counts"] = ordered_rejections
+        print(
+            f"   [Visual Diagnostics] blocked preview | rejection breakdown={ordered_rejections} | "
+            f"selected_source={blocked['source']} priority={blocked['priority']:.2f}",
+            flush=True,
+        )
+        return Image.open(io.BytesIO(blocked["bytes"])).convert("RGB"), False, blocked["source"]
 
     _record_visual_rejection(seg, "final_rescue", "No accepted real or AI visual remained.")
     rescue = make_visual_rescue(entity or factual_entity, visual_type)
