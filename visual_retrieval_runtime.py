@@ -384,8 +384,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         source_plan = _source_plan(bot, visual_type)
     max_provider_checks = max(1, min(40, 2 * max(1, len(source_plan))))
     provider_checks = 0
-    best_uncertain = None
-
     qa_scene = dict(seg)
     qa_scene["primary_entity"] = visual_intent.subject
     qa_scene["factual_primary_entity"] = visual_intent.subject
@@ -503,17 +501,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
         # No second-stage query synthesis here. The canonical intent already
         # supplied the complete bounded query set for this scene.
-
-    # An uncertain candidate is never silently promoted to production.
-    # It can remain telemetry for diagnostics, but the renderer must receive
-    # either a QC-passed visual or the explicit rescue frame.
-    if best_uncertain is not None:
-        print(
-            f"   [Visual Source] candidates remained uncertain; no unverified image will be used "
-            f"| best_score={best_uncertain[0]:.0f}",
-            flush=True,
-        )
-
     if (visual_type in ABSTRACT_TYPES or genre_allows_ai(visual_genre)) and callable(getattr(bot, "fetch_hf_ai_image", None)):
         prompt_text = _ai_prompt(entity, visual_type)
         print(f"   [Visual Source] AI attempt | type={visual_type} | prompt='{prompt_text[:180]}'", flush=True)
