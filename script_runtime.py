@@ -345,6 +345,33 @@ def clean_script_data(script_data, story_data, format_mode):
     }
 
 
+def _rewrite_for_originality_once(script_data, story_data, overlap):
+    scenes = [{"index": i, "voiceover": str(s.get("voiceover") or "")} for i, s in enumerate(script_data.get("script") or [], 1) if isinstance(s, dict) and not s.get("human_contributed")]
+    evidence = "\n\n".join(_originality_sources(story_data)[:10])
+    prompt = ("Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts and order. "
+              "Do not add facts or quote sources. Return JSON with script entries containing index and voiceover.\nDetected overlap:"
+              + json.dumps(overlap) + "\nSCENES:\n" + json.dumps(scenes, ensure_ascii=False) + "\nEVIDENCE:\n" + evidence[:16000])
+    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
+    gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
+    if groq:
+        result = _originality_llm("https://api.groq.com/openai/v1/chat/completions",
+            {"model":"openai/gpt-oss-120b","messages":[{"role":"system","content":"Rewrite for originality while preserving facts."},{"role":"user","content":prompt}],"response_format":{"type":"json_object"},"temperature":0.2},
+            {"Authorization":"Bearer "+groq,"Content-Type":"application/json"})
+    elif gemini:
+        result = _originality_llm("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            {"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseMimeType":"application/json","temperature":0.2}},
+            {"x-goog-api-key":gemini,"Content-Type":"application/json"})
+    else:
+        return None
+    if not isinstance(result, dict) or not isinstance(result.get("script"), list):
+        return None
+    replacements = {int(x.get("index")): str(x.get("voiceover") or "").strip() for x in result["script"] if isinstance(x, dict) and str(x.get("index") or "").isdigit()}
+    rewritten = dict(script_data)
+    rewritten["script"] = [dict(s, voiceover=replacements.get(i, s.get("voiceover", ""))) for i, s in enumerate(script_data.get("script") or [], 1)]
+    rewritten["originality_rewrite_attempted"] = True
+    return rewritten
+
+
 def validate_content_density(script_data, story_data, format_mode):
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
