@@ -574,6 +574,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                     "visual_type": str(layer.get("visual_type") or "visual"),
                     "verified": bool(layer.get("visual_verified", False)),
                     "manual_query": str(layer.get("manual_visual_query") or "").strip(),
+                    "query_used": str(layer.get("visual_query_used") or "").strip(),
                     "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
                 }
             )
@@ -601,7 +602,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             status = "Verified" if item["verified"] else "Needs attention"
             replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
             replacement_count = len(replacement_history)
-            query = item["manual_query"] or "automatic query"
+            query = item["manual_query"] or item["query_used"] or "automatic query"
             st.markdown(
                 f"**Visual {item['index']}** · {item['visual_type']}  \\n"
                 f"<span class='small-muted'>{item['source']} · {status}</span>",
