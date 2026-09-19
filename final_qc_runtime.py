@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 
+from script_runtime import check_script_originality
 
 def _validate_final_artifact(path: str) -> tuple[bool, str]:
     if not path or not os.path.isfile(path):
@@ -32,6 +33,52 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
     if len(comment) > 4900:
         return False, "creator comment exceeds 4900 characters"
     return True, "metadata checks passed"
+
+
+def evaluate_originality_gate(script_data: dict) -> dict:
+    data = script_data if isinstance(script_data, dict) else {}
+    fallback = str(data.get("fallback_mode") or "") == "extractive_source_grounded"
+    insight = next(
+        (scene for scene in data.get("script") or [] if isinstance(scene, dict) and scene.get("human_contributed")),
+        None,
+    )
+    insight_words = len(re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", str((insight or {}).get("voiceover") or "")))
+    if insight_words < 12:
+        return {
+            "passed": False,
+            "public_blocked": False,
+            "label": "Originality + Creator Insight",
+            "detail": f"Creator Insight must contain at least 12 words (currently {insight_words}).",
+        }
+    if fallback:
+        return {
+            "passed": True,
+            "public_blocked": True,
+            "label": "Originality + Creator Insight",
+            "detail": "PASS for private-only release. Extractive source-grounded fallback blocks public upload.",
+        }
+    originality = check_script_originality(data, data)
+    if not originality.get("passed"):
+        return {
+            "passed": False,
+            "public_blocked": True,
+            "label": "Originality + Creator Insight",
+            "detail": f"Verbatim-overlap gate failed in {len(originality.get('failures') or [])} scene(s).",
+        }
+    critique = data.get("originality_critique") or {}
+    if critique.get("unsupported_claims"):
+        return {
+            "passed": False,
+            "public_blocked": True,
+            "label": "Originality + Creator Insight",
+            "detail": "Real critique found unsupported claims.",
+        }
+    return {
+        "passed": True,
+        "public_blocked": False,
+        "label": "Originality + Creator Insight",
+        "detail": "Originality overlap, factual critique and Creator Insight all passed.",
+    }
 
 
 def validate_final_video(path: str) -> None:
@@ -135,13 +182,21 @@ def patch_workflow_qc(bot) -> bool:
             raise RuntimeError(f"Final metadata QC could not run before READY_FOR_UPLOAD: {type(exc).__name__}: {exc}") from exc
 
         validate_final_upload_metadata(title, description, comment)
-        print("   [Final QC] READY_FOR_UPLOAD gate passed.", flush=True)
+        originality = evaluate_originality_gate(script_data)
+        if not originality["passed"]:
+            raise RuntimeError(originality["detail"])
+        print("   [Final QC] READY_FOR_UPLOAD originality gate passed.", flush=True)
         return _mark_exact_run_ready_for_upload(self, original_ready, topic)
 
     def guarded_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword=""):
         validate_final_video(video_path)
         validate_final_upload_metadata(title, description, comment)
-        print("   [Final QC] Manual-upload gate passed.", flush=True)
+        originality = evaluate_originality_gate(script_data)
+        if not originality["passed"]:
+            raise RuntimeError(originality["detail"])
+        if originality.get("public_blocked") and str(publish_mode).lower() == "public":
+            raise RuntimeError("Public upload blocked: extractive source-grounded fallback is private-only.")
+        print("   [Final QC] Manual-upload originality gate passed.", flush=True)
         return original_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword)
 
     guarded_ready._final_qc_wrapped = True
