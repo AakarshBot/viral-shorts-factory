@@ -2338,6 +2338,16 @@ def run_robot(web_config=None):
         )
         conn.commit()
 
+        dashboard_manual_control = bool(
+            isinstance(web_config, dict) and web_config.get("_dashboard_manual_control")
+        )
+        if dashboard_manual_control and not callable(
+            web_config.get("_manual_script_review_hook")
+        ):
+            raise RuntimeError(
+                "Production blocked: dashboard manual script review hook is not installed."
+            )
+
         script_data = write_script(
             story_payload, lang_cfg, cat_choice, conn, format_mode
         )
@@ -2399,6 +2409,13 @@ def run_robot(web_config=None):
             if not visuals:
                 print("   [!] Error: Visual sourcing failed to produce packages.")
                 return
+
+            if dashboard_manual_control and not callable(
+                web_config.get("_manual_visual_review_hook")
+            ):
+                raise RuntimeError(
+                    "Rendering blocked: dashboard manual visual review hook is not installed."
+                )
 
             visuals = _run_manual_workflow_hook(
                 web_config,
