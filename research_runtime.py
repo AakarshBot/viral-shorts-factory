@@ -230,15 +230,9 @@ def patch_research_pipeline(bot):
         })
 
         prepared = _prepare_primary_writer_data(data, format_mode)
-        try:
-            result = current(prepared, language_cfg, genre_key, conn, format_mode)
-        except Exception as exc:
-            print(
-                f"   [Research] Primary writer raised {type(exc).__name__}; "
-                "continuing through fallback chain.",
-                flush=True,
-            )
-            result = None
+        # Provider failures are handled inside the primary writer; quality/originality
+        # failures must not trigger a second research + provider cascade.
+        result = current(prepared, language_cfg, genre_key, conn, format_mode)
         if result is None:
             print("   [Research] Trying OpenRouter free fallback.", flush=True)
             result = _openrouter_script_fallback(data, language_cfg, genre_key, format_mode)
