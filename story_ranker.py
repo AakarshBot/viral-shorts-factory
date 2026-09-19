@@ -105,34 +105,38 @@ def _source_domain(story):
 
 
 def _published_datetime(story):
-    """Parse the date formats used by GNews, RSS, Reddit and event evidence."""
-    for key in ("published_at", "publishedAt", "published", "pub_date", "date", "timestamp"):
+    """Return the newest trustworthy publication/update timestamp available."""
+    candidates = []
+    for key in (
+        "updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated",
+        "published_at", "publishedAt", "published", "pub_date", "date", "timestamp",
+    ):
         raw = story.get(key)
         if raw in (None, ""):
             continue
         if isinstance(raw, (int, float)):
             try:
-                return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+                candidates.append(datetime.fromtimestamp(float(raw), tz=timezone.utc))
             except (TypeError, ValueError, OSError, OverflowError):
                 continue
+            continue
         text = str(raw).strip()
         if not text:
             continue
+        parsed = None
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
         except ValueError:
-            pass
-        try:
-            parsed = parsedate_to_datetime(text)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
-        except (TypeError, ValueError, OverflowError):
+            try:
+                parsed = parsedate_to_datetime(text)
+            except (TypeError, ValueError, OverflowError):
+                parsed = None
+        if parsed is None:
             continue
-    return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        candidates.append(parsed.astimezone(timezone.utc))
+    return max(candidates) if candidates else None
 
 
 def _age_hours(story):
@@ -445,6 +449,61 @@ def _trend_signal(title):
     return min(4.0, sum(1.0 for term in terms if term and term in title_text))
 
 
+def _discovery_query_lanes(base_query, genre_key="", ai_cricket=False):
+    """Create a small set of intentional discovery lenses without query fanout."""
+    base = str(base_query or "").strip()
+    if not base:
+        return []
+    key = _clean(genre_key)
+    if ai_cricket or key == "sports_stories_of_day":
+        lenses = [
+            f"({base}) AND (latest OR today OR breaking)",
+            f"({base}) AND (record OR result OR squad OR selection OR injury OR announcement)",
+            f"({base}) AND (match OR series OR tournament OR player)",
+        ]
+    elif key in {"technology", "tech_reviews"}:
+        lenses = [
+            f"({base}) AND (latest OR today OR breaking)",
+            f"({base}) AND (launch OR release OR update OR reveal)",
+            f"({base}) AND (AI OR chip OR smartphone OR startup OR gadget)",
+        ]
+    elif key == "business_finance":
+        lenses = [
+            f"({base}) AND (latest OR today OR breaking)",
+            f"({base}) AND (earnings OR deal OR funding OR market OR acquisition)",
+            f"({base}) AND (India OR global)",
+        ]
+    elif key == "entertainment":
+        lenses = [
+            f"({base}) AND (latest OR today OR breaking)",
+            f"({base}) AND (release OR trailer OR box office OR casting OR announcement)",
+            f"({base}) AND (film OR series OR celebrity OR music)",
+        ]
+    elif key == "health_lifestyle":
+        lenses = [
+            f"({base}) AND (latest OR today OR breaking)",
+            f"({base}) AND (study OR research OR approval OR warning OR discovery)",
+            f"({base}) AND (health OR fitness OR nutrition OR wellness)",
+        ]
+    elif key == "viral_phenomenon":
+        lenses = [
+            f"({base}) AND (latest OR today OR trending)",
+            f"({base}) AND (viral OR internet OR social media OR video)",
+            f"({base}) AND (explained OR reaction OR controversy)",
+        ]
+    else:
+        lenses = [
+            f"({base}) AND (latest OR today OR breaking)",
+            f"({base}) AND (announcement OR decision OR result OR update)",
+            f"({base}) AND (India OR world OR global)",
+        ]
+    output = [base]
+    for query in lenses:
+        if query not in output:
+            output.append(query)
+    return output[:4]
+
+
 def _adaptive_discovery_query(base_query, social_titles):
     """Build at most one supplemental query from public-interest novelty."""
     base_tokens = _tokens(base_query)
@@ -675,8 +734,8 @@ def _reddit_items(genre_key):
         return []
 
 
-def _cheap_filter(stories, max_items=30, max_age_hours=48):
-    """Apply cheap eligibility checks to the full intake before truncating."""
+def _cheap_filter(stories, max_items=30, max_age_hours=72):
+    """Apply freshness/safety eligibility before truncating the intake."""
     survivors = []
     seen_urls = set()
     for story in stories:
@@ -705,8 +764,9 @@ def _cheap_filter(stories, max_items=30, max_age_hours=48):
 
     survivors.sort(
         key=lambda item: (
-            _safe_float(item.get("event_corroboration_score")) or 0.0,
             _freshness_score(item),
+            -max(0.0, _safe_float(item.get("age_hours")) or 9999.0),
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
             _source_quality(item),
         ),
         reverse=True,
@@ -1087,14 +1147,18 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     # These providers are independent. Fetch them concurrently so one slow
     # source does not make the entire intake run serially.
     rss_url = custom_rss_url or genre_cfg.get("rss_url", "")
+    query_lanes = _discovery_query_lanes(base_query, genre_key=genre_key, ai_cricket=ai_cricket)
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="discovery-intake") as pool:
-        gnews_future = pool.submit(_gnews_items, base_query, api_key, genre_key) if base_query else None
+        gnews_futures = [
+            pool.submit(_gnews_items, query, api_key, genre_key)
+            for query in query_lanes
+        ]
         rss_future = pool.submit(_rss_items, rss_url, genre_key)
         official_future = pool.submit(_official_feed_items, genre_key, genre_cfg)
         reddit_future = pool.submit(_reddit_items, genre_key)
 
-        if gnews_future is not None:
-            raw.extend(gnews_future.result())
+        for future in gnews_futures:
+            raw.extend(future.result())
         raw.extend(rss_future.result())
         raw.extend(official_future.result())
         social_rows = reddit_future.result()
@@ -1164,10 +1228,10 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
     used_topics = _load_used_topics(conn)
     social_titles = social_titles or []
 
-    stage30 = _cheap_filter(stories, max_items=30, max_age_hours=24 if ai_cricket else 48)
-    stage15 = _deduplicate_stage(stage30, max_items=15)
-    stage8 = _fact_source_stage(stage15, max_items=8)
-    stage5 = _originality_stage(stage8, used_topics, max_items=5)
+    stage60 = _cheap_filter(stories, max_items=60, max_age_hours=72)
+    stage30 = _deduplicate_stage(stage60, max_items=30)
+    stage15 = _fact_source_stage(stage30, max_items=15)
+    stage8 = _originality_stage(stage15, used_topics, max_items=8)
     ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage5]
     ranked.sort(key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0, reverse=True)
 
@@ -1176,7 +1240,7 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
 
     print(
         "   [Discovery Funnel] %d -> %d -> %d -> %d -> %d -> ranked top %d"
-        % (len(stories), len(stage30), len(stage15), len(stage8), len(stage5), min(3, len(ranked))),
+        % (len(stories), len(stage60), len(stage30), len(stage15), len(stage8), min(3, len(ranked))),
         flush=True,
     )
     return ranked[:3]
@@ -1198,14 +1262,10 @@ def rank_discovery_candidates(
     used_topics = _load_used_topics(conn)
     social_titles = social_titles or []
 
-    stage80 = _cheap_filter(
-        stories,
-        max_items=80,
-        max_age_hours=24 if ai_cricket else 48,
-    )
-    stage60 = _deduplicate_stage(stage80, max_items=60)
-    stage45 = _fact_source_stage(stage60, max_items=45)
-    stage40 = _originality_stage(stage45, used_topics, max_items=40)
+    stage120 = _cheap_filter(stories, max_items=120, max_age_hours=72)
+    stage80 = _deduplicate_stage(stage120, max_items=80)
+    stage60 = _fact_source_stage(stage80, max_items=60)
+    stage50 = _originality_stage(stage60, used_topics, max_items=50)
 
     ranked = [
         _editorial_score(
@@ -1232,10 +1292,10 @@ def rank_discovery_candidates(
         "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
         % (
             len(stories),
+            len(stage120),
             len(stage80),
             len(stage60),
-            len(stage45),
-            len(stage40),
+            len(stage50),
             len(selected),
         ),
         flush=True,
