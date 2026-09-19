@@ -198,8 +198,8 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
         for anchor in _anchors(script_data):
             if _entity_matches_publisher(anchor,script_data) and not explicit_branding:
                 continue
-        a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
-        if a_score>=0.80: return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
+            a_score,a_reason=_support(anchor,evidence,_role(scene,anchor))
+            if a_score>=0.80: return {"entity":anchor,"grounded":True,"changed":anchor.casefold()!=original.casefold(),"reason":f"unsupported identity repaired to story anchor: {a_reason}","confidence":a_score,"original_entity":original}
     return {"entity":original,"grounded":False,"changed":False,"reason":reason,"confidence":0.0,"original_entity":original}
 
 def apply_grounding(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
