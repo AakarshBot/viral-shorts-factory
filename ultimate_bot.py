@@ -2173,6 +2173,17 @@ def run_robot(web_config=None):
         except Exception as exc:
             print(f"   [!] Could not validate video duration: {exc}")
 
+        # Persist the visual rights ledger before the human upload gate so the
+        # selected/rejected render remains auditable.
+        conn.execute(
+            "UPDATE vault SET asset_credits_json=? WHERE topic=?",
+            (
+                json.dumps(script_data.get("visual_provenance") or [], ensure_ascii=False),
+                main_topic,
+            ),
+        )
+        conn.commit()
+
         # Bypass QC checking if running from Dashboard or Headless
         if not is_headless and not web_config:
             print("\n🔍 QUALITY CONTROL GATE")
