@@ -682,6 +682,7 @@ class DashboardWorkflowController(WorkflowController):
             "visual_rejected": False,
         }
         config["manual_qc_required"] = True
+        config["_dashboard_manual_control"] = True
         config["_manual_script_review_hook"] = self._manual_script_review_hook
         config["_manual_visual_review_hook"] = self._manual_visual_review_hook
         config["_manual_post_render_hook"] = self._manual_post_render_hook
