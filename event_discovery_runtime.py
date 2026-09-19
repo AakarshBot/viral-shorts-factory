@@ -77,6 +77,15 @@ GENERIC_ENTITY_TOKENS = {
     "court", "police", "officials", "people", "agency", "official",
 }
 
+GENERIC_EVENT_TOPIC_TOKENS = {
+    "action", "actions", "announcement", "announcements", "decision", "decisions",
+    "deal", "deals", "development", "developments", "event", "events", "funding",
+    "initiative", "initiatives", "investment", "investments", "issue", "issues",
+    "measure", "measures", "move", "moves", "plan", "plans", "program", "programs",
+    "programme", "programmes", "project", "projects", "proposal", "proposals",
+    "statement", "statements", "step", "steps", "support", "talks", "update", "updates",
+}
+
 ENTITY_NOISE = {
     "today", "latest", "breaking", "update", "news", "report", "reports",
     "says", "said", "after", "before", "new", "first", "major", "live",
@@ -276,7 +285,12 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
         - left_actions
         - right_actions
     )
-    if len(shared_entities) >= 1 and shared_actions and shared_topical_tokens and overlap >= 0.35:
+    distinctive_topical_tokens = {
+        token
+        for token in shared_topical_tokens
+        if token not in GENERIC_EVENT_TOPIC_TOKENS
+    }
+    if len(shared_entities) >= 1 and shared_actions and distinctive_topical_tokens:
         return True
 
     if len(shared_entities) >= 3 and (
