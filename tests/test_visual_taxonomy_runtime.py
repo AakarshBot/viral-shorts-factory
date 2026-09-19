@@ -110,3 +110,37 @@ def test_visual_genre_is_propagated_in_search_intent():
         }
     )
     assert intent.visual_genre == "ORG_BRANDING"
+
+
+def test_team_entities_never_default_to_headquarters():
+    assert classify_visual_genre(
+        {
+            "primary_entity": "India Men's Cricket Team",
+            "visual_intent": "team identity",
+            "voiceover": "India Men's Cricket Team is preparing for the tournament.",
+        },
+        "India Men's Cricket Team",
+        "ORGANIZATION",
+    ) == "GENERAL_PHOTO"
+
+    assert classify_visual_genre(
+        {
+            "primary_entity": "India Men's Cricket Team",
+            "visual_intent": "team jersey",
+            "voiceover": "India Men's Cricket Team jersey is the focus.",
+        },
+        "India Men's Cricket Team",
+        "ORGANIZATION",
+    ) == "TEAM_BRANDING"
+
+
+def test_real_organisation_headquarters_still_requires_explicit_location_context():
+    assert classify_visual_genre(
+        {
+            "primary_entity": "BCCI",
+            "visual_intent": "headquarters exterior",
+            "voiceover": "The BCCI headquarters is shown.",
+        },
+        "BCCI",
+        "ORGANIZATION",
+    ) == "ORG_HEADQUARTERS"

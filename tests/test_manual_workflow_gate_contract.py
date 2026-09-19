@@ -1,0 +1,90 @@
+import threading
+import time
+
+from dashboard_runtime import DashboardWorkflowController
+
+
+def test_dashboard_manual_script_gate_is_core_and_waits():
+    controller = DashboardWorkflowController(object())
+    config = controller._prepare_production_config({})
+    assert config["_dashboard_manual_control"] is True
+    assert callable(config["_manual_script_review_hook"])
+
+    script = {
+        "title": "Test",
+        "script": [
+            {
+                "voiceover": "A factual first scene with enough words for the review contract.",
+                "primary_entity": "India",
+                "visual_intent": "team",
+                "specific_search_prompt": "India",
+                "sport_or_topic_category": "sports",
+            },
+            {
+                "voiceover": "A factual second scene with enough words for the review contract.",
+                "primary_entity": "India",
+                "visual_intent": "team",
+                "specific_search_prompt": "India",
+                "sport_or_topic_category": "sports",
+            },
+            {
+                "voiceover": "A factual third scene with enough words for the review contract.",
+                "primary_entity": "India",
+                "visual_intent": "team",
+                "specific_search_prompt": "India",
+                "sport_or_topic_category": "sports",
+            },
+        ],
+    }
+
+    result = {}
+
+    def worker():
+        result["value"] = config["_manual_script_review_hook"](script)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+
+    for _ in range(100):
+        if controller.snapshot()["stage"] == "script_review":
+            break
+        time.sleep(0.01)
+
+    assert thread.is_alive()
+    assert controller.submit_script_visual_queries(
+        ["India cricket team", "", "India cricket team"],
+        "This is the human creator insight that must be present before the factory continues.",
+    )
+
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert "value" in result
+    assert result["value"]["creator_insight_required"] is True
+    assert result["value"]["script"][-2]["human_contributed"] is True
+
+
+def test_dashboard_manual_visual_gate_is_core_and_blocks_render_until_approved():
+    controller = DashboardWorkflowController(object())
+    config = controller._prepare_production_config({})
+
+    packages = [[{"image": "scene.jpg", "visual_verified": False}]]
+    result = {}
+
+    def worker():
+        result["value"] = config["_manual_visual_review_hook"](packages)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+
+    for _ in range(100):
+        if controller.snapshot()["stage"] == "visual_approval":
+            break
+        time.sleep(0.01)
+
+    assert thread.is_alive()
+    assert controller.snapshot()["visual_review_required"] is True
+    assert controller.approve_visuals() is True
+
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert result["value"][0][0]["human_visual_approved"] is True

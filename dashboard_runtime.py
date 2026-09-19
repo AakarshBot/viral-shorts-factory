@@ -74,7 +74,10 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
         and len(visual_items) == len(scenes)
         and all(str(item.get("image") or "").strip() and os.path.isfile(str(item.get("image") or "").strip()) for item in visual_items)
     )
-    visual_verified_ok = visual_package_ok and all(bool(item.get("visual_verified")) for item in visual_items)
+    visual_verified_ok = visual_package_ok and all(
+        bool(item.get("visual_verified")) or bool(item.get("human_visual_approved"))
+        for item in visual_items
+    )
     video_path = str(snapshot.get("video_path") or "").strip()
     render_ok = bool(video_path) and os.path.isfile(video_path)
 
@@ -571,6 +574,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
+        self._manual_visual_review_complete_id = None
         self._dashboard_logs: list[str] = []
         self._activity_events: list[dict[str, Any]] = []
         self._audio_paths: list[str] = []
@@ -607,6 +611,8 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_visual_gate_bound = False
         self._dashboard_audio_capture_wrapper = None
         self._dashboard_visual_gate_wrapper = None
+        self._manual_gate_state = None
+        self._manual_visual_review_complete_id = None
         super().reset()
 
     @staticmethod
@@ -667,10 +673,181 @@ class DashboardWorkflowController(WorkflowController):
                 lines.append(self._console_partial.rstrip())
             return lines[-120:]
 
+    def _ensure_manual_gate_state(self):
+        """Create the shared manual gate state for both production and direct dashboard tests."""
+        if not isinstance(self._manual_gate_state, dict):
+            self._manual_gate_state = {
+                "script_event": threading.Event(),
+                "visual_event": threading.Event(),
+                "script_submitted": False,
+                "creator_insight_submitted": False,
+                "visual_approved": False,
+                "visual_rejected": False,
+            }
+        return self._manual_gate_state
+
+    def _prepare_production_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Install dashboard checkpoints into the core production call path."""
+        self._manual_gate_state = None
+        gate = self._ensure_manual_gate_state()
+        gate["script_event"].clear()
+        gate["visual_event"].clear()
+        gate["script_submitted"] = False
+        gate["creator_insight_submitted"] = False
+        gate["visual_approved"] = False
+        gate["visual_rejected"] = False
+        config["manual_qc_required"] = True
+        config["_dashboard_manual_control"] = True
+        config["_manual_script_review_hook"] = self._manual_script_review_hook
+        config["_manual_visual_review_hook"] = self._manual_visual_review_hook
+        config["_manual_post_render_hook"] = self._manual_post_render_hook
+        return config
+
+    def _manual_script_review_hook(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Pause the core factory until script queries and Creator Insight are submitted."""
+        if not isinstance(result, dict):
+            raise RuntimeError("Script review could not start because the script payload is invalid.")
+
+        scenes = result.get("script") or []
+        if not isinstance(scenes, list) or not scenes:
+            raise RuntimeError("Script review could not start because no script scenes were returned.")
+
+        gate = self._ensure_manual_gate_state()
+
+        gate["script_event"].clear()
+        gate["script_submitted"] = False
+        gate["creator_insight_submitted"] = False
+        self._creator_insight = ""
+        self._creator_insight_submitted = False
+
+        with self._lock:
+            self._script_visual_queries = [""] * len(scenes)
+            self.state.script_data = result
+
+        self.update(
+            "script_review",
+            40,
+            f"The script is ready. Add your Creator Insight and review {len(scenes)} slides.",
+        )
+        gate["script_event"].wait(timeout=24 * 60 * 60)
+
+        if not gate["script_submitted"] or not gate["creator_insight_submitted"]:
+            raise RuntimeError(
+                "Script review timed out or Creator Insight was not submitted. The production run was stopped."
+            )
+
+        with self._lock:
+            queries = list(self._script_visual_queries)
+            script_scenes = result.get("script") or []
+            insight = str(self._creator_insight or "").strip()
+
+        if len(insight.split()) < 12:
+            raise RuntimeError("Creator Insight must contain at least 12 words.")
+        if len(script_scenes) < 2:
+            raise RuntimeError("Creator Insight requires at least two generated scenes.")
+
+        insight_scene = {
+            "voiceover": insight,
+            "primary_entity": str(
+                script_scenes[-1].get("primary_entity")
+                or script_scenes[0].get("primary_entity")
+                or ""
+            ).strip(),
+            "visual_intent": "conceptual",
+            "specific_search_prompt": "creator insight context",
+            "sport_or_topic_category": str(
+                script_scenes[-1].get("sport_or_topic_category") or ""
+            ),
+            "human_contributed": True,
+        }
+        insert_at = len(script_scenes) - 1
+        script_scenes.insert(insert_at, insight_scene)
+        queries = queries[:insert_at] + [""] + queries[insert_at:]
+        result["script"] = script_scenes
+        result["creator_insight"] = insight
+        result["creator_insight_required"] = True
+
+        with self._lock:
+            self.state.script_data = result
+            self._script_visual_queries = queries[:len(script_scenes)]
+
+        for index, scene in enumerate(script_scenes):
+            if not isinstance(scene, dict):
+                continue
+            query = queries[index] if index < len(queries) else ""
+            if query:
+                scene["manual_visual_query"] = query
+                scene["manual_visual_query_source"] = "dashboard_slide"
+            else:
+                scene.pop("manual_visual_query", None)
+                scene.pop("manual_visual_query_score", None)
+                scene.pop("manual_visual_query_index", None)
+                scene.pop("manual_visual_query_source", None)
+
+        self.update(
+            "audio",
+            42,
+            "Slide queries saved. Creating the voiceover and preparing visuals.",
+        )
+        return result
+
+    def _manual_visual_review_hook(self, packages: list[Any]) -> list[Any]:
+        """Pause the core factory until every generated visual has been reviewed."""
+        packages = list(packages or [])
+        if not packages:
+            raise RuntimeError("Visual review could not start because no visual packages were returned.")
+
+        package_id = id(packages)
+        if (
+            self._manual_visual_review_complete_id == package_id
+            and self._visual_approved
+        ):
+            return packages
+
+        gate = self._ensure_manual_gate_state()
+
+        self._visual_packages = packages
+        self._visual_approval_event = gate["visual_event"]
+        gate["visual_event"].clear()
+        gate["visual_approved"] = False
+        gate["visual_rejected"] = False
+        self._visual_approved = False
+        self._visual_rejected = False
+
+        self.update(
+            "visual_approval",
+            76,
+            "The visuals are ready. Review them on the dashboard before rendering continues.",
+        )
+        gate["visual_event"].wait(timeout=24 * 60 * 60)
+
+        if gate["visual_rejected"]:
+            raise RuntimeError("Visual review was rejected. The production run was stopped before rendering.")
+        if not gate["visual_approved"]:
+            raise RuntimeError("Visual review timed out. The production run was stopped before rendering.")
+
+        for package in packages:
+            layer = package[0] if isinstance(package, list) and package else package
+            if isinstance(layer, dict):
+                layer["human_visual_approved"] = True
+
+        self._manual_visual_review_complete_id = package_id
+        self.update("render", 77, "Visuals approved. Rendering the final Short now.")
+        return packages
+
+    def _manual_post_render_hook(self, video_path: str) -> None:
+        with self._lock:
+            self.state.video_path = os.path.abspath(os.fspath(video_path)) if video_path else ""
+        self.update("render", 94, "Video rendered and ready for final QC.")
+
     def _install_production_wrappers(self):
+        # These wrappers preserve the dashboard's direct callable contract for
+        # Streamlit/unit-test callers. The core run_robot hooks remain the
+        # authoritative fail-closed checkpoints.
         super()._install_production_wrappers()
-        if getattr(self, "_dashboard_visual_gate_bound", False):
-            return
+
+        self._ensure_manual_gate_state()
+
         run_robot = getattr(self.bot, "run_robot", None)
         namespace = getattr(run_robot, "__globals__", None)
         if not isinstance(namespace, dict):
@@ -682,83 +859,12 @@ class DashboardWorkflowController(WorkflowController):
                 result = current_script(*args, **kwargs)
                 if not isinstance(result, dict):
                     return result
-
-                scenes = result.get("script") or []
-                if not isinstance(scenes, list) or not scenes:
-                    raise RuntimeError("Script review could not start because no script scenes were returned.")
-
-                self._script_review_event.clear()
-                self._script_review_submitted = False
-                self._creator_insight = ""
-                self._creator_insight_submitted = False
-                with self._lock:
-                    self._script_visual_queries = [""] * len(scenes)
-                    self.state.script_data = result
-
-                self.update(
-                    "script_review",
-                    40,
-                    f"The script is ready. Add your Creator Insight and review {len(scenes)} slides.",
-                )
-                self._script_review_event.wait(timeout=24 * 60 * 60)
-
-                if not self._script_review_submitted or not self._creator_insight_submitted:
-                    raise RuntimeError(
-                        "Script review timed out or Creator Insight was not submitted. The production run was stopped."
-                    )
-
-                with self._lock:
-                    queries = list(self._script_visual_queries)
-                    script_scenes = result.get("script") or []
-                    insight = str(self._creator_insight or "").strip()
-
-                if len(insight.split()) < 12:
-                    raise RuntimeError("Creator Insight must contain at least 12 words.")
-
-                if len(script_scenes) < 2:
-                    raise RuntimeError("Creator Insight requires at least two generated scenes.")
-
-                insight_scene = {
-                    "voiceover": insight,
-                    "primary_entity": str(script_scenes[-1].get("primary_entity") or script_scenes[0].get("primary_entity") or "").strip(),
-                    "visual_intent": "conceptual",
-                    "specific_search_prompt": "creator insight context",
-                    "sport_or_topic_category": str(script_scenes[-1].get("sport_or_topic_category") or ""),
-                    "human_contributed": True,
-                }
-                insert_at = len(script_scenes) - 1
-                script_scenes.insert(insert_at, insight_scene)
-                queries = queries[:insert_at] + [""] + queries[insert_at:]
-                result["script"] = script_scenes
-                result["creator_insight"] = insight
-                result["creator_insight_required"] = True
-                with self._lock:
-                    self.state.script_data = result
-                    self._script_visual_queries = queries[:len(script_scenes)]
-
-                for index, scene in enumerate(script_scenes):
-                    if not isinstance(scene, dict):
-                        continue
-                    query = queries[index] if index < len(queries) else ""
-                    if query:
-                        scene["manual_visual_query"] = query
-                        scene["manual_visual_query_source"] = "dashboard_slide"
-                    else:
-                        scene.pop("manual_visual_query", None)
-                        scene.pop("manual_visual_query_score", None)
-                        scene.pop("manual_visual_query_index", None)
-                        scene.pop("manual_visual_query_source", None)
-
-                self.update(
-                    "audio",
-                    42,
-                    "Slide queries saved. Creating the voiceover and preparing visuals.",
-                )
-                return result
+                reviewed = self._manual_script_review_hook(result)
+                if isinstance(reviewed, dict):
+                    reviewed["_dashboard_script_review_complete"] = True
+                return reviewed
 
             dashboard_script_review._dashboard_script_review = True
-            # Preserve the research marker so Streamlit reruns do not install
-            # a second Phase 2 evidence-pack wrapper around this review gate.
             dashboard_script_review._research_layer_live = bool(
                 getattr(current_script, "_research_layer_live", False)
             )
@@ -783,36 +889,16 @@ class DashboardWorkflowController(WorkflowController):
             namespace["generate_voiceover_and_timestamps"] = dashboard_audio_capture
             self.bot.generate_voiceover_and_timestamps = dashboard_audio_capture
 
-        current = namespace.get("process_visuals_async")
-        if not callable(current):
-            return
+        current_visual = namespace.get("process_visuals_async")
+        if callable(current_visual) and not getattr(current_visual, "_dashboard_visual_gate_bound", False):
+            async def dashboard_visual_gate(*args, **kwargs):
+                packages = await current_visual(*args, **kwargs)
+                return self._manual_visual_review_hook(packages)
 
-        async def dashboard_visual_gate(*args, **kwargs):
-            packages = await current(*args, **kwargs)
-            self._visual_packages = list(packages or [])
-            if not self._visual_packages:
-                raise RuntimeError("Visual review could not start because no visual packages were returned.")
+            dashboard_visual_gate._dashboard_visual_gate_bound = True
+            namespace["process_visuals_async"] = dashboard_visual_gate
+            self.bot.process_visuals_async = dashboard_visual_gate
 
-            self._visual_approval_event.clear()
-            self._visual_approved = False
-            self._visual_rejected = False
-            self.update(
-                "visual_approval",
-                76,
-                "The visuals are ready. Review them on the dashboard before rendering continues.",
-            )
-            self._visual_approval_event.wait(timeout=24 * 60 * 60)
-
-            if self._visual_rejected:
-                raise RuntimeError("Visual review was rejected. The production run was stopped before rendering.")
-            if not self._visual_approved:
-                raise RuntimeError("Visual review timed out. The production run was stopped before rendering.")
-            self.update("render", 77, "Visuals approved. Rendering the final Short now.")
-            return packages
-
-        dashboard_visual_gate._dashboard_visual_gate_bound = True
-        namespace["process_visuals_async"] = dashboard_visual_gate
-        self.bot.process_visuals_async = dashboard_visual_gate
         self._dashboard_visual_gate_bound = True
 
     def submit_script_visual_queries(self, queries: list[str], creator_insight: str = "") -> bool:
@@ -834,6 +920,10 @@ class DashboardWorkflowController(WorkflowController):
         with self._lock:
             self._creator_insight = insight
             self._creator_insight_submitted = True
+            gate = self._manual_gate_state
+            if isinstance(gate, dict):
+                gate["script_submitted"] = True
+                gate["creator_insight_submitted"] = True
             self._script_visual_queries = cleaned
             live_script = self.state.script_data
             if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
@@ -856,7 +946,11 @@ class DashboardWorkflowController(WorkflowController):
             42,
             "Slide queries saved. Creating the voiceover and preparing visuals.",
         )
-        self._script_review_event.set()
+        gate = self._manual_gate_state
+        if isinstance(gate, dict):
+            gate["script_event"].set()
+        else:
+            self._script_review_event.set()
         return True
 
     def approve_visuals(self) -> bool:
@@ -864,8 +958,12 @@ class DashboardWorkflowController(WorkflowController):
         if snapshot.get("stage") != "visual_approval":
             return False
         self._visual_approved = True
-        self.update("render", 77, "Visuals approved. Rendering the final Short now.")
-        self._visual_approval_event.set()
+        gate = self._manual_gate_state
+        if isinstance(gate, dict):
+            gate["visual_approved"] = True
+            gate["visual_event"].set()
+        else:
+            self._visual_approval_event.set()
         return True
 
     def replace_visual(self, visual_index: int, replacement_query: str) -> tuple[bool, str]:
@@ -1062,8 +1160,13 @@ class DashboardWorkflowController(WorkflowController):
         if snapshot.get("stage") != "visual_approval":
             return False
         self._visual_rejected = True
+        gate = self._manual_gate_state
+        if isinstance(gate, dict):
+            gate["visual_rejected"] = True
+            gate["visual_event"].set()
+        else:
+            self._visual_approval_event.set()
         self.update("error", 100, "Visual review rejected. Stopping this production run.")
-        self._visual_approval_event.set()
         return True
 
     def snapshot(self):

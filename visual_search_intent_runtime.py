@@ -269,24 +269,16 @@ def _primary_visual_anchor(scene_terms: list[str]) -> str:
 
 
 def _genre_hint_anchor(genre: str, scene_terms: list[str]) -> str:
-    """Use a visual-form hint only when the genre itself calls for one."""
-    hints = {
-        "PERSON_PORTRAIT": ("portrait",),
-        "ORG_BRANDING": ("logo",),
-        "TEAM_BRANDING": ("logo",),
-        "ORG_HEADQUARTERS": ("headquarters",),
-        "LANDMARK": ("landmark",),
-        "ARCHITECTURE": ("building",),
-        "MAP": ("map",),
-        "CHART_GRAPH": ("chart",),
-        "DIAGRAM": ("diagram",),
-        "SCREENSHOT_UI": ("screenshot",),
-        "TROPHY_AWARD": ("trophy",),
-        "HISTORICAL_PHOTO": ("historical",),
+    """Use only visual-form words that are explicit in the requested scene."""
+    genre = str(genre or "").upper()
+    explicit_hints = {
+        "PERSON_PORTRAIT": "portrait",
+        "ORG_BRANDING": "logo",
+        "TEAM_BRANDING": "logo",
     }
-    for hint in hints.get(str(genre or "").upper(), ()):
-        if hint:
-            return hint
+    hint = explicit_hints.get(genre, "")
+    if hint:
+        return hint
     return _primary_visual_anchor(scene_terms)
 
 
@@ -321,14 +313,11 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         visual_genre = classify_visual_genre(scene, subject, visual_type)
         anchor = _primary_visual_anchor(scene_terms)
 
-        # Keep image queries short and photographic. For a person/action slide,
-        # the best query is normally "identity + concrete scene anchor" rather
-        # than the entire natural-language prompt.
-        if visual_genre == "PERSON_ACTION":
-            anchor = anchor or _primary_visual_anchor(scene_terms)
-        elif visual_genre == "PERSON_PORTRAIT":
-            anchor = _genre_hint_anchor(visual_genre, scene_terms)
-        elif not anchor:
+        # Automatic retrieval gets one compact story-grounded query. Only a
+        # concrete anchor that actually appears in the scene evidence is added.
+        # Identity-only is the fallback; no invented location, office, action or
+        # year is appended just because a genre classifier suggested it.
+        if not anchor and visual_genre in {"PERSON_PORTRAIT", "ORG_BRANDING", "TEAM_BRANDING"}:
             anchor = _genre_hint_anchor(visual_genre, scene_terms)
 
         query = _compose_query(subject, anchor)

@@ -2176,6 +2176,7 @@ def font_preflight_check(lang_cfg):
     except Exception as e:
         pass
 
+
 # ==========================================
 # STEP 1 UPDATE: STREAMLIT DASHBOARD SUPPORT
 # ==========================================
@@ -2186,6 +2187,17 @@ def run_robot(web_config=None):
 
     # If web_config is passed, it forces headless mode automatically
     is_headless = "--headless" in sys.argv or web_config is not None
+    def _run_manual_workflow_hook(payload, hook_key, description):
+        """Run a dashboard/manual workflow checkpoint from the core production path."""
+        if not isinstance(web_config, dict):
+            return payload
+        hook = web_config.get(hook_key)
+        if not callable(hook):
+            return payload
+        print(f"   [Workflow Gate] {description}", flush=True)
+        result = hook(payload)
+        return result if result is not None else payload
+
     conn = sqlite3.connect(DB_PATH)
 
     try:
@@ -2326,12 +2338,30 @@ def run_robot(web_config=None):
         )
         conn.commit()
 
+        dashboard_manual_control = bool(
+            isinstance(web_config, dict) and web_config.get("_dashboard_manual_control")
+        )
+        if dashboard_manual_control and not callable(
+            web_config.get("_manual_script_review_hook")
+        ):
+            raise RuntimeError(
+                "Production blocked: dashboard manual script review hook is not installed."
+            )
+
         script_data = write_script(
             story_payload, lang_cfg, cat_choice, conn, format_mode
         )
         if not script_data:
             print("   [!] Error: Script generation returned None.")
             return
+
+        script_data = _run_manual_workflow_hook(
+            script_data,
+            "_manual_script_review_hook",
+            "Manual script review is active. Waiting for the dashboard decision.",
+        )
+        if not isinstance(script_data, dict):
+            raise RuntimeError("Manual script review returned an invalid script payload.")
 
         titles = script_data.get("titles") or [main_topic]
         if not isinstance(titles, list):
@@ -2379,6 +2409,21 @@ def run_robot(web_config=None):
                 print("   [!] Error: Visual sourcing failed to produce packages.")
                 return
 
+            if dashboard_manual_control and not callable(
+                web_config.get("_manual_visual_review_hook")
+            ):
+                raise RuntimeError(
+                    "Rendering blocked: dashboard manual visual review hook is not installed."
+                )
+
+            visuals = _run_manual_workflow_hook(
+                visuals,
+                "_manual_visual_review_hook",
+                "Manual visual review is active. Rendering is paused until the dashboard decision.",
+            )
+            if not isinstance(visuals, list):
+                raise RuntimeError("Manual visual review returned an invalid visual package.")
+
             video_path = compile_video(
                 visuals, audio_paths, word_timings, lang_cfg, format_mode
             )
@@ -2411,6 +2456,10 @@ def run_robot(web_config=None):
         except Exception as exc:
             print(f"   [!] Could not validate video duration: {exc}")
 
+        post_render_hook = web_config.get("_manual_post_render_hook") if isinstance(web_config, dict) else None
+        if callable(post_render_hook):
+            post_render_hook(video_path)
+
         # Persist the visual rights ledger before the human upload gate so the
         # selected/rejected render remains auditable.
         conn.execute(
@@ -2422,7 +2471,11 @@ def run_robot(web_config=None):
         )
         conn.commit()
 
-        # Bypass QC checking if running from Dashboard or Headless
+        # Dashboard production is always manual-QC and never auto-uploads.
+        if isinstance(web_config, dict) and web_config.get("manual_qc_required"):
+            print("   [Workflow] Manual QC complete for rendering. Upload remains a dashboard-only action.", flush=True)
+            return
+
         if not is_headless and not web_config:
             print("\n🔍 QUALITY CONTROL GATE")
             print(f"🎬 Title: {script_data.get('title')}")
