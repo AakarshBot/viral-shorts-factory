@@ -262,6 +262,23 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
     # for differently worded reporting of the same event.
     if len(shared_entities) >= 2 and shared_actions:
         return True
+
+    # When only one salient entity is available, require an additional shared
+    # topical token (outside the entity/action vocabulary) before merging.
+    # This captures paraphrases such as "OpenAI announces new model release"
+    # vs "OpenAI releases new model after announcement", while avoiding the
+    # common-company/different-event case such as two separate NASA launches.
+    shared_topical_tokens = (
+        _tokens(left.get("title"))
+        & _tokens(right.get("title"))
+        - left_entities
+        - right_entities
+        - left_actions
+        - right_actions
+    )
+    if len(shared_entities) >= 1 and shared_actions and shared_topical_tokens and overlap >= 0.35:
+        return True
+
     if len(shared_entities) >= 3 and (
         not left_actions or not right_actions or shared_actions
     ):
