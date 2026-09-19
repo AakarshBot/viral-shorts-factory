@@ -393,6 +393,39 @@ def cluster_news_events(
             for item in cluster
             if _clean(item.get("genre"))
         })
+        published_times = [
+            item.get("published_dt")
+            for item in cluster
+            if item.get("published_dt") is not None
+        ]
+        first_seen = min(published_times) if published_times else None
+        latest_seen = max(published_times) if published_times else None
+        gdelt_count = sum(
+            1 for item in cluster
+            if _clean(item.get("collection_source")).lower() == "gdelt"
+        )
+        non_gdelt_count = article_count - gdelt_count
+        if latest_seen and first_seen:
+            span_hours = max(
+                0.25,
+                (latest_seen - first_seen).total_seconds() / 3600.0,
+            )
+            velocity_score = min(10.0, article_count / span_hours)
+        else:
+            velocity_score = 0.0
+        action_count = len({
+            action
+            for item in cluster
+            for action in (item.get("identity_actions") or [])
+        })
+        if article_count == 1:
+            development_state = "single-source"
+        elif action_count >= 2 or velocity_score >= 2.0:
+            development_state = "developing"
+        elif latest_seen and (datetime.now(timezone.utc) - latest_seen).total_seconds() <= 3 * 3600:
+            development_state = "breaking"
+        else:
+            development_state = "established"
         representative.update({
             "event_id": _event_id(cluster),
             "event_genres": event_genres,
@@ -429,6 +462,13 @@ def cluster_news_events(
                 if cluster[0].get("published_dt")
                 else _clean(cluster[0].get("publishedAt"))
             ),
+            "event_first_seen_at": first_seen.isoformat() if first_seen else "",
+            "event_latest_seen_at": latest_seen.isoformat() if latest_seen else "",
+            "event_velocity_score": round(velocity_score, 3),
+            "event_development_state": development_state,
+            "event_gdelt_article_count": gdelt_count,
+            "event_non_gdelt_article_count": non_gdelt_count,
+            "event_discovery_gap": bool(gdelt_count and not non_gdelt_count),
         })
         events.append(representative)
 
