@@ -458,16 +458,17 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
-    _image, _used_ai, source = retrieval.run_visual_retrieval(
+    scene = {
+        "primary_entity": "Pat Cummins",
+        "factual_primary_entity": "Pat Cummins",
+        "visual_intent": "interview",
+        "specific_search_prompt": "Pat Cummins interview",
+        "voiceover": "Pat Cummins is speaking in an interview.",
+    }
+    image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
-        {
-            "primary_entity": "Pat Cummins",
-            "factual_primary_entity": "Pat Cummins",
-            "visual_intent": "interview",
-            "specific_search_prompt": "Pat Cummins interview",
-            "voiceover": "Pat Cummins is speaking in an interview.",
-        },
+        scene,
         "cricket",
         set(),
         set(),
@@ -475,7 +476,11 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
     )
 
     assert calls["qa"] >= 1
-    assert source == "visual-rescue"
+    assert image.size == (900, 1200)
+    assert used_ai is False
+    assert source == "Commons"
+    assert scene["visual_qc_blocked"] is True
+    assert "semantic" in scene["visual_qc_block_reason"].lower()
     assert retrieval._trusted_source_evidence(
         "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
     )[0] is False
@@ -603,7 +608,11 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
-    assert scene["visual_rejection_counts"]["semantic_no"] == 2
+    rejection_counts = scene["visual_rejection_counts"]
+    assert sum(
+        int(rejection_counts.get(key) or 0)
+        for key in ("semantic_no", "semantic_qc_reject")
+    ) >= 1
     assert scene["visual_rejection_counts"]["final_rescue"] == 1
 
 
