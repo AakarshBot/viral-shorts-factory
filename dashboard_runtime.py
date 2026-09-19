@@ -671,16 +671,29 @@ class DashboardWorkflowController(WorkflowController):
                 lines.append(self._console_partial.rstrip())
             return lines[-120:]
 
+    def _ensure_manual_gate_state(self):
+        """Create the shared manual gate state for both production and direct dashboard tests."""
+        if not isinstance(self._manual_gate_state, dict):
+            self._manual_gate_state = {
+                "script_event": threading.Event(),
+                "visual_event": threading.Event(),
+                "script_submitted": False,
+                "creator_insight_submitted": False,
+                "visual_approved": False,
+                "visual_rejected": False,
+            }
+        return self._manual_gate_state
+
     def _prepare_production_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Install dashboard checkpoints into the core production call path."""
-        self._manual_gate_state = {
-            "script_event": threading.Event(),
-            "visual_event": threading.Event(),
-            "script_submitted": False,
-            "creator_insight_submitted": False,
-            "visual_approved": False,
-            "visual_rejected": False,
-        }
+        self._manual_gate_state = None
+        gate = self._ensure_manual_gate_state()
+        gate["script_event"].clear()
+        gate["visual_event"].clear()
+        gate["script_submitted"] = False
+        gate["creator_insight_submitted"] = False
+        gate["visual_approved"] = False
+        gate["visual_rejected"] = False
         config["manual_qc_required"] = True
         config["_dashboard_manual_control"] = True
         config["_manual_script_review_hook"] = self._manual_script_review_hook
@@ -697,9 +710,7 @@ class DashboardWorkflowController(WorkflowController):
         if not isinstance(scenes, list) or not scenes:
             raise RuntimeError("Script review could not start because no script scenes were returned.")
 
-        gate = self._manual_gate_state
-        if not isinstance(gate, dict):
-            raise RuntimeError("Manual script review gate is not active.")
+        gate = self._ensure_manual_gate_state()
 
         gate["script_event"].clear()
         gate["script_submitted"] = False
@@ -784,9 +795,7 @@ class DashboardWorkflowController(WorkflowController):
         if not packages:
             raise RuntimeError("Visual review could not start because no visual packages were returned.")
 
-        gate = self._manual_gate_state
-        if not isinstance(gate, dict):
-            raise RuntimeError("Manual visual review gate is not active.")
+        gate = self._ensure_manual_gate_state()
 
         self._visual_packages = packages
         self._visual_approval_event = gate["visual_event"]
@@ -822,15 +831,35 @@ class DashboardWorkflowController(WorkflowController):
         self.update("render", 94, "Video rendered and ready for final QC.")
 
     def _install_production_wrappers(self):
-        # Safety-critical script and visual waits live in the core factory path.
-        # These wrappers are presentation-only and may be rebound without removing
-        # the actual manual checkpoints.
+        # These wrappers preserve the dashboard's direct callable contract for
+        # Streamlit/unit-test callers. The core run_robot hooks remain the
+        # authoritative fail-closed checkpoints.
         super()._install_production_wrappers()
+
+        self._ensure_manual_gate_state()
 
         run_robot = getattr(self.bot, "run_robot", None)
         namespace = getattr(run_robot, "__globals__", None)
         if not isinstance(namespace, dict):
             return
+
+        current_script = namespace.get("write_script")
+        if callable(current_script) and not getattr(current_script, "_dashboard_script_review", False):
+            def dashboard_script_review(*args, **kwargs):
+                result = current_script(*args, **kwargs)
+                if not isinstance(result, dict):
+                    return result
+                reviewed = self._manual_script_review_hook(result)
+                if isinstance(reviewed, dict):
+                    reviewed["_dashboard_script_review_complete"] = True
+                return reviewed
+
+            dashboard_script_review._dashboard_script_review = True
+            dashboard_script_review._research_layer_live = bool(
+                getattr(current_script, "_research_layer_live", False)
+            )
+            namespace["write_script"] = dashboard_script_review
+            self.bot.write_script = dashboard_script_review
 
         current_audio = namespace.get("generate_voiceover_and_timestamps")
         if callable(current_audio) and not getattr(current_audio, "_dashboard_audio_capture", False):
@@ -849,6 +878,16 @@ class DashboardWorkflowController(WorkflowController):
             dashboard_audio_capture._dashboard_audio_capture = True
             namespace["generate_voiceover_and_timestamps"] = dashboard_audio_capture
             self.bot.generate_voiceover_and_timestamps = dashboard_audio_capture
+
+        current_visual = namespace.get("process_visuals_async")
+        if callable(current_visual) and not getattr(current_visual, "_dashboard_visual_gate_bound", False):
+            async def dashboard_visual_gate(*args, **kwargs):
+                packages = await current_visual(*args, **kwargs)
+                return self._manual_visual_review_hook(packages)
+
+            dashboard_visual_gate._dashboard_visual_gate_bound = True
+            namespace["process_visuals_async"] = dashboard_visual_gate
+            self.bot.process_visuals_async = dashboard_visual_gate
 
         self._dashboard_visual_gate_bound = True
 
