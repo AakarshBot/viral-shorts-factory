@@ -299,10 +299,14 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         scene_resolution = resolve_subject(base, video_title)
         subject = manual
         visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
-        manual_genre_scene = dict(base)
-        manual_genre_scene["primary_entity"] = manual
-        manual_genre_scene["visual_intent"] = manual
-        manual_genre_scene["specific_search_prompt"] = manual
+
+        # Manual queries are authoritative for retrieval, but stale generated
+        # genre/context metadata must not leak into the replacement scene.
+        manual_genre_scene = {
+            "primary_entity": manual,
+            "visual_intent": _clean(scene.get("visual_intent", "")),
+            "specific_search_prompt": manual,
+        }
         visual_genre = classify_visual_genre(manual_genre_scene, manual, visual_type)
         confidence = 1.0
         query = manual
@@ -331,16 +335,21 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         if subject and query.casefold() != subject.casefold():
             queries.append(subject)
 
-    intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
-    context = _clean(" ".join(
-        _clean(scene.get(field, ""))
-        for field in (
-            "factual_visual_intent", "visual_intent", "visual_context",
-            "factual_search_prompt", "specific_search_prompt",
-            "factual_voiceover", "voiceover",
-        )
-        if _clean(scene.get(field, ""))
-    ) or video_title)
+    if manual:
+        manual_intent = _clean(scene.get("visual_intent", ""))
+        intent = manual_intent or manual
+        context = manual_intent or manual
+    else:
+        intent = _clean(scene.get("factual_visual_intent") or scene.get("visual_intent"))
+        context = _clean(" ".join(
+            _clean(scene.get(field, ""))
+            for field in (
+                "factual_visual_intent", "visual_intent", "visual_context",
+                "factual_search_prompt", "specific_search_prompt",
+                "factual_voiceover", "voiceover",
+            )
+            if _clean(scene.get(field, ""))
+        ) or video_title)
 
     return VisualSearchIntent(
         subject=subject,

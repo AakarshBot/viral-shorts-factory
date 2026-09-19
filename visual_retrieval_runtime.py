@@ -210,7 +210,7 @@ def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_g
     query_tokens = {re.sub(r"[^a-z0-9]+", "", token.casefold()) for token in re.findall(r"[A-Za-z0-9]+", str(query or ""))}
 
     genre_l = str(visual_genre or "").strip().upper()
-    if genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"} and source_l in {"wikipedia", "commons"}:
+    if genre_l == "PERSON_PORTRAIT" and source_l in {"wikipedia", "commons"}:
         return True, "SOURCE-IDENTITY", REAL_SOURCE_SCORES.get(source_l, 95.0)
     if genre_l in {"ORG_BRANDING", "TEAM_BRANDING"} and source_l == "commons" and query_tokens & _VISUAL_DESCRIPTOR_WORDS:
         return True, "SOURCE-BRANDED", REAL_SOURCE_SCORES.get(source_l, 96.0)
@@ -335,7 +335,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     cache_entity = visual_anchor
 
     cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
-    if cached_img is not None:
+    if cached_img is not None and visual_genre != "PERSON_ACTION":
         buffer = io.BytesIO()
         cached_img.save(buffer, format="JPEG", quality=95)
         cached_hash = _hash_image(bot, buffer.getvalue())
@@ -346,6 +346,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             seg["visual_fallback_reason"] = ""
             seg["visual_query_used"] = "cache"
             return cached_img.convert("RGB"), False, "cached"
+    elif cached_img is not None:
+        print("   [Visual Cache] PERSON_ACTION cache bypassed; semantic QA required.", flush=True)
 
     verification_attempts = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))

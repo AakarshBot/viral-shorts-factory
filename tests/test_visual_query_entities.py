@@ -130,6 +130,19 @@ def test_malformed_leading_negation_is_removed_and_context_grounded():
     assert all("not" not in q.lower().split() for q in queries)
 
 
+def test_trailing_conjunction_does_not_survive_stable_identity_cleanup():
+    for malformed in ("Virat Kohli Or", "Virat Kohli And", "Virat Kohli But"):
+        resolution = resolve_subject(
+            {
+                "primary_entity": malformed,
+                "visual_intent": "person portrait",
+            }
+        )
+        assert resolution["visual_type"] == "PERSON"
+        assert resolution["subject"] == "Virat Kohli"
+        assert resolution["factual_entity"] == "Virat Kohli"
+
+
 def test_html_noise_is_removed_from_visual_subject_and_query():
     scene = {
         "primary_entity": "Not Aurora",

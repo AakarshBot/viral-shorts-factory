@@ -8,6 +8,8 @@ import unicodedata
 MAX_SUBJECT_WORDS = 8
 MAX_QUERY_WORDS = 10
 
+_TRAILING_IDENTITY_CONJUNCTIONS = {"or", "and", "but"}
+
 GENERIC_NOISE = {
     "nbsp", "amp", "quot", "apos", "lt", "gt", "latest", "breaking", "news",
     "update", "story", "article", "headline", "reported", "reports", "according",
@@ -133,7 +135,10 @@ def sanitize_candidate(value: object) -> str:
     end = len(words)
     while start < end and key(words[start]) in DISCOURSE_PREFIXES:
         start += 1
-    while end > start and key(words[end - 1]) in GENERIC_NOISE:
+    while end > start and (
+        key(words[end - 1]) in GENERIC_NOISE
+        or key(words[end - 1]) in _TRAILING_IDENTITY_CONJUNCTIONS
+    ):
         end -= 1
     filtered = words[start:end]
     if not filtered:
