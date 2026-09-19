@@ -528,27 +528,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     seg["visual_query_used"] = prompt_text
                     seg["visual_verification_attempts"] = verification_attempts
                     return Image.open(io.BytesIO(normalized)).convert("RGB"), True, "ai-generated"
-                if not hard_reject:
-                    best_uncertain = (float(score or 40), normalized, "ai-generated", prompt_text)
         else:
             print(f"   [Visual Source] AI image rejected before QA: {reason}", flush=True)
-
-    if best_uncertain is not None:
-        score, normalized, source, query = best_uncertain
-        image_hash = _hash_image(bot, normalized)
-        if image_hash not in used_hashes:
-            used_hashes.add(image_hash)
-            seg["visual_verified"] = False
-            seg["visual_rescue_reason"] = "ai-or-real-source-unverified"
-            seg["visual_fallback_reason"] = ""
-            seg["visual_query_used"] = query
-            seg["visual_verification_attempts"] = verification_attempts
-            print(
-                f"   [Visual Source] {source} | USED-UNVERIFIED-FALLBACK | score={score:.0f} | query='{query}' | "
-                f"QA={verification_attempts}/{max_verification}",
-                flush=True,
-            )
-            return Image.open(io.BytesIO(normalized)).convert("RGB"), source == "ai-generated", source
 
     rescue = make_visual_rescue(entity or factual_entity, visual_type)
     seg["visual_verified"] = False
