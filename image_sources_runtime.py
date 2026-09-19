@@ -115,7 +115,7 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
                     "page_size": 15,
                     "mature": "false",
                     "license_type": "commercial",
-                    "license": "cc0,by,by-sa,pdm",
+                    "license": ["cc0", "pdm", "by", "by-sa"],
                 },
                 timeout=DEFAULT_TIMEOUT,
                 headers={"User-Agent": "ViralShortsFactory/1.0 (+image-retrieval)"},
