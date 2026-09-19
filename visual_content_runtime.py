@@ -209,8 +209,24 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, acti
         return None
 
     ranked_indices = _rank_news_source_scene_indices(scenes, article_title)
+    person_scene_indices = {
+        index
+        for index, scene in enumerate(scenes)
+        if str(scene.get("visual_genre") or "").strip().upper()
+        in {"PERSON_PORTRAIT", "PERSON_ACTION"}
+    }
     for scene_index in ranked_indices:
         scene = scenes[scene_index]
+        if scene_index in person_scene_indices:
+            # Article lead images frequently contain headlines, cards or page
+            # artwork rather than the actual person. Person slides must use the
+            # person-specific retrieval path instead.
+            print(
+                f"   [News Source Image] Skipped person scene {scene_index + 1}; "
+                "person-specific retrieval is required.",
+                flush=True,
+            )
+            continue
         scene["news_source_qc_attempted"] = True
         try:
             accepted, tier, score, hard_reject = visual_runtime._strict_gate(
