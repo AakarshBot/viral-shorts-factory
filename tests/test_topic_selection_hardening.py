@@ -163,3 +163,20 @@ def test_diversity_reranker_separates_repeated_subjects():
     assert selected[0]["title"] == "Rishabh Pant omitted from India squad"
     assert selected[1]["title"] == "Major satellite mission launches"
     assert len(selected) == 3
+
+def test_originality_allows_new_development_for_same_entity():
+    stories = [
+        {"title": "OpenAI launches new model for developers"},
+        {"title": "OpenAI launches new model for enterprise users"},
+    ]
+
+    result = _originality_stage(
+        stories,
+        ["OpenAI launches new model for developers"],
+        max_items=5,
+    )
+
+    assert [item["title"] for item in result] == [
+        "OpenAI launches new model for enterprise users",
+    ]
+\n
