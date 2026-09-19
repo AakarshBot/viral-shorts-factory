@@ -448,7 +448,7 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     if vt == "PERSON" and (sports_action or _has(words, "interview", "speaking", "speaks", "appearing", "on stage")):
         return "PERSON_ACTION"
 
-    team_terms = _has(words, "team", "squad", "club", "xi", "eleven", "federation")
+    team_terms = _has(words, "team", "squad", "club", "xi", "eleven")
     if sports_action and (vt == "ORGANIZATION" or team_terms):
         return "TEAM_ACTION"
     if sports_action and (vt in {"PERSON", "EVENT"} or _has(words, "player", "athlete")):
@@ -487,6 +487,8 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
     if vt == "PERSON":
         return "PERSON_ACTION" if sports_action or _has(words, "interview", "speaking", "speaks", "appearing", "on stage") else "PERSON_PORTRAIT"
     if vt == "ORGANIZATION":
+        if team_terms:
+            return "GENERAL_PHOTO"
         if _has(words, "headquarters", "office", "campus"):
             return "ORG_HEADQUARTERS"
         if _contains_phrase(intent, (
@@ -494,7 +496,9 @@ def classify_visual_genre(scene: dict, subject: str = "", visual_type: str = "")
             "summit", "meeting", "signing", "unveiling", "unveil",
         )):
             return "EVENT_SCENE"
-        return "ORG_BRANDING" if _has(words, "official", "logo", "brand") else "ORG_HEADQUARTERS"
+        if _has(words, "official", "logo", "brand"):
+            return "ORG_BRANDING"
+        return "GENERAL_PHOTO"
     if vt == "LOCATION":
         return "LANDMARK" if _has(words, "landmark", "monument") else ("ARCHITECTURE" if _has(words, "building", "stadium", "arena") else "PLACE_SCENE")
     if vt == "EVENT":
