@@ -1291,7 +1291,7 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
     stage30 = _deduplicate_stage(stage50, max_items=30)
     stage15 = _fact_source_stage(stage30, max_items=15)
     stage8 = _originality_stage(stage15, used_topics, max_items=8)
-    ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage5]
+    ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage8]
     ranked.sort(key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0, reverse=True)
 
     for story in ranked:
