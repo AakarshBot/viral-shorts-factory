@@ -642,5 +642,5 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'def render_generated_outputs(snapshot: Dict[str, Any]) -> None:' in app_source
     assert 'render_generated_outputs(snapshot)' in app_source
     assert 'def render_script_visual_query_review(' in app_source
-    assert 'visual_search_queries' not in app_source
+    assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
