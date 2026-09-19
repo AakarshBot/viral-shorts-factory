@@ -876,17 +876,8 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         if blocked:
             st.caption("Blocked by: " + " · ".join(blocked))
 
-    st.markdown("### Final video")
-    if video_path and os.path.isfile(video_path):
-        st.success("The Short is rendered, branded and ready for your review.", icon="✅")
-        st.video(video_path)
-    else:
-        st.error("The dashboard has a final video path, but the file is not accessible from this dashboard process.")
-        st.code(video_path or "No final video path recorded.", language="text")
-        return
-
     st.markdown("### 1 · Review and approve metadata")
-    st.caption("Edit the title, description and creator comment. Upload controls stay locked until you explicitly approve these fields.")
+    st.caption("Review the final title, description and pinned comment here. Titles are normalized to include #shorts and stay within YouTube's 100-character limit.")
 
     editing = not bool(st.session_state.get("metadata_approved"))
     title = st.text_input(
@@ -902,7 +893,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         disabled=not editing,
     )
     comment = st.text_area(
-        "Creator comment",
+        "Pinned comment",
         height=110,
         key="final_comment",
         disabled=not editing,
@@ -937,6 +928,16 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     if st.button("✏️ Edit metadata", use_container_width=True, key="edit_metadata"):
         st.session_state["metadata_approved"] = False
         st.rerun()
+
+
+    st.markdown("### Final video")
+    if video_path and os.path.isfile(video_path):
+        st.success("The Short is rendered, branded and ready for your review.", icon="✅")
+        st.video(video_path)
+    else:
+        st.error("The dashboard has a final video path, but the file is not accessible from this dashboard process.")
+        st.code(video_path or "No final video path recorded.", language="text")
+        return
 
     st.markdown("### 2 · Choose upload visibility")
     st.info("Private keeps the Short hidden on YouTube. Public publishes it immediately after the final confirmation.")
