@@ -49,7 +49,7 @@ def test_real_visual_candidate_reaches_verified_source(monkeypatch):
 
         @staticmethod
         def _call_fetcher_with_timeout(fetcher, args, source, query):
-            return image_bytes
+            return _licensed_candidate(image_bytes, "cc0")
 
         @staticmethod
         def _strict_gate(bot, data, seg, video_title="", source=""):
@@ -66,7 +66,7 @@ def test_real_visual_candidate_reaches_verified_source(monkeypatch):
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type: [("Commons", lambda *args: image_bytes)],
+        lambda bot, visual_type: [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
     image, used_ai, source = retrieval.run_visual_retrieval(
@@ -89,6 +89,19 @@ def test_real_visual_candidate_reaches_verified_source(monkeypatch):
     assert used_ai is False
     assert source == "Commons"
 
+
+
+def _licensed_candidate(image_bytes, license_name="cc0"):
+    return {
+        "bytes": image_bytes,
+        "provenance": {
+            "provider": "Commons",
+            "url": "https://commons.wikimedia.org/wiki/File:Test.jpg",
+            "author": "Test Author",
+            "license": license_name,
+            "license_url": "https://creativecommons.org/publicdomain/zero/1.0/" if license_name == "cc0" else "https://creativecommons.org/licenses/by/4.0/",
+        },
+    }
 
 
 def _jpeg_bytes(size=(900, 1200)):
@@ -131,7 +144,7 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [image_bytes])],
+        lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [_licensed_candidate(image_bytes, "by")])],
     )
 
     image, used_ai, source = retrieval.run_visual_retrieval(
@@ -191,7 +204,7 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [image_bytes])],
+        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
     _image, _used_ai, source = retrieval.run_visual_retrieval(
