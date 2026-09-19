@@ -2,6 +2,8 @@
 
 import io
 
+import visual_provider_boundary_runtime as provider_boundary
+
 from PIL import Image
 
 import visual_retrieval_runtime as retrieval
@@ -26,6 +28,178 @@ def test_image_hash_deduplicates_different_file_encodings():
 
 
 
+
+
+def test_license_is_checked_before_semantic_qa(monkeypatch):
+    image_bytes = _jpeg_bytes()
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 4
+        qa_calls = 0
+
+        @staticmethod
+        def _verification_tier(seg, visual_type, source):
+            return "STRICT"
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher()
+
+        @staticmethod
+        def _strict_gate(*args, **kwargs):
+            FakeRuntime.qa_calls += 1
+            return True, "STRICT", 100, False
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    bad = {
+        "bytes": image_bytes,
+        "provenance": {
+            "provider": "Openverse",
+            "url": "https://example.test/bad.jpg",
+            "author": "Example",
+            "license": "cc-by-nc",
+            "license_url": "",
+        },
+    }
+    good = _licensed_candidate(image_bytes, "cc0")
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [bad, good])],
+    )
+
+    image, used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        {
+            "primary_entity": "India",
+            "factual_primary_entity": "India",
+            "visual_intent": "match",
+            "specific_search_prompt": "India match",
+            "voiceover": "India match update.",
+        },
+        "news",
+        set(),
+        set(),
+        "India match",
+    )
+
+    assert image.size == (900, 1200)
+    assert used_ai is False
+    assert source == "Commons"
+    assert FakeRuntime.qa_calls == 1
+
+
+def test_failed_semantic_candidate_is_kept_for_manual_review(monkeypatch):
+    image_bytes = _jpeg_bytes()
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 2
+
+        @staticmethod
+        def _verification_tier(seg, visual_type, source):
+            return "STRICT"
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher()
+
+        @staticmethod
+        def _strict_gate(*args, **kwargs):
+            return False, "STRICT:SEMANTIC_NO", 50, True
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("Wikipedia", lambda *args: [{
+                "bytes": image_bytes,
+                "provenance": {
+                    "provider": "Wikipedia",
+                    "url": "https://commons.wikimedia.org/wiki/File:Test.jpg",
+                    "author": "Test",
+                    "license": "cc0",
+                    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+                },
+            }]),
+            ("Pexels", lambda *args: [{
+                "bytes": image_bytes,
+                "provenance": {
+                    "provider": "Pexels",
+                    "url": "https://www.pexels.com/photo/test/",
+                    "author": "Test",
+                    "license": "Pexels License",
+                    "license_url": "https://www.pexels.com/license/",
+                },
+            }]),
+        ],
+    )
+
+    scene = {
+        "primary_entity": "Sanju Samson",
+        "factual_primary_entity": "Sanju Samson",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "Sanju Samson",
+        "voiceover": "Sanju Samson is in focus.",
+    }
+    image, used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        scene,
+        "cricket",
+        set(),
+        set(),
+        "Sanju Samson story",
+    )
+
+    assert image.size == (900, 1200)
+    assert used_ai is False
+    assert source == "Wikipedia"
+    assert scene["visual_qc_blocked"] is True
+    assert "semantic_no" in scene["visual_qc_block_reason"].lower()
+    assert scene["visual_rejection_counts"]["semantic_no"] == 2
+
+
+def test_provider_plan_skips_unconfigured_optional_providers(monkeypatch):
+    import visual_provider_boundary_runtime as boundary
+
+    for name in ("PIXABAY_API_KEY", "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    plan = boundary.build_raw_source_plan("GENERAL_CONTEXT", "PLACE_SCENE")
+    names = {name for name, _fetcher in plan}
+    assert "Openverse" in names
+    assert "Pixabay" not in names
+    assert "Pexels" not in names
+    assert "Unsplash" not in names
+
+
+def test_gate_failure_bucket_distinguishes_no_and_uncertain():
+    assert retrieval._gate_rejection_bucket("STRICT:SEMANTIC_NO") == "semantic_no"
+    assert retrieval._gate_rejection_bucket("STRICT:QA_AMBIGUOUS_RESPONSE") == "semantic_uncertain"
+    assert retrieval._gate_rejection_bucket("STRICT:QA_NO_API_KEY") == "qa_unavailable"
 
 
 def test_real_visual_candidate_reaches_verified_source(monkeypatch):
