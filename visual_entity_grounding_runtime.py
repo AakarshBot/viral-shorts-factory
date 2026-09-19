@@ -87,7 +87,7 @@ def _entity_contains_publisher_domain(entity:str,script_data:dict[str,Any])->boo
 def _evidence(script_data:dict[str,Any])->str:
     if not isinstance(script_data,dict): return ""
     parts=[]
-    for field in ("title","step_1_headline","step_2_data_points","text","summary","description","research_bundle"):
+    for field in ("step_2_data_points","text","summary","description","research_bundle"):
         value=script_data.get(field)
         if value: parts.append(_strip_domains(value))
     sources=script_data.get("research_sources")
@@ -96,14 +96,14 @@ def _evidence(script_data:dict[str,Any])->str:
             if isinstance(source,dict):
                 parts.extend(
                     _strip_domains(source.get(f, ""))
-                    for f in ("title", "snippet", "summary", "description")
+                    for f in ("snippet", "summary", "description")
                     if source.get(f)
                 )
 
     # Phase 2 evidence is the authoritative research layer used to build the
-    # script. Grounding must see its claims and source previews; otherwise valid
-    # people/teams/events can be treated as unsupported and collapsed to a
-    # generic headline anchor such as "Asian Games".
+    # script. Headline/title fields are deliberately excluded from identity
+    # support: headline phrasing is not a reliable entity proof source and can
+    # contain title-case action fragments that look like names.
     pack = script_data.get("research_evidence_pack")
     if isinstance(pack,dict):
         for claim in pack.get("claims") or []:
@@ -118,7 +118,7 @@ def _evidence(script_data:dict[str,Any])->str:
         for source in pack.get("sources") or []:
             if not isinstance(source,dict):
                 continue
-            for field in ("title", "snippet", "summary", "description", "clean_text_preview"):
+            for field in ("snippet", "summary", "description", "clean_text_preview"):
                 value = _strip_domains(source.get(field, ""))
                 if value:
                     parts.append(value)
@@ -183,17 +183,18 @@ def _anchors(script_data:dict[str,Any])->list[str]:
                 start-=1; steps+=1
             found.append(' '.join(words[start:i+1]))
 
-    # Also keep short title-cased names as fallback anchors (for example NASA,
-    # OpenAI, or a two-word organisation/person name).
-    for size in range(min(4,len(words)),1,-1):
-        for start in range(0,len(words)-size+1):
-            group=words[start:start+size]
-            if group and all(w[:1].isupper() for w in group):
-                found.append(' '.join(group))
-    if not found:
-        for token in words:
-            if token[:1].isupper() and len(token)>2:
-                found.append(token)
+    # Single title-cased headline tokens can still serve as fallback anchors
+    # (for example "Japan" or "BCCI"), but never promote a multi-word title-case
+    # fragment such as "India To Play Historic" into an entity.
+    for word in words:
+        token = key(word)
+        if (
+            word[:1].isupper()
+            and len(word) > 2
+            and token not in _GENERIC
+            and token not in _STOP
+        ):
+            found.append(word)
 
     result=[]
     for item in found:
@@ -204,7 +205,11 @@ def _anchors(script_data:dict[str,Any])->list[str]:
 def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str,Any]:
     original=_norm(scene.get("factual_primary_entity") or scene.get("primary_entity") or scene.get("visual_search_subject") or "")
     if not original: return {"entity":"","grounded":False,"changed":False,"reason":"no visual entity supplied","confidence":0.0}
-    evidence=_evidence(script_data); role=_role(scene,original)
+    evidence=_evidence(script_data)
+    scene_voiceover = _strip_domains(scene.get("voiceover") or "")
+    if scene_voiceover:
+        evidence = (evidence + "\n" + scene_voiceover).strip()
+    role=_role(scene,original)
     source_name_contamination=_entity_matches_publisher(original,script_data)
     contaminated=_entity_contains_publisher_domain(original,script_data)
     explicit_branding=any(

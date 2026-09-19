@@ -231,3 +231,51 @@ def test_match_query_uses_concrete_format_anchor():
     assert intent.queries
     assert any("odi" in query.casefold() for query in intent.queries)
     assert all("scene" not in query.casefold() for query in intent.queries)
+
+
+def test_headline_action_fragment_is_never_used_as_an_entity_anchor():
+    from visual_entity_grounding_runtime import _anchors
+
+    story = {
+        "title": "India To Play Historic Friendly Against Japan",
+        "research_bundle": "India's men's cricket team will play Japan in a friendly.",
+    }
+
+    anchors = _anchors(story)
+
+    assert "India To Play Historic" not in anchors
+
+
+def test_scene_voiceover_can_support_a_valid_visual_entity():
+    story = {
+        "title": "India To Play Historic Friendly Against Japan",
+        "research_bundle": "The teams are preparing for the fixture.",
+    }
+    scene = {
+        "primary_entity": "Ministry of Youth Affairs and Sports",
+        "visual_intent": "organisation building",
+        "voiceover": "The Ministry of Youth Affairs and Sports confirmed the team's participation.",
+    }
+
+    grounded = apply_grounding(scene, story)
+
+    assert grounded["primary_entity"] == "Ministry of Youth Affairs and Sports"
+    assert grounded["visual_entity_grounded"] is True
+    assert grounded["visual_entity_grounding_confidence"] >= 0.80
+
+
+def test_headline_title_alone_cannot_ground_a_fake_visual_entity():
+    story = {
+        "title": "India To Play Historic Friendly Against Japan",
+        "research_bundle": "India's men's cricket team will play Japan in a friendly.",
+    }
+    scene = {
+        "primary_entity": "India To Play Historic",
+        "visual_intent": "person portrait",
+        "voiceover": "The match will bring the two teams together.",
+    }
+
+    grounded = ground_scene_entity(scene, story)
+
+    assert grounded["grounded"] is False
+    assert grounded["changed"] is False
