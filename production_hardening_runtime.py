@@ -272,7 +272,7 @@ def install_production_wrappers(controller) -> None:
         def compile_wrapper(*args, **kwargs):
             controller._reporter("render", 78, "Rendering motion, word-highlight captions and branding…")
             result = original_compile(*args, **kwargs)
-            controller._reporter("render", 94, "Final video rendered. Preparing final QC…")
+            controller._reporter("render", 94, "Video rendered and loudness normalized. Preparing final QC…")
             if isinstance(result, str) and os.path.isfile(result):
                 with controller._lock:
                     controller.state.video_path = result
