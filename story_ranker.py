@@ -504,12 +504,24 @@ def _trend_signal(title):
     return min(4.0, sum(1.0 for term in terms if term and term in title_text))
 
 
-def _discovery_query_lanes(base_query, genre_key="", ai_cricket=False):
+def _discovery_query_lanes(base_query, genre_key="", ai_cricket=False, broad=False):
     """Create a small set of intentional discovery lenses without query fanout."""
     base = str(base_query or "").strip()
     if not base:
         return []
     key = _clean(genre_key)
+    if broad:
+        global_lenses = [
+            f"({base}) AND (breaking OR latest OR announced OR decision)",
+            f"({base}) AND (deal OR agreement OR conflict OR crisis OR court OR government)",
+            f"({base}) AND (launch OR discovery OR research OR science OR technology)",
+            f"({base}) AND (business OR economy OR market OR company OR funding)",
+            f"({base}) AND (incident OR disaster OR weather OR climate OR emergency)",
+            f"({base}) AND (sport OR match OR tournament OR player OR team)",
+            f"({base}) AND (film OR music OR entertainment OR celebrity OR culture)",
+            f"({base}) AND (viral OR internet OR social media OR unusual)",
+        ]
+        return [base] + [query for query in global_lenses if query != base][:8]
     if ai_cricket or key in {"sports", "sports_stories_of_day"}:
         lenses = [
             f"({base}) AND (latest OR today OR breaking)",
@@ -604,7 +616,7 @@ def _source_url_from_item(item):
     return str(item.get("url") or item.get("link") or "").strip()
 
 
-def _gnews_items(query, api_key, genre_key):
+def _gnews_items(query, api_key, genre_key, global_scope=False):
     global _GNEWS_FAILURE_UNTIL, _GNEWS_FAILURE_LOGGED
 
     if not api_key:
@@ -619,7 +631,7 @@ def _gnews_items(query, api_key, genre_key):
             params={
                 "q": query,
                 "lang": "en",
-                "country": "in",
+                **({"country": "in"} if not global_scope else {}),
                 "max": 20,
                 "apikey": api_key,
             },
@@ -1085,10 +1097,10 @@ def _discovery_portfolio_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
 
-    if freshness < 2.0 and momentum < 2.0:
+    if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
-    if score < 10.0:
+    if score < 6.0:
         story["discovery_rejection"] = "Below exploration quality floor"
         return False
 
@@ -1251,7 +1263,7 @@ def diversity_rerank(stories, max_items=28):
 
 
 
-def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False, discover_lanes=None):
+def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False, discover_lanes=None, broad_discovery=False):
     """Collect a broad article pool, then collapse it into distinct event candidates.\n\n    ``discover_lanes`` is a legacy compatibility keyword. The current\n    collector uses one canonical intake path, so the value is intentionally\n    ignored; accepting it prevents stale dashboard runtimes from crashing\n    during rolling deployments.\n    """
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
@@ -1260,10 +1272,21 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     # These providers are independent. Fetch them concurrently so one slow
     # source does not make the entire intake run serially.
     rss_url = custom_rss_url or genre_cfg.get("rss_url", "")
-    query_lanes = _discovery_query_lanes(base_query, genre_key=genre_key, ai_cricket=ai_cricket)
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="discovery-intake") as pool:
+    query_lanes = _discovery_query_lanes(
+        base_query,
+        genre_key=genre_key,
+        ai_cricket=ai_cricket,
+        broad=broad_discovery,
+    )
+    with ThreadPoolExecutor(max_workers=8 if broad_discovery else 4, thread_name_prefix="discovery-intake") as pool:
         gnews_futures = [
-            pool.submit(_gnews_items, query, api_key, genre_key)
+            pool.submit(
+                _gnews_items,
+                query,
+                api_key,
+                genre_key,
+                global_scope=broad_discovery,
+            )
             for query in query_lanes
         ]
         rss_future = pool.submit(_rss_items, rss_url, genre_key)
@@ -1312,16 +1335,22 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
 
     compact = compact_items(raw)
     event_pool = discover_event_pool(
-        query=base_query,
+        query=(
+            "breaking OR latest OR announced OR decision OR deal OR launch OR "
+            "discovery OR incident OR crisis OR court OR business OR technology OR "
+            "sports OR entertainment OR culture OR viral"
+            if broad_discovery
+            else base_query
+        ),
         existing_articles=compact,
         timespan="48h",
-        max_gdelt_records=75,
+        max_gdelt_records=150 if broad_discovery else 75,
     )
     events = event_pool["events"]
 
-    # GDELT is one bounded supplemental source. Do not fan out into
-    # multiple query lanes: the base intake already combines GNews, RSS,
-    # official feeds and public social signals before event clustering.
+    # GDELT remains a bounded supplemental radar. In dashboard mode it
+    # receives an independent global lens so it can surface events missed by
+    # category queries; production selection keeps the narrower legacy query.
     raw = list(event_pool.get("articles") or raw)
     initial_gdelt_count = int(event_pool.get("gdelt_article_count") or 0)
     print(
@@ -1378,10 +1407,13 @@ def rank_discovery_candidates(
     social_titles = social_titles or []
 
     stage120 = _cheap_filter(stories, max_items=120, max_age_hours=72)
-    stage100 = _recent_topic_cooldown(conn, stage120, hours=72)
+    stage100 = _recent_topic_cooldown(conn, stage120, hours=36)
     stage80 = _deduplicate_stage(stage100, max_items=80)
-    stage60 = _fact_source_stage(stage80, max_items=60)
-    stage50 = _originality_stage(stage60, used_topics, max_items=50)
+    # Dashboard discovery already requires a usable source URL/event record.
+    # Keep source quality as a dimension, not a hard pre-ranking choke point;
+    # strict corroboration remains in production selection.
+    stage60 = stage80
+    stage50 = _originality_stage(stage60, used_topics, max_items=60)
 
     ranked = [
         _editorial_score(
