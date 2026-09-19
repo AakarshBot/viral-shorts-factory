@@ -167,13 +167,20 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
         except Exception:
             visual_type = "GENERAL_CONTEXT"
     tier = _verification_tier(seg, visual_type, source)
-    if tier == "STRICT(person)":
-        print(f"   [Visual QA] Tier=STRICT(person) | source={source} | Gemini=SKIPPED (curated source).", flush=True)
-        return True, tier, 100, False
-    if tier == "SKIPPED(conceptual)":
-        print("   [Visual QA] Tier=SKIPPED(conceptual) | Gemini=SKIPPED.", flush=True)
-        return True, tier, 90, False
-    result = _strict_gemini_check(img_bytes, entity, intent, prompt, voice, title, os.getenv("GEMINI_API_KEY"), tier=tier, visual_type=visual_type, visual_genre=visual_genre)
+    # Source authority determines ordering and evidence, not acceptance.
+    # Every automatic candidate still passes the same semantic QC gate.
+    result = _strict_gemini_check(
+        img_bytes,
+        entity,
+        intent,
+        prompt,
+        voice,
+        title,
+        os.getenv("GEMINI_API_KEY"),
+        tier=tier,
+        visual_type=visual_type,
+        visual_genre=visual_genre,
+    )
     source_score = {"wikipedia": 100, "commons": 95, "ddg": 70, "pexels": 65, "unsplash": 65, "ai-generated": 45}.get(str(source).lower(), 50)
     if result is True:
         return True, tier, 100, False
