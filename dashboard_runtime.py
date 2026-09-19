@@ -290,9 +290,18 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         for category in AI_DISCOVERY_CATEGORY_KEYS:
             cfg = bot.CONTENT_CATEGORIES.get(category) or {}
             query = str(cfg.get("gnews_q", "") or "").strip()
-            for lane in _discovery_query_lanes(query, genre_key=category)[:2]:
+            for lane in _discovery_query_lanes(query, genre_key=category, broad=True)[:4]:
                 if lane and api_key:
-                    gnews_jobs.append((category, pool.submit(_gnews_items, lane, api_key, category)))
+                    gnews_jobs.append((
+                        category,
+                        pool.submit(
+                            _gnews_items,
+                            lane,
+                            api_key,
+                            category,
+                            global_scope=True,
+                        ),
+                    ))
             rss_url = str(cfg.get("rss_url", "") or "").strip()
             if rss_url:
                 source_jobs.append(pool.submit(_rss_items, rss_url, category))
@@ -319,18 +328,24 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
             compact.append(item)
 
     event_pool = discover_event_pool(
-        query="India OR world OR technology OR business OR entertainment OR cricket",
+        query=(
+            "breaking OR latest OR announced OR decision OR deal OR launch OR "
+            "discovery OR incident OR crisis OR court OR business OR technology OR "
+            "sports OR entertainment OR culture OR viral"
+        ),
         existing_articles=compact,
         timespan="48h",
-        max_gdelt_records=75,
+        max_gdelt_records=150,
     )
     candidates = event_pool.get("events") or compact
 
-    stage30 = _cheap_filter(candidates, max_items=60, max_age_hours=48)
-    stage20 = _deduplicate_stage(stage30, max_items=45)
-    stage20 = _recent_topic_cooldown(conn, stage20, hours=48)
-    stage12 = _fact_source_stage(stage20, max_items=35)
-    stage10 = _originality_stage(stage12, used_topics, max_items=max_candidates)
+    stage30 = _cheap_filter(candidates, max_items=90, max_age_hours=48)
+    stage20 = _deduplicate_stage(stage30, max_items=70)
+    stage20 = _recent_topic_cooldown(conn, stage20, hours=36)
+    # Dashboard discovery keeps provenance on every event but does not require
+    # multi-source corroboration before showing it to the human selector.
+    stage12 = stage20
+    stage10 = _originality_stage(stage12, used_topics, max_items=max_candidates * 2)
 
     ranked: list[dict[str, Any]] = []
     for item in stage10:
@@ -372,7 +387,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         )
 
     if not pool:
-        print("   [AI Discovery] No evidence-backed candidates survived the discovery gates.", flush=True)
+        print("   [AI Discovery] No source-backed candidates survived the discovery gates.", flush=True)
     print(
         f"   [AI Discovery] current intake={len(compact)} -> events={len(candidates)} -> "
         f"Top {len(pool)}; history used as a fit signal, not a repetition target.",
@@ -432,6 +447,7 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
             and str(web_config.get("cricket_category", ""))
             == "AI-assisted top story in cricket"
         ),
+        broad_discovery=True,
     )
 
     relevance_filtered = []
