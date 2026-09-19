@@ -223,6 +223,31 @@ def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_g
 _RELATED_SUBJECT_ASSET_LIMIT = 3
 
 
+def _related_source_is_safe(source: str, visual_genre: str) -> bool:
+    """Return whether provider identity evidence is strong enough for reuse."""
+    source_l = str(source or "").strip().casefold()
+    genre_l = str(visual_genre or "").strip().upper()
+
+    # Wikipedia person candidates are title-filtered by the provider before
+    # their images reach this layer. Commons does not return equivalent
+    # per-image identity metadata, so do not reuse arbitrary person candidates.
+    if genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"}:
+        return source_l == "wikipedia"
+
+    # Commons is appropriate for explicit identity assets where the query and
+    # asset class itself provide strong source-level evidence.
+    return (
+        source_l == "commons"
+        and genre_l in {
+            "ORG_BRANDING",
+            "TEAM_BRANDING",
+            "MONEY_CURRENCY",
+            "FLAG_SYMBOL",
+            "TROPHY_AWARD",
+        }
+    )
+
+
 def _record_trusted_related_assets(
     seg: dict,
     bot,
@@ -254,7 +279,7 @@ def _record_trusted_related_assets(
             query,
             visual_genre,
         )
-        if not trusted:
+        if not trusted or not _related_source_is_safe(source, visual_genre):
             continue
 
         existing.append(

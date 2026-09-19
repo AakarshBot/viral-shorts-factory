@@ -440,6 +440,29 @@ def patch_content_first_visuals(bot):
                     flush=True,
                 )
 
+        # Only subjects that appear on multiple slides are allowed to build a
+        # related-asset rescue pool. This keeps the fallback useful without
+        # collecting extra images for every one-off subject.
+        subject_counts: dict[str, int] = {}
+        for scene in scenes:
+            subject_key = _related_subject_key(
+                scene.get("factual_primary_entity")
+                or scene.get("primary_entity")
+                or scene.get("visual_search_subject")
+            )
+            if subject_key:
+                subject_counts[subject_key] = subject_counts.get(subject_key, 0) + 1
+
+        for scene in scenes:
+            subject_key = _related_subject_key(
+                scene.get("factual_primary_entity")
+                or scene.get("primary_entity")
+                or scene.get("visual_search_subject")
+            )
+            scene["_related_asset_rescue_eligible"] = bool(
+                subject_key and subject_counts.get(subject_key, 0) >= 2
+            )
+
         active_config = getattr(bot, "_active_web_config", {}) or {}
         news_source_candidate = await _load_verified_news_source_candidate(
             bot, visual_runtime, scenes, manual_queries, active_config
@@ -495,10 +518,11 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
-            _register_related_assets(
-                related_pool,
-                seg.get("_verified_subject_assets") or [],
-            )
+            if seg.get("_related_asset_rescue_eligible"):
+                _register_related_assets(
+                    related_pool,
+                    seg.get("_verified_subject_assets") or [],
+                )
 
             if source_type != "news_source":
                 source_credit = source_credit_for_type(source_type)

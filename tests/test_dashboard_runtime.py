@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dashboard_runtime import (
@@ -309,8 +310,16 @@ def test_recent_topic_cooldown_removes_only_recent_repeats(tmp_path):
     conn.executemany(
         "INSERT INTO vault (topic, date_used, created_at) VALUES (?, ?, ?)",
         [
-            ("Major battery breakthrough announced", "2026-09-17T10:00:00+00:00", "2026-09-17T10:00:00+00:00"),
-            ("Old satellite launch story", "2026-09-10T10:00:00+00:00", "2026-09-10T10:00:00+00:00"),
+            (
+                "Major battery breakthrough announced",
+                (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(),
+                (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(),
+            ),
+            (
+                "Old satellite launch story",
+                (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat(),
+                (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat(),
+            ),
         ],
     )
     conn.commit()

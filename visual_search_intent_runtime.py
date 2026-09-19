@@ -250,8 +250,17 @@ def _primary_visual_anchor(scene_terms: list[str]) -> str:
         phrase_bonus = 3 if len(parts) >= 2 and strong_count >= 2 else 0
         return (phrase_bonus, strong_count, -float(weak_count))
 
-    ranked = sorted(scene_terms, key=lambda term: strength(term), reverse=True)
-    for term in ranked:
+    ranked = sorted(
+        enumerate(scene_terms),
+        key=lambda item: (
+            strength(item[1])[0],
+            strength(item[1])[1],
+            strength(item[1])[2],
+            -item[0],
+        ),
+        reverse=True,
+    )
+    for _, term in ranked:
         keys = {key(part) for part in tokens(term)}
         if keys & _SEARCH_STRONG:
             return term

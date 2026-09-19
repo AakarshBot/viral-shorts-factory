@@ -177,6 +177,7 @@ def test_failed_scene_reuses_verified_same_subject_asset_once(monkeypatch, tmp_p
     assert script_data["visual_coverage"] == 1.0
     assert script_data["visual_related_reuse_count"] == 1
     assert script_data["visual_rescue_count"] == 0
+    assert script_data["visuals_verified"] is True
 
 
 def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
