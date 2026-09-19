@@ -252,7 +252,7 @@ AI_DISCOVERY_CATEGORY_KEYS = (
 
 
 def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
-    """Build a diverse current-topic list using one intentional query per useful genre."""
+    """Build a diverse current-topic list from bounded global discovery lenses."""
     from story_ranker import (
         _canonical_url,
         _candidate_reason,
@@ -262,7 +262,6 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _recent_topic_cooldown,
         _deduplicate_stage,
         _editorial_score,
-        _fact_source_stage,
         _gnews_items,
         _load_history,
         _load_used_topics,
