@@ -128,8 +128,10 @@ def _split_scene_text(text, min_words=8, max_words=30):
             atomic.extend(clauses)
             continue
 
-        for start in range(0, len(words), max_words):
-            atomic.append(" ".join(words[start:start + max_words]))
+        chunk_count = max(2, (len(words) + max_words - 1) // max_words)
+        chunk_size = max(min_words, (len(words) + chunk_count - 1) // chunk_count)
+        for start in range(0, len(words), chunk_size):
+            atomic.append(" ".join(words[start:start + chunk_size]))
 
     packed = []
     pending = ""
