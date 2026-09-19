@@ -1124,7 +1124,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                     key=f"use_candidate_{start_index + offset}",
                 ):
                     st.session_state.pending_candidate = dict(candidate)
-                    st.session_state.visual_search_queries = ""
                     st.rerun()
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
@@ -1318,7 +1317,6 @@ def render_demo_page() -> None:
         ("runtime_bindings", "Runtime bindings"),
         ("provider_boundary", "Raw provider boundary"),
         ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
-        ("manual_visual_queries", "Manual visual query routing"),
         ("dashboard_architecture", "Dashboard architecture"),
         ("factory_function_coverage", "Factory function coverage"),
     ]
