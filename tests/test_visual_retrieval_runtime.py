@@ -7,6 +7,27 @@ from PIL import Image
 import visual_retrieval_runtime as retrieval
 
 
+def test_image_hash_deduplicates_different_file_encodings():
+    from PIL.PngImagePlugin import PngInfo
+
+    image = Image.new("RGB", (320, 240), (120, 140, 160))
+
+    first = io.BytesIO()
+    image.save(first, format="PNG")
+
+    metadata = PngInfo()
+    metadata.add_text("provider", "alternate")
+    second = io.BytesIO()
+    image.save(second, format="PNG", pnginfo=metadata)
+
+    assert retrieval._hash_image(object(), first.getvalue()) == retrieval._hash_image(
+        object(), second.getvalue()
+    )
+
+
+
+
+
 def test_real_visual_candidate_reaches_verified_source(monkeypatch):
     image_buffer = io.BytesIO()
     Image.new("RGB", (900, 1200), (80, 90, 100)).save(image_buffer, format="JPEG", quality=95)

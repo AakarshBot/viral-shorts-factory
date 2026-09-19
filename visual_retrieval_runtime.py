@@ -38,17 +38,25 @@ REAL_SOURCE_SCORES = {
 MAX_CANDIDATES_PER_SOURCE = max(1, min(6, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "4"))))
 
 def _hash_image(bot, img_bytes: bytes) -> str:
-    """Return one stable image fingerprint for deduplication across visual sources."""
+    """Return a content-normalized fingerprint for deduplication across sources."""
     data = bytes(img_bytes or b"")
-    resolver = getattr(bot, "get_image_hash", None)
-    if callable(resolver):
-        try:
-            value = str(resolver(data) or "").strip()
-            if value:
-                return value
-        except Exception:
-            pass
-    return hashlib.sha256(data).hexdigest()
+    try:
+        image = Image.open(io.BytesIO(data)).convert("RGB")
+        # Providers often return the same photo with different encodings or
+        # thumbnail dimensions. Hash a fixed-size pixel representation so those
+        # copies are treated as the same visual.
+        image = image.resize((96, 96), Image.Resampling.LANCZOS)
+        return hashlib.sha256(image.tobytes()).hexdigest()
+    except Exception:
+        resolver = getattr(bot, "get_image_hash", None)
+        if callable(resolver):
+            try:
+                value = str(resolver(data) or "").strip()
+                if value:
+                    return value
+            except Exception:
+                pass
+        return hashlib.sha256(data).hexdigest()
 
 
 def _source_plan(_bot, visual_type: str, visual_genre: str = ""):
