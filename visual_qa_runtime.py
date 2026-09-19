@@ -24,6 +24,7 @@ VISUAL_QA_RUNTIME_VERSION = "2026-09-18-v14-identity-aware-uncertainty"
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
 _CIRCUIT_OPEN = False
+LAST_VISUAL_QA_FAILURE = ""
 _LOCK = threading.Lock()
 _CACHE = {}
 
@@ -92,8 +93,10 @@ Return exactly YES, NO, or UNCERTAIN followed by one short reason."""
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="IDENTITY", visual_type="", visual_genre=""):
-    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN
+    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN, LAST_VISUAL_QA_FAILURE
+    LAST_VISUAL_QA_FAILURE = ""
     if not api_key:
+        LAST_VISUAL_QA_FAILURE = "no_api_key"
         print("   [Visual QA] IDENTITY | Gemini unavailable (no API key); candidate remains uncertain.", flush=True)
         return None
 
@@ -105,12 +108,15 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
 
     with _LOCK:
         if _CIRCUIT_OPEN:
+            LAST_VISUAL_QA_FAILURE = "circuit_breaker"
             print("   [Visual QA] Circuit breaker open; candidate remains uncertain.", flush=True)
             return None
         if _VIDEO_CALLS >= GEMINI_VISUAL_MAX_REQUESTS:
+            LAST_VISUAL_QA_FAILURE = "video_budget_exhausted"
             print(f"   [Visual QA] Per-video visual request budget exhausted ({GEMINI_VISUAL_MAX_REQUESTS}); candidate remains uncertain.", flush=True)
             return None
         if _SCENE_CALLS >= GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE:
+            LAST_VISUAL_QA_FAILURE = "scene_budget_exhausted"
             print(f"   [Visual QA] Per-scene visual QA budget exhausted ({GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}); candidate remains uncertain.", flush=True)
             return None
         _VIDEO_CALLS += 1
@@ -139,6 +145,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         elif text.startswith("NO"):
             result = False
         else:
+            LAST_VISUAL_QA_FAILURE = "ambiguous_response"
             print("   [Visual QA] Ambiguous Gemini answer; candidate remains uncertain.", flush=True)
             return None
         _CACHE[key] = result
@@ -146,10 +153,12 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
     except Exception as exc:
         msg = str(exc).lower()
         if any(x in msg for x in ("429", "quota", "resource exhausted", "rate limit")):
+            LAST_VISUAL_QA_FAILURE = "quota_or_rate_limit"
             with _LOCK:
                 _CIRCUIT_OPEN = True
             print("   [Visual QA] Gemini quota/rate-limit detected; circuit breaker opened; candidate remains uncertain.", flush=True)
         else:
+            LAST_VISUAL_QA_FAILURE = "request_exception"
             print(f"   [Visual QA] Gemini request failed: {type(exc).__name__}: {exc}; candidate remains uncertain.", flush=True)
         return None
 
