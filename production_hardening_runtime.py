@@ -173,13 +173,25 @@ def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any],
         repaired, structure_diag = repair_script_structure(result, format_mode)
         if repaired is not None and structure_diag.get("changed"):
             repaired = _repair_visual_identity(repaired, story_data)
-            repaired["fallback_reason"] = "scene_count_local_repair"
-            repaired["fallback_source_enrichment"] = False
+            repaired, _diag = clean_script_data(repaired, story_data, format_mode)
+            ok, repair_reason = validate_content_density(repaired, story_data, format_mode)
+            repaired_scenes = repaired.get("script") if isinstance(repaired, dict) else None
+            if (
+                ok
+                and isinstance(repaired_scenes, list)
+                and minimum <= len(repaired_scenes) <= maximum
+            ):
+                repaired["fallback_reason"] = "scene_count_local_repair"
+                repaired["fallback_source_enrichment"] = False
+                print(
+                    "   [Script Hardening] Local structural repair succeeded before deterministic fallback.",
+                    flush=True,
+                )
+                return repaired
             print(
-                "   [Script Hardening] Local structural repair succeeded before deterministic fallback.",
+                f"   [Script Hardening] Local repair did not pass final cleanup/content gate: {repair_reason}",
                 flush=True,
             )
-            return repaired
 
         repair_story = _enrich_emergency_story(bot, story_data)
         fallback = _extractive_script_fallback(repair_story, language_cfg, genre_key, format_mode)
