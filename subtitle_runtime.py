@@ -200,21 +200,41 @@ def generate_readable_karaoke_clip(
         fill=(8, 12, 20, 168),
     )
 
-    # Soft shadow only; the caption remains the visual focus.
+    # Highlight the active spoken word while keeping the rest of the phrase visible.
+    try:
+        active_index = max(0, min(int(active_index), len(words) - 1))
+    except (TypeError, ValueError):
+        active_index = 0
+
+    global_word_index = 0
     y = panel_y + max(14, (panel_h - text_h) // 2) - 1
     for line in lines:
-        text = " ".join(line)
-        text_w = _measure_line(line, font)
-        x = (width - text_w) / 2
-        draw.text(
-            (x + 2, y + 3),
-            text,
-            font=font,
-            fill=(0, 0, 0, 150),
-            stroke_width=1,
-            stroke_fill=(0, 0, 0, 130),
-        )
-        draw.text((x, y), text, font=font, fill=(248, 249, 250, 255))
+        line_widths = [draw.textlength(word, font=font) for word in line]
+        spacing = draw.textlength(" ", font=font)
+        line_total = sum(line_widths) + spacing * max(0, len(line) - 1)
+        x = (width - line_total) / 2
+
+        for word, word_width in zip(line, line_widths):
+            is_active = global_word_index == active_index
+            fill = (64, 196, 255, 255) if is_active else (248, 249, 250, 255)
+            draw.text(
+                (x + 2, y + 3),
+                word,
+                font=font,
+                fill=(0, 0, 0, 150),
+                stroke_width=1,
+                stroke_fill=(0, 0, 0, 130),
+            )
+            draw.text(
+                (x, y),
+                word,
+                font=font,
+                fill=fill,
+                stroke_width=1,
+                stroke_fill=(0, 0, 0, 170),
+            )
+            x += word_width + spacing
+            global_word_index += 1
         y += line_height + line_gap
 
     image.save(output_path, "PNG")
