@@ -130,3 +130,39 @@ def test_adaptive_discovery_query_requires_repeated_social_novelty():
         ["single unrelated topic"],
     ) == ""
 
+
+
+def test_discovery_query_lanes_are_bounded_and_category_aware():
+    lanes = story_ranker._discovery_query_lanes(
+        "Cricket OR BCCI",
+        genre_key="sports_stories_of_day",
+        ai_cricket=True,
+    )
+    assert lanes[0] == "Cricket OR BCCI"
+    assert len(lanes) == 4
+    assert any("record" in query for query in lanes[1:])
+    assert any("latest" in query for query in lanes[1:])
+
+
+def test_updated_timestamp_can_make_a_currently_updated_story_fresh():
+    story = {
+        "published_at": _iso(240),
+        "updated_at": _iso(2),
+    }
+    assert story_ranker._age_hours(story) < 3
+    assert story_ranker._freshness_score(story) >= 6
+
+
+def test_recent_topic_cooldown_allows_a_new_event_action():
+    class Conn:
+        def execute(self, _query):
+            return [
+                ("India beat Afghanistan in Delhi", _iso(20)),
+            ]
+
+    candidate = {
+        "title": "India names squad after Varun injury",
+        "event_actions": ["announce", "injury"],
+    }
+    kept = story_ranker._recent_topic_cooldown(Conn(), [candidate], hours=72)
+    assert kept == [candidate]
