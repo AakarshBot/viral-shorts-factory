@@ -197,3 +197,37 @@ def test_candidate_quality_floor_keeps_current_supported_topic():
         },
     }
     assert story_ranker._candidate_quality_pass(story) is True
+
+
+def test_discovery_portfolio_keeps_current_niche_topic_but_marks_it_exploratory():
+    story = {
+        "candidate_score": 11.5,
+        "discovery_dimensions": {
+            "freshness": 6.0,
+            "event_momentum": 1.25,
+            "importance": 3.0,
+            "shorts_viability": 2.5,
+            "corroboration": 2.0,
+            "source_quality": 1.0,
+        },
+    }
+
+    assert story_ranker._discovery_portfolio_pass(story) is True
+    assert story["discovery_tier"] == "exploratory"
+
+
+def test_discovery_portfolio_still_rejects_stale_low_signal_topic():
+    story = {
+        "candidate_score": 24.0,
+        "discovery_dimensions": {
+            "freshness": 0.0,
+            "event_momentum": 0.0,
+            "importance": 8.0,
+            "shorts_viability": 7.0,
+            "corroboration": 4.0,
+            "source_quality": 3.0,
+        },
+    }
+
+    assert story_ranker._discovery_portfolio_pass(story) is False
+    assert story["discovery_rejection"] == "Insufficient current-event signal"
