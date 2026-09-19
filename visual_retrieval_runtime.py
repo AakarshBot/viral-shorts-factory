@@ -1,13 +1,12 @@
 """Genre-agnostic multi-source visual retrieval for the Shorts factory.
 
-The active visual path is deliberately resilient: each scene gets multiple
+The active visual path is deliberately bounded: each scene gets a small set of
 search phrases, multiple real image sources, several candidates per source,
-cheap image validation, then semantic verification. A real source candidate
-that is merely unverified is preferred over an empty frame when verification
-infrastructure is unavailable. AI generation is reserved for abstract/contextual
-scenes after real-source retrieval is exhausted. A tiny built-in visual rescue
-exists only as the final renderer guarantee; it is never presented as a factual
-photograph.
+cheap image validation, then mandatory semantic verification. No real or
+generated candidate is accepted when semantic verification is unavailable or
+uncertain. AI generation is reserved for abstract/contextual scenes after
+real-source retrieval is exhausted. A tiny built-in visual rescue exists only
+as the final renderer guarantee; it is never presented as a factual photograph.
 
 The provider layer is intentionally raw. Provider adapters only search and
 return downloadable image bytes; this module is the sole active acceptance
@@ -206,12 +205,9 @@ _VISUAL_DESCRIPTOR_WORDS = {
 
 
 def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_genre: str = "") -> tuple[bool, str, float]:
-    """Return source-level identity evidence before spending semantic-QA budget.
+    """Return source-level evidence used for ranking and related-asset reuse.
 
-    The factory should not make a multimodal model prove facts that are already
-    established by a canonical source. Wikimedia's person/article image and its
-    server-generated thumbnails are source evidence; Commons is also a strong
-    identity source for explicit visual assets such as logos and badges.
+    Source authority never bypasses the active semantic-QC acceptance gate.
     """
     source_l = str(source or "").strip().casefold()
     visual_l = str(visual_type or "").strip().upper()
