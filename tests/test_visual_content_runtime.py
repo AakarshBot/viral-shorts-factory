@@ -53,6 +53,77 @@ def test_news_source_ranking_does_not_force_first_slide_for_manual_query():
     assert ranked[0] == 1
 
 
+def test_news_source_candidate_skips_person_scenes(monkeypatch, tmp_path):
+    import asyncio
+    import news_source_image_runtime
+
+    image = Image.new("RGB", (900, 1200), (80, 90, 100))
+    raw = io.BytesIO()
+    image.save(raw, format="PNG")
+
+    def fake_extract(*_args, **_kwargs):
+        return {
+            "bytes": raw.getvalue(),
+            "credit": "Example",
+            "image_url": "https://example.com/image.png",
+            "page_url": "https://example.com/story",
+            "publisher": "Example",
+        }
+
+    monkeypatch.setattr(news_source_image_runtime, "extract_news_source_image", fake_extract)
+    monkeypatch.setattr(
+        news_source_image_runtime,
+        "compose_news_source_image",
+        lambda image, _size: image,
+    )
+    monkeypatch.setattr(
+        content_runtime,
+        "_rank_news_source_scene_indices",
+        lambda *_args, **_kwargs: [0, 1],
+    )
+
+    class FakeRuntime:
+        @staticmethod
+        def _strict_gate(*_args, **_kwargs):
+            return True, "STRICT", 100, False
+
+    bot = _fake_bot(tmp_path)
+    scenes = [
+        {
+            "primary_entity": "Gautam Gambhir",
+            "visual_genre": "PERSON_ACTION",
+        },
+        {
+            "primary_entity": "Stadium",
+            "visual_genre": "GENERAL_CONTEXT",
+        },
+    ]
+    active_config = {
+        "selected_story": {
+            "story_url": "https://example.com/story",
+            "source_label": "Example",
+            "title": "Gautam Gambhir update at the stadium",
+        }
+    }
+
+    result = asyncio.run(
+        content_runtime._load_verified_news_source_candidate(
+            bot,
+            FakeRuntime,
+            scenes,
+            active_config,
+        )
+    )
+
+    assert result is not None
+    assert result["scene_index"] == 1
+    assert scenes[0].get("news_source_qc_attempted") is not True
+    assert scenes[1]["news_source_qc_attempted"] is True
+
+
+
+
+
 def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
     calls = []
     bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
