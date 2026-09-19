@@ -255,16 +255,26 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, acti
         scene["visual_verified"] = True
         scene["visual_query_used"] = "selected article lead image"
         scene["visual_source"] = "news_source"
+        image_url = str(source_pack.get("image_url") or "")
+        page_url = str(source_pack.get("page_url") or article_url)
+        publisher_name = str(source_pack.get("publisher") or publisher or "News source").strip()
         return {
             "scene_index": scene_index,
             "image": compose_news_source_image(image, (1080, 1920)),
             "source_type": "news_source",
             "credit": str(
                 source_pack.get("credit")
-                or f"Source: {source_pack.get('publisher') or publisher or 'News source'}"
+                or f"Source: {publisher_name}"
             ).strip(),
-            "image_url": str(source_pack.get("image_url") or ""),
-            "page_url": str(source_pack.get("page_url") or article_url),
+            "image_url": image_url,
+            "page_url": page_url,
+            "provenance": provenance(
+                "Article source",
+                url=image_url or page_url,
+                author=publisher_name,
+                license="Unverified article-source license",
+                license_url=page_url,
+            ),
         }
 
     print("   [News Source Image] Extracted image failed the normal visual QC for every relevant scene; discarded.", flush=True)
@@ -520,6 +530,7 @@ def patch_content_first_visuals(bot):
                 used_ai = False
                 source_type = news_source_candidate["source_type"]
                 source_credit = news_source_candidate["credit"]
+                seg["asset_provenance"] = dict(news_source_candidate.get("provenance") or {})
                 print(
                     f"   [News Source Image] Accepted for scene {idx + 1} after normal visual QC.",
                     flush=True,
@@ -613,6 +624,7 @@ def patch_content_first_visuals(bot):
                 "manual_visual_query_score": seg.get("manual_visual_query_score", 0),
                 "source_credit": source_credit,
                 "source_image_url": news_source_candidate.get("image_url", "") if source_type == "news_source" and isinstance(news_source_candidate, dict) else "",
+                "asset_provenance": dict(seg.get("asset_provenance") or {}),
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
@@ -711,6 +723,7 @@ def patch_content_first_visuals(bot):
                     "visual_query_used": seg["visual_query_used"],
                     "source_credit": source_credit_for_type(related_source),
                     "source_image_url": "",
+                    "asset_provenance": dict(asset.get("provenance") or {}),
                     "related_reuse": True,
                     "related_subject": str(asset.get("subject") or "").strip(),
                     "related_source_type": related_source,
