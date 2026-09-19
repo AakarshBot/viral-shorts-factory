@@ -638,6 +638,45 @@ class DashboardWorkflowController(WorkflowController):
         self.bot.process_visuals_async = dashboard_visual_gate
         self._dashboard_visual_gate_bound = True
 
+    def submit_script_visual_queries(self, queries: list[str]) -> bool:
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "script_review":
+            return False
+
+        script_data = snapshot.get("script_data") or {}
+        scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+        if not isinstance(scenes, list) or not scenes:
+            return False
+
+        cleaned = [str(query or "").strip() for query in list(queries or [])]
+        cleaned = (cleaned + [""] * len(scenes))[:len(scenes)]
+
+        with self._lock:
+            self._script_visual_queries = cleaned
+            live_script = self.state.script_data
+            if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
+                for index, scene in enumerate(live_script["script"]):
+                    if not isinstance(scene, dict):
+                        continue
+                    query = cleaned[index] if index < len(cleaned) else ""
+                    if query:
+                        scene["manual_visual_query"] = query
+                        scene["manual_visual_query_source"] = "dashboard_slide"
+                    else:
+                        scene.pop("manual_visual_query", None)
+                        scene.pop("manual_visual_query_score", None)
+                        scene.pop("manual_visual_query_index", None)
+                        scene.pop("manual_visual_query_source", None)
+            self._script_review_submitted = True
+
+        self.update(
+            "audio",
+            42,
+            "Slide queries saved. Creating the voiceover and preparing visuals.",
+        )
+        self._script_review_event.set()
+        return True
+
     def approve_visuals(self) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
@@ -662,6 +701,8 @@ class DashboardWorkflowController(WorkflowController):
         with self._lock:
             data.update(
                 {
+                    "script_review_required": data.get("stage") == "script_review",
+                    "script_visual_queries": list(self._script_visual_queries),
                     "visual_packages": list(self._visual_packages),
                     "visual_review_required": data.get("stage") == "visual_approval",
                     "visual_review_approved": self._visual_approved,
