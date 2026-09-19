@@ -80,9 +80,20 @@ def _install_runtime_query_guard(visual_runtime_module):
 
     visual_runtime_module._build_search_variants = guarded_build_search_variants
     visual_runtime_module._verification_tier = generic_verification_tier
-    visual_runtime_module._relevant_asset = robust_relevant_asset
+
+    # Lightweight compatibility doubles may intentionally provide their own
+    # _relevant_asset. Only install the production retrieval boundary when the
+    # runtime exposes the production cache/QC/fetch surface.
+    production_retrieval_surface = (
+        callable(getattr(visual_runtime_module, "get_cached_asset", None))
+        and callable(getattr(visual_runtime_module, "_strict_gate", None))
+        and callable(getattr(visual_runtime_module, "_call_fetcher_with_timeout", None))
+    )
+    if production_retrieval_surface:
+        visual_runtime_module._relevant_asset = robust_relevant_asset
+        visual_runtime_module._robust_retrieval_boundary = True
+
     visual_runtime_module._generic_semantic_query_guard = True
-    visual_runtime_module._robust_retrieval_boundary = True
 
 
 def lock_visual_subject(scene: dict, video_title: str = "") -> str:
