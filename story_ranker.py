@@ -983,8 +983,17 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     originality = _safe_float(story.get("originality_score")) or 5.0
     event_momentum = _event_momentum_score(story)
     independent_corroboration = _independent_corroboration_score(story)
+    event_velocity = _safe_float(story.get("event_velocity_score")) or 0.0
+    discovery_gap = bool(story.get("event_discovery_gap"))
+    development_state = _clean(story.get("event_development_state"))
 
-    momentum = min(10.0, velocity + trend)
+    momentum = min(
+        10.0,
+        velocity
+        + trend
+        + min(2.0, event_velocity * 0.35)
+        + (0.75 if development_state == "developing" else 0.0)
+    )
     importance = _clamp_score(
         momentum * 0.28
         + min(10.0, event_momentum) * 0.18
@@ -1018,6 +1027,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + visual * 0.20
         + channel_history * 0.70
         + niche * 0.20
+        + (0.60 if discovery_gap else 0.0)
         - risk * 0.55
     )
     story["candidate_score"] = round(final_score, 3)
@@ -1051,6 +1061,9 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
         "safety_risk": risk,
+        "event_velocity": round(event_velocity, 2),
+        "development_state": development_state,
+        "discovery_gap": discovery_gap,
     }
     return story
 
@@ -1152,6 +1165,12 @@ def _candidate_reason(story):
         parts.append("strong current momentum")
     if _safe_float(dimensions.get("event_momentum")) >= 4:
         parts.append("coverage accelerating")
+    if _safe_float(dimensions.get("event_velocity")) >= 2:
+        parts.append("high reporting velocity")
+    if dimensions.get("development_state") == "developing":
+        parts.append("new event development detected")
+    if dimensions.get("discovery_gap"):
+        parts.append("independent discovery-gap signal")
     if _safe_float(dimensions.get("freshness")) >= 6:
         parts.append("very fresh")
     if _safe_float(dimensions.get("corroboration")) >= 2:
@@ -1382,6 +1401,37 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
     # category queries; production selection keeps the narrower legacy query.
     raw = list(event_pool.get("articles") or raw)
     initial_gdelt_count = int(event_pool.get("gdelt_article_count") or 0)
+
+    # Coverage-gap radar: if GDELT finds an event absent from our normal
+    # intake, spend at most three targeted global searches to try to obtain
+    # an independent article. This is evidence-seeking, not blind query fanout.
+    if broad_discovery and api_key and events:
+        gap_titles = [
+            str(item.get("title") or item.get("event_search_text") or "").strip()
+            for item in events
+            if item.get("event_discovery_gap")
+        ][:3]
+        for gap_title in gap_titles:
+            if not gap_title:
+                continue
+            gap_rows = _gnews_items(
+                gap_title,
+                api_key,
+                genre_key,
+                global_scope=True,
+            )
+            if gap_rows:
+                raw.extend(gap_rows)
+        if gap_titles:
+            event_pool = discover_event_pool(
+                query="",
+                existing_articles=compact_items(raw),
+                timespan="48h",
+                max_gdelt_records=0,
+            )
+            events = event_pool["events"]
+            raw = list(event_pool.get("articles") or raw)
+
     print(
         f"   [Discovery Funnel] article intake={event_pool['article_count']} "
         f"(GDELT={initial_gdelt_count}) -> "
