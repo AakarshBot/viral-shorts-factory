@@ -77,7 +77,7 @@ def test_legacy_shorts_titles_are_cleaned_without_suffix():
 def test_description_has_at_most_three_relevant_hashtags():
     tags = build_description_hashtags(
         {"hashtags": ["#Technology", "#AI", "#Gadgets", "#Trending"]},
-        "AI launch",
+        "AI",
     )
     assert 0 <= len(tags) <= 3
     assert tags[0] == "#AIlaunch"
