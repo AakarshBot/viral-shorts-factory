@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -256,6 +257,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _canonical_url,
         _candidate_reason,
         _cheap_filter,
+        _discovery_query_lanes,
         _deduplicate_stage,
         _editorial_score,
         _fact_source_stage,
@@ -281,15 +283,23 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
     raw: list[dict[str, Any]] = []
 
-    for category in AI_DISCOVERY_CATEGORY_KEYS:
-        cfg = bot.CONTENT_CATEGORIES.get(category) or {}
-        query = str(cfg.get("gnews_q", "") or "").strip()
-        if query:
-            raw.extend(_gnews_items(query, api_key, category))
-        rss_url = str(cfg.get("rss_url", "") or "").strip()
-        if rss_url:
-            raw.extend(_rss_items(rss_url, category))
-        raw.extend(_official_feed_items(category, cfg))
+    gnews_jobs = []
+    source_jobs = []
+    with ThreadPoolExecutor(max_workers=8, thread_name_prefix="ai-discovery") as pool:
+        for category in AI_DISCOVERY_CATEGORY_KEYS:
+            cfg = bot.CONTENT_CATEGORIES.get(category) or {}
+            query = str(cfg.get("gnews_q", "") or "").strip()
+            for lane in _discovery_query_lanes(query, genre_key=category)[:2]:
+                if lane and api_key:
+                    gnews_jobs.append((category, pool.submit(_gnews_items, lane, api_key, category)))
+            rss_url = str(cfg.get("rss_url", "") or "").strip()
+            if rss_url:
+                source_jobs.append(pool.submit(_rss_items, rss_url, category))
+            source_jobs.append(pool.submit(_official_feed_items, category, cfg))
+        for category, future in gnews_jobs:
+            raw.extend(future.result())
+        for future in source_jobs:
+            raw.extend(future.result())
 
     social_rows = _reddit_items("viral_phenomenon")
     raw.extend(social_rows)
