@@ -423,6 +423,9 @@ class DashboardWorkflowController(WorkflowController):
     def __init__(self, bot):
         super().__init__(bot)
         self._visual_approval_event = threading.Event()
+        self._script_review_event = threading.Event()
+        self._script_review_submitted = False
+        self._script_visual_queries: list[str] = []
         self._visual_approved = False
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
@@ -441,6 +444,9 @@ class DashboardWorkflowController(WorkflowController):
         if getattr(self, "state", None) is not None and self.state.thread_alive:
             return
         self._visual_approval_event.clear()
+        self._script_review_event.clear()
+        self._script_review_submitted = False
+        self._script_visual_queries = []
         self._visual_approved = False
         self._visual_rejected = False
         self._visual_packages = []
