@@ -77,6 +77,15 @@ GENERIC_ENTITY_TOKENS = {
     "court", "police", "officials", "people", "agency", "official",
 }
 
+GENERIC_EVENT_TOPIC_TOKENS = {
+    "action", "actions", "announcement", "announcements", "decision", "decisions",
+    "deal", "deals", "development", "developments", "event", "events", "funding",
+    "initiative", "initiatives", "investment", "investments", "issue", "issues",
+    "measure", "measures", "move", "moves", "plan", "plans", "program", "programs",
+    "programme", "programmes", "project", "projects", "proposal", "proposals",
+    "statement", "statements", "step", "steps", "support", "talks", "update", "updates",
+}
+
 ENTITY_NOISE = {
     "today", "latest", "breaking", "update", "news", "report", "reports",
     "says", "said", "after", "before", "new", "first", "major", "live",
