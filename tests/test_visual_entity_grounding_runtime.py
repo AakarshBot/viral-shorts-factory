@@ -23,6 +23,42 @@ def test_unrelated_person_is_repaired_to_story_anchor():
     assert grounded['visual_entity_grounded'] is True
     assert grounded['visual_entity_original'] == 'Rashid Khan'
 
+def test_phase2_evidence_pack_supports_valid_person_identity():
+    story = {
+        "title": "India to wear BCCI jersey against Japan in friendly",
+        "research_evidence_pack": {
+            "claims": [
+                {
+                    "text": "Shreyas Iyer is among the players involved in India's squad planning for the Japan friendly.",
+                    "status": "corroborated",
+                },
+                {
+                    "text": "The Asian Games kit issue was resolved before the fixture.",
+                    "status": "corroborated",
+                },
+            ],
+            "sources": [
+                {
+                    "title": "India to wear BCCI jersey against Japan",
+                    "clean_text_preview": "Shreyas Iyer and the India squad were discussed in the latest reporting.",
+                }
+            ],
+        },
+    }
+    scene = {
+        "primary_entity": "Shreyas Iyer",
+        "visual_intent": "person action",
+        "specific_search_prompt": "Shreyas Iyer",
+    }
+
+    grounded = apply_grounding(scene, story)
+
+    assert grounded["primary_entity"] == "Shreyas Iyer"
+    assert grounded["visual_entity_grounded"] is True
+    assert grounded["visual_entity_grounding_confidence"] >= 0.80
+
+
+
 def test_supported_person_is_preserved():
     scene = {
         'primary_entity': 'Harmanpreet Kaur',

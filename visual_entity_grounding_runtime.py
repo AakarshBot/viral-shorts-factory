@@ -99,6 +99,30 @@ def _evidence(script_data:dict[str,Any])->str:
                     for f in ("title", "snippet", "summary", "description")
                     if source.get(f)
                 )
+
+    # Phase 2 evidence is the authoritative research layer used to build the
+    # script. Grounding must see its claims and source previews; otherwise valid
+    # people/teams/events can be treated as unsupported and collapsed to a
+    # generic headline anchor such as "Asian Games".
+    pack = script_data.get("research_evidence_pack")
+    if isinstance(pack,dict):
+        for claim in pack.get("claims") or []:
+            if not isinstance(claim,dict):
+                continue
+            if str(claim.get("status") or "").strip().casefold() == "conflicted":
+                continue
+            value = claim.get("text") or claim.get("claim") or claim.get("statement") or ""
+            value = _strip_domains(value)
+            if value:
+                parts.append(value)
+        for source in pack.get("sources") or []:
+            if not isinstance(source,dict):
+                continue
+            for field in ("title", "snippet", "summary", "description", "clean_text_preview"):
+                value = _strip_domains(source.get(field, ""))
+                if value:
+                    parts.append(value)
+
     return "\n".join(x for x in parts if x)
 
 def _role(scene:dict[str,Any],entity:str)->str:

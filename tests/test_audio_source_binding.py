@@ -80,6 +80,32 @@ def test_audio_accepts_production_scene_count_repair_handoff():
     assert [scene["scene_id"] for scene in handed_off["script"]] == [1, 2, 3, 4, 5]
 
 
+def test_audio_accepts_dashboard_creator_insight_as_validated_narration():
+    bot = _patched_bot()
+
+    script = {
+        "authoritative_narration": True,
+        "script": [
+            {
+                "voiceover": "The selected story changed after the latest official update.",
+                "narration_source": "validated_script",
+            },
+            {
+                "voiceover": "My editorial takeaway is that the kit dispute matters because it changed the team presentation rules.",
+                "human_contributed": True,
+            },
+        ],
+    }
+
+    result = asyncio.run(bot.generate_voiceover_and_timestamps(script, {}))
+
+    assert result["ok"] is True
+    handed_off = bot.calls[0]
+    assert handed_off["script"][1]["human_contributed"] is True
+    assert handed_off["script"][1]["narration_source"] == "validated_script"
+    assert handed_off["script"][1]["scene_id"] == 2
+
+
 def test_audio_rejects_unvalidated_slide_or_visual_text():
     bot = _patched_bot()
 
