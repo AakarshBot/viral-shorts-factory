@@ -255,18 +255,6 @@ def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 
 
 
 
-# Dashboard-only AI topic selection. This deliberately lives here so the
-# factory's production CONTENT_CATEGORIES and format contracts stay unchanged.
-AI_DISCOVERY_CATEGORY_KEYS = (
-    "national_global_affairs",
-    "technology",
-    "business_finance",
-    "entertainment",
-    "sports_stories_of_day",
-    "health_lifestyle",
-    "viral_phenomenon",
-)
-
 
 def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
     """Build an AI-mode topic portfolio from the same broad free discovery radar."""
