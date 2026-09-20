@@ -30,6 +30,8 @@ def test_open_license_allowlist_rejects_nc_and_nd():
     assert is_allowed_license("pdm")
     assert is_allowed_license("by")
     assert is_allowed_license("cc-by-sa")
+    assert is_allowed_license("GODL-India")
+    assert is_allowed_license("Government Open Data License - India")
     for license_code in ("by-nc", "by-nc-sa", "by-nd", "by-sa-nd", "fair-use", "all-rights-reserved"):
         assert not is_allowed_license(license_code), license_code
     assert normalize_license_code("CC BY-NC-SA 4.0") == "by-nc-sa"
@@ -58,11 +60,19 @@ def test_image_credits_include_only_attribution_licenses():
             "by-sa",
             "https://creativecommons.org/licenses/by-sa/4.0/",
         ),
+        provenance(
+            "Commons",
+            "https://commons.wikimedia.org/wiki/File:Government.jpg",
+            "Prime Minister's Office",
+            "GODL-India",
+            "https://data.gov.in/sites/default/files/Gazette_Notification_OGDL.pdf",
+        ),
     ]
     description = append_image_credits("Base description", records)
     assert "Image credits" in description
     assert "Alice — by — https://example.test/by.jpg" in description
     assert "Carol — by-sa — https://example.test/by-sa.jpg" in description
+    assert "Prime Minister's Office — GODL-India — https://commons.wikimedia.org/wiki/File:Government.jpg" in description
     assert "Bob" not in description
 
 
