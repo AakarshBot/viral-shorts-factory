@@ -33,7 +33,7 @@ _RETENTION_BAIT_RE = tuple(
     )
 )
 
-_GENERIC_FILLER_GENERIC_FILLER = (
+_GENERIC_FILLER = (
     r"^here(?:'s| is) (?:the )?(?:key|main|important) (?:point|development|detail)\.?$",
     r"^the latest facts are worth a closer look\.?$", r"^this development deserves attention\.?$",
     r"^let(?:'s| us) (?:break this down|take a closer look|talk about this)\.?$",
@@ -607,7 +607,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     }
     valid, reason = validate_content_density(result, story_data, format_mode)
     if not valid:
-        raise ValueError(f"Source-grounded fallback failed semantic completeness: {reason}")
+        raise ValueError(f"Source-grounded fallback refused to invent narration: {reason}")
     return result
 
 
