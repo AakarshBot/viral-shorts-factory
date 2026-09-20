@@ -877,20 +877,19 @@ def test_dashboard_manual_crop_returns_shorts_frame():
     assert cropped.size == (1080, 1920)
 
 
-def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
+def test_dashboard_visual_review_uses_simple_popover_crop_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert "Choose from the visual pool" in source
-    assert "Available verified images" in source
-    assert "Identity-verified, lower-resolution images" in source
-    assert "Search 5 new images" in source
-    assert "Apply crop" in source
+    assert "Review the images" in source
+    assert 'with st.popover("Crop")' in source
     assert "controller.crop_visual(" in source
+    assert "controller.crop_visual_pool_asset(" in source
     assert 'aspect_ratio=(9, 16)' in source
     assert 'return_type="both"' in source
-    assert 'should_resize_image=False' in source
+    assert 'should_resize_image=True' in source
+    assert "Save crop" in source
+    assert "Search for new images" in source
     assert "Use on slide" in source
-    assert "Crop / reframe selected image" in source
 
 
 def test_repository_does_not_use_deprecated_streamlit_container_width():
@@ -976,6 +975,82 @@ def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, 
     ok, message = controller.assign_visual_pool_asset("pool-hash", 1)
     assert ok is False
     assert "already assigned to slide 2" in message
+
+
+def test_dashboard_pool_replacement_preserves_previous_visual(tmp_path, monkeypatch):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    current = tmp_path / "current.jpg"
+    replacement = tmp_path / "replacement.jpg"
+    Image.new("RGB", (1080, 1920), (20, 30, 40)).save(current, "JPEG")
+    Image.new("RGB", (900, 1200), (80, 100, 120)).save(replacement, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Replacement test",
+        "script": [{"primary_entity": "India", "voiceover": "Current visual."}],
+    }
+    controller._visual_packages = [[{
+        "image": str(current),
+        "visual_original_path": str(current),
+        "visual_verified": True,
+        "visual_type": "ORGANIZATION",
+        "visual_genre": "TEAM_ACTION",
+        "source_type": "Pexels",
+        "visual_query_used": "India cricket team action",
+        "asset_provenance": {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/current/",
+            "author": "Tester",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+        },
+    }]]
+    controller._visual_pool = [{
+        "path": str(replacement),
+        "hash": "replacement-hash",
+        "source": "Pexels",
+        "query": "India cricket team action",
+        "visual_type": "ORGANIZATION",
+        "visual_genre": "TEAM_ACTION",
+        "provenance": {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/replacement/",
+            "author": "Tester",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+        },
+        "used": False,
+        "assigned_slide": 0,
+        "status": "entity-verified",
+    }]
+
+    def fake_replace(index, bank_index):
+        layer = controller._visual_packages[index - 1][0]
+        selected = controller._visual_pool[0]
+        layer = dict(layer)
+        layer["image"] = selected["path"]
+        controller._visual_packages[index - 1] = [layer]
+        return True, "ok"
+
+    monkeypatch.setattr(controller, "replace_visual_from_bank", fake_replace)
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, _ = controller.assign_visual_pool_asset("replacement-hash", 1)
+    assert ok is True
+    preserved = [
+        item for item in controller._visual_pool
+        if item.get("preserved_from_replacement")
+    ]
+    assert preserved
+    assert preserved[-1]["path"] == str(current)
+    assert preserved[-1]["used"] is False
 
 
 def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_path):
