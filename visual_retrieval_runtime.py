@@ -1661,6 +1661,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 for asset in bank_assets
                 if str(asset.get("hash") or "").strip()
                 and str(asset.get("hash") or "").strip() not in used_hashes
+                and str(asset.get("provenance_status") or "commercial-verified").strip()
+                == "commercial-verified"
             ),
             None,
         )
