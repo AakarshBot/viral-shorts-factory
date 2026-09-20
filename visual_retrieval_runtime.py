@@ -1405,70 +1405,23 @@ def collect_manual_visual_search(
     except TypeError:
         source_plan = _source_plan(bot, visual_type)
 
-    # Recent web discovery is only used for contextual manual searches. Exact
-    # identity searches continue through the established identity-oriented sources.
-    contextual_manual_genres = {
-        "SPORTS_ACTION",
-        "SPORTS_MATCH",
-        "TEAM_ACTION",
-        "PLACE_SCENE",
-        "EVENT_SCENE",
-        "GENERAL_PHOTO",
-        "GENERAL_CONTEXT",
-    }
-    if (
-        visual_genre in contextual_manual_genres
-        and str(os.getenv("SERPAPI_API_KEY", "")).strip()
-    ):
-        try:
-            from image_sources_runtime import fetch_serpapi_candidates
-            if all(str(name).casefold() != "serpapi" for name, _fetcher in source_plan):
-                source_plan = [("SerpApi", fetch_serpapi_candidates)] + list(source_plan)
-        except Exception:
-            pass
-
-    query_tokens = {
-        token.casefold()
-        for token in re.findall(r"[\w-]+", exact_query, flags=re.UNICODE)
-    }
-    sports_context = bool(query_tokens & _SPORTS_CONTEXT_TERMS)
-    team_context = bool(
-        re.search(r"\bnational\s+team\b", exact_query, flags=re.IGNORECASE)
-        or re.search(r"\b(?:xi|squad)\b", exact_query, flags=re.IGNORECASE)
-    )
-    branding_or_portrait = visual_genre in {"TEAM_BRANDING", "ORG_BRANDING", "PERSON_PORTRAIT"}
-    action_search = (
-        visual_genre in ACTION_VISUAL_GENRES
-        or ((sports_context or team_context) and not branding_or_portrait)
+    source_plan, action_search = _prepare_action_source_plan(
+        source_plan,
+        exact_query,
+        visual_genre,
+        allow_recent_discovery=True,
     )
 
+    action_variants = []
     if action_search:
-        action_provider_order = {
-            "serpapi": -1,
-            "openverse": 0,
-            "pexels": 1,
-            "pixabay": 2,
-            "commons": 3,
-            "unsplash": 4,
-        }
-        source_plan = sorted(
-            source_plan,
-            key=lambda item: (
-                action_provider_order.get(str(item[0] or "").strip().casefold(), 99),
-                str(item[0] or "").casefold(),
-            ),
-        )
-
-    action_variants = [exact_query]
-    if action_search:
-        suffixes = _ACTION_SEARCH_SUFFIXES.get(
+        for suffix in _ACTION_SEARCH_SUFFIXES.get(
             visual_genre,
             ("action", "match action", "celebration"),
-        )
-        for suffix in suffixes:
+        ):
             variant = f"{exact_query} {suffix}".strip()
             if variant.casefold() != exact_query.casefold():
                 action_variants.append(variant)
+    action_variants.append(exact_query)
 
     for variant_index, search_variant in enumerate(action_variants, 1):
         if len(candidates) >= 5:
@@ -1543,7 +1496,7 @@ def collect_manual_visual_search(
             "bytes": item["bytes"],
             "hash": item["hash"],
             "source": item["source"],
-            "query": exact_query,
+            "query": item["query"],
             "visual_type": item["visual_type"],
             "visual_genre": item["visual_genre"],
             "provenance": dict(item["provenance"]),
@@ -1552,6 +1505,8 @@ def collect_manual_visual_search(
             "source_page_url": str(item.get("source_page_url") or "").strip(),
             "source_image_url": str(item.get("source_image_url") or "").strip(),
             "status": "new-search",
+            "action_search": bool(item.get("action_search")),
+            "search_variant_index": int(item.get("search_variant_index") or 1),
             "used": False,
         }
         for item in candidates[:5]
