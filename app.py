@@ -1378,18 +1378,30 @@ def render_visual_details(snapshot: Dict[str, Any]) -> None:
                 details.append(f"Rescue: {item['rescue_reason']}")
             st.caption(" — ".join(details))
 
-def render_powershell_output(lines: list[str]) -> None:
-    with st.popover(
-        "🖥️ Open exact PowerShell output",
-        type="secondary",
-        width="stretch",
-        help="Open the exact stdout/stderr captured from the active factory worker.",
-    ):
-        st.caption("Exact stdout/stderr captured from the active factory worker.")
-        if lines:
-            st.code("\n".join(lines), language="powershell")
-        else:
-            st.info("No factory console output has been captured yet.")
+def render_powershell_widget(snapshot: Dict[str, Any]) -> None:
+    """Render the worker's exact stdout/stderr in the collapsible dashboard sidebar."""
+    lines = list(snapshot.get("console_lines") or [])
+    worker_alive = bool(snapshot.get("thread_alive"))
+    stage = str(snapshot.get("stage") or "").strip()
+    if worker_alive:
+        status = "LIVE"
+    elif lines:
+        status = "IDLE"
+    else:
+        status = "WAITING"
+
+    with st.sidebar:
+        with st.expander(f"🖥️ PowerShell · {status}", expanded=False):
+            st.caption(
+                "Mirrors the active factory worker's PowerShell stdout/stderr. "
+                "This panel updates with the live factory progress."
+            )
+            if lines:
+                visible = lines[-100:]
+                st.code("\n".join(visible), language="powershell")
+                st.caption(f"Showing the latest {len(visible)} lines · stage: {stage or 'ready'}")
+            else:
+                st.info("No factory PowerShell output captured yet.")
 
 def render_console(snapshot: Dict[str, Any]) -> None:
     lines = snapshot.get("console_lines") or []
@@ -1713,6 +1725,7 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
         def _polling_fragment():
             live_snapshot = controller.snapshot()
             live_stage = str(live_snapshot.get("stage") or "").strip()
+            render_powershell_widget(live_snapshot)
             if (
                 not live_snapshot.get("thread_alive")
                 or live_stage != poll_stage
@@ -1725,6 +1738,7 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
         _polling_fragment()
     else:
         render_stage_progress(snapshot)
+        render_powershell_widget(snapshot)
 
     _render_content(snapshot)
 
@@ -2242,6 +2256,8 @@ def main() -> None:
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     workspace = render_workspace_navigation()
+    controller_snapshot = controller.snapshot()
+    render_powershell_widget(controller_snapshot)
 
     if workspace == "Live Factory":
         config = render_sidebar_controls()
