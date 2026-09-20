@@ -477,7 +477,7 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
     )
 
     assert calls["qa"] >= 1
-    assert image.size == (900, 1200)
+    assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
     assert scene["visual_qc_blocked"] is False
@@ -606,7 +606,7 @@ def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
         "Sanju Samson story",
     )
 
-    assert image.size == (900, 1200)
+    assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
     rejection_counts = scene["visual_rejection_counts"]
