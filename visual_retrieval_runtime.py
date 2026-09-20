@@ -966,6 +966,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     seg["visual_fallback_reason"] = ""
                     seg["visual_query_used"] = "cache"
                     seg["visual_verification_attempts"] = 1
+                    try:
+                        original_path = os.path.join(
+                            bot.ASSETS_DIR,
+                            f"visual_original_cache_{cached_hash[:16]}.jpg",
+                        )
+                        cached_img.convert("RGB").save(original_path, "JPEG", quality=92)
+                        seg["visual_original_path"] = original_path
+                    except Exception:
+                        seg["visual_original_path"] = ""
                     return cached_img.convert("RGB"), False, "cached"
 
     try:
@@ -1187,6 +1196,20 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         json.dump(meta, fh, ensure_ascii=False, indent=2)
             except Exception:
                 pass
+
+            try:
+                original_path = os.path.join(
+                    bot.ASSETS_DIR,
+                    f"visual_original_{selected_hash[:16]}.jpg",
+                )
+                Image.open(io.BytesIO(selected_bytes)).convert("RGB").save(
+                    original_path,
+                    "JPEG",
+                    quality=92,
+                )
+                seg["visual_original_path"] = original_path
+            except Exception:
+                seg["visual_original_path"] = ""
 
             used_hashes.add(selected_hash)
             seg["visual_verified"] = True
