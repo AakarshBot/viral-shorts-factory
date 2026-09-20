@@ -51,20 +51,10 @@ st.markdown("<style>\n.block-container{padding-top:1.5rem;padding-bottom:3rem;ma
 
 st.markdown("""<style>
 *{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
-.block-container{padding-top:1.2rem;padding-bottom:2rem;max-width:1440px}
-.brand-card{background:linear-gradient(135deg,#0d0f14,#12132a 60%,#0d0f14);border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:20px 26px;margin-bottom:16px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
-.brand-title{font-size:1.7rem;font-weight:800;color:#f2f4fa;letter-spacing:-.03em;line-height:1.15}
-.brand-sub{color:#7a8fb8;margin-top:4px;font-size:.8rem;letter-spacing:.01em}
-.section-kicker{font-family:system-ui,sans-serif;color:#6c7d9f;text-transform:uppercase;letter-spacing:.13em;font-size:.68rem;font-weight:600;margin-bottom:3px}
-.panel,.candidate{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;box-shadow:0 6px 24px rgba(0,0,0,.1);transition:border-color .18s ease,background .18s ease}
-.panel:hover,.candidate:hover{border-color:rgba(124,92,255,.35);background:rgba(255,255,255,.05)}
-.candidate{min-height:200px}.candidate-rank{font-family:system-ui,sans-serif;color:#7a8fb8;font-size:.7rem;font-weight:700;letter-spacing:.08em}.candidate-title{font-family:system-ui,sans-serif;font-size:1rem;font-weight:600;color:#f2f4fa;margin:6px 0 8px}.candidate-reason{font-family:system-ui,sans-serif;color:#b0bdd4;font-size:.84rem;line-height:1.45;min-height:64px}.small-muted{font-family:system-ui,sans-serif;color:#6c7d9f;font-size:.76rem}
-.stage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 14px}.stage-card{border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:10px 11px;background:rgba(255,255,255,.012);transition:all .2s ease}.stage-card.active{border-color:rgba(124,92,255,.55);background:rgba(124,92,255,.07)}.stage-card.done{border-color:rgba(45,212,191,.35)}.stage-name{font-family:system-ui,sans-serif;font-size:.78rem;font-weight:600;color:#dde3f0}.stage-state{font-family:system-ui,sans-serif;color:#6c7d9f;font-size:.7rem;margin-top:2px}
-.stButton>button,.stLinkButton>a{border-radius:8px;font-weight:500;min-height:38px;padding:4px 14px;letter-spacing:.01em;box-shadow:0 4px 12px rgba(79,49,224,.3),inset 0 1px 0 rgba(255,255,255,.15);transition:all .15s ease}
-.stButton>button:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(79,49,224,.45),inset 0 1px 0 rgba(255,255,255,.2)}
-.dashboard-footer{font-family:'Instrument Serif',Georgia,'Times New Roman',serif;text-align:center;color:#6c7d9f;font-size:.82rem;padding:10px 0;font-style:italic;letter-spacing:.02em}
-@media(max-width:900px){.stage-grid{grid-template-columns:repeat(2,1fr)}}
-</style>""")
+.brand-card{background:linear-gradient(135deg,#2a0d35,#1a1030 60%,#3a0d5c);border:1px solid rgba(190,140,255,.15);box-shadow:0 16px 50px rgba(80,20,120,.35);border-radius:18px;padding:22px 28px;margin-bottom:20px}
+.brand-title{font-family:system-ui,sans-serif;font-size:1.9rem;font-weight:800;color:#f8e8ff;letter-spacing:-.03em;line-height:1.1;text-shadow:0 2px 14px rgba(190,140,255,.4)}
+.stButton>button{background:linear-gradient(180deg,#7b3fe6,#5a2fc0);border:1px solid rgba(255,255,255,.25);box-shadow:0 6px 18px rgba(123,63,230,.45),inset 0 1px 0 rgba(255,255,255,.2)}
+</style>""", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
