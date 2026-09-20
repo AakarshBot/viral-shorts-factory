@@ -829,3 +829,131 @@ def test_strict_gemini_bridge_accepts_visual_genre_argument():
 
     params = inspect.signature(visual_runtime._strict_gemini_check).parameters
     assert "visual_genre" in params
+
+def test_manual_queries_build_one_shared_twenty_image_pool(monkeypatch):
+    query_values = ["Rishabh Pant", "BCCI logo", "India cricket team", "New Delhi stadium"]
+    image_candidates = {}
+    for query_index, query in enumerate(query_values):
+        items = []
+        for image_index in range(5):
+            buffer = io.BytesIO()
+            Image.new(
+                "RGB",
+                (900, 1200),
+                (20 + query_index * 40, 40 + image_index * 20, 80),
+            ).save(buffer, format="JPEG", quality=95)
+            items.append(
+                _licensed_candidate(
+                    buffer.getvalue(),
+                    "cc0",
+                ) | {
+                    "search_title": f"{query} image {image_index + 1}",
+                    "search_position": image_index + 1,
+                }
+            )
+        image_candidates[query] = items
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("Commons", lambda *args, query=image_candidates.get(args[0], []): query)
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Rishabh Pant", "voiceover": "Rishabh Pant press conference."}],
+        query_values,
+        "Test story",
+    )
+
+    assert len(result["assets"]) == 20
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
+    assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
+
+
+def test_manual_pool_retains_entity_verified_soft_resolution_candidate(monkeypatch):
+    low = io.BytesIO()
+    Image.new("RGB", (400, 600), (50, 60, 70)).save(low, format="JPEG", quality=95)
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("Commons", lambda *args: [
+                _licensed_candidate(low.getvalue(), "cc0"),
+            ])
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Test Subject", "voiceover": "Test Subject is visible."}],
+        ["Test Subject"],
+        "Test story",
+    )
+
+    assert len(result["assets"]) == 1
+    assert result["assets"][0]["status"] == "factory-rejected-resolution"
+    assert result["rejection_counts"]["resolution_soft"] == 1
+
+
+def test_manual_pool_scene_selection_prefers_scene_relevant_candidate():
+    assets = [
+        {
+            "hash": "press",
+            "query": "Rishabh Pant",
+            "search_text": "Rishabh Pant press conference",
+            "priority": 60,
+            "status": "entity-verified",
+        },
+        {
+            "hash": "match",
+            "query": "Rishabh Pant",
+            "search_text": "Rishabh Pant cricket match",
+            "priority": 70,
+            "status": "entity-verified",
+        },
+    ]
+    selected = retrieval.select_manual_visual_candidate(
+        assets,
+        {
+            "factual_primary_entity": "Rishabh Pant",
+            "visual_intent": "press conference",
+            "specific_search_prompt": "Rishabh Pant press conference",
+            "voiceover": "Rishabh Pant speaks at a press conference.",
+        },
+        set(),
+    )
+    assert selected["hash"] == "press"
