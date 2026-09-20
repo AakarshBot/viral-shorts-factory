@@ -1318,6 +1318,23 @@ def collect_manual_visual_search(
         or ((sports_context or team_context) and not branding_or_portrait)
     )
 
+    if action_search:
+        action_provider_order = {
+            "serpapi": -1,
+            "openverse": 0,
+            "pexels": 1,
+            "pixabay": 2,
+            "commons": 3,
+            "unsplash": 4,
+        }
+        source_plan = sorted(
+            source_plan,
+            key=lambda item: (
+                action_provider_order.get(str(item[0] or "").strip().casefold(), 99),
+                str(item[0] or "").casefold(),
+            ),
+        )
+
     action_variants = [exact_query]
     if action_search:
         suffixes = _ACTION_SEARCH_SUFFIXES.get(
