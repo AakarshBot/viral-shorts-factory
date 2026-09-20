@@ -750,10 +750,10 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'Visual semantic QC blocked:' in app_source
 
 
-def test_dashboard_ai_discovery_uses_broad_bounded_query_lanes():
+def test_dashboard_ai_discovery_uses_shared_broad_radar():
     source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
-    assert "_discovery_query_lanes" in source
-    assert "ThreadPoolExecutor(max_workers=8" in source
-    assert "_discovery_query_lanes(query, genre_key=category, broad=True)[:4]" in source
-    assert "global_scope=True" in source
-    assert "max_gdelt_records=150" in source
+    assert 'collect_high_recall_stories(bot, "", {}, broad_discovery=True)' in source
+    assert "_cheap_filter(raw, max_items=120, max_age_hours=48)" in source
+    assert "_infer_discovery_category(item)" in source
+    assert "diversity_rerank(ranked, max_items=max_candidates)" in source
+    assert "category inferred after discovery, not used as an intake gate." in source
