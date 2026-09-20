@@ -1,6 +1,5 @@
 """Dashboard visual rendering helpers and the supported runtime patch surface."""
 import random, re, sys, traceback
-import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 
 
