@@ -125,7 +125,7 @@ def _local_query_fallback(title: str, body: str, max_queries: int = 5) -> list[d
     return [
         {
             "query": value,
-            "source_hint": "Commons / configured image source",
+            "source_hint": "Configured visual sources",
             "reason": "Deterministic fallback from named entities in the selected story.",
         }
         for value in candidates[:max(1, int(max_queries))]
@@ -194,11 +194,13 @@ def generate_visual_query_suggestions(
         "You are the visual-search query planner for a monetized YouTube Shorts factory. "
         "Audit the selected story and return a small ranked set of concrete image-search phrases. "
         "These are SEARCH TERMS ONLY, not image results. Prioritize exact named people, organizations, "
-        "logos, teams, places, products, events, landmarks or other concrete entities that are likely "
-        "to have usable files in Wikimedia Commons or the factory's other configured image sources. "
-        "For a person, prefer the person's exact name; for a logo, use the organization name plus logo; "
-        "for a team or event, use the exact team/event/entity plus one useful contextual noun only when "
-        "the story supports it. Do not invent facts. Avoid generic phrases such as 'news', 'latest update', "
+        "logos, teams, places, products, events, landmarks or other concrete entities. Do not assume "
+        "Wikimedia Commons is the primary source. For sports or live-event stories, prioritize a real "
+        "action context when the story supports it, such as batting, bowling, playing, match action, "
+        "celebration, training, interview or on-stage action. For a person, prefer the person's exact "
+        "name plus the supported action/context; for a logo, use the organization name plus logo; "
+        "for a team or event, use the exact team/event/entity plus one useful action/context noun only "
+        "when the story supports it. Do not invent facts. Avoid generic phrases such as 'news', 'latest update', "
         "'editorial photo', or 'interesting image'. Keep every query concise and directly searchable. "
         "Return JSON only: {\"queries\":[{\"query\":\"...\",\"source_hint\":\"...\",\"reason\":\"...\"}]}. "
         "Rank the most likely-to-return result first."
