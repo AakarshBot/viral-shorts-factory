@@ -76,10 +76,10 @@ def test_final_artifact_qc_does_not_depend_on_branding_runtime(monkeypatch):
     class FakeCapture:
         def __init__(self, _path):
             self.values = {
-                7: 30.0,
-                5: 1080.0,
-                4: 1920.0,
-                3: 300.0,
+                7: 30.0,   # CAP_PROP_FPS
+                5: 300.0,  # CAP_PROP_FRAME_COUNT
+                4: 1920.0, # CAP_PROP_FRAME_HEIGHT
+                3: 1080.0, # CAP_PROP_FRAME_WIDTH
             }
 
         def isOpened(self):
