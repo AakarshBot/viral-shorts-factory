@@ -154,11 +154,11 @@ def _parse_query_planner_response(raw_text: str, max_queries: int) -> list[dict[
     for item in rows:
         if isinstance(item, dict):
             query = str(item.get("query") or "").strip()
-            source_hint = str(item.get("source_hint") or "Commons / configured image source").strip()
+            source_hint = str(item.get("source_hint") or "Configured visual sources").strip()
             reason = str(item.get("reason") or "").strip()
         else:
             query = str(item or "").strip()
-            source_hint = "Commons / configured image source"
+            source_hint = "Configured visual sources"
             reason = ""
         query = re.sub(r"\s+", " ", query).strip(" ,.;:!?")
         words = re.findall(r"[\w&.'-]+", query, flags=re.UNICODE)
