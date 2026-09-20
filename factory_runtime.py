@@ -1,12 +1,7 @@
-"""Dashboard runtime upgrades: data-driven scoring, semantic deduplication and visual design."""
+"""Dashboard visual rendering helpers and the supported runtime patch surface."""
 import random, re, sys, traceback
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
-
-_FITTED_WEIGHTS = None
-_FITTED_SAMPLE_COUNT = -1
-_SEMANTIC_MODEL = None
-_SEMANTIC_ERROR = None
 
 
 def install_safe_exception_hook():
