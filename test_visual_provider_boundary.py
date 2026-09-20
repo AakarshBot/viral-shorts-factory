@@ -119,7 +119,7 @@ def test_retrieval_accepts_multi_candidate_provider_payloads(monkeypatch):
 
 if __name__ == "__main__":
     test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers()
-    test_raw_person_adapters_have_no_legacy_quality_gate_dependency()
+    test_raw_candidate_adapters_have_no_legacy_quality_gate_dependency()
     test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods()
     test_commons_candidate_adapter_is_bounded()
     print("Visual provider boundary regression checks passed.")
