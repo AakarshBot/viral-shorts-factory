@@ -477,7 +477,6 @@ def _cricket_relevance_pass(story, genre_key):
     return False
 
 
-@lru_cache(maxsize=1)
 GOOGLE_NEWS_RADAR_QUERIES = (
     "(India OR Indian) (news OR update OR announced)",
     "(world OR global) (news OR update OR announced)",
