@@ -171,6 +171,21 @@ def _wikipedia_identity_candidates(query: str) -> tuple[list[str], dict[str, str
     return candidate_ids[:5], labels
 
 
+def _cache_person_identity(cache_key: str, resolved: dict[str, str]) -> None:
+    key = str(cache_key or "").strip().casefold()
+    if not key or not resolved:
+        return
+    if key in _PERSON_IDENTITY_CACHE:
+        _PERSON_IDENTITY_CACHE[key] = dict(resolved)
+        return
+    if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
+        oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
+        if oldest_key:
+            _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
+    _PERSON_IDENTITY_CACHE[key] = dict(resolved)
+
+
+
 def resolve_person_identity(entity: str) -> dict[str, str]:
     """Resolve a person name through Wikidata, with Wikipedia spelling/alias fallback."""
     normalized = _clean_query(entity)
@@ -237,16 +252,10 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
         else:
             return {}
 
-    if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
-        oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
-        if oldest_key:
-            _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
-    _PERSON_IDENTITY_CACHE[cache_key] = dict(resolved)
+    _cache_person_identity(cache_key, resolved)
     canonical_label = str(resolved.get("label") or "").strip()
     if canonical_label:
-        canonical_key = canonical_label.casefold()
-        if canonical_key and canonical_key not in _PERSON_IDENTITY_CACHE:
-            _PERSON_IDENTITY_CACHE[canonical_key] = dict(resolved)
+        _cache_person_identity(canonical_label, resolved)
     return dict(resolved)
 
 
