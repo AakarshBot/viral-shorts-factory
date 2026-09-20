@@ -1465,7 +1465,111 @@ def render_final_branding_preview() -> None:
         st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", use_container_width=True)
 
 
-def render_visual_query_dry_run_test() -> None:\n    st.markdown("### Visual query dry run")\n    st.caption(\n        "Choose a story from the ranked discovery pool. This runs the same research, script, "\n        "scene-hardening and visual-query path as production, then stops before image retrieval. "\n        "Manual slide queries are intentionally excluded."\n    )\n\n    candidates = st.session_state.get("candidates") or []\n    if not candidates:\n        st.info(\n            "Run topic discovery in Live Factory first. The test deliberately uses a story "\n            "from that ranked selection pool so it follows the same production input contract."\n        )\n        return\n\n    labels = [\n        f"{index + 1:02d}. {str(candidate.get('title') or 'Untitled story').strip()}"\n        for index, candidate in enumerate(candidates)\n    ]\n    selected_index = st.selectbox(\n        "Story",\n        range(len(labels)),\n        format_func=lambda value: labels[value],\n        key="visual_query_dry_run_story",\n    )\n    selected_story = dict(candidates[selected_index])\n    config = dict(st.session_state.get("web_config") or {})\n    if not config:\n        config = {\n            "format_mode": str(selected_story.get("format_mode") or "regular"),\n            "category": str(selected_story.get("category") or "national_global_affairs"),\n            "language": "english",\n        }\n\n    if st.button(\n        "🔎 Generate production visual queries",\n        type="primary",\n        use_container_width=True,\n        key="run_visual_query_dry_run",\n        disabled=bool(st.session_state.workflow_controller.snapshot().get("thread_alive")),\n    ):\n        try:\n            with st.spinner("Running the production research → script → query path..."):\n                st.session_state.visual_query_dry_run_result = run_visual_query_dry_run(\n                    ultimate_bot,\n                    selected_story,\n                    config,\n                )\n        except Exception as exc:\n            st.session_state.visual_query_dry_run_result = {\n                "status": "FAIL",\n                "detail": f"{type(exc).__name__}: {exc}",\n                "results": [],\n            }\n\n    result = st.session_state.get("visual_query_dry_run_result") or {}\n    if not result:\n        return\n\n    if result.get("status") == "PASS":\n        st.success(result.get("detail", "Visual query dry run completed."), icon="✅")\n    elif result.get("status") == "BLOCKED":\n        st.warning(result.get("detail", "Some slides were blocked before image retrieval."), icon="⚠️")\n    else:\n        st.error(result.get("detail", "Visual query dry run failed."), icon="⛔")\n\n    if result.get("story_title"):\n        st.markdown(\n            f"<div class='panel'><div class='small-muted'>TEST STORY</div>"\n            f"<b>{result['story_title']}</b></div>",\n            unsafe_allow_html=True,\n        )\n\n    st.caption(\n        f"Scenes: {result.get('scene_count', 0)} · "\n        f"Research sources: {result.get('research_source_count', 0)} · "\n        f"Image retrieval performed: {'YES' if result.get('image_retrieval_performed') else 'NO'}"\n    )\n\n    for item in result.get("results") or []:\n        status = str(item.get("status") or "READY")\n        icon = "✅" if status == "READY" else "⚠️"\n        st.markdown(f"### {icon} Slide {item.get('slide', '')}")\n        st.caption(\n            f"Subject: {item.get('subject') or 'None'} · "\n            f"Type: {item.get('visual_type') or '—'} · "\n            f"Genre: {item.get('visual_genre') or '—'}"\n        )\n        if item.get("query"):\n            st.code(item["query"], language="text")\n        if item.get("queries"):\n            st.caption("Actual bounded query set:")\n            for query_index, query in enumerate(item["queries"], 1):\n                st.markdown(f"\\`{query_index}. {query}\\`")\n        if status == "BLOCKED":\n            st.error(item.get("error") or "This slide would not reach image retrieval.", icon="⛔")\n\n    st.info(\n        "This diagnostic never uses your manual visual queries and never calls the image retrieval boundary. "\n        "Production manual queries remain authoritative when you run the real factory."\n    )\n\n\ndef render_demo_page() -> None:
+def render_visual_query_dry_run_test() -> None:
+    st.markdown("### Visual query dry run")
+    st.caption(
+        "Choose a story from the ranked discovery pool. This runs the same research, script, "
+        "scene-hardening and visual-query path as production, then stops before image retrieval. "
+        "Manual slide queries are intentionally excluded."
+    )
+
+    candidates = st.session_state.get("candidates") or []
+    if not candidates:
+        st.info(
+            "Run topic discovery in Live Factory first. The test deliberately uses a story "
+            "from that ranked selection pool so it follows the same production input contract."
+        )
+        return
+
+    labels = [
+        f"{index + 1:02d}. {str(candidate.get('title') or 'Untitled story').strip()}"
+        for index, candidate in enumerate(candidates)
+    ]
+    selected_index = st.selectbox(
+        "Story",
+        range(len(labels)),
+        format_func=lambda value: labels[value],
+        key="visual_query_dry_run_story",
+    )
+    selected_story = dict(candidates[selected_index])
+    config = dict(st.session_state.get("web_config") or {})
+    if not config:
+        config = {
+            "format_mode": str(selected_story.get("format_mode") or "regular"),
+            "category": str(selected_story.get("category") or "national_global_affairs"),
+            "language": "english",
+        }
+
+    if st.button(
+        "🔎 Generate production visual queries",
+        type="primary",
+        use_container_width=True,
+        key="run_visual_query_dry_run",
+        disabled=bool(st.session_state.workflow_controller.snapshot().get("thread_alive")),
+    ):
+        try:
+            with st.spinner("Running the production research → script → query path..."):
+                st.session_state.visual_query_dry_run_result = run_visual_query_dry_run(
+                    ultimate_bot,
+                    selected_story,
+                    config,
+                )
+        except Exception as exc:
+            st.session_state.visual_query_dry_run_result = {
+                "status": "FAIL",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "results": [],
+            }
+
+    result = st.session_state.get("visual_query_dry_run_result") or {}
+    if not result:
+        return
+
+    if result.get("status") == "PASS":
+        st.success(result.get("detail", "Visual query dry run completed."), icon="✅")
+    elif result.get("status") == "BLOCKED":
+        st.warning(result.get("detail", "Some slides were blocked before image retrieval."), icon="⚠️")
+    else:
+        st.error(result.get("detail", "Visual query dry run failed."), icon="⛔")
+
+    if result.get("story_title"):
+        st.markdown(
+            f"<div class='panel'><div class='small-muted'>TEST STORY</div>"
+            f"<b>{result['story_title']}</b></div>",
+            unsafe_allow_html=True,
+        )
+
+    st.caption(
+        f"Scenes: {result.get('scene_count', 0)} · "
+        f"Research sources: {result.get('research_source_count', 0)} · "
+        f"Image retrieval performed: {'YES' if result.get('image_retrieval_performed') else 'NO'}"
+    )
+
+    for item in result.get("results") or []:
+        status = str(item.get("status") or "READY")
+        icon = "✅" if status == "READY" else "⚠️"
+        st.markdown(f"### {icon} Slide {item.get('slide', '')}")
+        st.caption(
+            f"Subject: {item.get('subject') or 'None'} · "
+            f"Type: {item.get('visual_type') or '—'} · "
+            f"Genre: {item.get('visual_genre') or '—'}"
+        )
+        if item.get("query"):
+            st.code(item["query"], language="text")
+        if item.get("queries"):
+            st.caption("Actual bounded query set:")
+            for query_index, query in enumerate(item["queries"], 1):
+                st.markdown(f"{query_index}. {query}")
+        if status == "BLOCKED":
+            st.error(item.get("error") or "This slide would not reach image retrieval.", icon="⛔")
+
+    st.info(
+        "This diagnostic never uses your manual visual queries and never calls the image retrieval boundary. "
+        "Production manual queries remain authoritative when you run the real factory."
+    )
+
+
+def render_demo_page() -> None:
     st.markdown("<div class='section-kicker'>Engineering lab</div><h2 style='margin-top:0'>Demo Factory</h2><h4>Component-by-component factory tests</h4>", unsafe_allow_html=True)
     st.caption(
         "Demo mode never performs a production upload and does not need provider calls. "
