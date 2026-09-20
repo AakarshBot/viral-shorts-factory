@@ -1328,140 +1328,106 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.session_state["metadata_loaded_run_id"] = run_id
         st.session_state["metadata_approved"] = False
 
-    st.markdown("---")
-    st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
-
-    gates = evaluate_live_qc_gates(
-        snapshot,
-        {
-            "title": str(st.session_state.get("final_title") or metadata.get("title") or script_data.get("title") or ""),
-            "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
-            "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
-        },
+    _render_section_header(
+        "Final step",
+        "QC & publish",
+        "Review the gates, approve the metadata, then choose how the Short is published.",
     )
+
+    current_metadata = {
+        "title": str(st.session_state.get("final_title") or metadata.get("title") or script_data.get("title") or ""),
+        "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
+        "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
+    }
+    gates = evaluate_live_qc_gates(snapshot, current_metadata)
     passed_count = sum(1 for gate in gates if gate["passed"])
     qc_ready = passed_count == len(gates)
     public_blocked = any(bool(gate.get("public_blocked")) for gate in gates)
     fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+
     if fallback_mode == "extractive_source_grounded":
         st.error(
             "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
             "Private upload remains available after the other QC gates pass.",
             icon="⛔",
         )
-    st.markdown(f"**Live gate status: {passed_count}/{len(gates)} passing**")
-    gate_cols = st.columns(2)
-    for index, gate in enumerate(gates):
-        with gate_cols[index % 2]:
-            if gate["passed"]:
-                st.success(f"✓ {gate['label']} — PASS", icon="✅")
-            else:
-                st.error(f"✕ {gate['label']} — BLOCKED", icon="⛔")
-            st.caption(gate["detail"])
 
-    st.markdown("### Upload QC")
-    if qc_ready:
-        st.success(
-            "All release QC gates are passing. Both upload modes are available.",
-            icon="✅",
-        )
-    else:
-        st.warning(
-            "Upload is locked until every release QC gate passes.",
-            icon="🔒",
-        )
-        blocked = [gate["label"] for gate in gates if not gate["passed"]]
-        if blocked:
-            st.caption("Blocked by: " + " · ".join(blocked))
+    st.markdown(
+        f"<div class='live-bar'><div class='live-bar-copy'><b>Release QC</b> · "
+        f"{passed_count}/{len(gates)} gates passing</div><div class='small-muted'>"
+        f"{'READY' if qc_ready else 'LOCKED'}</div></div>",
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("### 1 · Review and approve metadata")
-    st.caption("Review the final title, description and pinned comment here. Titles are normalized to include #shorts and stay within YouTube's 100-character limit.")
+    gate_html = []
+    for gate in gates:
+        passed = bool(gate.get("passed"))
+        gate_class = "pass" if passed else "block"
+        gate_html.append(
+            f"<div class='release-gate {gate_class}'><div class='release-gate-name'>"
+            f"{'✓' if passed else '✕'} {gate.get('label', '')}</div>"
+            f"<div class='release-gate-detail'>{gate.get('detail', '')}</div></div>"
+        )
+    st.markdown("<div class='release-gates'>" + "".join(gate_html) + "</div>", unsafe_allow_html=True)
 
     editing = not bool(st.session_state.get("metadata_approved"))
-    title = st.text_input(
-        "YouTube title",
-        max_chars=100,
-        key="final_title",
-        disabled=not editing,
-    )
-    description = st.text_area(
-        "YouTube description",
-        height=150,
-        key="final_description",
-        disabled=not editing,
-    )
-    comment = st.text_area(
-        "Pinned comment",
-        height=110,
-        key="final_comment",
-        disabled=not editing,
-    )
+    with st.container(border=True):
+        st.markdown("#### 1 · Metadata")
+        st.caption("Approve the exact title, description and pinned comment used for upload.")
 
-    if editing:
-        approve_col, info_col = st.columns([1, 2])
-        with approve_col:
-            if st.button(
-                "✅ Approve title, description & comment",
-                type="primary",
-                width="stretch",
-                key="approve_metadata",
-            ):
-                try:
-                    from final_qc_runtime import validate_final_upload_metadata
-                    clean_title, clean_description, clean_comment = validate_final_upload_metadata(
-                        title, description, comment
-                    )
-                    st.session_state["final_title"] = clean_title
-                    st.session_state["final_description"] = clean_description
-                    st.session_state["final_comment"] = clean_comment
-                    st.session_state["metadata_approved"] = True
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
-        with info_col:
-            st.info("Nothing will be uploaded until the metadata approval above succeeds.")
-        return
+        title = st.text_input("YouTube title", max_chars=100, key="final_title", disabled=not editing)
+        meta_cols = st.columns(2)
+        with meta_cols[0]:
+            description = st.text_area("YouTube description", height=140, key="final_description", disabled=not editing)
+        with meta_cols[1]:
+            comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=not editing)
 
-    st.success("Metadata approved. You can now choose how the Short is published.", icon="✅")
-    if st.button("✏️ Edit metadata", width="stretch", key="edit_metadata"):
-        st.session_state["metadata_approved"] = False
-        st.rerun()
+        if editing:
+            approve_col, note_col = st.columns([1, 2])
+            with approve_col:
+                if st.button("Approve metadata", type="primary", width="stretch", key="approve_metadata"):
+                    try:
+                        from final_qc_runtime import validate_final_upload_metadata
+                        clean_title, clean_description, clean_comment = validate_final_upload_metadata(
+                            title, description, comment
+                        )
+                        st.session_state["final_title"] = clean_title
+                        st.session_state["final_description"] = clean_description
+                        st.session_state["final_comment"] = clean_comment
+                        st.session_state["metadata_approved"] = True
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
+            with note_col:
+                st.caption("Nothing uploads until this approval succeeds.")
+            return
 
+        st.success("Metadata approved.", icon="✅")
+        if st.button("Edit metadata", width="content", key="edit_metadata"):
+            st.session_state["metadata_approved"] = False
+            st.rerun()
 
-    st.markdown("### Final video")
-    if video_path and os.path.isfile(video_path):
-        st.success("The Short is rendered, branded and ready for your review.", icon="✅")
-        st.video(video_path)
-    else:
-        st.error("The dashboard has a final video path, but the file is not accessible from this dashboard process.")
+    if not (video_path and os.path.isfile(video_path)):
+        st.error("The final video path is recorded, but the file is not accessible from the dashboard process.")
         st.code(video_path or "No final video path recorded.", language="text")
         return
 
-    st.markdown("### 2 · Choose upload visibility")
-    st.info("Private keeps the Short hidden on YouTube. Public publishes it immediately after the final confirmation.")
-
-    public_col, private_col = st.columns(2)
-    with public_col:
-        if st.button(
-            "🌐 Upload Publicly",
-            type="primary",
-            width="stretch",
-            key="upload_public",
-            disabled=not qc_ready,
-        ):
+    preview_col, publish_col = st.columns([1.35, .65], gap="large")
+    with preview_col:
+        st.markdown("#### 2 · Watch")
+        st.video(video_path)
+    with publish_col:
+        st.markdown("#### 3 · Publish")
+        st.caption("Private stays hidden. Public needs explicit confirmation.")
+        if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not qc_ready):
             if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                 st.error("Public upload blocked: release QC is no longer passing.")
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
-        st.caption("Public: full release QC + explicit publish confirmation." + (" · BLOCKED by originality policy" if public_blocked else ""))
-    with private_col:
-        if st.button(
-            "🔒 Upload Privately",
-            width="stretch",
-            key="upload_private",
-            disabled=not qc_ready,
-        ):
+        if public_blocked:
+            st.caption("Public publishing is currently blocked by a release policy gate.")
+        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not qc_ready):
             if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                 st.error("Private upload blocked: release QC is no longer passing.")
             else:
@@ -1474,34 +1440,32 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     st.session_state["final_comment"],
                     "private",
                 )
-        st.caption("Private: the same release QC, without public publishing confirmation.")
 
-    if st.session_state.get("confirm_public_upload"):
-        st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
-        confirm_col, cancel_col = st.columns(2)
-        with confirm_col:
-            if st.button("✅ Yes, upload publicly", type="primary", width="stretch", key="confirm_upload_public"):
-                if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
-                    st.error("Upload blocked: one or more live QC gates are not passing.")
-                else:
+        if st.session_state.get("confirm_public_upload"):
+            st.warning("You are about to publish this video publicly. Continue?")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button("Yes, publish", type="primary", width="stretch", key="confirm_upload_public"):
+                    if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
+                        st.error("Upload blocked: one or more live QC gates are not passing.")
+                    else:
+                        st.session_state["confirm_public_upload"] = False
+                        _perform_upload(
+                            controller,
+                            snapshot,
+                            st.session_state["final_title"],
+                            st.session_state["final_description"],
+                            st.session_state["final_comment"],
+                            "public",
+                        )
+            with cancel_col:
+                if st.button("Cancel", width="stretch", key="cancel_upload_public"):
                     st.session_state["confirm_public_upload"] = False
-                    _perform_upload(
-                        controller,
-                        snapshot,
-                        st.session_state["final_title"],
-                        st.session_state["final_description"],
-                        st.session_state["final_comment"],
-                        "public",
-                    )
-        with cancel_col:
-            if st.button("← Cancel", width="stretch", key="cancel_upload_public"):
-                st.session_state["confirm_public_upload"] = False
-                st.rerun()
+                    st.rerun()
 
     result = st.session_state.get("upload_result", "")
     if result:
         st.success(f"Last upload completed: {result}")
-
 
 def _perform_upload(
     controller: DashboardWorkflowController,
@@ -1575,53 +1539,69 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     live_blockers = [item for item in problems if "provider key" in item]
     if live_blockers:
         st.warning(
-            "Some live provider keys are not configured. Discovery/production may stop when that provider is required."
+            "Some live provider keys are not configured. Discovery or production may stop when that provider is required."
         )
 
-    st.markdown("<div class='section-kicker'>Step 01 · Discovery</div><h2 style='margin-top:0'>Choose a story</h2>", unsafe_allow_html=True)
-    st.caption(
-        "The factory ranks up to 28 fresh, diverse stories for this section. Repeats from the previous 48 hours are removed before ranking."
+    _render_section_header(
+        "Step 01 · Discovery",
+        "Build a Short",
+        "Choose a ranked story, optionally guide the visual search, then start production.",
     )
 
     if not st.session_state.candidates:
-        if st.button("🚀 Find today's ranked topics", type="primary", width="stretch"):
-            controller.reset()
-            try:
-                controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
-                conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        mode_label = str(config.get("display_format") or config.get("editorial_mode") or "Deep Dive")
+        language_label = str(config.get("language_label") or "English")
+        category_label = str(config.get("category") or "Automatic").replace("_", " ").title()
+        with st.container():
+            st.markdown(
+                "<div class='empty-state'><div class='empty-title'>Ready for a new Short</div>"
+                "<div class='empty-copy'>Search current stories and keep the final story choice in your hands. "
+                "The factory handles the ranking; you handle the decision.</div></div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='meta-row'><span class='meta-chip'>Mode · {mode_label}</span>"
+                f"<span class='meta-chip'>Language · {language_label}</span>"
+                f"<span class='meta-chip'>Category · {category_label}</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.write("")
+            if st.button("Find today's ranked topics", type="primary", width="stretch"):
+                controller.reset()
                 try:
-                    migrate_vault(conn)
-                    if config.get("editorial_mode") == "AI":
-                        candidates = discover_ai_topics(
-                            ultimate_bot,
-                            config,
-                            conn,
-                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
-                        )
-                    else:
-                        candidates = discover_ranked_topics(
-                            ultimate_bot,
-                            config,
-                            conn,
-                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
-                        )
-                finally:
-                    conn.close()
-                for candidate in candidates:
-                    candidate["dashboard_discovery_pool"] = True
-                st.session_state.candidates = candidates
-                st.session_state.web_config = config
-                st.session_state.production_started = False
-                st.session_state.final_qc = False
-                st.session_state.upload_result = ""
-                st.session_state.candidate_page = 0
-                st.session_state.discovery_headline_selection = None
-                st.success(
-                    f"Found {len(candidates)} ranked headlines. Choose one below."
-                )
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Topic discovery failed: {type(exc).__name__}: {exc}")
+                    controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
+                    conn = sqlite3.connect(ultimate_bot.DB_PATH)
+                    try:
+                        migrate_vault(conn)
+                        if config.get("editorial_mode") == "AI":
+                            candidates = discover_ai_topics(
+                                ultimate_bot,
+                                config,
+                                conn,
+                                max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                            )
+                        else:
+                            candidates = discover_ranked_topics(
+                                ultimate_bot,
+                                config,
+                                conn,
+                                max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                            )
+                    finally:
+                        conn.close()
+                    for candidate in candidates:
+                        candidate["dashboard_discovery_pool"] = True
+                    st.session_state.candidates = candidates
+                    st.session_state.web_config = config
+                    st.session_state.production_started = False
+                    st.session_state.final_qc = False
+                    st.session_state.upload_result = ""
+                    st.session_state.candidate_page = 0
+                    st.session_state.discovery_headline_selection = None
+                    st.success(f"Found {len(candidates)} ranked headlines. Choose one below.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Topic discovery failed: {type(exc).__name__}: {exc}")
         return
 
     if st.session_state.production_started:
@@ -1630,35 +1610,37 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     pending_candidate = st.session_state.get("pending_candidate")
     if pending_candidate:
-        st.markdown("### Visual search queries (optional)")
-        st.caption(
-            "Enter optional manual visual queries separated by semicolons (;). "
-            "The factory will intelligently assign them to the most relevant slides. "
-            "You can still refine individual slides during script review."
+        headline = str(pending_candidate.get("title") or "Untitled story").strip()
+        source = str(pending_candidate.get("source_label") or "News source").strip()
+        url = str(pending_candidate.get("story_url") or "").strip()
+
+        _render_section_header(
+            "Step 02",
+            "Review your story",
+            "Confirm the headline before the factory spends time producing it.",
         )
-        st.text_input(
-            "Search queries",
-            placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
-            key="visual_search_queries",
-            label_visibility="collapsed",
-        )
-        st.markdown(
-            f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
-            f"<b>{pending_candidate.get('title', '')}</b></div>",
-            unsafe_allow_html=True,
-        )
-        start_col, cancel_col = st.columns(2)
+        with st.container(border=True):
+            st.markdown("<div class='story-rank'>SELECTED HEADLINE</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='story-title' style='font-size:1.35rem'>{headline}</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Source · {source}")
+            if url.startswith(("http://", "https://")):
+                st.link_button("Open source article", url, width="content")
+            with st.expander("Optional visual-search hints", expanded=False):
+                st.caption("Add exact image searches up front. Leave blank to keep automatic visual search.")
+                st.text_input(
+                    "Search queries",
+                    placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
+                    key="visual_search_queries",
+                )
+
+        start_col, cancel_col = st.columns([1.5, 1])
         with start_col:
-            if st.button(
-                "🚀 Start production",
-                type="primary",
-                width="stretch",
-                key="start_selected_topic",
-            ):
+            if st.button("Start production", type="primary", width="stretch", key="start_selected_topic"):
                 config = dict(st.session_state.web_config)
-                config["visual_search_queries"] = str(
-                    st.session_state.get("visual_search_queries", "") or ""
-                ).strip()
+                config["visual_search_queries"] = str(st.session_state.get("visual_search_queries", "") or "").strip()
                 if config.get("editorial_mode") == "AI":
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
@@ -1668,11 +1650,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 controller.start_production(config, dict(pending_candidate))
                 st.rerun()
         with cancel_col:
-            if st.button(
-                "← Choose another headline",
-                width="stretch",
-                key="cancel_selected_topic",
-            ):
+            if st.button("Choose another headline", width="stretch", key="cancel_selected_topic"):
                 st.session_state.pending_candidate = None
                 st.session_state.visual_search_queries = ""
                 st.rerun()
@@ -1687,81 +1665,64 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     visible = candidates[start_index:start_index + page_size]
 
     st.markdown(
-        f"<div class='panel'><b>Ranked headlines</b>"
-        f"<span class='small-muted' style='float:right'>Showing {start_index + 1}-{start_index + len(visible)} of {total}</span></div>",
+        f"<div class='live-bar'><div class='live-bar-copy'><b>Ranked headlines</b> · "
+        f"Showing {start_index + 1}–{start_index + len(visible)} of {total}</div></div>",
         unsafe_allow_html=True,
     )
 
-    for offset, candidate in enumerate(visible):
-        rank = start_index + offset + 1
-        title = str(candidate.get("title") or "Untitled story").strip()
-        reason = str(candidate.get("discovery_reason") or "").strip()
-        score = float(candidate.get("candidate_score") or 0.0)
-        evidence = build_discovery_evidence(candidate)
-        history_fit = float(evidence.get("channel_history") or 0.0)
+    for row_start in range(0, len(visible), 2):
+        row = visible[row_start:row_start + 2]
+        cols = st.columns(len(row), gap="medium")
+        for local_index, candidate in enumerate(row):
+            absolute_index = start_index + row_start + local_index
+            with cols[local_index]:
+                rank = absolute_index + 1
+                title = str(candidate.get("title") or "Untitled story").strip()
+                reason = str(candidate.get("discovery_reason") or "").strip()
+                score = float(candidate.get("candidate_score") or 0.0)
+                evidence = build_discovery_evidence(candidate)
+                history_fit = float(evidence.get("channel_history") or 0.0)
+                source = str(candidate.get("source_label") or "News source").strip()
+                url = str(candidate.get("story_url") or "").strip()
 
-        with st.container(border=True):
-            st.markdown(f"**{rank:02d}. {title}**")
-            meta = [
-                f"Score {score:.1f}",
-                f"{evidence['articles']} article{'s' if evidence['articles'] != 1 else ''}",
-            ]
-            if evidence["independent_publishers"]:
-                meta.append(f"{evidence['independent_publishers']} publisher{'s' if evidence['independent_publishers'] != 1 else ''}")
-            if candidate.get("ai_recommendation"):
-                meta.append(f"Channel fit {history_fit:.1f}/10")
-            st.caption(" · ".join(meta))
-            if reason:
-                st.write(reason)
-
-            source = str(candidate.get("source_label") or "News source").strip()
-            url = str(candidate.get("story_url") or "").strip()
-            source_col, action_col = st.columns([3, 1])
-            with source_col:
-                st.caption(f"Source: {source}")
-                if url.startswith(("http://", "https://")):
-                    st.link_button("Open source", url)
-            with action_col:
-                if st.button(
-                    "Use headline →",
-                    type="primary",
-                    width="stretch",
-                    key=f"use_candidate_{start_index + offset}",
-                ):
-                    st.session_state.pending_candidate = dict(candidate)
-                    st.session_state.visual_search_queries = ""
-                    st.rerun()
+                with st.container(border=True):
+                    st.markdown(f"<div class='story-rank'>#{rank:02d}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='story-title'>{title}</div>", unsafe_allow_html=True)
+                    article_label = "article" if evidence["articles"] == 1 else "articles"
+                    publisher_label = f" · {evidence['independent_publishers']} publishers" if evidence["independent_publishers"] else ""
+                    fit_label = f" · Channel fit {history_fit:.1f}/10" if candidate.get("ai_recommendation") else ""
+                    st.markdown(
+                        f"<span class='score-chip'>Score {score:.1f}</span> "
+                        f"<span class='story-meta'>{evidence['articles']} {article_label}{publisher_label}{fit_label}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    if reason:
+                        st.markdown(f"<div class='story-reason'>{reason}</div>", unsafe_allow_html=True)
+                    st.caption(f"Source · {source}")
+                    action_cols = st.columns([1, 1])
+                    with action_cols[0]:
+                        if url.startswith(("http://", "https://")):
+                            st.link_button("Open source", url, width="stretch")
+                    with action_cols[1]:
+                        if st.button("Use headline →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
+                            st.session_state.pending_candidate = dict(candidate)
+                            st.session_state.visual_search_queries = ""
+                            st.rerun()
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
     with nav_left:
-        if st.button(
-            "← Previous",
-            disabled=page <= 0,
-            width="stretch",
-            key="candidate_previous",
-        ):
+        if st.button("Previous", disabled=page <= 0, width="stretch", key="candidate_previous"):
             st.session_state.candidate_page = page - 1
             st.rerun()
     with nav_center:
         st.markdown(
-            f"<div style='text-align:center;padding-top:10px' class='small-muted'>"
-            f"Page {page + 1} of {page_count}</div>",
+            f"<div style='text-align:center;padding-top:10px' class='small-muted'>Page {page + 1} of {page_count}</div>",
             unsafe_allow_html=True,
         )
     with nav_right:
-        if st.button(
-            "Next →",
-            disabled=page >= page_count - 1,
-            width="stretch",
-            key="candidate_next",
-        ):
+        if st.button("Next", disabled=page >= page_count - 1, width="stretch", key="candidate_next"):
             st.session_state.candidate_page = page + 1
             st.rerun()
-
-    if not controller.snapshot().get("thread_alive"):
-        st.info("Choose a headline to review its script and set optional per-slide image-search queries.")
-
-
 
 def render_channel_statistics() -> None:
     st.markdown("<div class='section-kicker'>Analytics</div><h2 style='margin-top:0'>Channel performance</h2>", unsafe_allow_html=True)
