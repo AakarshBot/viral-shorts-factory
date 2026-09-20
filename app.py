@@ -14,6 +14,11 @@ from typing import Any, Dict
 
 import streamlit as st
 
+try:
+    from streamlit_cropper import st_cropper
+except ModuleNotFoundError:
+    st_cropper = None
+
 import ultimate_bot
 from db_architecture import migrate_vault
 from diagnostics_runtime import run_offline_diagnostics
@@ -138,6 +143,53 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
 [data-testid="stProgress"] div[role="progressbar"]{background:#e7eaf0}
 [data-testid="stProgress"] div[role="progressbar"] > div{background:var(--accent)}
+[data-baseweb="popover"]{
+  z-index:1000000!important;
+  background:var(--surface)!important;
+  border:1px solid var(--line)!important;
+  border-radius:12px!important;
+  box-shadow:0 18px 50px rgba(15,23,42,.18)!important;
+  opacity:1!important;
+  overflow:hidden!important;
+}
+[data-baseweb="popover"] [data-baseweb="menu"],
+[data-baseweb="popover"] [role="listbox"]{
+  background:var(--surface)!important;
+  color:var(--text)!important;
+  opacity:1!important;
+  border:0!important;
+  box-shadow:none!important;
+  padding:5px!important;
+}
+[data-baseweb="popover"] [role="option"]{
+  color:var(--text)!important;
+  background:transparent!important;
+  border-radius:8px!important;
+  min-height:38px!important;
+}
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [aria-selected="true"]{
+  background:var(--accent-soft)!important;
+  color:var(--text)!important;
+}
+[data-baseweb="popover"] input{
+  color:var(--text)!important;
+  background:var(--surface-soft)!important;
+  border-color:var(--line)!important;
+}
+[data-baseweb="popover"] *{
+  opacity:1!important;
+  text-shadow:none!important;
+}
+.stSelectbox [data-baseweb="select"]>div{
+  background:var(--surface)!important;
+  border:1px solid var(--line)!important;
+  border-radius:11px!important;
+  min-height:42px!important;
+}
+.stSelectbox [data-baseweb="select"]>div:hover{
+  border-color:#b8bec9!important;
+}
 .crop-shell{background:#f7f8fb;border:1px solid var(--line);border-radius:16px;padding:12px}
 .crop-caption{color:var(--muted);font-size:.73rem;line-height:1.45;margin-bottom:9px}
 .dashboard-footer{text-align:center;color:var(--muted-2);font-size:.7rem;padding:10px 0}
@@ -1023,46 +1075,52 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         except (TypeError, ValueError):
                             default_coords = None
 
-                        crop_left, crop_right = st.columns([1.18, 0.82], gap="medium")
-                        with crop_left:
-                            crop_result = st_cropper(
-                                img_file=original_image,
-                                realtime_update=True,
-                                default_coords=default_coords,
-                                box_color="#5b46e8",
-                                aspect_ratio=(9, 16),
-                                return_type="both",
-                                key=f"visual_cropper_{run_id}_{item['index']}",
-                                should_resize_image=True,
-                                stroke_width=3,
+                        if st_cropper is None:
+                            st.warning(
+                                "Interactive cropping is unavailable in this Python environment. "
+                                "Run \`python -m pip install -r requirements.txt\` and restart Streamlit."
                             )
-                            if isinstance(crop_result, tuple) and len(crop_result) == 2:
-                                crop_preview, crop_box = crop_result
-                            else:
-                                crop_preview, crop_box = crop_result, {}
-
-                        with crop_right:
-                            st.markdown("**Shorts preview**")
-                            if crop_preview is not None:
-                                st.image(crop_preview, width="stretch")
-                            st.caption("9:16 frame · no provider or AI call")
-
-                        if isinstance(crop_box, dict) and crop_box:
-                            if st.button(
-                                "Apply crop",
-                                type="primary",
-                                width="stretch",
-                                key=f"apply_crop_{run_id}_{item['index']}",
-                            ):
-                                ok, message = controller.crop_visual(
-                                    item["index"],
-                                    crop_box=crop_box,
+                        else:
+                            crop_left, crop_right = st.columns([1.18, 0.82], gap="medium")
+                            with crop_left:
+                                crop_result = st_cropper(
+                                    img_file=original_image,
+                                    realtime_update=True,
+                                    default_coords=default_coords,
+                                    box_color="#5b46e8",
+                                    aspect_ratio=(9, 16),
+                                    return_type="both",
+                                    key=f"visual_cropper_{run_id}_{item['index']}",
+                                    should_resize_image=True,
+                                    stroke_width=3,
                                 )
-                                if ok:
-                                    st.success(message)
-                                    st.rerun()
+                                if isinstance(crop_result, tuple) and len(crop_result) == 2:
+                                    crop_preview, crop_box = crop_result
                                 else:
-                                    st.error(message)
+                                    crop_preview, crop_box = crop_result, {}
+    
+                            with crop_right:
+                                st.markdown("**Shorts preview**")
+                                if crop_preview is not None:
+                                    st.image(crop_preview, width="stretch")
+                                st.caption("9:16 frame · no provider or AI call")
+    
+                            if isinstance(crop_box, dict) and crop_box:
+                                if st.button(
+                                    "Apply crop",
+                                    type="primary",
+                                    width="stretch",
+                                    key=f"apply_crop_{run_id}_{item['index']}",
+                                ):
+                                    ok, message = controller.crop_visual(
+                                        item["index"],
+                                        crop_box=crop_box,
+                                    )
+                                    if ok:
+                                        st.success(message)
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
                     else:
                         st.info("The preserved original image is not available for cropping.")
 
