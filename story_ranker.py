@@ -1328,6 +1328,19 @@ def _is_reddit_json_url(url):
         return False
 
 
+def _reddit_subreddit_from_url(url):
+    """Recover the configured subreddit when a category points at a Reddit JSON feed."""
+    try:
+        parsed = urlparse(str(url or "").strip())
+        host = parsed.netloc.lower().removeprefix("www.")
+        if not host.endswith("reddit.com"):
+            return ""
+        match = re.search(r"/r/([^/]+)/", parsed.path, re.IGNORECASE)
+        return match.group(1).strip() if match else ""
+    except Exception:
+        return ""
+
+
 def _dedupe_discovery_queries(queries, max_items):
     seen = set()
     output = []
@@ -1431,6 +1444,7 @@ def collect_high_recall_stories(
 
     configured_rss = str(custom_rss_url or genre_cfg.get("rss_url") or "").strip()
     configured_google_query = _google_news_query_from_url(configured_rss)
+    configured_reddit_subreddit = _reddit_subreddit_from_url(configured_rss)
     selected_rss = configured_rss
     if configured_google_query or _is_reddit_json_url(selected_rss):
         # Google News search URLs become query lanes; Reddit JSON belongs to the
@@ -1447,7 +1461,12 @@ def collect_high_recall_stories(
     )
 
     trend_geos = GOOGLE_TRENDS_GEOS if broad_discovery else ("IN",)
-    reddit_subreddits = REDDIT_RADAR_SUBREDDITS[:DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD] if broad_discovery else ("",)
+    if broad_discovery:
+        reddit_subreddits = REDDIT_RADAR_SUBREDDITS[:DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD]
+    elif configured_reddit_subreddit:
+        reddit_subreddits = (configured_reddit_subreddit,)
+    else:
+        reddit_subreddits = ("",)
 
     official_urls = _official_feed_urls(genre_key, genre_cfg)
     core_job_count = len(google_queries) + bool(selected_rss) + bool(official_urls)
