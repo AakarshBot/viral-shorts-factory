@@ -853,6 +853,7 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
 def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip()
     provider_page = _provider_page(_args)
+    visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
     q = _clean_query(query)
     if not key or not q:
         return []
@@ -861,7 +862,11 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
         params={
             "query": q,
             "page": provider_page,
-            "orientation": "portrait",
+            "orientation": (
+                None
+                if visual_genre in {"PERSON_ACTION", "TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH", "EVENT_SCENE"}
+                else "portrait"
+            ),
             "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2),
             "client_id": key,
         },
