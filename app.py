@@ -1725,7 +1725,11 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             st.rerun()
 
 def render_channel_statistics() -> None:
-    st.markdown("<div class='section-kicker'>Analytics</div><h2 style='margin-top:0'>Channel performance</h2>", unsafe_allow_html=True)
+    _render_section_header(
+        "Analytics",
+        "Channel performance",
+        "Recorded factory history and optional live YouTube totals.",
+    )
     try:
         stats = collect_channel_statistics(ultimate_bot.DB_PATH)
     except Exception as exc:
@@ -1741,80 +1745,83 @@ def render_channel_statistics() -> None:
         f"{stats['avg_view_percentage']:.1f}%" if stats["avg_view_percentage"] is not None else "—",
     )
 
-    ctr_col, live_col = st.columns(2)
-    ctr_col.metric("Average title CTR", f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—")
-    with live_col:
-        if st.button("↻ Refresh live YouTube totals", width="stretch", key="refresh_live_channel_stats"):
-            st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
-
+    st.markdown("### Live channel")
     live = st.session_state.get("live_channel_stats") or {}
     if live.get("error"):
         st.warning(f"Live YouTube totals could not be loaded: {live['error']}")
     elif live:
-        st.markdown("### Live YouTube channel totals")
         live_cols = st.columns(4)
         live_cols[0].metric("Channel", live.get("channel_title", "Connected channel"))
-        live_cols[1].metric("Subscribers", "Hidden" if live.get("hidden_subscriber_count") else f"{live.get('subscriber_count', 0):,}")
+        live_cols[1].metric(
+            "Subscribers",
+            "Hidden" if live.get("hidden_subscriber_count") else f"{live.get('subscriber_count', 0):,}",
+        )
         live_cols[2].metric("Videos", f"{live.get('video_count', 0):,}")
         live_cols[3].metric("All-time views", f"{live.get('view_count', 0):,}")
     else:
-        st.caption(
-            "Recorded factory metrics are shown above. Use “Refresh live YouTube totals” "
-            "to query the connected channel account."
-        )
+        st.caption("Recorded metrics are available now. Live totals are optional.")
 
-    st.markdown("### By format")
-    if stats["by_format"]:
-        st.dataframe(stats["by_format"], width="stretch", hide_index=True)
+    if st.button("Refresh live YouTube totals", width="content", key="refresh_live_channel_stats"):
+        st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
+        st.rerun()
 
-    st.markdown("### By language")
-    if stats["by_language"]:
-        st.dataframe(stats["by_language"], width="stretch", hide_index=True)
-
-    st.markdown("### Recent factory history")
-    if stats["recent"]:
-        st.dataframe(stats["recent"], width="stretch", hide_index=True)
-    else:
-        st.info("No recorded factory runs yet.")
-
+    for label, table in (
+        ("By format", stats["by_format"]),
+        ("By language", stats["by_language"]),
+        ("Recent factory history", stats["recent"]),
+    ):
+        with st.expander(label, expanded=(label == "Recent factory history")):
+            if table:
+                st.dataframe(table, width="stretch", hide_index=True)
+            else:
+                st.info(f"No {label.lower()} data yet.")
 
 def render_offline_page() -> None:
-    st.markdown("<div class='section-kicker'>Engineering</div><h2 style='margin-top:0'>Offline diagnostics</h2>", unsafe_allow_html=True)
-    st.caption("These checks are safe to run while coding. They make zero provider/API calls.")
+    _render_section_header(
+        "Engineering",
+        "Offline diagnostics",
+        "Safe checks for the dashboard and factory contracts. No provider/API calls are made.",
+    )
 
-    if st.button("🧪 Run offline diagnostics", type="primary", width="stretch"):
+    if st.button("Run offline diagnostics", type="primary", width="content"):
         with st.spinner("Running offline factory checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
             st.session_state.show_offline_diagnostics = True
+        st.rerun()
 
     report = st.session_state.get("offline_diagnostics") or {}
     if not report:
+        with st.container(border=True):
+            st.info("No diagnostic run yet. Run the checks when you want a fresh contract snapshot.")
         return
 
+    cols = st.columns(3)
+    cols[0].metric("Passed", report.get("passed", 0))
+    cols[1].metric("Failed", report.get("failed", 0))
+    cols[2].metric("API calls", report.get("api_calls", 0))
+
     if report.get("all_passed"):
-        st.success(f"All checks passed: {report.get('passed', 0)}/{report.get('total', 0)}")
+        st.success(f"All {report.get('total', 0)} checks passed.")
     else:
-        st.error(
-            f"Diagnostics found {report.get('failed', 0)} issue(s) out of {report.get('total', 0)}."
-        )
+        st.error(f"{report.get('failed', 0)} check(s) failed.")
 
+    checks = []
     for item in report.get("results", []):
-        icon = "✅" if item.get("status") == "PASS" else "❌"
-        st.markdown(
-            f"<div class='panel'><b>{icon} {item.get('name', '')}</b><br>"
-            f"<span class='small-muted'>{item.get('detail', '')}</span></div>",
-            unsafe_allow_html=True,
+        passed = item.get("status") == "PASS"
+        gate_class = "pass" if passed else "block"
+        checks.append(
+            f"<div class='release-gate {gate_class}'><div class='release-gate-name'>"
+            f"{'✓' if passed else '✕'} {item.get('name', '')}</div>"
+            f"<div class='release-gate-detail'>{item.get('detail', '')}</div></div>"
         )
-
-
+    st.markdown("<div class='release-gates'>" + "".join(checks) + "</div>", unsafe_allow_html=True)
 
 def render_factory_function_coverage() -> None:
-    """Show a complete, read-only map of ultimate_bot callables."""
     report = factory_function_coverage()
-    st.markdown("### Factory function coverage")
-    st.caption(
-        "Every top-level function in ultimate_bot.py is explicitly classified so we can "
-        "distinguish dashboard features from deliberate internal helpers."
+    _render_section_header(
+        "Engineering",
+        "Factory function coverage",
+        "A read-only map of the functions exposed by ultimate_bot.py.",
     )
     if report.get("complete"):
         st.success(f"All {report['total']} factory functions are accounted for.")
@@ -1832,29 +1839,26 @@ def render_factory_function_coverage() -> None:
 
     for label in labels:
         names = buckets.get(label, [])
-        with st.expander(f"{label} ({len(names)})", expanded=(label != "Internal")):
+        with st.expander(f"{label} · {len(names)}", expanded=False):
             st.code("\\n".join(names), language="text") if names else st.caption("None")
 
 def render_final_branding_preview() -> None:
-    """Expose the canonical final branding compositor as a first-class dashboard preview."""
-    st.markdown(
-        "<div class='section-kicker'>Branding approval</div>"
-        "<h2 style='margin-top:0'>Final Branding Preview</h2>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "This preview uses the same canonical branding overlay path as the final compositor. "
-        "It is a synthetic 1080×1920 frame, so it never renders or modifies a production video."
+    _render_section_header(
+        "Branding",
+        "Final branding preview",
+        "A synthetic 1080×1920 frame using the same canonical branding compositor as production.",
     )
 
-    if st.button("▶ Render final branding preview", type="primary", width="stretch"):
+    if st.button("Render final branding preview", type="primary", width="content"):
         with st.spinner("Rendering the canonical branding overlay..."):
             result = run_demo_section("scene_branding")
         st.session_state.last_demo_results["scene_branding"] = result
+        st.rerun()
 
     result = (st.session_state.get("last_demo_results") or {}).get("scene_branding")
     if not result:
-        st.info("Run the preview to inspect the final logo and source overlay.")
+        with st.container(border=True):
+            st.info("Run the preview to inspect the final logo and source overlay.")
         return
 
     if result.get("status") == "PASS":
@@ -1864,14 +1868,14 @@ def render_final_branding_preview() -> None:
 
     preview_path = (result.get("artifacts") or {}).get("final_branding_preview")
     if preview_path and os.path.isfile(preview_path):
-        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", width="stretch")
-
+        with st.container(border=True):
+            st.image(preview_path, caption="Canonical compositor · 1080×1920", width="stretch")
 
 def render_demo_page() -> None:
-    st.markdown("<div class='section-kicker'>Engineering lab</div><h2 style='margin-top:0'>Demo Factory</h2><h4>Component-by-component factory tests</h4>", unsafe_allow_html=True)
-    st.caption(
-        "Demo mode never performs a production upload and does not need provider calls. "
-        "It exercises existing factory contracts with controlled test inputs."
+    _render_section_header(
+        "Engineering lab",
+        "Demo Factory",
+        "Controlled component checks. These never perform a production upload.",
     )
 
     sections = [
@@ -1889,36 +1893,42 @@ def render_demo_page() -> None:
         ("factory_function_coverage", "Factory function coverage"),
     ]
 
-    if st.button("▶ Run all demo checks", type="primary", width="stretch"):
+    if st.button("Run all demo checks", type="primary", width="content"):
         results = {}
         with st.spinner("Running all demo sections..."):
             for key, _label in sections:
                 results[key] = run_demo_section(key)
         st.session_state.last_demo_results = results
+        st.rerun()
 
-    columns = st.columns(2, gap="medium")
+    columns = st.columns(3, gap="medium")
     for index, (key, label) in enumerate(sections):
-        with columns[index % 2]:
-            st.markdown(f"<div class='panel'><div class='qc-title'>{label}</div></div>", unsafe_allow_html=True)
-            if st.button(f"Test {label}", key=f"demo_{key}", width="stretch"):
-                result = run_demo_section(key)
-                st.session_state.last_demo_results[key] = result
+        with columns[index % 3]:
+            with st.container(border=True):
+                st.markdown(
+                    f"<div class='story-rank'>CHECK {index + 1:02d}</div>"
+                    f"<div class='story-title'>{label}</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button("Run check", key=f"demo_{key}", width="stretch"):
+                    result = run_demo_section(key)
+                    st.session_state.last_demo_results[key] = result
+                    st.rerun()
 
-            result = (st.session_state.get("last_demo_results") or {}).get(key)
-            if result:
-                if result.get("status") == "PASS":
-                    st.success(result.get("detail", "Passed"))
-                else:
-                    st.error(result.get("detail", "Failed"))
-                artifacts = result.get("artifacts") or {}
-                for artifact_name, artifact_path in artifacts.items():
-                    if artifact_path and os.path.isfile(artifact_path):
-                        st.caption(artifact_name.replace("_", " ").title())
-                        st.image(artifact_path, width="stretch")
+                result = (st.session_state.get("last_demo_results") or {}).get(key)
+                if result:
+                    if result.get("status") == "PASS":
+                        st.success(result.get("detail", "Passed"), icon="✅")
+                    else:
+                        st.error(result.get("detail", "Failed"), icon="⛔")
+                    artifacts = result.get("artifacts") or {}
+                    for artifact_name, artifact_path in artifacts.items():
+                        if artifact_path and os.path.isfile(artifact_path):
+                            st.caption(artifact_name.replace("_", " ").title())
+                            st.image(artifact_path, width="stretch")
 
-    st.markdown("---")
+    st.divider()
     render_factory_function_coverage()
-
 
 def main() -> None:
     load_streamlit_secrets_into_runtime()
