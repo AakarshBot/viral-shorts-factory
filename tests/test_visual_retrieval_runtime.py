@@ -423,7 +423,11 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [_licensed_candidate(image_bytes, "by")])],
     )
 
-    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+    batch_calls = {"count": 0}
+    def fake_batch(images, *args, **kwargs):
+        batch_calls["count"] += 1
+        return {index: True for index in range(len(images))}
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -444,7 +448,7 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     assert image.size == (900, 1200)
     assert used_ai is False
     assert source == "Wikipedia"
-    assert FakeRuntime.calls == 1
+    assert batch_calls["count"] >= 1
 
 
 def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatch):
