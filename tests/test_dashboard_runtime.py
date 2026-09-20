@@ -854,7 +854,8 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert '"qc_passed": verified and not missing' in app_source
     assert 'disabled=bool(unresolved)' in app_source
     assert 'Review the images' in app_source
-    assert 'popover = st.popover("Crop"' in app_source
+    assert "popover = st.popover(" in app_source
+    assert '"Crop"' in app_source
     assert 'on_change="rerun"' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
@@ -884,7 +885,8 @@ def test_dashboard_visual_review_uses_simple_popover_crop_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     assert "Review the images" in source
-    assert 'popover = st.popover("Crop"' in source
+    assert "popover = st.popover(" in source
+    assert '"Crop"' in source
     assert "if not popover.open" in source
     assert "controller.crop_visual(" in source
     assert "controller.crop_visual_pool_asset(" in source

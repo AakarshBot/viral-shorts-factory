@@ -9,6 +9,7 @@ import visual_provider_boundary_runtime as provider_boundary
 from PIL import Image
 
 import visual_retrieval_runtime as retrieval
+import visual_search_intent_runtime
 
 
 def test_image_hash_deduplicates_different_file_encodings():
