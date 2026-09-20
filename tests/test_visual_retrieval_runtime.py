@@ -1188,6 +1188,7 @@ def test_commons_team_search_handles_womens_team_and_scene_modifier(monkeypatch)
     searches = [call.get("gsrsearch") for call in calls]
     assert "haswbstatement:P180=Q6019705" in searches
     assert "India women's national cricket team celebration" in searches
+    assert "India women's national cricket team" in searches
     assert "India Womens National Team celebrate" in searches
     assert len(searches) <= 4
     assert candidates

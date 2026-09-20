@@ -515,35 +515,27 @@ def _commons_team_search_variants(query: str, visual_type: str, visual_genre: st
     if not exact:
         return []
 
-    visual_l = str(visual_type or "").strip().upper()
-    genre_l = str(visual_genre or "").strip().upper()
-    team_like = (
-        visual_l in {"ORGANIZATION", "EVENT"}
-        or genre_l in {"TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH"}
-    )
     lowered = exact.casefold()
     women_team = bool(
         re.search(r"\bwomen'?s\b", lowered)
         and re.search(r"\bnational\b", lowered)
         and re.search(r"\bteam\b", lowered)
     )
-    if not team_like or not women_team:
+    if not women_team:
         return []
 
     normalized = re.sub(r"\bwomens\b", "women's", exact, flags=re.IGNORECASE)
     normalized = re.sub(r"\bwomen\s+s\b", "women's", normalized, flags=re.IGNORECASE)
-    if re.search(r"\bindia\b", normalized, flags=re.IGNORECASE) and not re.search(
-        r"\bcricket\b|\bfootball\b|\bhockey\b", normalized, flags=re.IGNORECASE
-    ):
-        core = "India women's national cricket team"
-    else:
-        core = re.sub(
-            r"\b(?:celebrate|celebrates|celebrating|celebration|pose|poses|pictured)\b",
-            "",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-        core = re.sub(r"\s+", " ", core).strip(" -,:")
+    core = re.sub(
+        r"\b(?:celebrate|celebrates|celebrating|celebration|pose|poses|pictured)\b",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    core = re.sub(r"\s+", " ", core).strip(" -,:")
+    if not core:
+        return []
+
     variants = [core]
     if re.search(r"\b(?:celebrate|celebrates|celebrating|celebration)\b", exact, flags=re.IGNORECASE):
         variants.insert(0, f"{core} celebration")
@@ -602,6 +594,20 @@ def _commons_search_queries(
                     entity_label or structured_query,
                 )
             )
+        if team_like and entity_label:
+            resolved_variants = []
+            for variant in team_variants:
+                scene_suffix = (
+                    " celebration"
+                    if re.search(
+                        r"\b(?:celebrate|celebrates|celebrating|celebration)\b",
+                        variant,
+                        flags=re.IGNORECASE,
+                    )
+                    else ""
+                )
+                resolved_variants.append(f"{entity_label}{scene_suffix}".strip())
+            team_variants = list(dict.fromkeys(resolved_variants + team_variants))[:3]
 
     for variant in team_variants:
         searches.append((variant, "normalized-team", team_core))
