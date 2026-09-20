@@ -160,7 +160,18 @@ def test_person_identity_resolver_uses_wikidata_and_caches(monkeypatch):
 
     def fake_api(url, *, params=None, headers=None):
         calls.append((url, params))
-        return {"search": [{"id": "Q123456", "label": "Test Person"}]}
+        if (params or {}).get("action") == "wbsearchentities":
+            return {"search": [{"id": "Q123456", "label": "Test Person"}]}
+        return {
+            "entities": {
+                "Q123456": {
+                    "claims": {
+                        "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}]
+                    },
+                    "labels": {"en": {"value": "Test Person"}},
+                }
+            }
+        }
 
     monkeypatch.setattr(boundary, "_api_json", fake_api)
     first = boundary.resolve_person_identity("Test Person Identity Resolver")
