@@ -106,6 +106,37 @@ _ACTION_PROVIDER_ORDER = {
     "wikipedia": 5,
 }
 
+
+def _build_action_variants(base_query: str, visual_genre: str, *, limit: int = 2) -> list[str]:
+    query = str(base_query or "").strip()
+    if not query:
+        return []
+
+    existing_terms = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", query, flags=re.UNICODE)
+    }
+    variants: list[str] = []
+    for suffix in _ACTION_SEARCH_SUFFIXES.get(
+        str(visual_genre or "").strip().upper(),
+        ("action", "match action", "celebration"),
+    ):
+        suffix_tokens = [
+            token.casefold()
+            for token in re.findall(r"[\w-]+", suffix, flags=re.UNICODE)
+        ]
+        if suffix_tokens and all(token in existing_terms for token in suffix_tokens):
+            continue
+        variant = f"{query} {suffix}".strip()
+        if variant.casefold() != query.casefold() and variant.casefold() not in {
+            item.casefold() for item in variants
+        }:
+            variants.append(variant)
+        if len(variants) >= max(1, int(limit)):
+            break
+    return variants
+
+
 _VISUAL_DESCRIPTOR_WORDS = {
     "logo", "logos", "badge", "badges", "emblem", "emblems",
     "crest", "crests", "branding", "brand", "brands", "symbol", "symbols",
@@ -1094,15 +1125,15 @@ def collect_manual_visual_pool(
             allow_recent_discovery=True,
         )
 
-        search_variants = []
-        if action_search:
-            for suffix in _ACTION_SEARCH_SUFFIXES.get(
+        search_variants = (
+            _build_action_variants(
+                exact_query,
                 visual_genre,
-                ("action", "match action", "celebration"),
-            )[:2]:
-                variant = f"{exact_query} {suffix}".strip()
-                if variant.casefold() != exact_query.casefold():
-                    search_variants.append(variant)
+                limit=2,
+            )
+            if action_search
+            else []
+        )
         search_variants.append(exact_query)
 
         target = _manual_query_target(query_index)
@@ -1388,15 +1419,11 @@ def collect_manual_visual_search(
         allow_recent_discovery=True,
     )
 
-    action_variants = []
-    if action_search:
-        for suffix in _ACTION_SEARCH_SUFFIXES.get(
-            visual_genre,
-            ("action", "match action", "celebration"),
-        ):
-            variant = f"{exact_query} {suffix}".strip()
-            if variant.casefold() != exact_query.casefold():
-                action_variants.append(variant)
+    action_variants = _build_action_variants(
+        exact_query,
+        visual_genre,
+        limit=3,
+    ) if action_search else []
     action_variants.append(exact_query)
 
     for variant_index, search_variant in enumerate(action_variants, 1):
@@ -1635,27 +1662,23 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
     query_rounds = []
     if action_search:
-        for suffix in _ACTION_SEARCH_SUFFIXES.get(
-            visual_genre,
-            ("action", "match action", "celebration"),
-        )[:2]:
-            variant = f"{base_query} {suffix}".strip()
-            if variant.casefold() != base_query.casefold():
-                query_rounds.append(variant)
+        query_rounds.extend(_build_action_variants(base_query, visual_genre, limit=2))
+        if base_query.casefold() not in {item.casefold() for item in query_rounds}:
+            query_rounds.append(base_query)
     else:
         query_rounds.append(base_query)
         refinement = _scene_refinement_query(seg, visual_anchor)
         if refinement and refinement.casefold() != base_query.casefold():
             query_rounds.append(refinement)
 
-    for round_index, query in enumerate(query_rounds[:2], 1):
+    for round_index, query in enumerate(query_rounds[:3], 1):
         raw_target = INITIAL_CANDIDATE_POOL if round_index == 1 else REFINEMENT_CANDIDATE_POOL
         source_limit = INITIAL_SOURCE_LIMIT if round_index == 1 else REFINEMENT_SOURCE_LIMIT
         query_candidates = []
         attempted_for_round = set()
 
         print(
-            f"   [Visual Search] round {round_index}/{min(2, len(query_rounds))} | "
+            f"   [Visual Search] round {round_index}/{min(3, len(query_rounds))} | "
             f"'{query}' | raw_target={raw_target} | sources={source_limit}",
             flush=True,
         )
@@ -1789,6 +1812,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         "source": item[6],
                         "query": item[7],
                         "visual_type": visual_type,
+                        "action_search": action_search,
+                        "search_variant_index": int(round_index),
                         "visual_genre": visual_genre,
                         "provenance": dict(item[5]),
                         "priority": float(item[4]),
