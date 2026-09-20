@@ -1049,7 +1049,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
                         if isinstance(crop_box, dict) and crop_box:
                             if st.button(
-                                "Apply this crop",
+                                "Apply crop",
                                 type="primary",
                                 width="stretch",
                                 key=f"apply_crop_{run_id}_{item['index']}",
