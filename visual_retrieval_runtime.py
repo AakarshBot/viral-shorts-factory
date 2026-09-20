@@ -638,6 +638,7 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "source_page_url": str(asset.get("source_page_url") or "").strip(),
                 "source_image_url": str(asset.get("source_image_url") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
+                "provenance_status": str(asset.get("provenance_status") or "commercial-verified"),
                 "used": False,
             }
         )
@@ -1620,8 +1621,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         "subject": cache_entity,
                         "bytes": item[2],
                         "hash": item[3],
-                        "source": item[6],
-                        "query": item[7],
+                        "source": item[7],
+                        "query": item[8],
                         "visual_type": visual_type,
                         "visual_genre": visual_genre,
                         "provenance": dict(item[5]),
