@@ -419,6 +419,11 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
+        if str(active_config.get("visual_pipeline") or "").strip() == "option2_storyboard":
+            from visual_storyboard_v2_runtime import build_storyboard_visuals
+            print("   [Visual Pipeline] Option 2 selected: building original editorial storyboard graphics.", flush=True)
+            return await build_storyboard_visuals(bot, script_data, language_cfg, format_mode)
+
         setattr(bot, "_visual_source_search_cache", {})
         reset_visual_qa_video_budget()
 

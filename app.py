@@ -496,6 +496,15 @@ def category_options(format_mode: str, editorial_mode: str = "Deep Dive") -> Dic
     return output
 
 
+
+def _selected_visual_pipeline() -> str:
+    """Return the user-selected visual production architecture."""
+    label = str(
+        st.session_state.get("visual_pipeline_label")
+        or "Option 1 · Current image sourcing"
+    ).strip()
+    return "option2_storyboard" if label.startswith("Option 2") else "option1_scrape"
+
 def build_config() -> Dict[str, Any]:
     language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
     language_label = st.session_state.get("language_label", "English")
@@ -514,6 +523,7 @@ def build_config() -> Dict[str, Any]:
             "language_label": language_label,
             "channel": st.session_state.get("selected_channel", _channel_options()[0]),
             "cricket_pipeline": True,
+            "visual_pipeline": _selected_visual_pipeline(),
             "cricket_category": st.session_state.get("cricket_category", "AI-assisted top story in cricket"),
             "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),
         }
@@ -528,6 +538,7 @@ def build_config() -> Dict[str, Any]:
             "language_label": language_label,
             "channel": st.session_state.get("selected_channel", _channel_options()[0]),
             "cricket_pipeline": False,
+            "visual_pipeline": _selected_visual_pipeline(),
         }
 
     format_mode = "top5" if mode == "Top Five" else "regular"
@@ -545,6 +556,7 @@ def build_config() -> Dict[str, Any]:
         "language_label": language_label,
         "channel": st.session_state.get("selected_channel", _channel_options()[0]),
         "cricket_pipeline": False,
+        "visual_pipeline": _selected_visual_pipeline(),
     }
 
 
@@ -673,6 +685,29 @@ def render_sidebar_controls() -> Dict[str, Any]:
             key="category_label",
         )
         st.session_state.category_key = options[selected_label]
+
+
+
+    visual_pipeline_labels = [
+        "Option 1 · Current image sourcing",
+        "Option 2 · AI editorial storyboard",
+    ]
+    current_visual_pipeline = str(
+        st.session_state.get("visual_pipeline_label")
+        or visual_pipeline_labels[0]
+    )
+    if current_visual_pipeline not in visual_pipeline_labels:
+        current_visual_pipeline = visual_pipeline_labels[0]
+    st.sidebar.selectbox(
+        "Visual pipeline",
+        visual_pipeline_labels,
+        index=visual_pipeline_labels.index(current_visual_pipeline),
+        key="visual_pipeline_label",
+        help=(
+            "Option 1 uses the existing image-sourcing pipeline. Option 2 builds original "
+            "editorial graphics from the verified story instead of relying on current-news photographs."
+        ),
+    )
 
     sidebar_snapshot = st.session_state.workflow_controller.snapshot()
     st.sidebar.divider()
