@@ -395,7 +395,7 @@ def safe_text(val, fallback=""):
         return fallback
     if isinstance(val, str):
         # LLM/provider formatting artifacts such as `_arrow` are not user-facing text.
-        return re.sub(r"(?<!\w)_arrow(?:_right)?(?!\w)", "", val, flags=re.IGNORECASE).strip()
+        return re.sub(r"(?<![A-Za-z0-9])_arrow(?:_(?:right|left|up|down))?(?![A-Za-z0-9])", "", val, flags=re.IGNORECASE).strip()
     # Prevent NumPy/array-like containers from leaking their repr into UI/video text.
     # Extract their actual values first; ordinary lists/dicts retain their existing behaviour.
     if hasattr(val, "tolist") and not isinstance(val, (bytes, bytearray)):
