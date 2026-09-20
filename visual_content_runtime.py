@@ -555,9 +555,14 @@ def patch_content_first_visuals(bot):
                 source_type = str(manual_selected.get("source") or "manual-pool")
                 source_credit = source_credit_for_type(source_type)
                 seg["visual_verified"] = True
+                seg["visual_type"] = str(manual_selected.get("visual_type") or "GENERAL_CONTEXT").upper()
+                seg["visual_genre"] = str(manual_selected.get("visual_genre") or "GENERAL_CONTEXT").upper()
                 seg["visual_selected_hash"] = selected_hash
                 seg["visual_query_used"] = str(manual_selected.get("query") or "").strip()
                 seg["visual_provider_query_used"] = str(manual_selected.get("query") or "").strip()
+                seg["manual_visual_query"] = "; ".join(manual_queries)
+                seg["manual_visual_query_mode"] = True
+                seg["asset_provenance"] = dict(manual_selected.get("provenance") or {})
                 seg["visual_original_path"] = selected_path
                 seg["visual_asset_bank"] = [
                     dict(item)
@@ -693,6 +698,8 @@ def patch_content_first_visuals(bot):
                 ),
                 "visual_original_path": str(seg.get("visual_original_path") or "").strip(),
                 "visual_manual_pool_mode": bool(seg.get("visual_manual_pool_mode", False)),
+                "visual_manual_pool_size": len(manual_pool_materialized) if seg.get("visual_manual_pool_mode") else 0,
+                "visual_manual_pool_query_stats": list((manual_pool_result or {}).get("query_stats") or []) if seg.get("visual_manual_pool_mode") else [],
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
