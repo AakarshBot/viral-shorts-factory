@@ -245,12 +245,13 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
         qid = str((page.get("pageprops") or {}).get("wikibase_item") or "").strip()
         if qid and re.fullmatch(r"Q\\d+", qid):
             cache_key = entity.casefold()
-            resolved = {"qid": qid, "label": title}
-            if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX and cache_key not in _PERSON_IDENTITY_CACHE:
-                oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
-                if oldest_key:
-                    _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
-            _PERSON_IDENTITY_CACHE[cache_key] = resolved
+            if cache_key not in _PERSON_IDENTITY_CACHE:
+                resolved = {"qid": qid, "label": title}
+                if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
+                    oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
+                    if oldest_key:
+                        _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
+                _PERSON_IDENTITY_CACHE[cache_key] = resolved
         # Wikipedia's search engine is the relevance filter. Do not impose a
         # brittle token-level name match here: legitimate pages commonly use
         # compacted names, punctuation, initials, aliases, transliterations or
