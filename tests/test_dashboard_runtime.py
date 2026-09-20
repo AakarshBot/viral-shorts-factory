@@ -730,7 +730,7 @@ def test_live_qc_gates_are_real_blocking_checks(tmp_path):
 def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
     source = Path("app.py").read_text(encoding="utf-8")
     assert '"missing": missing' in source
-    assert '"qc_passed": verified and not missing' in source
+    assert '"qc_passed": verified and not missing and not bool(layer.get("visual_qc_blocked", False))' in source
     assert 'if item.get("missing"):' in source
 
 def test_dashboard_primary_menu_and_generated_outputs_contract():
@@ -745,7 +745,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": verified and not missing' in app_source
     assert 'disabled=bool(qc_blocked)' in app_source
-    assert 'Visual semantic QC blocked:' in app_source
+    assert 'Visual QC blocked:' in app_source
 
 
 def test_dashboard_ai_discovery_uses_shared_broad_radar():
@@ -757,3 +757,22 @@ def test_dashboard_ai_discovery_uses_shared_broad_radar():
     assert "_infer_discovery_category(item)" in source
     assert "diversity_rerank(ranked, max_items=max_candidates)" in source
     assert "category inferred after discovery, not used as an intake gate." in source
+
+
+def test_dashboard_manual_crop_returns_shorts_frame():
+    from PIL import Image
+    from dashboard_runtime import _manual_crop_to_shorts
+
+    image = Image.new("RGB", (2000, 1000), (100, 120, 140))
+    cropped = _manual_crop_to_shorts(image, zoom=1.8, x_center=0.75, y_center=0.5)
+
+    assert cropped.size == (1080, 1920)
+
+
+def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert "Shared manual pool:" in source
+    assert "Entity verified but factory-rejected for resolution" in source
+    assert "Apply manual crop" in source
+    assert "controller.crop_visual(" in source

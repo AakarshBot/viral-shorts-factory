@@ -94,6 +94,8 @@ def _api_json(
 
 _PERSON_IDENTITY_CACHE: dict[str, dict[str, str]] = {}
 _PERSON_IDENTITY_CACHE_MAX = 128
+_WIKIDATA_ENTITY_CACHE: dict[str, dict[str, str]] = {}
+_WIKIDATA_ENTITY_CACHE_MAX = 256
 
 
 def _verify_wikidata_human(candidate_ids: list[str], labels: dict[str, str]) -> tuple[str, str, bool]:
@@ -259,6 +261,91 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
     return dict(resolved)
 
 
+def _normalize_identity_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", _clean_query(value).casefold()).strip()
+
+
+def resolve_wikidata_entity(entity: str) -> dict[str, str]:
+    """Resolve a named Wikidata item for structured Commons discovery."""
+    normalized = _clean_query(entity)
+    if not normalized:
+        return {}
+    cache_key = normalized.casefold()
+    cached = _WIKIDATA_ENTITY_CACHE.get(cache_key)
+    if cached:
+        return dict(cached)
+
+    payload = _api_json(
+        "https://www.wikidata.org/w/api.php",
+        params={
+            "action": "wbsearchentities",
+            "search": normalized,
+            "language": "en",
+            "uselang": "en",
+            "type": "item",
+            "limit": 5,
+            "format": "json",
+        },
+    )
+    results = payload.get("search", []) if payload else []
+    if not isinstance(results, list):
+        return {}
+
+    query_norm = _normalize_identity_text(normalized)
+    query_tokens = set(query_norm.split())
+    ranked: list[tuple[float, dict[str, str]]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        qid = str(item.get("id") or "").strip()
+        label = str(item.get("label") or "").strip()
+        description = str(item.get("description") or "").strip()
+        aliases = item.get("aliases") or []
+        if not isinstance(aliases, list):
+            aliases = []
+        alias_values = [
+            str(alias.get("value") or "").strip()
+            for alias in aliases
+            if isinstance(alias, dict) and str(alias.get("value") or "").strip()
+        ]
+        if not re.fullmatch(r"Q\d+", qid) or not label:
+            continue
+        label_norm = _normalize_identity_text(label)
+        label_tokens = set(label_norm.split())
+        score = 0.0
+        if label_norm == query_norm:
+            score += 100.0
+        if any(_normalize_identity_text(alias) == query_norm for alias in alias_values):
+            score += 95.0
+        if query_norm and query_norm in label_norm:
+            score += 35.0
+        score += 20.0 * len(query_tokens & label_tokens) / max(1, len(query_tokens))
+        ranked.append(
+            (
+                score,
+                {
+                    "qid": qid,
+                    "label": label,
+                    "description": description,
+                },
+            )
+        )
+
+    if not ranked:
+        return {}
+    ranked.sort(key=lambda item: (-item[0], item[1]["label"].casefold()))
+    if ranked[0][0] < 20.0:
+        return {}
+    resolved = dict(ranked[0][1])
+    if len(_WIKIDATA_ENTITY_CACHE) >= _WIKIDATA_ENTITY_CACHE_MAX:
+        oldest_key = next(iter(_WIKIDATA_ENTITY_CACHE), "")
+        if oldest_key:
+            _WIKIDATA_ENTITY_CACHE.pop(oldest_key, None)
+    _WIKIDATA_ENTITY_CACHE[cache_key] = resolved
+    _WIKIDATA_ENTITY_CACHE[resolved["label"].casefold()] = resolved
+    return dict(resolved)
+
+
 def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -370,57 +457,199 @@ def _commons_search_query(query: str) -> str:
     return q
 
 
-def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
-    """Search Commons in one API request and return several image candidates."""
-    q = _commons_search_query(query)
-    if not q:
+_COMMONS_PERSON_NOISE = {
+    "action",
+    "actions",
+    "bat",
+    "batted",
+    "batter",
+    "batting",
+    "bowler",
+    "bowling",
+    "celebrate",
+    "celebrating",
+    "celebration",
+    "cricket",
+    "game",
+    "games",
+    "inning",
+    "innings",
+    "match",
+    "matches",
+    "playing",
+    "player",
+    "players",
+    "shot",
+    "shots",
+    "sports",
+    "sport",
+    "stadium",
+    "team",
+    "teams",
+    "training",
+    "women",
+    "womens",
+    "woman",
+    "world",
+    "cup",
+}
+
+
+def _commons_person_seed(query: str) -> str:
+    """Extract a compact person-name candidate from a manual search phrase."""
+    tokens = re.findall(r"[A-Za-z][A-Za-z'’.-]*", _clean_query(query))
+    kept = [
+        token
+        for token in tokens
+        if token.casefold() not in _COMMONS_PERSON_NOISE
+        and len(token) > 1
+    ]
+    if len(kept) < 2:
+        return ""
+    return " ".join(kept[:4]).strip()
+
+
+def _commons_search_queries(
+    query: str,
+    visual_type: str = "",
+    visual_genre: str = "",
+) -> list[tuple[str, str, str]]:
+    """Return a small, topic-aware Commons search ladder without weakening QC."""
+    exact = _commons_search_query(query)
+    if not exact:
         return []
-    payload = _api_json(
-        "https://commons.wikimedia.org/w/api.php",
-        params={
-            "action": "query",
-            "generator": "search",
-            "gsrsearch": q,
-            "gsrnamespace": 6,
-            "gsrlimit": MAX_PROVIDER_CANDIDATES,
-            "prop": "imageinfo",
-            "iiprop": "url|mime|extmetadata",
-            "iiurlwidth": 1600,
-            "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl|ImageDescription",
-            "format": "json",
-        },
-    )
-    pages = payload.get("query", {}).get("pages", {}) if payload else {}
+
+    searches: list[tuple[str, str, str]] = []
+    visual_l = str(visual_type or "").strip().upper()
+    genre_l = str(visual_genre or "").strip().upper()
+    person_seed = _commons_person_seed(exact) if (
+        visual_l == "PERSON"
+        or genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION", "SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION"}
+    ) else ""
+    person_qid = ""
+    person_label = ""
+    if person_seed:
+        resolved_person = resolve_person_identity(person_seed)
+        person_qid = str((resolved_person or {}).get("qid") or "").strip()
+        person_label = str((resolved_person or {}).get("label") or "").strip()
+        if re.fullmatch(r"Q\d+", person_qid):
+            searches.append(
+                (
+                    f"haswbstatement:P180={person_qid}",
+                    "structured-depicts-person",
+                    person_label or person_seed,
+                )
+            )
+
+    structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
+    if str(visual_type or "").strip().upper() in structured_types and not person_qid:
+        resolved_entity = resolve_wikidata_entity(exact)
+        entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
+        entity_label = str((resolved_entity or {}).get("label") or "").strip()
+        if re.fullmatch(r"Q\d+", entity_qid):
+            searches.append(
+                (
+                    f"haswbstatement:P180={entity_qid}",
+                    "structured-depicts-entity",
+                    entity_label or exact,
+                )
+            )
+
+    # Always retain the literal query. Scene-specific refinements are already
+    # generated upstream, so this provider remains bounded to two searches.
+    searches.append((exact, "text", ""))
+    return searches
+
+
+def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
+    """Search Commons with topic-aware structured/text discovery and open-license filtering."""
+    visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
+    visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
+    searches = _commons_search_queries(query, visual_type, visual_genre)
+    if not searches:
+        return []
+
     urls: list[Any] = []
-    for page_position, page in enumerate(pages.values() if isinstance(pages, dict) else [], 1):
-        if not isinstance(page, dict):
-            continue
-        imageinfo = page.get("imageinfo") or []
-        if imageinfo and isinstance(imageinfo[0], dict):
+    seen_file_urls: set[str] = set()
+    for search_query, match_mode, matched_entity in searches:
+        payload = _api_json(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": search_query,
+                "gsrnamespace": 6,
+                "gsrlimit": MAX_PROVIDER_CANDIDATES,
+                "prop": "imageinfo|categories",
+                "iiprop": "url|mime|extmetadata",
+                "iiurlwidth": 1600,
+                "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl|ImageDescription",
+                "cllimit": "max",
+                "format": "json",
+            },
+        )
+        pages = payload.get("query", {}).get("pages", {}) if payload else {}
+        for page_position, page in enumerate(
+            pages.values() if isinstance(pages, dict) else [],
+            1,
+        ):
+            if not isinstance(page, dict):
+                continue
+            imageinfo = page.get("imageinfo") or []
+            if not imageinfo or not isinstance(imageinfo[0], dict):
+                continue
+
             info = imageinfo[0]
             ext = info.get("extmetadata") or {}
+
             def _meta_value(key):
                 value = ext.get(key)
                 return value.get("value", "") if isinstance(value, dict) else str(value or "")
+
             license_code = normalize_license_code(_meta_value("LicenseShortName"))
             if not is_allowed_license(license_code):
                 continue
+
             source = info.get("thumburl") or info.get("url")
-            if source:
-                urls.append((
-                    str(source),
-                    {
-                        "provider": "Commons",
-                        "url": str(info.get("descriptionurl") or ("https://commons.wikimedia.org/wiki/" + str(page.get("title", "")))),
-                        "author": _meta_value("Artist"),
-                        "license": license_code,
-                        "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
-                        "search_title": str(page.get("title", "")).removeprefix("File:").strip(),
-                        "search_description": _meta_value("ImageDescription"),
-                        "search_position": page_position,
-                    },
-                ))
-    return _bounded_downloads(urls, used_urls)
+            if not source:
+                continue
+
+            description = _meta_value("ImageDescription")
+            categories = " ".join(
+                str(item.get("title") or "").removeprefix("Category:").strip()
+                for item in (page.get("categories") or [])
+                if isinstance(item, dict)
+            )
+            page_title = str(page.get("title", "")).removeprefix("File:").strip()
+
+            metadata = {
+                "provider": "Commons",
+                "url": str(
+                    info.get("descriptionurl")
+                    or ("https://commons.wikimedia.org/wiki/" + str(page.get("title", "")))
+                ),
+                "author": _meta_value("Artist"),
+                "license": license_code,
+                "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
+                "search_title": page_title,
+                "search_description": description,
+                "search_tags": categories,
+                "search_position": page_position,
+                "commons_match_mode": match_mode,
+                "commons_matched_entity": matched_entity,
+            }
+            source_url = str(source)
+            if source_url in seen_file_urls:
+                continue
+            seen_file_urls.add(source_url)
+            urls.append((source_url, metadata))
+
+            if len(urls) >= MAX_PROVIDER_CANDIDATES * 2:
+                break
+        if len(urls) >= MAX_PROVIDER_CANDIDATES * 2:
+            break
+
+    return _bounded_downloads(urls, used_urls, limit=MAX_PROVIDER_CANDIDATES)
 
 
 def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
@@ -553,6 +782,7 @@ __all__ = [
     "MAX_PROVIDER_CANDIDATES",
     "build_raw_source_plan",
     "resolve_person_identity",
+    "resolve_wikidata_entity",
     "fetch_commons_candidates",
     "fetch_pexels_candidates",
     "fetch_unsplash_candidates",

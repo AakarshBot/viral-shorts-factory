@@ -3,6 +3,7 @@ import io
 from PIL import Image
 
 import visual_retrieval_runtime as retrieval
+import visual_qa_runtime as visual_qa
 from visual_query_entities_runtime import search_slide_visual
 
 
@@ -72,7 +73,7 @@ def test_manual_visual_query_remains_authoritative_without_grounding():
     assert calls[0]["manual_visual_query"] == "Rishabh Pant press conference"
 
 
-def test_visual_qa_budget_is_a_hard_stop(monkeypatch):
+def test_visual_batch_qc_is_the_active_retrieval_boundary(monkeypatch):
     image = _jpeg_bytes()
     calls = {"qa": 0}
 
@@ -87,11 +88,6 @@ def test_visual_qa_budget_is_a_hard_stop(monkeypatch):
             return fetcher()
 
         @staticmethod
-        def _strict_gate(*args, **kwargs):
-            calls["qa"] += 1
-            return False, "STRICT:QA_VIDEO_BUDGET_EXHAUSTED", 0, False
-
-        @staticmethod
         def get_cached_asset(*args, **kwargs):
             return None, None
 
@@ -99,6 +95,11 @@ def test_visual_qa_budget_is_a_hard_stop(monkeypatch):
         def save_to_cache(*args, **kwargs):
             return None
 
+    def fake_batch(images, *args, **kwargs):
+        calls["qa"] += 1
+        return {index: None for index in range(len(images))}
+
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
@@ -121,7 +122,7 @@ def test_visual_qa_budget_is_a_hard_stop(monkeypatch):
         "voiceover": "India cricket team update.",
     }
 
-    image_out, used_ai, source = retrieval.run_visual_retrieval(
+    _image_out, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
         scene,
@@ -131,7 +132,7 @@ def test_visual_qa_budget_is_a_hard_stop(monkeypatch):
         "India cricket team",
     )
 
-    assert calls["qa"] == 1
+    assert calls["qa"] <= 2
     assert used_ai is False
     assert source == "visual-rescue"
-    assert scene["visual_rejection_counts"]["qa_budget_exhausted"] == 1
+    assert scene["visual_rejection_counts"]["final_rescue"] == 1

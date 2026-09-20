@@ -257,6 +257,6 @@ def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkey
     queries, visual_type = runtime._build_search_variants(scene, "Noisy title")
     assert queries
     assert len(queries) <= 6
-    assert queries[0] == "Rishabh Pant press conference"
-    assert queries[-1] == "Rishabh Pant"
+    assert queries[0] == "Rishabh Pant"
+    assert queries[-1] == "Rishabh Pant press conference"
     assert visual_type == "PERSON"

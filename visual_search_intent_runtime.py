@@ -1,13 +1,13 @@
 """Canonical visual-search intent for the Shorts factory.
 
 Automatic queries are built for image retrieval rather than prose. The factual
-identity is mandatory; scene evidence is ranked for searchable visual anchors
-such as named organizations/events, concrete actions, and photographable
-contexts. Manual queries remain exact and authoritative.
+identity is mandatory; scene evidence is used only for a compact searchable
+refinement. Manual queries remain exact for provider retrieval while their
+entity anchor is separated for entity-only verification.
 
-Retrieval is intentionally bounded to one primary query plus up to four
-evidence-backed refinements and the exact factual identity fallback. Query
-construction never invents facts or fan-outs into a blind ladder.
+Retrieval is intentionally bounded to one primary query plus one compact
+evidence-backed refinement. Query construction never invents facts or fans
+out into a blind ladder.
 """
 from __future__ import annotations
 
@@ -43,6 +43,40 @@ class VisualSearchIntent:
 
 def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+_MANUAL_SCENE_WORDS = {
+    "logo", "logos", "portrait", "portraits", "headshot", "headshots",
+    "press", "conference", "interview", "speech", "speaking", "meeting",
+    "match", "game", "batting", "bowling", "training", "stadium", "arena",
+    "final", "finals", "opening", "ceremony", "celebration", "celebrating",
+    "crowd", "fans", "night", "day", "action", "action-shot", "screenshot",
+    "map", "flag", "flags", "poster", "posters", "chart", "graph", "document",
+    "documents", "office", "headquarters",
+}
+
+
+def _manual_entity_from_query(manual: str, resolved_subject: str) -> str:
+    """Keep the manual search phrase intact while separating its entity anchor."""
+    query = _clean(manual)
+    resolved = clean_text(resolved_subject or "")
+    if resolved:
+        query_tokens = set(tokens(query))
+        resolved_tokens = set(tokens(resolved))
+        overlap = query_tokens & resolved_tokens
+        if overlap and (
+            len(resolved_tokens) == 1
+            or len(overlap) >= 2
+            or len(overlap) >= len(resolved_tokens)
+        ):
+            return resolved
+
+    words = [
+        word
+        for word in re.findall(r"[\w-]+", query, flags=re.UNICODE)
+        if word.casefold() not in _MANUAL_SCENE_WORDS
+    ]
+    return " ".join(words[:4]).strip() or query
 
 
 # These are retrieval-quality filters, not domain rules. They remove words that
@@ -290,7 +324,8 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
 
     if manual:
         scene_resolution = resolve_subject(base, video_title)
-        subject = manual
+        resolved_subject = scene_resolution.get("subject") or scene_resolution.get("factual_entity") or ""
+        subject = _manual_entity_from_query(manual, resolved_subject)
         visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
 
         # Manual queries are authoritative for retrieval, but stale generated
@@ -323,29 +358,21 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
                 queries.append(portrait_query)
             query = queries[0] if queries else ""
         else:
+            # Search the factual subject first. Only add one compact scene
+            # refinement later when the first entity search does not produce
+            # enough verified images. This keeps the query path quick and
+            # avoids burning provider calls on long narrative phrases.
+            query = subject
+            queries = [subject] if subject else []
             if visual_genre in {"ORG_BRANDING", "TEAM_BRANDING"}:
                 anchor = _genre_hint_anchor(visual_genre, scene_terms)
             else:
                 anchor = _primary_visual_anchor(scene_terms)
 
-            query = _compose_query(subject, anchor)
-            queries = []
-
-            # Build a bounded, evidence-backed fallback ladder. Each fallback is
-            # derived from a real visual anchor in the scene, then the exact
-            # factual identity is retained as the final identity-only fallback.
-            # This allows rejected/failed searches to keep trying without inventing
-            # unrelated search terms or creating an unbounded query fan-out.
-            for candidate_anchor in ([anchor] + scene_terms):
-                candidate = _compose_query(subject, candidate_anchor)
-                if candidate and candidate.casefold() not in {item.casefold() for item in queries}:
-                    queries.append(candidate)
-                if len(queries) >= 5:
-                    break
-            if subject and subject.casefold() not in {item.casefold() for item in queries}:
-                queries.append(subject)
-            queries = queries[:6]
-            query = queries[0] if queries else ""
+            refined = _compose_query(subject, anchor)
+            if refined and refined.casefold() not in {item.casefold() for item in queries}:
+                queries.append(refined)
+            queries = queries[:2]
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))

@@ -46,9 +46,14 @@ def normalize_license_code(value: Any) -> str:
     text = re.sub(r"\s+", "-", str(value or "").strip().casefold())
     text = re.sub(r"[^a-z0-9-]+", "", text)
     text = re.sub(r"-+", "-", text).strip("-")
+    text = re.sub(r"-universal$", "", text)
     if text.startswith("cc-"):
         text = text[3:]
     text = re.sub(r"-[0-9]+(?:-[0-9]+)?$", "", text)
+    if text in {"cc0", "zero", "cczero"} or text.startswith(
+        ("cc0-", "zero-", "cczero-", "public-domain-dedication-", "public-domain-")
+    ):
+        return "cc0"
     if text in {"godl", "government-open-data-license-india"}:
         return "godl-india"
     return text

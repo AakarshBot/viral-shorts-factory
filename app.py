@@ -394,7 +394,7 @@ def render_sidebar_controls() -> Dict[str, Any]:
 
     if st.sidebar.button(
         "Reset current run",
-        use_container_width=True,
+        width="stretch",
         disabled=bool(sidebar_snapshot.get("thread_alive")),
     ):
         reset_run()
@@ -538,7 +538,7 @@ def render_script_visual_query_review(
         submitted = st.form_submit_button(
             "✅ Save slide queries & continue",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     if submitted:
@@ -569,6 +569,29 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
         path = str(layer.get("image") or "").strip()
         missing = not path or not os.path.isfile(path)
         verified = bool(layer.get("visual_verified", False))
+        bank = []
+        for bank_item in layer.get("visual_asset_bank") or []:
+            if not isinstance(bank_item, dict):
+                continue
+            bank_path = str(bank_item.get("path") or "").strip()
+            if bank_path and os.path.isfile(bank_path):
+                bank.append(dict(bank_item))
+        factory_rejected = [
+            dict(item)
+            for item in bank
+            if str(item.get("status") or "").strip() == "factory-rejected-resolution"
+            or str(item.get("scene_status") or "").strip() == "resolution-rejected"
+        ]
+        scene_rejected = [
+            dict(item)
+            for item in bank
+            if str(item.get("scene_status") or "").strip() == "scene-rejected"
+        ]
+        unused_verified = [
+            dict(item)
+            for item in bank
+            if str(item.get("scene_status") or "").strip() in {"", "good-unused"}
+        ]
         items.append(
             {
                 "index": index,
@@ -577,21 +600,39 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "source": str(layer.get("source_type") or "visual"),
                 "visual_type": str(layer.get("visual_type") or "visual"),
                 "verified": verified,
-                "qc_passed": verified and not missing,
+                "qc_passed": verified and not missing and not bool(layer.get("visual_qc_blocked", False)),
                 "qc_reason": (
                     "Rendered image file is missing from the dashboard host."
                     if missing
                     else str(
                         layer.get("visual_qc_block_reason")
                         or layer.get("visual_rescue_reason")
-                        or "Visual has no verified semantic QC verdict."
+                        or "Visual has no verified entity QC verdict."
                     ).strip()
                 ),
-                "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
+                "qc_attempts": int(
+                    layer.get("visual_verification_attempts")
+                    or sum(
+                        int(stat.get("qa_requests") or 0)
+                        for stat in (layer.get("visual_manual_pool_query_stats") or [])
+                        if isinstance(stat, dict)
+                    )
+                ),
                 "rejection_counts": dict(layer.get("visual_rejection_counts") or {}),
                 "manual_query": str(layer.get("manual_visual_query") or "").strip(),
                 "query_used": str(layer.get("visual_query_used") or "").strip(),
                 "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
+                "crop_zoom": float(layer.get("visual_crop_zoom") or 1.0),
+                "crop_x": float(layer.get("visual_crop_x") if layer.get("visual_crop_x") is not None else 0.5),
+                "crop_y": float(layer.get("visual_crop_y") if layer.get("visual_crop_y") is not None else 0.5),
+                "original_path": str(layer.get("visual_original_path") or "").strip(),
+                "manual_pool_mode": bool(layer.get("visual_manual_pool_mode", False)),
+                "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
+                "manual_pool_query_stats": list(layer.get("visual_manual_pool_query_stats") or []),
+                "factory_rejected": factory_rejected,
+                "scene_rejected": scene_rejected,
+                "bank": unused_verified,
+                "all_bank": bank,
             }
         )
     return items
@@ -605,74 +646,259 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     run_id = str(snapshot.get("run_id") or "active")
     history = snapshot.get("visual_replacement_history") or {}
 
-    st.markdown("<div class='section-kicker'>Approval gate</div><h2 style='margin-top:0'>Visual review</h2>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-kicker'>Approval gate</div>"
+        "<h2 style='margin-top:0'>Visual review</h2>",
+        unsafe_allow_html=True,
+    )
     st.caption(
-        f"{len(items)} visuals are ready. Approve the set when it is correct. "
-        "If one image is wrong, reject only that visual and give it a new search term."
+        f"{len(items)} visuals are ready. Entity verification is completed before scene selection. "
+        "The current image is the scene-selected candidate; other entity-verified images remain available for manual swaps."
     )
 
     columns = st.columns(3, gap="medium")
     for offset, item in enumerate(items):
         with columns[offset % 3]:
+            st.markdown(f"### Visual {item['index']}")
+            st.markdown("**Chosen for this slide**")
             if item.get("missing"):
-                st.error(
-                    "No rendered image file is available for this slide.",
-                    icon="⛔",
-                )
+                st.error("No rendered image file is available for this slide.", icon="⛔")
             else:
-                st.image(item["path"], use_container_width=True)
-            status = "QC PASS" if item["qc_passed"] else "QC BLOCKED"
-            replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
-            replacement_count = len(replacement_history)
-            query = item["manual_query"] or item["query_used"] or "automatic query"
+                st.image(item["path"], width=320)
+
+            status = "ENTITY QC PASS" if item["qc_passed"] else "ENTITY QC BLOCKED"
             st.markdown(
-                f"**Visual {item['index']}** · {item['visual_type']}  \\n"
                 f"<span class='small-muted'>{item['source']} · {status}</span>",
                 unsafe_allow_html=True,
             )
             if item["qc_passed"]:
                 attempts = item.get("qc_attempts", 0)
                 st.success(
-                    f"Visual semantic QC passed{f' after {attempts} QA check(s)' if attempts else ''}.",
+                    f"Entity verification passed{f' after {attempts} batched QA request(s)' if attempts else ''}.",
                     icon="✅",
                 )
             else:
-                reason = item.get("qc_reason") or "Visual has no verified semantic QC verdict."
-                st.error(f"Visual semantic QC blocked: {reason}", icon="⛔")
-            st.caption(f"Search: {query}")
-            rejection_counts = item.get("rejection_counts") or {}
-            if rejection_counts and not item["qc_passed"]:
-                summary = ", ".join(f"{key.replace('_', ' ')}={value}" for key, value in list(rejection_counts.items())[:4])
-                st.caption(f"Automatic QC: {summary}")
+                reason = item.get("qc_reason") or "Visual has no verified entity QC verdict."
+                st.error(f"Visual QC blocked: {reason}", icon="⛔")
+
+            query = item["manual_query"] or item["query_used"] or "automatic entity search"
+            st.caption(f"Retrieval: {query}")
+            if item.get("manual_pool_mode"):
+                st.caption(f"Shared manual pool: {item.get('manual_pool_size', 0)} entity-verified images.")
+
+            bank = item.get("bank") or []
+            if bank:
+                st.markdown(f"**Not chosen but all good · {len(bank)}**")
+                bank_cols = st.columns(2, gap="small")
+                for bank_index, bank_item in enumerate(bank[:19], 1):
+                    with bank_cols[(bank_index - 1) % 2]:
+                        bank_path = str(bank_item.get("path") or "").strip()
+                        if bank_path and os.path.isfile(bank_path):
+                            st.image(bank_path, width=190)
+                        source = str(bank_item.get("source") or "verified").strip()
+                        bank_query = str(bank_item.get("query") or "").strip()
+                        st.caption(
+                            f"{source}" + (f" · {bank_query}" if bank_query else "")
+                        )
+                        if st.button(
+                            "Use this image",
+                            width="stretch",
+                            key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
+                        ):
+                            live_bank = item.get("all_bank") or []
+                            live_bank_index = next(
+                                (
+                                    pos
+                                    for pos, entry in enumerate(live_bank, 1)
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("path") or "") == bank_path
+                                ),
+                                None,
+                            )
+                            if live_bank_index is None:
+                                st.error("That bank image is no longer available.")
+                                continue
+                            ok, message = controller.replace_visual_from_bank(
+                                item["index"],
+                                live_bank_index,
+                            )
+                            if ok:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+            else:
+                st.caption("No additional pool images were both scene-compatible and above the normal resolution threshold.")
+
+            scene_rejected = item.get("scene_rejected") or []
+            if scene_rejected:
+                st.markdown(f"**Rejected by scene context · retained for replacement · {len(scene_rejected)}**")
+                reject_cols = st.columns(2, gap="small")
+                for rejected_index, rejected_item in enumerate(scene_rejected[:19], 1):
+                    with reject_cols[(rejected_index - 1) % 2]:
+                        rejected_path = str(rejected_item.get("path") or "").strip()
+                        if rejected_path and os.path.isfile(rejected_path):
+                            st.image(rejected_path, width=190)
+                        rejected_query = str(rejected_item.get("query") or "").strip()
+                        rejected_score = float(rejected_item.get("scene_score") or 0.0)
+                        st.caption(
+                            f"Scene mismatch · score {rejected_score:.1f}"
+                            + (f" · {rejected_query}" if rejected_query else "")
+                        )
+                        if st.button(
+                            "Use this image",
+                            width="stretch",
+                            key=f"use_scene_rejected_{run_id}_{item['index']}_{rejected_index}",
+                        ):
+                            live_bank = item.get("all_bank") or []
+                            bank_position = next(
+                                (
+                                    pos
+                                    for pos, entry in enumerate(live_bank, 1)
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("path") or "") == rejected_path
+                                ),
+                                None,
+                            )
+                            if bank_position is not None:
+                                ok, message = controller.replace_visual_from_bank(
+                                    item["index"],
+                                    bank_position,
+                                )
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("That scene-review image is no longer available.")
+
+            rejected = item.get("factory_rejected") or []
+            if rejected:
+                st.markdown(f"**Rejected by resolution · retained for manual QC · {len(rejected)}**")
+                st.caption("Entity verified but factory-rejected for resolution; retained for manual QC.")
+                reject_cols = st.columns(2, gap="small")
+                for rejected_index, rejected_item in enumerate(rejected[:19], 1):
+                    with reject_cols[(rejected_index - 1) % 2]:
+                        rejected_path = str(rejected_item.get("path") or "").strip()
+                        if rejected_path and os.path.isfile(rejected_path):
+                            st.image(rejected_path, width=190)
+                        rejected_query = str(rejected_item.get("query") or "").strip()
+                        st.caption(
+                            "Low resolution — manual QC"
+                            + (f" · {rejected_query}" if rejected_query else "")
+                        )
+                        if st.button(
+                            "Use this image anyway",
+                            width="stretch",
+                            key=f"use_resolution_rejected_{run_id}_{item['index']}_{rejected_index}",
+                        ):
+                            packages = snapshot.get("visual_packages") or []
+                            package = packages[item["index"] - 1] if item["index"] - 1 < len(packages) else None
+                            layer = package[0] if isinstance(package, list) and package else package
+                            live_bank = layer.get("visual_asset_bank") if isinstance(layer, dict) else []
+                            bank_position = next(
+                                (
+                                    pos
+                                    for pos, entry in enumerate(live_bank or [], 1)
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("path") or "") == rejected_path
+                                ),
+                                None,
+                            )
+                            if bank_position is not None:
+                                ok, message = controller.replace_visual_from_bank(
+                                    item["index"],
+                                    bank_position,
+                                )
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("That resolution-review image is no longer available.")
+
+            with st.expander("Manual crop", expanded=False):
+                st.caption(
+                    "Crop from the preserved original source. This does not make another provider or AI call."
+                )
+                original_path = str(item.get("original_path") or "").strip()
+                if original_path and os.path.isfile(original_path):
+                    st.image(
+                        original_path,
+                        caption="Original source used for the crop",
+                        width=320,
+                    )
+                crop_cols = st.columns(3, gap="small")
+                with crop_cols[0]:
+                    crop_zoom = st.slider(
+                        "Zoom",
+                        min_value=1.0,
+                        max_value=4.0,
+                        value=float(item.get("crop_zoom") or 1.0),
+                        step=0.1,
+                        key=f"crop_zoom_{run_id}_{item['index']}",
+                    )
+                with crop_cols[1]:
+                    crop_x = st.slider(
+                        "Horizontal",
+                        min_value=0,
+                        max_value=100,
+                        value=int(float(item.get("crop_x") or 0.5) * 100),
+                        step=1,
+                        key=f"crop_x_{run_id}_{item['index']}",
+                    )
+                with crop_cols[2]:
+                    crop_y = st.slider(
+                        "Vertical",
+                        min_value=0,
+                        max_value=100,
+                        value=int(float(item.get("crop_y") or 0.5) * 100),
+                        step=1,
+                        key=f"crop_y_{run_id}_{item['index']}",
+                    )
+                if st.button(
+                    "Apply manual crop",
+                    type="secondary",
+                    width="stretch",
+                    key=f"apply_crop_{run_id}_{item['index']}",
+                ):
+                    ok, message = controller.crop_visual(
+                        item["index"],
+                        zoom=float(crop_zoom),
+                        x_center=float(crop_x) / 100.0,
+                        y_center=float(crop_y) / 100.0,
+                    )
+                    if ok:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+
+            replacement_count = len(
+                history.get(str(item["index"]))
+                or history.get(item["index"])
+                or []
+            )
             if replacement_count:
-                st.caption(f"Replacement attempt: {replacement_count}")
+                st.caption(f"Replacement changes: {replacement_count}")
 
-            replace_key = f"replace_visual_{run_id}_{item['index']}"
-            if st.button(
-                "⛔ Reject & replace this visual",
-                use_container_width=True,
-                key=replace_key,
-            ):
-                st.session_state[f"{replace_key}_active"] = True
-                st.rerun()
-
-            if st.session_state.get(f"{replace_key}_active", False):
-                query_key = f"{replace_key}_query"
+            with st.expander("Need another image? Search", expanded=False):
+                query_key = f"replace_visual_{run_id}_{item['index']}_query"
                 replacement_query = st.text_input(
                     "New search term",
                     placeholder="e.g. Rishabh Pant press conference",
                     key=query_key,
                 )
                 if st.button(
-                    "🔎 Search replacement",
+                    "Search another visual",
                     type="secondary",
-                    use_container_width=True,
-                    key=f"{replace_key}_search",
+                    width="stretch",
+                    key=f"replace_visual_{run_id}_{item['index']}_search",
                 ):
                     ok, message = controller.replace_visual(item["index"], replacement_query)
                     if ok:
-                        st.session_state[f"{replace_key}_active"] = False
-                        st.session_state.pop(query_key, None)
                         st.success(message)
                         st.rerun()
                     else:
@@ -685,7 +911,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if st.button(
             "✅ Approve visuals & continue",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="approve_visuals",
             disabled=bool(qc_blocked),
         ):
@@ -693,18 +919,17 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             st.rerun()
         if qc_blocked:
             st.caption(
-                f"Approval is locked until {len(qc_blocked)} visual(s) pass semantic QC. "
-                "Use Reject & replace on the blocked visual(s)."
+                f"Approval is locked until {len(qc_blocked)} visual(s) pass entity QC. "
+                "Use a verified bank image or the optional search fallback on the affected slide."
             )
     with reject_col:
         if st.button(
             "⛔ Reject visuals & stop production",
-            use_container_width=True,
+            width="stretch",
             key="reject_visuals",
         ):
             controller.reject_visuals()
             st.rerun()
-
 
 def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
     events = snapshot.get("activity_events") or []
@@ -738,7 +963,7 @@ def render_research_summary(snapshot: Dict[str, Any]) -> None:
     if source:
         st.markdown(f"**Source:** {source}")
     if url.startswith(("http://", "https://")):
-        st.link_button("Open source article", url, use_container_width=True)
+        st.link_button("Open source article", url, width="stretch")
 
 
 def render_audio_preview(snapshot: Dict[str, Any]) -> None:
@@ -855,7 +1080,7 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
                             icon="⛔",
                         )
                     else:
-                        st.image(item["path"], use_container_width=True)
+                        st.image(item["path"], width="stretch")
                     st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
     if video_path and os.path.isfile(video_path):
         with st.expander("Final rendered video", expanded=True):
@@ -961,7 +1186,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             if st.button(
                 "✅ Approve title, description & comment",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="approve_metadata",
             ):
                 try:
@@ -981,7 +1206,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         return
 
     st.success("Metadata approved. You can now choose how the Short is published.", icon="✅")
-    if st.button("✏️ Edit metadata", use_container_width=True, key="edit_metadata"):
+    if st.button("✏️ Edit metadata", width="stretch", key="edit_metadata"):
         st.session_state["metadata_approved"] = False
         st.rerun()
 
@@ -1003,7 +1228,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         if st.button(
             "🌐 Upload Publicly",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="upload_public",
             disabled=not qc_ready,
         ):
@@ -1016,7 +1241,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with private_col:
         if st.button(
             "🔒 Upload Privately",
-            use_container_width=True,
+            width="stretch",
             key="upload_private",
             disabled=not qc_ready,
         ):
@@ -1038,7 +1263,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
         confirm_col, cancel_col = st.columns(2)
         with confirm_col:
-            if st.button("✅ Yes, upload publicly", type="primary", use_container_width=True, key="confirm_upload_public"):
+            if st.button("✅ Yes, upload publicly", type="primary", width="stretch", key="confirm_upload_public"):
                 if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                     st.error("Upload blocked: one or more live QC gates are not passing.")
                 else:
@@ -1052,7 +1277,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                         "public",
                     )
         with cancel_col:
-            if st.button("← Cancel", use_container_width=True, key="cancel_upload_public"):
+            if st.button("← Cancel", width="stretch", key="cancel_upload_public"):
                 st.session_state["confirm_public_upload"] = False
                 st.rerun()
 
@@ -1142,7 +1367,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     )
 
     if not st.session_state.candidates:
-        if st.button("🚀 Find today's ranked topics", type="primary", use_container_width=True):
+        if st.button("🚀 Find today's ranked topics", type="primary", width="stretch"):
             controller.reset()
             try:
                 controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
@@ -1210,7 +1435,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             if st.button(
                 "🚀 Start production",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="start_selected_topic",
             ):
                 config = dict(st.session_state.web_config)
@@ -1228,7 +1453,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         with cancel_col:
             if st.button(
                 "← Choose another headline",
-                use_container_width=True,
+                width="stretch",
                 key="cancel_selected_topic",
             ):
                 st.session_state.pending_candidate = None
@@ -1283,7 +1508,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 if st.button(
                     "Use headline →",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"use_candidate_{start_index + offset}",
                 ):
                     st.session_state.pending_candidate = dict(candidate)
@@ -1295,7 +1520,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         if st.button(
             "← Previous",
             disabled=page <= 0,
-            use_container_width=True,
+            width="stretch",
             key="candidate_previous",
         ):
             st.session_state.candidate_page = page - 1
@@ -1310,7 +1535,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         if st.button(
             "Next →",
             disabled=page >= page_count - 1,
-            use_container_width=True,
+            width="stretch",
             key="candidate_next",
         ):
             st.session_state.candidate_page = page + 1
@@ -1341,7 +1566,7 @@ def render_channel_statistics() -> None:
     ctr_col, live_col = st.columns(2)
     ctr_col.metric("Average title CTR", f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—")
     with live_col:
-        if st.button("↻ Refresh live YouTube totals", use_container_width=True, key="refresh_live_channel_stats"):
+        if st.button("↻ Refresh live YouTube totals", width="stretch", key="refresh_live_channel_stats"):
             st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
 
     live = st.session_state.get("live_channel_stats") or {}
@@ -1362,15 +1587,15 @@ def render_channel_statistics() -> None:
 
     st.markdown("### By format")
     if stats["by_format"]:
-        st.dataframe(stats["by_format"], use_container_width=True, hide_index=True)
+        st.dataframe(stats["by_format"], width="stretch", hide_index=True)
 
     st.markdown("### By language")
     if stats["by_language"]:
-        st.dataframe(stats["by_language"], use_container_width=True, hide_index=True)
+        st.dataframe(stats["by_language"], width="stretch", hide_index=True)
 
     st.markdown("### Recent factory history")
     if stats["recent"]:
-        st.dataframe(stats["recent"], use_container_width=True, hide_index=True)
+        st.dataframe(stats["recent"], width="stretch", hide_index=True)
     else:
         st.info("No recorded factory runs yet.")
 
@@ -1379,7 +1604,7 @@ def render_offline_page() -> None:
     st.markdown("<div class='section-kicker'>Engineering</div><h2 style='margin-top:0'>Offline diagnostics</h2>", unsafe_allow_html=True)
     st.caption("These checks are safe to run while coding. They make zero provider/API calls.")
 
-    if st.button("🧪 Run offline diagnostics", type="primary", use_container_width=True):
+    if st.button("🧪 Run offline diagnostics", type="primary", width="stretch"):
         with st.spinner("Running offline factory checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
             st.session_state.show_offline_diagnostics = True
@@ -1444,7 +1669,7 @@ def render_final_branding_preview() -> None:
         "It is a synthetic 1080×1920 frame, so it never renders or modifies a production video."
     )
 
-    if st.button("▶ Render final branding preview", type="primary", use_container_width=True):
+    if st.button("▶ Render final branding preview", type="primary", width="stretch"):
         with st.spinner("Rendering the canonical branding overlay..."):
             result = run_demo_section("scene_branding")
         st.session_state.last_demo_results["scene_branding"] = result
@@ -1461,7 +1686,7 @@ def render_final_branding_preview() -> None:
 
     preview_path = (result.get("artifacts") or {}).get("final_branding_preview")
     if preview_path and os.path.isfile(preview_path):
-        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", use_container_width=True)
+        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", width="stretch")
 
 
 def render_demo_page() -> None:
@@ -1486,7 +1711,7 @@ def render_demo_page() -> None:
         ("factory_function_coverage", "Factory function coverage"),
     ]
 
-    if st.button("▶ Run all demo checks", type="primary", use_container_width=True):
+    if st.button("▶ Run all demo checks", type="primary", width="stretch"):
         results = {}
         with st.spinner("Running all demo sections..."):
             for key, _label in sections:
@@ -1497,7 +1722,7 @@ def render_demo_page() -> None:
     for index, (key, label) in enumerate(sections):
         with columns[index % 2]:
             st.markdown(f"<div class='panel'><div class='qc-title'>{label}</div></div>", unsafe_allow_html=True)
-            if st.button(f"Test {label}", key=f"demo_{key}", use_container_width=True):
+            if st.button(f"Test {label}", key=f"demo_{key}", width="stretch"):
                 result = run_demo_section(key)
                 st.session_state.last_demo_results[key] = result
 
@@ -1511,7 +1736,7 @@ def render_demo_page() -> None:
                 for artifact_name, artifact_path in artifacts.items():
                     if artifact_path and os.path.isfile(artifact_path):
                         st.caption(artifact_name.replace("_", " ").title())
-                        st.image(artifact_path, use_container_width=True)
+                        st.image(artifact_path, width="stretch")
 
     st.markdown("---")
     render_factory_function_coverage()

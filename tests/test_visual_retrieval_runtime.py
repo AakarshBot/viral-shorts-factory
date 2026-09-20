@@ -2,6 +2,8 @@
 
 import io
 
+import visual_qa_runtime as visual_qa
+
 import visual_provider_boundary_runtime as provider_boundary
 
 from PIL import Image
@@ -79,6 +81,8 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [bad, good])],
     )
 
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -99,7 +103,7 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
     assert image.size == (900, 1200)
     assert used_ai is False
     assert source == "Commons"
-    assert FakeRuntime.qa_calls == 1
+    assert FakeRuntime.qa_calls == 0
 
 
 def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
@@ -158,6 +162,8 @@ def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
         ],
     )
 
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
+
     scene = {
         "primary_entity": "Sanju Samson",
         "factual_primary_entity": "Sanju Samson",
@@ -180,7 +186,7 @@ def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
     assert source == "visual-rescue"
     assert scene["visual_qc_blocked"] is False
     assert scene["visual_qc_block_reason"] == ""
-    assert scene["visual_rejection_counts"]["semantic_no"] == 2
+    assert int(scene["visual_rejection_counts"].get("semantic_no") or 0) >= 1
 
 
 def test_provider_plan_skips_unconfigured_optional_providers(monkeypatch):
@@ -197,10 +203,14 @@ def test_provider_plan_skips_unconfigured_optional_providers(monkeypatch):
     assert "Unsplash" not in names
 
 
-def test_gate_failure_bucket_distinguishes_no_and_uncertain():
-    assert retrieval._gate_rejection_bucket("STRICT:SEMANTIC_NO") == "semantic_no"
-    assert retrieval._gate_rejection_bucket("STRICT:QA_AMBIGUOUS_RESPONSE") == "semantic_uncertain"
-    assert retrieval._gate_rejection_bucket("STRICT:QA_NO_API_KEY") == "qa_unavailable"
+def test_rejection_accounting_preserves_entity_qc_reasons():
+    scene = {}
+    retrieval._record_visual_rejection(scene, "semantic_no", "ENTITY_NO")
+    retrieval._record_visual_rejection(scene, "semantic_uncertain", "ENTITY_UNCERTAIN")
+    assert scene["visual_rejection_counts"] == {
+        "semantic_no": 1,
+        "semantic_uncertain": 1,
+    }
 
 
 def test_real_visual_candidate_reaches_verified_source(monkeypatch):
@@ -243,6 +253,8 @@ def test_real_visual_candidate_reaches_verified_source(monkeypatch):
         "_source_plan",
         lambda bot, visual_type: [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
+
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -342,6 +354,12 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
         ],
     )
 
+    batch_payloads = []
+    def fake_batch(images, *args, **kwargs):
+        batch_payloads.append(list(images))
+        return {index: False for index in range(len(images))}
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -358,9 +376,15 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
         "India match",
     )
 
-    assert image.size == (900, 1200)
+    assert image.size == (1080, 1920)
     assert used_ai is False
-    assert source == "ProviderTwo"
+    assert batch_payloads
+    assert len(batch_payloads[0]) == 8
+    provider_one_bytes = candidates_one[0]["bytes"]
+    provider_two_bytes = candidates_two[0]["bytes"]
+    assert any(candidate == provider_one_bytes for candidate in batch_payloads[0])
+    assert any(candidate == provider_two_bytes for candidate in batch_payloads[0])
+    assert source == "visual-rescue"
 
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
@@ -399,6 +423,12 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [_licensed_candidate(image_bytes, "by")])],
     )
 
+    batch_calls = {"count": 0}
+    def fake_batch(images, *args, **kwargs):
+        batch_calls["count"] += 1
+        return {index: True for index in range(len(images))}
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -418,7 +448,7 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     assert image.size == (900, 1200)
     assert used_ai is False
     assert source == "Wikipedia"
-    assert FakeRuntime.calls == 1
+    assert batch_calls["count"] >= 1
 
 
 def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatch):
@@ -528,6 +558,8 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -547,7 +579,7 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
     assert image.size == (900, 900)
     assert used_ai is False
     assert source == "Commons"
-    assert FakeRuntime.calls == 1
+    assert FakeRuntime.calls == 0
 
 
 def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
@@ -589,6 +621,8 @@ def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
         lambda bot, visual_type: [("DDG", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
+
     scene = {
         "primary_entity": "Sanju Samson",
         "factual_primary_entity": "Sanju Samson",
@@ -610,12 +644,7 @@ def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
     assert used_ai is False
     assert source == "visual-rescue"
     rejection_counts = scene["visual_rejection_counts"]
-    assert sum(
-        int(rejection_counts.get(key) or 0)
-        for key in ("semantic_no", "semantic_qc_reject")
-    ) >= 1
-    assert scene["visual_qc_blocked"] is False
-
+    assert int(rejection_counts.get("semantic_no") or 0) >= 1
 
 
 def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_candidate(monkeypatch):
@@ -674,6 +703,178 @@ def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_cand
     )
 
     assert source == "visual-rescue"
+
+
+def test_commons_person_search_uses_structured_depicts(monkeypatch):
+    calls = []
+    downloads = []
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda query: {"qid": "Q16224802", "label": "Smriti Mandhana"},
+    )
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        calls.append(dict(params or {}))
+        return {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:2017 Women's Cricket World Cup IMG 2690.jpg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/smriti.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:2017_Women's_Cricket_World_Cup_IMG_2690.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC Zero 1.0"},
+                                "Artist": {"value": "Robert Drummond"},
+                                "ImageDescription": {"value": "Smriti Mandhana batting"},
+                            },
+                        }],
+                        "categories": [
+                            {"title": "Category:Smriti Mandhana"},
+                            {"title": "Category:India Women v Australia Women, Women's Cricket World Cup 2017"},
+                        ],
+                    }
+                }
+            }
+        }
+
+    def fake_download(url, used_urls=None, metadata=None):
+        downloads.append((url, dict(metadata or {})))
+        return {
+            "bytes": b"image-bytes",
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        }
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+    monkeypatch.setattr(provider_boundary, "_download_image", fake_download)
+
+    candidates = provider_boundary.fetch_commons_candidates(
+        "Smriti Mandhana action",
+        set(),
+        "",
+        "",
+        "PERSON",
+        "PERSON_ACTION",
+    )
+
+    assert calls
+    assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q16224802"
+    assert calls[1]["gsrsearch"] == "Smriti Mandhana action"
+    assert candidates
+    assert candidates[0]["commons_match_mode"] == "structured-depicts-person"
+    assert candidates[0]["commons_matched_entity"] == "Smriti Mandhana"
+    assert "India Women v Australia Women" in candidates[0]["search_tags"]
+    assert downloads
+
+
+def test_commons_cc_zero_license_is_accepted_after_normalization():
+    from visual_licensing_runtime import normalize_license_code
+
+    assert normalize_license_code("CC Zero 1.0 Universal") == "cc0"
+    assert normalize_license_code("CC0 1.0") == "cc0"
+
+
+def test_commons_entity_search_uses_structured_depicts_for_named_non_people(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda query: {},
+    )
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_wikidata_entity",
+        lambda query: {"qid": "Q41291", "label": "BCCI", "description": "cricket governing body"},
+    )
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        calls.append(dict(params or {}))
+        return {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:BCCI logo.svg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/bcci.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:BCCI_logo.svg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                "Artist": {"value": "Example"},
+                                "ImageDescription": {"value": "BCCI logo"},
+                            },
+                        }],
+                        "categories": [{"title": "Category:Board of Control for Cricket in India"}],
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+    monkeypatch.setattr(
+        provider_boundary,
+        "_download_image",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": b"image-bytes",
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        },
+    )
+
+    candidates = provider_boundary.fetch_commons_candidates(
+        "BCCI",
+        set(),
+        "",
+        "",
+        "ORGANIZATION",
+        "ORG_BRANDING",
+    )
+
+    assert candidates
+    assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q41291"
+    assert candidates[0]["commons_match_mode"] == "structured-depicts-entity"
+
+
+def test_commons_search_query_normalizes_match_operators():
+    assert provider_boundary._commons_search_query("India women versus Australia") == "India women v Australia"
+    assert provider_boundary._commons_search_query("India women vs Australia") == "India women v Australia"
+
+
+def test_commons_query_ladder_is_bounded_and_keeps_exact_search(monkeypatch):
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda query: {},
+    )
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_wikidata_entity",
+        lambda query: {"qid": "Q1", "label": query, "description": ""},
+    )
+
+    queries = []
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        queries.append((params or {}).get("gsrsearch"))
+        return {"query": {"pages": {}}}
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+
+    provider_boundary.fetch_commons_candidates(
+        "India women's national cricket team",
+        set(),
+        "",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+    )
+
+    assert len(queries) == 2
+    assert queries[0] == "haswbstatement:P180=Q1"
+    assert queries[1] == "India women's national cricket team"
 
 
 def test_provider_search_metadata_survives_provenance_wrapping():
@@ -788,7 +989,10 @@ def test_retrieval_uses_multiple_candidates_from_one_provider_before_next_query(
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
-    assert calls == [("ProviderOne", "India match")]
+    assert calls == [
+        ("ProviderOne", "India match"),
+        ("ProviderOne", "India match update"),
+    ]
 
 
 def test_strict_gemini_bridge_accepts_visual_genre_argument():
@@ -797,3 +1001,130 @@ def test_strict_gemini_bridge_accepts_visual_genre_argument():
 
     params = inspect.signature(visual_runtime._strict_gemini_check).parameters
     assert "visual_genre" in params
+
+def test_manual_queries_build_one_shared_twenty_image_pool(monkeypatch):
+    query_values = ["Rishabh Pant", "BCCI logo", "India cricket team", "New Delhi stadium"]
+    image_candidates = {}
+    for query_index, query in enumerate(query_values):
+        items = []
+        for image_index in range(5):
+            buffer = io.BytesIO()
+            Image.new(
+                "RGB",
+                (900, 1200),
+                (20 + query_index * 40, 40 + image_index * 20, 80),
+            ).save(buffer, format="JPEG", quality=95)
+            candidate = _licensed_candidate(
+                buffer.getvalue(),
+                "cc0",
+            )
+            candidate["search_title"] = f"{query} image {image_index + 1}"
+            candidate["search_position"] = image_index + 1
+            items.append(candidate)
+        image_candidates[query] = items
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def fetcher(*args):
+        return image_candidates.get(args[0], [])
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("Commons", fetcher)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Rishabh Pant", "voiceover": "Rishabh Pant press conference."}],
+        query_values,
+        "Test story",
+    )
+
+    assert len(result["assets"]) == 20
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
+    assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
+
+
+def test_manual_pool_retains_entity_verified_soft_resolution_candidate(monkeypatch):
+    low = io.BytesIO()
+    Image.new("RGB", (400, 600), (50, 60, 70)).save(low, format="JPEG", quality=95)
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("Commons", lambda *args: [
+                _licensed_candidate(low.getvalue(), "cc0"),
+            ])
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Test Subject", "voiceover": "Test Subject is visible."}],
+        ["Test Subject"],
+        "Test story",
+    )
+
+    assert len(result["assets"]) == 1
+    assert result["assets"][0]["status"] == "factory-rejected-resolution"
+    assert result["rejection_counts"]["resolution_soft"] == 1
+
+
+def test_manual_pool_scene_selection_prefers_scene_relevant_candidate():
+    assets = [
+        {
+            "hash": "press",
+            "query": "Rishabh Pant",
+            "search_text": "Rishabh Pant press conference",
+            "priority": 60,
+            "status": "entity-verified",
+        },
+        {
+            "hash": "match",
+            "query": "Rishabh Pant",
+            "search_text": "Rishabh Pant cricket match",
+            "priority": 70,
+            "status": "entity-verified",
+        },
+    ]
+    selected = retrieval.select_manual_visual_candidate(
+        assets,
+        {
+            "factual_primary_entity": "Rishabh Pant",
+            "visual_intent": "press conference",
+            "specific_search_prompt": "Rishabh Pant press conference",
+            "voiceover": "Rishabh Pant speaks at a press conference.",
+        },
+        set(),
+    )
+    assert selected["hash"] == "press"

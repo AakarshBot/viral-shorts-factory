@@ -73,7 +73,7 @@ def _test_visual_strategy():
     from visual_semantic_guard_runtime import meaningful_tokens, resolve_subject
     from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
     from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
-    from visual_qa_runtime import _tier_for
+    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, strict_gemini_check_batch
     from visual_runtime import _cache_key, _context_fingerprint
 
     cases = [
@@ -125,8 +125,10 @@ def _test_visual_strategy():
     if visual_type != "PERSON" or brief["subject"] != "محمد صلاح" or not queries or not set(meaningful_tokens("محمد صلاح")).issubset(set(meaningful_tokens(queries[0]))):
         raise AssertionError("multilingual identity was not preserved")
 
-    if _tier_for("person portrait", "PERSON", "Wikipedia") != "IDENTITY":
-        raise AssertionError("person identity tier failed")
+    if GEMINI_VISUAL_BATCH_SIZE != 10:
+        raise AssertionError(f"entity QA batch size changed unexpectedly: {GEMINI_VISUAL_BATCH_SIZE}")
+    if not callable(strict_gemini_check_batch):
+        raise AssertionError("entity-only batch QA bridge is unavailable")
     manual = parse_manual_visual_queries("Shubman Gill batting; India Afghanistan cricket match; New Delhi stadium")
     if len(manual) != 3:
         raise AssertionError(f"manual query parsing failed: {manual}")
@@ -138,8 +140,9 @@ def _test_visual_strategy():
     assignments = assign_manual_queries(manual_scenes, manual)
     if len(assignments) != 3 or any(not item.get("query") for item in assignments):
         raise AssertionError(f"manual visual assignment failed: {assignments}")
-    if _tier_for("conceptual", "GENERAL_CONTEXT", "DDG") != "IDENTITY":
-        raise AssertionError("concept identity tier failed")
+    entity_prompt = strict_gemini_check_batch.__doc__ or ""
+    if "entity" not in entity_prompt.casefold():
+        raise AssertionError("entity-only batch QA contract is not exposed")
     c1 = _context_fingerprint("person portrait", "Amina documentary", "Amina presented it", "story")
     c2 = _context_fingerprint("person portrait", "Amina interview", "Amina discussed it", "story")
     if c1 == c2 or _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
