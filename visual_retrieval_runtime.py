@@ -402,7 +402,7 @@ def _candidate_priority(
 
     action_bonus = 0.0
     if str(visual_genre or "").strip().upper() in ACTION_VISUAL_GENRES:
-        metadata_text = _candidate_search_text(data).casefold()
+        metadata_text = f"{query} {_candidate_search_text(data)}".casefold()
         cue_hits = sum(
             1
             for cue in _ACTION_METADATA_CUES
