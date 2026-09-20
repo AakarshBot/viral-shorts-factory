@@ -831,11 +831,16 @@ def test_commons_entity_search_uses_structured_depicts_for_named_non_people(monk
     assert candidates[0]["commons_match_mode"] == "structured-depicts-entity"
 
 
-def test_commons_sports_query_adds_match_context_without_dropping_exact_search(monkeypatch):
+def test_commons_query_ladder_is_bounded_and_keeps_exact_search(monkeypatch):
     monkeypatch.setattr(
         provider_boundary,
         "resolve_person_identity",
         lambda query: {},
+    )
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_wikidata_entity",
+        lambda query: {"qid": "Q1", "label": query, "description": ""},
     )
 
     queries = []
@@ -851,12 +856,13 @@ def test_commons_sports_query_adds_match_context_without_dropping_exact_search(m
         set(),
         "",
         "",
-        "EVENT",
-        "SPORTS_MATCH",
+        "ORGANIZATION",
+        "TEAM_ACTION",
     )
 
-    assert "India women's national cricket team match" in queries
-    assert "India women's national cricket team" in queries
+    assert len(queries) == 2
+    assert queries[0] == "haswbstatement:P180=Q1"
+    assert queries[1] == "India women's national cricket team"
 
 
 def test_provider_search_metadata_survives_provenance_wrapping():
