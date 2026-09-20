@@ -514,10 +514,10 @@ def _trend_traffic_score(value, rank=0):
     return max(1.0, min(3.0, 3.0 - max(0, int(rank) - 1) * 0.2))
 
 
-def _google_trends_items(geo="IN", max_items=10):
+def _google_trends_root(geo="IN"):
     geo = str(geo or "").strip().upper()
     if not geo:
-        return []
+        return None
     try:
         response = requests.get(
             "https://trends.google.com/trending/rss",
@@ -526,9 +526,16 @@ def _google_trends_items(geo="IN", max_items=10):
             timeout=8,
         )
         response.raise_for_status()
-        root = ET.fromstring(response.content)
+        return ET.fromstring(response.content)
     except Exception as exc:
         print(f"   [Discovery] Google Trends RSS unavailable for {geo}: {type(exc).__name__}", flush=True)
+        return None
+
+
+def _google_trends_items(geo="IN", max_items=10):
+    geo = str(geo or "").strip().upper()
+    root = _google_trends_root(geo)
+    if root is None:
         return []
 
     output = []
@@ -569,19 +576,8 @@ def fetch_google_trending_topics(geos=("IN",), max_terms=15):
     terms = []
     seen = set()
     for geo in geos or ("IN",):
-        geo = str(geo or "").strip().upper()
-        if not geo:
-            continue
-        try:
-            response = requests.get(
-                "https://trends.google.com/trending/rss",
-                params={"geo": geo},
-                headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
-                timeout=8,
-            )
-            response.raise_for_status()
-            root = ET.fromstring(response.content)
-        except Exception:
+        root = _google_trends_root(geo)
+        if root is None:
             continue
         for item in root.findall("./channel/item")[:max(1, int(max_terms))]:
             trend = str(item.findtext("title") or "").strip()
@@ -660,45 +656,6 @@ def _rss_items(url, genre_key, collection_source="rss", max_items=60):
         root = ET.fromstring(response.content)
         items = []
         for item in root.findall(".//item")[:max_items]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            description = (item.findtext("description") or "").strip()
-            published = (item.findtext("pubDate") or "").strip()
-            source_node = item.find("source")
-            publisher = (
-                (source_node.text or "").strip()
-                if source_node is not None and source_node.text
-                else _source_domain({"url": link}) or "RSS"
-            )
-            if title and link:
-                items.append({
-                    "title": title,
-                    "text": description,
-                    "description": description,
-                    "source": publisher,
-                    "source_name": publisher,
-                    "url": link,
-                    "publishedAt": published,
-                    "genre": genre_key,
-                    "collection_source": collection_source,
-                })
-        return items
-    except Exception:
-        return []
-
-    if not url:
-        return []
-    try:
-        response = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 ViralShortsFactory/2026"},
-            timeout=8,
-        )
-        if response.status_code != 200:
-            return []
-        root = ET.fromstring(response.content)
-        items = []
-        for item in root.findall(".//item"):
             title = (item.findtext("title") or "").strip()
             link = (item.findtext("link") or "").strip()
             description = (item.findtext("description") or "").strip()
