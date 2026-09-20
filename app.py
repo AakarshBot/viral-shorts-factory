@@ -271,9 +271,6 @@ def initialise_runtime() -> None:
         from audio_runtime import patch_audio_pipeline
         patch_audio_pipeline(ultimate_bot)
         patch_provider_adapters(ultimate_bot)
-        ultimate_bot.run_analytics_sweep = lambda _conn: print(
-            "[Learning] Automatic analytics sync disabled in newsroom workflow.", flush=True
-        )
         ultimate_bot._dashboard_runtime_initialized = True
     else:
         install_visual_qa_bridge(visual_runtime)
@@ -1680,34 +1677,34 @@ def _perform_upload(
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
     snapshot = controller.snapshot()
 
-    def _render_content(current_snapshot: Dict[str, Any]) -> None:
-        selected = current_snapshot.get("selected_story") or {}
+    def _render_content(snapshot: Dict[str, Any]) -> None:
+        selected = snapshot.get("selected_story") or {}
         if selected:
             st.markdown(
                 f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
                 unsafe_allow_html=True,
             )
 
-        render_research_summary(current_snapshot)
-        if current_snapshot.get("script_review_required"):
-            render_script_visual_query_review(controller, current_snapshot)
+        render_research_summary(snapshot)
+        if snapshot.get("script_review_required"):
+            render_script_visual_query_review(controller, snapshot)
         else:
-            render_script(current_snapshot)
-        render_audio_preview(current_snapshot)
-        render_generated_outputs(current_snapshot)
+            render_script(snapshot)
+        render_audio_preview(snapshot)
+        render_generated_outputs(snapshot)
 
-        if current_snapshot.get("visual_review_required"):
-            render_visual_review(controller, current_snapshot)
-        render_visual_details(current_snapshot)
+        if snapshot.get("visual_review_required"):
+            render_visual_review(controller, snapshot)
+        render_visual_details(snapshot)
 
-        render_activity_timeline(current_snapshot)
-        render_console(current_snapshot)
-        render_logs(current_snapshot)
+        render_activity_timeline(snapshot)
+        render_console(snapshot)
+        render_logs(snapshot)
 
-        if current_snapshot.get("stage") == "error":
-            st.error(current_snapshot.get("error") or "The factory stopped with an error.")
+        if snapshot.get("stage") == "error":
+            st.error(snapshot.get("error") or "The factory stopped with an error.")
 
-        render_upload_panel(controller, current_snapshot)
+        render_upload_panel(controller, snapshot)
 
     if live_monitor_should_poll(snapshot):
         poll_stage = str(snapshot.get("stage") or "").strip()
@@ -1973,21 +1970,29 @@ def render_channel_statistics() -> None:
     _render_section_header(
         "Analytics",
         "Channel performance",
-        "Recorded factory history and optional live YouTube totals.",
+        "Live YouTube totals plus the factory's historical vault, retention and CTR data.",
     )
+
+    if not st.session_state.get("live_channel_stats"):
+        st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
+
     try:
         stats = collect_channel_statistics(ultimate_bot.DB_PATH)
     except Exception as exc:
         st.error(f"Statistics could not be loaded: {type(exc).__name__}: {exc}")
         return
 
-    metric_cols = st.columns(4)
+    metric_cols = st.columns(5)
     metric_cols[0].metric("Recorded runs", stats["total_runs"])
     metric_cols[1].metric("Completed runs", stats["completed_runs"])
     metric_cols[2].metric("Recorded views", f"{stats['total_views']:,}")
     metric_cols[3].metric(
         "Average view %",
         f"{stats['avg_view_percentage']:.1f}%" if stats["avg_view_percentage"] is not None else "—",
+    )
+    metric_cols[4].metric(
+        "Average CTR",
+        f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—",
     )
 
     st.markdown("### Live channel")
@@ -2003,12 +2008,34 @@ def render_channel_statistics() -> None:
         )
         live_cols[2].metric("Videos", f"{live.get('video_count', 0):,}")
         live_cols[3].metric("All-time views", f"{live.get('view_count', 0):,}")
-    else:
-        st.caption("Recorded metrics are available now. Live totals are optional.")
 
-    if st.button("Refresh live YouTube totals", width="content", key="refresh_live_channel_stats"):
-        st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
-        st.rerun()
+    refresh_col, sync_col = st.columns([1, 1], gap="small")
+    with refresh_col:
+        if st.button("Refresh live YouTube totals", width="stretch", key="refresh_live_channel_stats"):
+            st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
+            st.rerun()
+    with sync_col:
+        if st.button("Refresh factory analytics", width="stretch", key="refresh_factory_analytics"):
+            try:
+                from learning_runtime import sync_factory_analytics
+                conn = sqlite3.connect(ultimate_bot.DB_PATH)
+                try:
+                    migrate_vault(conn)
+                    result = sync_factory_analytics(ultimate_bot, conn)
+                finally:
+                    conn.close()
+                st.session_state.analytics_refresh_result = result
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Factory analytics refresh failed: {type(exc).__name__}: {exc}")
+
+    refresh_result = st.session_state.get("analytics_refresh_result")
+    if isinstance(refresh_result, dict):
+        st.caption(
+            f"Factory analytics refresh: {int(refresh_result.get('updated', 0) or 0)} videos updated; "
+            f"{int(refresh_result.get('retention_ready', 0) or 0)} with retention; "
+            f"{int(refresh_result.get('analytics_errors', 0) or 0)} analytics issue(s)."
+        )
 
     for label, table in (
         ("By format", stats["by_format"]),
@@ -2020,6 +2047,33 @@ def render_channel_statistics() -> None:
                 st.dataframe(table, width="stretch", hide_index=True)
             else:
                 st.info(f"No {label.lower()} data yet.")
+
+    try:
+        from channel_intelligence_runtime import build_intelligence
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        try:
+            migrate_vault(conn)
+            intelligence = build_intelligence(conn)
+        finally:
+            conn.close()
+
+        st.markdown("### Factory learning")
+        learning_cols = st.columns(3)
+        learning_cols[0].metric("Published factory videos", intelligence["videos"])
+        learning_cols[1].metric("Videos with view data", intelligence["reported"])
+        learning_cols[2].metric("Videos with retention", intelligence["retention_ready"])
+
+        for label, table in intelligence["tables"].items():
+            if table:
+                with st.expander(f"Learning · {label}", expanded=False):
+                    st.dataframe(table[:8], width="stretch", hide_index=True)
+                    st.caption(
+                        "These historical factory patterns are already used by the editorial/ranking system. "
+                        "Small samples are directional rather than causal."
+                    )
+    except Exception as exc:
+        st.warning(f"Factory learning summaries could not be loaded: {type(exc).__name__}: {exc}")
+
 
 def render_offline_page() -> None:
     _render_section_header(
