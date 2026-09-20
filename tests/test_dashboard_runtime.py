@@ -778,7 +778,14 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
     assert "controller.crop_visual(" in source
 
 
-def test_dashboard_does_not_use_deprecated_streamlit_container_width():
-    app_path = Path(__file__).resolve().parents[1] / "app.py"
-    source = app_path.read_text(encoding="utf-8")
-    assert "use_container_width" not in source
+def test_repository_does_not_use_deprecated_streamlit_container_width():
+    repo_root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in repo_root.rglob("*.py"):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "use_container_width" in source:
+            offenders.append(str(path.relative_to(repo_root)))
+    assert offenders == []
