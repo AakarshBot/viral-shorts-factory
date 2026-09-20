@@ -626,6 +626,231 @@ def materialize_visual_bank(bot, seg: dict, scene_index: int = 0) -> list[dict]:
 
 
 
+
+
+def collect_manual_visual_pool(
+    runtime,
+    bot,
+    scenes: list[dict],
+    manual_queries: list[str],
+    video_title: str = "",
+    used_hashes: set[str] | None = None,
+) -> dict:
+    """Build one shared entity-verified pool from the user's exact manual queries.
+
+    Each query tries to contribute up to five entity-verified images. The shared
+    pool stops at twenty. Scene selection happens later and never deletes a
+    candidate from this pool.
+    """
+    from visual_qa_runtime import (
+        GEMINI_VISUAL_BATCH_SIZE,
+        start_visual_qa_scene,
+        strict_gemini_check_batch,
+    )
+
+    used_hashes = used_hashes or set()
+    assets = []
+    seen_hashes = set(used_hashes)
+    query_stats = []
+    rejected_counts = {
+        "entity_no": 0,
+        "entity_uncertain": 0,
+        "resolution_soft": 0,
+        "monetization": 0,
+        "invalid_image": 0,
+        "duplicate": 0,
+    }
+
+    for query_index, raw_query in enumerate(manual_queries or [], 1):
+        exact_query = str(raw_query or "").strip()
+        if not exact_query:
+            continue
+        if len(assets) >= MANUAL_POOL_MAX:
+            break
+
+        # Reset only the QA-per-scene counter between manual query batches.
+        # The global video budget remains shared and bounded.
+        start_visual_qa_scene()
+
+        visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
+        try:
+            source_plan = _source_plan(bot, visual_type, visual_genre)
+        except TypeError:
+            source_plan = _source_plan(bot, visual_type)
+
+        candidates = []
+        attempted_sources = set()
+        for source_index, (source, fetcher) in enumerate(source_plan):
+            if source_index >= INITIAL_SOURCE_LIMIT:
+                break
+            if not callable(fetcher) or len(candidates) >= MANUAL_QUERY_RAW_POOL:
+                break
+
+            source_name = str(source or "").strip()
+            source_key = source_name.casefold()
+            if not source_key or source_key in attempted_sources:
+                continue
+            attempted_sources.add(source_key)
+
+            # Manual retrieval is intentionally exact. Provider-specific semantic
+            # expansion is not allowed to rewrite the user's search phrase.
+            raw_data = runtime._call_fetcher_with_timeout(
+                fetcher,
+                (exact_query, set(), exact_query, video_title),
+                source_name,
+                exact_query,
+            )
+            for candidate_index, data in enumerate(_candidate_items(raw_data), 1):
+                valid, reason, normalized = _preflight_image(data)
+                if not valid:
+                    rejected_counts["invalid_image"] += 1
+                    continue
+
+                image_hash = _hash_image(bot, normalized)
+                if image_hash in seen_hashes or any(item[3] == image_hash for item in candidates):
+                    rejected_counts["duplicate"] += 1
+                    continue
+
+                record = candidate_provenance(data)
+                if not provenance_is_usable(record):
+                    # Commercial-use incompatibility is a factory-hard rejection.
+                    # It never enters the reviewer pool or consumes entity-QA budget.
+                    rejected_counts["monetization"] += 1
+                    continue
+
+                priority = _candidate_priority(
+                    source_name,
+                    normalized,
+                    visual_type,
+                    exact_query,
+                    visual_genre,
+                    data=data,
+                )
+                candidates.append(
+                    (
+                        candidate_index,
+                        data,
+                        normalized,
+                        image_hash,
+                        priority,
+                        record,
+                        source_name,
+                        reason,
+                    )
+                )
+                if len(candidates) >= MANUAL_QUERY_RAW_POOL:
+                    break
+
+        candidates.sort(
+            key=lambda item: (
+                -float(item[4]),
+                str(item[6]).casefold(),
+                int(item[0]),
+            )
+        )
+        primary_count = min(ENTITY_CHECK_PRIMARY_POOL, len(candidates))
+        groups = [candidates[:primary_count]]
+        if len(candidates) > primary_count:
+            groups.append(candidates[primary_count:])
+
+        verdicts = {}
+        qa_requests = 0
+        entity_passes = 0
+        batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
+
+        for group_index, group in enumerate(groups):
+            if not group or entity_passes >= MANUAL_QUERY_VERIFIED_TARGET:
+                break
+            for offset in range(0, len(group), batch_size):
+                batch = group[offset : offset + batch_size]
+                if not batch:
+                    continue
+                result_map = strict_gemini_check_batch(
+                    [item[2] for item in batch],
+                    exact_query,
+                    os.getenv("GEMINI_API_KEY"),
+                    tier="IDENTITY",
+                    visual_type=visual_type,
+                    visual_genre=visual_genre,
+                )
+                qa_requests += 1
+                base_offset = (0 if group_index == 0 else primary_count) + offset
+                for local_index, verdict in result_map.items():
+                    verdicts[base_offset + int(local_index)] = verdict
+                entity_passes = sum(value is True for value in verdicts.values())
+                if entity_passes >= MANUAL_QUERY_VERIFIED_TARGET:
+                    break
+            if entity_passes >= MANUAL_QUERY_VERIFIED_TARGET:
+                break
+
+        query_verified = 0
+        query_resolution_rejected = 0
+        for local_index, candidate in enumerate(candidates):
+            verdict = verdicts.get(local_index)
+            if verdict is True:
+                status = (
+                    "factory-rejected-resolution"
+                    if str(candidate[7]).startswith("resolution-soft:")
+                    else "entity-verified"
+                )
+                if status == "factory-rejected-resolution":
+                    rejected_counts["resolution_soft"] += 1
+                    query_resolution_rejected += 1
+
+                assets.append(
+                    {
+                        "subject": exact_query,
+                        "bytes": candidate[2],
+                        "hash": candidate[3],
+                        "source": candidate[6],
+                        "query": exact_query,
+                        "visual_type": visual_type,
+                        "visual_genre": visual_genre,
+                        "provenance": dict(candidate[5]),
+                        "priority": float(candidate[4]),
+                        "search_text": _candidate_search_text(candidate[1]),
+                        "status": status,
+                        "manual_query_index": query_index,
+                    }
+                )
+                seen_hashes.add(candidate[3])
+                query_verified += 1
+                if len(assets) >= MANUAL_POOL_MAX:
+                    break
+            elif verdict is False:
+                rejected_counts["entity_no"] += 1
+            elif local_index in verdicts:
+                rejected_counts["entity_uncertain"] += 1
+
+        query_stats.append(
+            {
+                "query": exact_query,
+                "verified": query_verified,
+                "resolution_rejected": query_resolution_rejected,
+                "qa_requests": qa_requests,
+                "visual_type": visual_type,
+                "visual_genre": visual_genre,
+            }
+        )
+        print(
+            f"   [Manual Visual Pool] query {query_index}/{len(manual_queries)} | "
+            f"'{exact_query}' | entity-verified={query_verified} | "
+            f"shared-pool={len(assets)}/{MANUAL_POOL_MAX} | Gemini={qa_requests}",
+            flush=True,
+        )
+
+    deduped = {}
+    for asset in sorted(assets, key=lambda item: -float(item.get("priority") or 0.0)):
+        deduped.setdefault(str(asset.get("hash") or ""), asset)
+    final_assets = list(deduped.values())[:MANUAL_POOL_MAX]
+
+    return {
+        "assets": final_assets,
+        "queries": [str(item).strip() for item in manual_queries or [] if str(item).strip()],
+        "query_stats": query_stats,
+        "rejection_counts": rejected_counts,
+    }
+
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Retrieve a useful entity image bank with a small number of batched AI checks."""
     entity = str(seg.get("primary_entity", "")).strip()
