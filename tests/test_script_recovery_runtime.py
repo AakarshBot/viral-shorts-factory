@@ -24,9 +24,15 @@ def _scene(text):
 def test_three_scene_script_can_be_repaired_without_inventing_text():
     script = {
         "script": [
-            _scene("India Men's Cricket Team faces a clothing delay before the Asian Games as officials work through the issue and the squad continues preparations."),
-            _scene("The delay concerns the team's playing clothing and has become a preparation issue ahead of the tournament, with officials working through the supply problem."),
-            _scene("The squad continues tournament preparations while organizers address the clothing issue and assess its effect on the team's readiness for the Asian Games."),
+            _scene(
+                "India Men's Cricket Team faces a clothing delay before the Asian Games, while officials work through the supply issue and the squad continues detailed preparations for the tournament."
+            ),
+            _scene(
+                "The delay concerns the team's playing clothing and has become a preparation issue ahead of the tournament, with officials reviewing the supply problem and its timing."
+            ),
+            _scene(
+                "The squad continues tournament preparations while organizers address the clothing issue, review the latest position, and assess what the delay means for overall readiness."
+            ),
 
         ]
     }
