@@ -88,6 +88,7 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
             "visual_intent": "match",
             "specific_search_prompt": "India match",
             "voiceover": "India match update.",
+            "manual_visual_query": "India match",
         },
         "news",
         set(),
@@ -101,7 +102,7 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
     assert FakeRuntime.qa_calls == 1
 
 
-def test_failed_semantic_candidate_is_kept_for_manual_review(monkeypatch):
+def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
     image_bytes = _jpeg_bytes()
 
     class FakeBot:
@@ -176,9 +177,9 @@ def test_failed_semantic_candidate_is_kept_for_manual_review(monkeypatch):
 
     assert image.size == (900, 1200)
     assert used_ai is False
-    assert source == "Wikipedia"
-    assert scene["visual_qc_blocked"] is True
-    assert "semantic_no" in scene["visual_qc_block_reason"].lower()
+    assert source == "visual-rescue"
+    assert scene["visual_qc_blocked"] is False
+    assert scene["visual_qc_block_reason"] == ""
     assert scene["visual_rejection_counts"]["semantic_no"] == 2
 
 
@@ -478,9 +479,9 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
     assert calls["qa"] >= 1
     assert image.size == (900, 1200)
     assert used_ai is False
-    assert source == "Commons"
-    assert scene["visual_qc_blocked"] is True
-    assert "semantic" in scene["visual_qc_block_reason"].lower()
+    assert source == "visual-rescue"
+    assert scene["visual_qc_blocked"] is False
+    assert scene["visual_qc_block_reason"] == ""
     assert retrieval._trusted_source_evidence(
         "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
     )[0] is False
@@ -549,7 +550,7 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
     assert FakeRuntime.calls == 1
 
 
-def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
+def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
     image_bytes = _jpeg_bytes()
 
     class FakeBot:
@@ -607,13 +608,13 @@ def test_generic_provider_semantic_no_is_hard_rejected(monkeypatch):
 
     assert image.size == (900, 1200)
     assert used_ai is False
-    assert source == "DDG"
+    assert source == "visual-rescue"
     rejection_counts = scene["visual_rejection_counts"]
     assert sum(
         int(rejection_counts.get(key) or 0)
         for key in ("semantic_no", "semantic_qc_reject")
     ) >= 1
-    assert scene["visual_qc_blocked"] is True
+    assert scene["visual_qc_blocked"] is False
 
 
 
@@ -673,6 +674,121 @@ def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_cand
     )
 
     assert source == "visual-rescue"
+
+
+def test_provider_search_metadata_survives_provenance_wrapping():
+    from visual_licensing_runtime import licensed_candidate
+
+    candidate = licensed_candidate(
+        b"image-bytes",
+        {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/test/",
+            "author": "Test",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+            "search_title": "Rishabh Pant press conference",
+            "search_tags": ["Rishabh Pant", "press conference"],
+            "search_position": 1,
+        },
+    )
+
+    assert candidate["search_title"] == "Rishabh Pant press conference"
+    assert candidate["search_tags"] == ["Rishabh Pant", "press conference"]
+    assert candidate["search_position"] == 1
+
+
+def test_candidate_metadata_outweighs_resolution_in_qa_ordering():
+    from visual_retrieval_runtime import _candidate_priority
+
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (1600, 900), (80, 90, 100)).save(image_buffer, format="JPEG", quality=95)
+    strong = _candidate_priority(
+        "Pexels",
+        image_buffer.getvalue(),
+        "PERSON",
+        "Rishabh Pant press conference",
+        "PERSON_ACTION",
+        data={
+            "search_title": "Rishabh Pant press conference",
+            "search_description": "Rishabh Pant speaks to reporters",
+            "search_position": 1,
+        },
+    )
+
+    weak_buffer = io.BytesIO()
+    Image.new("RGB", (1080, 1920), (80, 90, 100)).save(weak_buffer, format="JPEG", quality=95)
+    weak = _candidate_priority(
+        "Pexels",
+        weak_buffer.getvalue(),
+        "PERSON",
+        "Rishabh Pant press conference",
+        "PERSON_ACTION",
+        data={
+            "search_title": "generic sports stadium",
+            "search_description": "crowd at a sports venue",
+            "search_position": 2,
+        },
+    )
+
+    assert strong > weak
+
+
+def test_retrieval_uses_multiple_candidates_from_one_provider_before_next_query(monkeypatch):
+    image_bytes = _jpeg_bytes()
+    calls = []
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 3
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            calls.append((source, query))
+            return fetcher(*args)
+
+        @staticmethod
+        def _strict_gate(*args, **kwargs):
+            return False, "STRICT:SEMANTIC_NO", 0, True
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    candidates = []
+    for value in (40, 100, 160):
+        buffer = io.BytesIO()
+        Image.new("RGB", (900, 1200), (value, 70, 100)).save(buffer, format="JPEG", quality=95)
+        candidates.append(_licensed_candidate(buffer.getvalue(), "cc0"))
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [("ProviderOne", lambda *inner: candidates)],
+    )
+
+    image, used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        object(),
+        {
+            "primary_entity": "India",
+            "factual_primary_entity": "India",
+            "visual_intent": "match",
+            "specific_search_prompt": "India match",
+            "voiceover": "India match update.",
+        },
+        "news",
+        set(),
+        set(),
+        "India match",
+    )
+
+    assert image.size == (1080, 1920)
+    assert used_ai is False
+    assert source == "visual-rescue"
+    assert calls == [("ProviderOne", "India match")]
 
 
 def test_strict_gemini_bridge_accepts_visual_genre_argument():

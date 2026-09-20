@@ -16,8 +16,9 @@ import io
 import os
 from PIL import Image, ImageFilter, ImageStat
 
-MIN_SHORT_SIDE = 720
+MIN_SHORT_SIDE = 540
 PREFERRED_SHORT_SIDE = 1080
+
 MAX_SOURCE_ASPECT = 3.2
 MIN_SOURCE_ASPECT = 0.32
 MAX_CROP_LOSS = 0.72
