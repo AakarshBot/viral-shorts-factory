@@ -1552,3 +1552,214 @@ def test_manual_query_planner_has_non_network_fallback(monkeypatch):
     )
     assert result
     assert result[0]["query"]
+
+
+
+def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch):
+    image_bytes = [
+        _jpeg_bytes((900, 1200), (20 + index * 10, 60, 100))
+        for index in range(10)
+    ]
+    calls = []
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def fake_fetcher(*args):
+        page = int(args[-1])
+        calls.append(page)
+        start = (page - 1) * 5
+        return [
+            {
+                "bytes": image_bytes[index],
+                "source_image_url": f"https://cdn.pexels.com/photos/{index + 1}/image.jpg",
+                "provenance": {
+                    "provider": "Pexels",
+                    "url": f"https://www.pexels.com/photo/{index + 1}/",
+                    "author": "Tester",
+                    "license": "Pexels License",
+                    "license_url": "https://www.pexels.com/license/",
+                },
+                "search_title": "Indian cricket team",
+            }
+            for index in range(start, start + 5)
+        ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_manual_query_visual_context",
+        lambda query, scenes: ("GENERAL_CONTEXT", "SPORTS_ACTION"),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("Pexels", fake_fetcher)],
+    )
+
+    first = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Indian cricket team",
+    )
+    first_hashes = {item["hash"] for item in first["assets"]}
+    assert len(first_hashes) == 5
+    assert calls == [1]
+
+    second = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Indian cricket team",
+        used_hashes=first_hashes,
+    )
+    second_hashes = {item["hash"] for item in second["assets"]}
+    assert len(second_hashes) == 5
+    assert first_hashes.isdisjoint(second_hashes)
+    assert calls == [1, 2]
+
+
+def test_pixabay_manual_search_requests_latest_page(monkeypatch, tmp_path):
+    import image_sources_runtime as sources
+
+    monkeypatch.setenv("PIXABAY_API_KEY", "test-key")
+    monkeypatch.setattr(sources, "_cache_dir", lambda: tmp_path)
+    requested = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"hits": []}
+
+    monkeypatch.setattr(
+        sources.requests,
+        "get",
+        lambda url, **kwargs: requested.update(kwargs) or Response(),
+    )
+
+    result = sources.fetch_pixabay_candidates(
+        "Indian cricket team",
+        set(),
+        "Indian cricket team",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+        True,
+        2,
+    )
+
+    assert result == []
+    assert requested["params"]["page"] == 2
+    assert requested["params"]["order"] == "latest"
+
+
+def test_pexels_search_requests_requested_page(monkeypatch):
+    monkeypatch.setenv("PEXELS_API_KEY", "test-key")
+    requested = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"photos": []}
+
+    monkeypatch.setattr(
+        provider_boundary.requests,
+        "get",
+        lambda url, **kwargs: requested.update(kwargs) or Response(),
+    )
+
+    result = provider_boundary.fetch_pexels_candidates(
+        "cricket team",
+        set(),
+        "cricket team",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+        True,
+        3,
+    )
+
+    assert result == []
+    assert requested["params"]["page"] == 3
+
+
+def test_serpapi_recent_discovery_accepts_only_known_stock_hosts(monkeypatch, tmp_path):
+    import image_sources_runtime as sources
+
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-key")
+    monkeypatch.setattr(sources, "_cache_dir", lambda: tmp_path)
+
+    payload = {
+        "images_results": [
+            {
+                "position": 1,
+                "source": "Pexels",
+                "title": "Cricket players",
+                "link": "https://www.pexels.com/photo/cricket-players-123/",
+                "original": "https://images.pexels.com/photos/123/original.jpeg",
+                "unsafe": False,
+                "is_product": False,
+            },
+            {
+                "position": 2,
+                "source": "Unknown",
+                "title": "Other image",
+                "link": "https://example.com/photo.jpg",
+                "original": "https://example.com/photo.jpg",
+                "unsafe": False,
+                "is_product": False,
+            },
+        ]
+    }
+    requested = {}
+
+    class SearchResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    monkeypatch.setattr(
+        sources.requests,
+        "get",
+        lambda url, **kwargs: requested.update(kwargs) or SearchResponse(),
+    )
+    monkeypatch.setattr(
+        sources,
+        "_download",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": _jpeg_bytes((900, 1200), (80, 90, 100)),
+            "provenance": {
+                "provider": metadata["provider"],
+                "url": metadata["url"],
+                "author": "",
+                "license": metadata["license"],
+                "license_url": metadata["license_url"],
+            },
+        },
+    )
+
+    result = sources.fetch_serpapi_candidates(
+        "cricket players",
+        set(),
+        "cricket players",
+        "",
+        "GENERAL_CONTEXT",
+        "SPORTS_ACTION",
+        True,
+        1,
+    )
+
+    assert len(result) == 1
+    assert result[0]["provenance"]["provider"] == "Pexels"
+    assert requested["params"]["licenses"] == "fmc"
+    assert requested["params"]["start_date"].endswith("0101")
+    assert len(requested["params"]["end_date"]) == 8
