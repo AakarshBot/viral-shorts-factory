@@ -45,6 +45,7 @@ from dashboard_runtime import (
     upload_ready_for_manual_decision,
     evaluate_live_qc_gates,
     live_qc_passes,
+    live_monitor_should_poll,
 )
 
 
@@ -314,20 +315,17 @@ def _init_state() -> None:
         "candidates": [],
         "web_config": {},
         "production_started": False,
-        "final_qc": False,
         "upload_result": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
         "selected_channel": _channel_options()[0],
         "last_demo_results": {},
-        "show_offline_diagnostics": False,
         "offline_diagnostics": {},
         "pending_candidate": None,
         "visual_search_queries": "",
         "visual_query_story_key": "",
         "visual_query_suggestions": [],
         "visual_query_field_count": 0,
-        "discovery_headline_selection": None,
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
@@ -344,7 +342,6 @@ def reset_run() -> None:
         "candidates": [],
         "web_config": {},
         "production_started": False,
-        "final_qc": False,
         "upload_result": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
@@ -356,7 +353,6 @@ def reset_run() -> None:
         "visual_query_story_key": "",
         "visual_query_suggestions": [],
         "visual_query_field_count": 0,
-        "discovery_headline_selection": None,
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
     }.items():
@@ -767,6 +763,7 @@ def render_script_visual_query_review(
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not isinstance(scenes, list) or not scenes:
         st.warning("The script is not available for review yet.")
+        st.info("The factory is paused at script QC. Once the script payload is available, this review will appear here; PowerShell remains active while it waits.")
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
@@ -1681,8 +1678,7 @@ def _perform_upload(
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
-    def _fragment():
-        snapshot = controller.snapshot()
+    def _render(snapshot: Dict[str, Any]) -> None:
         render_stage_progress(snapshot)
 
         selected = snapshot.get("selected_story") or {}
@@ -1713,7 +1709,24 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
 
         render_upload_panel(controller, snapshot)
 
-    _fragment()
+    snapshot = controller.snapshot()
+    if live_monitor_should_poll(snapshot):
+        @st.fragment(run_every="2s")
+        def _polling_fragment():
+            live_snapshot = controller.snapshot()
+            if (
+                not live_snapshot.get("thread_alive")
+                or str(live_snapshot.get("stage") or "").strip() in {"script_review", "visual_approval"}
+            ):
+                st.rerun()
+                return
+            st.caption("Live status refreshes every 2 seconds while the factory is working. Auto-refresh pauses during QC.")
+            _render(live_snapshot)
+
+        _polling_fragment()
+        return
+
+    _render(snapshot)
 
 
 def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowController) -> None:
@@ -1776,10 +1789,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                     st.session_state.candidates = candidates
                     st.session_state.web_config = config
                     st.session_state.production_started = False
-                    st.session_state.final_qc = False
                     st.session_state.upload_result = ""
                     st.session_state.candidate_page = 0
-                    st.session_state.discovery_headline_selection = None
                     st.success(f"Found {len(candidates)} ranked headlines. Choose one below.")
                     st.rerun()
                 except Exception as exc:
@@ -1872,7 +1883,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
                 st.session_state.production_started = True
-                st.session_state.final_qc = False
                 st.session_state.upload_result = ""
                 controller.start_production(config, dict(pending_candidate))
                 st.rerun()
@@ -2019,7 +2029,6 @@ def render_offline_page() -> None:
     if st.button("Run offline diagnostics", type="primary", width="content"):
         with st.spinner("Running offline factory checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
-            st.session_state.show_offline_diagnostics = True
         st.rerun()
 
     report = st.session_state.get("offline_diagnostics") or {}
