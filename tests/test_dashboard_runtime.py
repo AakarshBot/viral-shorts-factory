@@ -32,7 +32,7 @@ def test_live_monitor_polling_pauses_for_user_checkpoints():
     assert live_monitor_should_poll({"thread_alive": False, "stage": "qc"}) is False
 
 
-def test_dashboard_worker_console_capture(monkeypatch):
+def test_dashboard_worker_console_capture():
     import dashboard_runtime
 
     controller = DashboardWorkflowController(_Bot())
