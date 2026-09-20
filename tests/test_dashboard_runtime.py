@@ -1184,3 +1184,21 @@ def test_final_artifact_qc_export_is_available():
     passed, detail = _artifact_qc("")
     assert passed is False
     assert "missing" in detail.lower()
+
+
+def test_dashboard_upload_choices_remain_visible_before_metadata_approval():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def render_upload_panel")
+    end = source.index("\ndef _perform_upload", start)
+    panel = source[start:end]
+    assert "private_ready = metadata_approved and qc_ready" in panel
+    assert "public_ready = private_ready and not public_blocked" in panel
+    assert 'if not metadata_approved:' in panel
+    assert 'st.info("Approve metadata above to unlock upload.")' in panel
+    assert "return" not in panel.split('if not metadata_approved:', 1)[1].split('if metadata_approved:', 1)[0]
+
+
+def test_public_release_policy_cannot_be_bypassed_by_ui():
+    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    assert 'if str(publish_mode or "").strip().lower() == "public":' in source
+    assert 'if bool(gate.get("public_blocked"))' in source
