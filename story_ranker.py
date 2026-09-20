@@ -1463,8 +1463,11 @@ def collect_high_recall_stories(
     genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
 
     configured_rss = str(custom_rss_url or genre_cfg.get("rss_url") or "").strip()
+    configured_google_query = _google_news_query_from_url(configured_rss)
     selected_rss = configured_rss
-    if _is_reddit_json_url(selected_rss):
+    if configured_google_query or _is_reddit_json_url(selected_rss):
+        # Google News search URLs become query lanes; Reddit JSON belongs to the
+        # dedicated social lane. Neither should also be fetched as generic RSS.
         selected_rss = ""
 
     google_queries = _build_discovery_google_queries(
