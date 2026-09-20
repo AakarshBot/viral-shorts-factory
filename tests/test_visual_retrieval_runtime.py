@@ -770,6 +770,95 @@ def test_commons_cc_zero_license_is_accepted_after_normalization():
     assert normalize_license_code("CC0 1.0") == "cc0"
 
 
+def test_commons_entity_search_uses_structured_depicts_for_named_non_people(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda query: {},
+    )
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_wikidata_entity",
+        lambda query: {"qid": "Q41291", "label": "BCCI", "description": "cricket governing body"},
+    )
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        calls.append(dict(params or {}))
+        return {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:BCCI logo.svg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/bcci.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:BCCI_logo.svg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                "Artist": {"value": "Example"},
+                                "ImageDescription": {"value": "BCCI logo"},
+                            },
+                        }],
+                        "categories": [{"title": "Category:Board of Control for Cricket in India"}],
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+    monkeypatch.setattr(
+        provider_boundary,
+        "_download_image",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": b"image-bytes",
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        },
+    )
+
+    candidates = provider_boundary.fetch_commons_candidates(
+        "BCCI",
+        set(),
+        "",
+        "",
+        "ORGANIZATION",
+        "ORG_BRANDING",
+    )
+
+    assert candidates
+    assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q41291"
+    assert candidates[0]["commons_match_mode"] == "structured-depicts-entity"
+
+
+def test_commons_sports_query_adds_match_context_without_dropping_exact_search(monkeypatch):
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda query: {},
+    )
+
+    queries = []
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        queries.append((params or {}).get("gsrsearch"))
+        return {"query": {"pages": {}}}
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+
+    provider_boundary.fetch_commons_candidates(
+        "India women's national cricket team",
+        set(),
+        "",
+        "",
+        "EVENT",
+        "SPORTS_MATCH",
+    )
+
+    assert "India women's national cricket team match" in queries
+    assert "India women's national cricket team" in queries
+
+
 def test_provider_search_metadata_survives_provenance_wrapping():
     from visual_licensing_runtime import licensed_candidate
 
