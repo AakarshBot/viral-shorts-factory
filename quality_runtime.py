@@ -19,6 +19,7 @@ def _normalise(text):
 
 
 def _quality_validate(original_validate, script_data, source_text, format_mode):
+    """Run the existing validator plus deterministic non-numeric script QC."""
     ok, message = original_validate(script_data, source_text, format_mode)
     if not ok:
         return ok, message
@@ -75,23 +76,6 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
 
 
 def _self_critique(script_data, format_mode):
-    """Score useful storytelling properties without rewarding CTAs or filler."""
-    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
-    if not scenes:
-        return 0, "No scenes"
-
-    score = 10.0
-    reasons = []
-    first = _normalise(scenes[0].get("voiceover", ""))
-    if any(first.startswith(x) for x in ("welcome to", "hey everyone", "today we are going to", "in this video")):
-        score -= 2
-        reasons.append("generic opener")
-    if len(scenes) < 4:
-        score -= 1
-        reasons.append("low scene count; verify information density")
-    for i in range(len(scenes)):
-        for j in range(i + 1, len(scenes)):
-            if difflib.SequenceMatcher(None, _normalise(scenes[i].get("voiceover")), _normalise(scenesdef _self_critique(script_data, format_mode):
     """Score useful storytelling properties without rewarding CTAs, filler or scene count."""
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
@@ -126,7 +110,6 @@ def _self_critique(script_data, format_mode):
 
     score = max(0, min(10, round(score, 1)))
     return score, ("Passed" if not reasons else "; ".join(dict.fromkeys(reasons)))
-
 
 
 def patch_quality_control(bot):
