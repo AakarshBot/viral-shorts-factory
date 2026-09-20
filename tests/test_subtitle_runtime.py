@@ -43,3 +43,13 @@ def test_top5_card_uses_same_glass_language():
     assert rendered.mode == "RGBA"
     assert rendered.size == (1080, 1920)
     assert rendered.getpixel((540, 600))[3] == 255
+
+
+def test_array_like_caption_value_is_cleaned():
+    class ArrayLike:
+        def tolist(self):
+            return ["Hello", "world"]
+
+    from subtitle_runtime import _clean_word
+
+    assert _clean_word(ArrayLike()) == "Hello world"
