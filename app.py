@@ -112,7 +112,6 @@ def initialise_runtime() -> None:
         from audio_runtime import patch_audio_pipeline
         patch_audio_pipeline(ultimate_bot)
         patch_provider_adapters(ultimate_bot)
-        ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
         ultimate_bot.run_analytics_sweep = lambda _conn: print(
             "[Learning] Automatic analytics sync disabled in newsroom workflow.", flush=True
         )
