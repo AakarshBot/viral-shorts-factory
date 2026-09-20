@@ -2256,8 +2256,6 @@ def main() -> None:
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     workspace = render_workspace_navigation()
-    controller_snapshot = controller.snapshot()
-    render_powershell_widget(controller_snapshot)
 
     if workspace == "Live Factory":
         config = render_sidebar_controls()
