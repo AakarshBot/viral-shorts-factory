@@ -59,7 +59,6 @@ st.markdown("""<style>
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
     "GROQ_API_KEY",
-    "GNEWS_API_KEY",
     "UNSPLASH_ACCESS_KEY",
     "HF_TOKEN",
     "PEXELS_API_KEY",
@@ -97,7 +96,7 @@ def check_required_local_assets() -> list[str]:
     for font_name in ("NotoSansDevanagari-Bold.ttf", "NotoSansTelugu-Bold.ttf"):
         if not os.path.exists(os.path.join(base, font_name)):
             problems.append(f"Language font is missing: {font_name}.")
-    for env_key in ("GEMINI_API_KEY", "GROQ_API_KEY", "GNEWS_API_KEY"):
+    for env_key in ("GEMINI_API_KEY", "GROQ_API_KEY"):
         if not os.getenv(env_key):
             problems.append(f"Live provider key is not configured: {env_key}.")
     return problems
