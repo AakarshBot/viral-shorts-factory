@@ -581,8 +581,6 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
         "collect_high_recall_stories",
         fake_collect_high_recall_stories,
     )
-    monkeypatch.setattr(story_ranker, "_india_trend_terms", lambda: tuple())
-
     pool = __import__("dashboard_runtime").discover_ranked_topics(
         Bot(),
         {"format_mode": "regular", "category": "technology", "language": "english"},
