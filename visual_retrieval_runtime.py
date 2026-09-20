@@ -764,11 +764,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         local_results = {}
 
-        for batch_number, batch_start in enumerate(batches):
-            if not batch:
+        for batch_number, batch_group in enumerate(batches):
+            if not batch_group:
                 continue
-            for offset in range(0, len(batch), batch_size):
-                batch = batch[offset : offset + batch_size]
+            for offset in range(0, len(batch_group), batch_size):
+                batch = batch_group[offset : offset + batch_size]
                 result_map = strict_gemini_check_batch(
                     [item[2] for item in batch],
                     cache_entity,
