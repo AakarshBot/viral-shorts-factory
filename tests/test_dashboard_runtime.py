@@ -1133,3 +1133,43 @@ def test_dashboard_contains_generated_text_safety_and_overflow_guards():
     assert "f\"<div class='story-title'>{_ui_html(title)}</div>\"" in source
     assert "with st.expander(\"Why this story\", expanded=False)" in source
     assert "section[data-testid=\"stSidebar\"]{" in source
+
+
+def test_dashboard_css_never_overrides_streamlit_icon_font():
+    """Global dashboard typography must not steal Streamlit's icon ligatures."""
+    import re
+
+    repo_root = Path(__file__).resolve().parents[1]
+    css_sources = [
+        repo_root.joinpath("app.py").read_text(encoding="utf-8"),
+        repo_root.joinpath("dashboard_theme.py").read_text(encoding="utf-8"),
+    ]
+
+    css_blocks = []
+    for source in css_sources:
+        css_blocks.extend(re.findall(r"<style>(.*?)</style>", source, flags=re.DOTALL))
+
+    assert css_blocks, "Expected injected dashboard CSS"
+
+    unsafe_selectors = []
+    font_rule_re = re.compile(
+        r"(?P<selectors>[^{}]+)\{(?P<body>[^{}]*font-family\s*:[^{}]+)\}",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for css in css_blocks:
+        for match in font_rule_re.finditer(css):
+            selectors = match.group("selectors").strip()
+            if (
+                "[class*=\"css\"]" in selectors
+                or re.search(r"(?<![\w-])\*(?![\w-])", selectors)
+                or re.search(r"(?<![\w-])span(?![\w-])", selectors, flags=re.IGNORECASE)
+            ):
+                icon_selector = (
+                    "stIconMaterial" in selectors
+                    or "stExpanderToggleIcon" in selectors
+                    or "material" in selectors.lower()
+                )
+                if not icon_selector:
+                    unsafe_selectors.append(selectors)
+
+    assert unsafe_selectors == []
