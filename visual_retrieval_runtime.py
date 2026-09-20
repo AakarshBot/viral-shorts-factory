@@ -183,6 +183,20 @@ def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def _record_cache_eligibility(seg: dict, reason: str, *, detail: str = "", cache_path: str = "") -> None:
+    """Record the single cache-eligibility predicate that decided the current outcome.
+
+    Diagnostic only: this helper never changes whether retrieval may use the cache.
+    """
+    payload = {
+        "eligible": reason in {"eligible", "cache_hit"},
+        "reason": str(reason or "unknown").strip() or "unknown",
+        "detail": str(detail or "").strip(),
+        "cache_path": str(cache_path or "").strip(),
+    }
+    seg["visual_cache_eligibility"] = payload
+
+
 def _as_image_bytes(data: Any) -> bytes | None:
     if data is None:
         return None
@@ -1617,41 +1631,84 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     seg["visual_qc_block_reason"] = ""
     seg["visual_verification_attempts"] = 0
 
-    # The cache is retained for automatic scenes. Manual queries intentionally
-    # perform a fresh search so the dashboard receives a real image bank.
-    if not manual_query and visual_genre not in ACTION_VISUAL_GENRES:
+    # Diagnostic only: preserve the existing cache predicates and record the
+    # first predicate that prevents cache use. This must never alter retrieval.
+    if manual_query:
+        _record_cache_eligibility(seg, "manual", detail="Manual visual query requires fresh retrieval.")
+    elif visual_genre in ACTION_VISUAL_GENRES:
+        _record_cache_eligibility(
+            seg,
+            "genre_action_bypass",
+            detail=f"Genre '{visual_genre}' requires fresh action-oriented retrieval.",
+        )
+    else:
         cached_img, cache_path = runtime.get_cached_asset(
             bot,
             cache_entity,
             visual_type,
             context,
         )
-        if cached_img is not None and cache_path:
+        if cached_img is None or not cache_path:
+            _record_cache_eligibility(seg, "cache_miss", detail="No cache asset was returned.")
+        else:
             cache_meta = {}
+            metadata_error = ""
+            meta_path = os.path.splitext(str(cache_path))[0] + ".json"
             try:
-                meta_path = os.path.splitext(str(cache_path))[0] + ".json"
                 with open(meta_path, "r", encoding="utf-8") as fh:
                     cache_meta = json.load(fh)
-            except Exception:
-                cache_meta = {}
+            except FileNotFoundError:
+                metadata_error = "Cache sidecar metadata file is missing."
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                metadata_error = f"Cache sidecar metadata could not be read: {type(exc).__name__}."
 
-            cached_provenance = cache_meta.get("provenance")
-            if isinstance(cached_provenance, dict) and provenance_is_usable(cached_provenance):
-                buffer = io.BytesIO()
-                cached_img.save(buffer, format="JPEG", quality=95)
-                cached_bytes = buffer.getvalue()
-                cached_hash = _hash_image(bot, cached_bytes)
-                if cached_hash not in used_hashes:
-                    used_hashes.add(cached_hash)
-                    seg["visual_verified"] = True
-                    seg["visual_rescue_reason"] = ""
-                    seg["visual_fallback_reason"] = ""
-                    seg["visual_query_used"] = "cache"
-                    seg["visual_provider_query_used"] = "cache"
-                    seg["visual_verification_attempts"] = 0
-                    seg["visual_original_path"] = str(cache_path)
-                    seg["asset_provenance"] = dict(cached_provenance)
-                    return cached_img.convert("RGB"), False, "cached"
+            if metadata_error or not isinstance(cache_meta, dict) or not cache_meta:
+                _record_cache_eligibility(
+                    seg,
+                    "missing_metadata",
+                    detail=metadata_error or "Cache sidecar metadata is empty or invalid.",
+                    cache_path=str(cache_path),
+                )
+            else:
+                cached_provenance = cache_meta.get("provenance")
+                if not isinstance(cached_provenance, dict):
+                    _record_cache_eligibility(
+                        seg,
+                        "provenance",
+                        detail="Cache metadata has no provenance object.",
+                        cache_path=str(cache_path),
+                    )
+                elif not provenance_is_usable(cached_provenance):
+                    _record_cache_eligibility(
+                        seg,
+                        "provenance",
+                        detail="Cache provenance failed the existing usability predicate.",
+                        cache_path=str(cache_path),
+                    )
+                else:
+                    buffer = io.BytesIO()
+                    cached_img.save(buffer, format="JPEG", quality=95)
+                    cached_bytes = buffer.getvalue()
+                    cached_hash = _hash_image(bot, cached_bytes)
+                    if cached_hash in used_hashes:
+                        _record_cache_eligibility(
+                            seg,
+                            "duplicate_hash",
+                            detail="Cached image hash is already present in used_hashes.",
+                            cache_path=str(cache_path),
+                        )
+                    else:
+                        _record_cache_eligibility(seg, "cache_hit", cache_path=str(cache_path))
+                        used_hashes.add(cached_hash)
+                        seg["visual_verified"] = True
+                        seg["visual_rescue_reason"] = ""
+                        seg["visual_fallback_reason"] = ""
+                        seg["visual_query_used"] = "cache"
+                        seg["visual_provider_query_used"] = "cache"
+                        seg["visual_verification_attempts"] = 0
+                        seg["visual_original_path"] = str(cache_path)
+                        seg["asset_provenance"] = dict(cached_provenance)
+                        return cached_img.convert("RGB"), False, "cached"
 
     try:
         source_plan = _source_plan(bot, visual_type, visual_genre)
