@@ -779,14 +779,15 @@ def _signature_close(left: str, right: str, threshold: int = 3) -> bool:
     return (a ^ b).bit_count() <= int(threshold)
 
 
-def _append_unique_candidate(candidate: dict, seen_hashes: set[str], seen_image_urls: set[str], seen_signatures: list[str]) -> bool:
+def _append_unique_candidate(
+    candidate: dict,
+    seen_hashes: set[str],
+    seen_image_urls: set[str],
+    seen_asset_keys: set[str],
+) -> bool:
     image_hash = str(candidate.get("hash") or "").strip()
     image_url = str(candidate.get("source_image_url") or "").strip().casefold().rstrip("/")
     source_asset_key = str(candidate.get("source_asset_key") or "").strip().casefold()
-    seen_asset_keys = getattr(_append_unique_candidate, "_seen_asset_keys", None)
-    if not isinstance(seen_asset_keys, set):
-        seen_asset_keys = set()
-        setattr(_append_unique_candidate, "_seen_asset_keys", seen_asset_keys)
     if image_hash and image_hash in seen_hashes:
         return False
     if image_url and image_url in seen_image_urls:
@@ -811,7 +812,7 @@ def _manual_candidate_from_data(
     bot,
     seen_hashes: set[str],
     seen_image_urls: set[str],
-    seen_signatures: list[str],
+    seen_asset_keys: set[str],
     rejected_counts: dict[str, int],
 ) -> dict | None:
     normalized = _as_image_bytes(data)
@@ -1003,7 +1004,7 @@ def collect_manual_visual_pool(
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
-        query_seen_signatures: list[str] = list(seen_signatures)
+        query_seen_asset_keys: set[str] = set()
         source_attempts = 0
         qa_requests = 0
         verified_for_query = 0
@@ -1052,7 +1053,7 @@ def collect_manual_visual_pool(
                     bot,
                     query_seen_hashes,
                     query_seen_urls,
-                    query_seen_signatures,
+                    query_seen_asset_keys,
                     rejected_counts,
                 )
                 if candidate is None:
@@ -1162,7 +1163,7 @@ def collect_manual_visual_pool(
                 candidates = []
                 local_hashes = set(seen_hashes)
                 local_urls = set(seen_image_urls)
-                local_signatures = list(seen_signatures)
+                local_asset_keys: set[str] = set()
                 try:
                     source_plan = _source_plan(bot, visual_type, visual_genre)
                 except TypeError:
@@ -1193,7 +1194,7 @@ def collect_manual_visual_pool(
                             bot,
                             local_hashes,
                             local_urls,
-                            local_signatures,
+                            local_asset_keys,
                             rejected_counts,
                         )
                         if candidate is not None:
