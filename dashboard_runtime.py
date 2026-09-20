@@ -1097,6 +1097,7 @@ class DashboardWorkflowController(WorkflowController):
                 group_index = int(str(origin).split(":", 1)[1])
                 live_item = self._visual_search_groups[group_index]["items"][position]
             live_item["path"] = target_path
+            live_item["original_path"] = str(asset.get("original_path") or "").strip() or source_path
             live_item["cropped"] = True
             live_item["crop_box"] = {
                 "left": left,
