@@ -57,6 +57,34 @@ REFINEMENT_CANDIDATE_POOL = max(6, min(12, int(os.getenv("VISUAL_REFINEMENT_CAND
 INITIAL_SOURCE_LIMIT = max(1, min(3, int(os.getenv("VISUAL_INITIAL_SOURCE_LIMIT", "3"))))
 REFINEMENT_SOURCE_LIMIT = max(1, min(2, int(os.getenv("VISUAL_REFINEMENT_SOURCE_LIMIT", "2"))))
 
+ACTION_VISUAL_GENRES = {
+    "PERSON_ACTION",
+    "TEAM_ACTION",
+    "SPORTS_ACTION",
+    "SPORTS_MATCH",
+    "EVENT_SCENE",
+}
+
+_ACTION_METADATA_CUES = {
+    "action", "batting", "bowling", "fielding", "wicket", "playing", "play",
+    "match", "celebration", "celebrating", "running", "racing", "scoring",
+    "shooting", "dribbling", "tackling", "serving", "swimming", "boxing",
+    "training", "interview", "speaking", "press conference", "on stage",
+}
+
+_ACTION_STATIC_CUES = {
+    "portrait", "headshot", "logo", "crest", "emblem", "badge", "close up",
+    "close-up", "stadium exterior", "building exterior",
+}
+
+_ACTION_SEARCH_SUFFIXES = {
+    "PERSON_ACTION": ("in action", "playing", "match action"),
+    "TEAM_ACTION": ("action", "celebration", "playing"),
+    "SPORTS_ACTION": ("action", "match action", "playing"),
+    "SPORTS_MATCH": ("match action", "playing", "celebration"),
+    "EVENT_SCENE": ("live action", "at event", "on stage"),
+}
+
 _VISUAL_DESCRIPTOR_WORDS = {
     "logo", "logos", "badge", "badges", "emblem", "emblems",
     "crest", "crests", "branding", "brand", "brands", "symbol", "symbols",
@@ -351,12 +379,29 @@ def _candidate_priority(
         except (TypeError, ValueError):
             pass
 
+    action_bonus = 0.0
+    if str(visual_genre or "").strip().upper() in ACTION_VISUAL_GENRES:
+        metadata_text = _candidate_search_text(data).casefold()
+        cue_hits = sum(
+            1
+            for cue in _ACTION_METADATA_CUES
+            if cue in metadata_text
+        )
+        static_hits = sum(
+            1
+            for cue in _ACTION_STATIC_CUES
+            if cue in metadata_text
+        )
+        action_bonus = min(28.0, cue_hits * 7.0)
+        action_bonus -= min(14.0, static_hits * 5.0)
+
     return round(
         (relevance_score * 0.60)
         + (quality_score * 0.30)
         + (source_score * 0.08)
         + (trusted_score * 0.02 if trusted else 0.0)
-        + position,
+        + position
+        + action_bonus,
         3,
     )
 
@@ -1252,60 +1297,75 @@ def collect_manual_visual_search(
         except Exception:
             pass
 
-    for page in range(1, MANUAL_SEARCH_MAX_PAGES + 1):
-        for source_name, fetcher in source_plan:
-            if len(candidates) >= 5 or not callable(fetcher):
-                break
-            source_key = str(source_name or "").strip().casefold()
-            cache_key = ("query", source_key, exact_query.casefold(), page)
-            raw_data = search_cache.get(cache_key)
-            if raw_data is None:
-                try:
-                    raw_data = runtime._call_fetcher_with_timeout(
-                        fetcher,
-                        (
-                            exact_query,
-                            fetch_used_urls,
-                            exact_query,
-                            video_title,
-                            visual_type,
-                            visual_genre,
-                            True,
-                            page,
-                        ),
-                        str(source_name),
-                        exact_query,
-                    )
-                except Exception as exc:
-                    print(
-                        f"   [Manual Visual Search] {source_name} page={page} failed safely: "
-                        f"{type(exc).__name__}: {exc}",
-                        flush=True,
-                    )
-                    raw_data = []
-                search_cache[cache_key] = list(raw_data or [])
+    action_variants = [exact_query]
+    if visual_genre in ACTION_VISUAL_GENRES:
+        for suffix in _ACTION_SEARCH_SUFFIXES.get(visual_genre, ("action",)):
+            variant = f"{exact_query} {suffix}".strip()
+            if variant.casefold() != exact_query.casefold():
+                action_variants.append(variant)
 
-            for data in search_cache.get(cache_key) or []:
-                candidate = _manual_candidate_from_data(
-                    str(source_name),
-                    data,
-                    exact_query,
-                    visual_type,
-                    visual_genre,
-                    bot,
-                    seen_hashes,
-                    seen_urls,
-                    rejected_counts,
-                )
-                if candidate is None:
-                    continue
-                candidate["status"] = "new-search"
-                candidates.append(candidate)
-                if len(candidates) >= 5:
-                    break
-
+    for variant_index, search_variant in enumerate(action_variants, 1):
         if len(candidates) >= 5:
             break
+        variant_start = len(candidates)
+        variant_target = 2 if len(action_variants) > 1 else 5
+
+        for page in range(1, MANUAL_SEARCH_MAX_PAGES + 1):
+            for source_name, fetcher in source_plan:
+                if len(candidates) - variant_start >= variant_target or len(candidates) >= 5 or not callable(fetcher):
+                    break
+                source_key = str(source_name or "").strip().casefold()
+                cache_key = ("query", source_key, search_variant.casefold(), page)
+                raw_data = search_cache.get(cache_key)
+                if raw_data is None:
+                    try:
+                        raw_data = runtime._call_fetcher_with_timeout(
+                            fetcher,
+                            (
+                                search_variant,
+                                fetch_used_urls,
+                                search_variant,
+                                video_title,
+                                visual_type,
+                                visual_genre,
+                                True,
+                                page,
+                            ),
+                            str(source_name),
+                            search_variant,
+                        )
+                    except Exception as exc:
+                        print(
+                            f"   [Manual Visual Search] {source_name} page={page} failed safely: "
+                            f"{type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+                        raw_data = []
+                    search_cache[cache_key] = list(raw_data or [])
+
+                for data in search_cache.get(cache_key) or []:
+                    candidate = _manual_candidate_from_data(
+                        str(source_name),
+                        data,
+                        search_variant,
+                        visual_type,
+                        visual_genre,
+                        bot,
+                        seen_hashes,
+                        seen_urls,
+                        rejected_counts,
+                    )
+                    if candidate is None:
+                        continue
+                    candidate["status"] = "new-search"
+                    candidate["search_variant_index"] = variant_index
+                    candidate["action_search"] = bool(visual_genre in ACTION_VISUAL_GENRES)
+                    candidates.append(candidate)
+                    if len(candidates) - variant_start >= variant_target or len(candidates) >= 5:
+                        break
+
+            if len(candidates) - variant_start >= variant_target or len(candidates) >= 5:
+                break
 
     candidates.sort(key=lambda item: (
         -float(item.get("priority") or 0.0),
