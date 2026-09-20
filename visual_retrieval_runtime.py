@@ -114,14 +114,12 @@ def _candidate_source_page_key(data: Any) -> str:
     """Normalize the page/article that supplied an image for pool diversity."""
     if not isinstance(data, dict):
         return ""
-    provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
     candidates = (
         data.get("source_page_url"),
         data.get("source_article_url"),
         data.get("foreign_landing_url"),
         data.get("pageURL"),
         data.get("landing_url"),
-        provenance.get("url") if isinstance(provenance, dict) else "",
     )
     for value in candidates:
         url = str(value or "").strip()

@@ -705,7 +705,7 @@ def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_cand
     assert source == "visual-rescue"
 
 
-def test_commons_person_search_uses_structured_depicts(monkeypatch):
+def test_commons_person_action_search_preserves_action_intent(monkeypatch):
     calls = []
     downloads = []
 
@@ -761,11 +761,13 @@ def test_commons_person_search_uses_structured_depicts(monkeypatch):
     )
 
     assert calls
-    assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q16224802"
-    assert calls[1]["gsrsearch"] == "Smriti Mandhana action"
+    searches = [str(call.get("gsrsearch") or "") for call in calls]
+    assert "Smriti Mandhana action cricket" in searches
+    assert "Smriti Mandhana action" in searches
+    assert all("haswbstatement:P180=" not in query for query in searches)
     assert candidates
-    assert candidates[0]["commons_match_mode"] == "structured-depicts-person"
-    assert candidates[0]["commons_matched_entity"] == "Smriti Mandhana"
+    assert any(item["commons_match_mode"] == "person-action-text" for item in candidates)
+    assert "Smriti Mandhana" in candidates[0]["commons_matched_entity"]
     assert "India Women v Australia Women" in candidates[0]["search_tags"]
     assert downloads
 
