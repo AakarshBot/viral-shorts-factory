@@ -719,12 +719,11 @@ def collect_manual_visual_pool(
 ) -> dict:
     """Build one shared verified pool from exact manual queries, then bounded smart backfill.
 
-    Manual queries are exhausted in the order supplied. Every candidate that
+    Manual queries are processed in the order supplied. Every candidate that
     survives licensing and basic technical checks is sent through entity-only
     Gemini QA until the shared pool reaches the target or hard maximum. If the
-   
-manual queries are not enough, the existing automatic identity + compact scene
-    refinement is used to fill the same pool without creating a second pool.
+    manual queries are not enough, the existing automatic identity + compact
+    scene refinement is used to fill the same pool without creating a second pool.
     """
     from visual_qa_runtime import (
         GEMINI_VISUAL_BATCH_SIZE,
@@ -1017,7 +1016,7 @@ manual queries are not enough, the existing automatic identity + compact scene
                 attempted_sources = set()
 
                 for source, fetcher in source_plan:
-                    if len(candidates) >= REFINEMENT_CANDIDATE_POOL * 2:
+                    if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
                         break
                     source_name = str(source or "").strip()
                     source_key = source_name.casefold()
@@ -1056,7 +1055,7 @@ manual queries are not enough, the existing automatic identity + compact scene
                             continue
                         candidate["source_query"] = source_query
                         candidates.append(candidate)
-                        if len(candidates) >= REFINEMENT_CANDIDATE_POOL * 2:
+                        if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
                             break
 
                 candidates.sort(
@@ -1067,7 +1066,7 @@ manual queries are not enough, the existing automatic identity + compact scene
                     )
                 )
                 added, qa_requests = _verify_candidates(
-                    candidates[: REFINEMENT_CANDIDATE_POOL * 2],
+                    candidates[:REFINEMENT_CANDIDATE_POOL],
                     entity_anchor,
                     f"automatic:{scene_index}:{query_round}",
                     query_index=0,
