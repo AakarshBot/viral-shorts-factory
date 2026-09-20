@@ -538,7 +538,7 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
     ]
     topics = [
         {
-            "title": f"{title} changes the {subject} market",
+            "title": f"{title} launches into the {subject} market",
             "url": f"https://reuters.example/story-{index}",
             "source": "Reuters",
             "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
