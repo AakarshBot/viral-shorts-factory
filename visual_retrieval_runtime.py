@@ -846,6 +846,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             seg["visual_query_used"] = str(selected.get("query") or last_round)
             seg["visual_provider_query_used"] = str(selected.get("query") or last_round)
             seg["visual_verification_attempts"] = verification_attempts
+            seg["visual_selected_hash"] = selected_hash
             seg["asset_provenance"] = dict(selected.get("provenance") or {})
             return Image.open(io.BytesIO(selected_bytes)).convert("RGB"), False, str(selected.get("source") or "visual")
 
@@ -883,6 +884,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     seg["visual_fallback_reason"] = ""
     seg["visual_query_used"] = ""
     seg["visual_verification_attempts"] = verification_attempts
+    seg["visual_selected_hash"] = ""
     seg["asset_provenance"] = rescue_provenance()
     seg["visual_rejection_counts"] = dict(
         sorted(
