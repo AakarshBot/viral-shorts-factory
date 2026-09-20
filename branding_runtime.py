@@ -11,8 +11,10 @@ encode, avoiding a second full-video FFmpeg pass.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 from visual_licensing_runtime import attribution_required, normalize_license_code
@@ -54,6 +56,64 @@ _SOURCE_NAMES = {
     "visual-rescue": "Factory visual",
     "hf_generated": "AI-generated",
 }
+
+def _artifact_qc(
+    path: str,
+    expected_width: int | None = None,
+    expected_height: int | None = None,
+    expected_duration: float | None = None,
+    expected_audio_count: int | None = None,
+) -> tuple[bool, str]:
+    """Validate the actual rendered MP4 before it is allowed out of the factory."""
+    if not path or not os.path.isfile(path):
+        return False, "rendered video file is missing"
+    try:
+        if os.path.getsize(path) < 10_000:
+            return False, "rendered video file is unexpectedly small"
+    except OSError:
+        return False, "rendered video file size could not be checked"
+
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=index,codec_type,width,height,codec_name",
+                "-show_entries", "format=duration,format_name",
+                "-of", "json", path,
+            ], capture_output=True, text=True, timeout=10, check=False,
+        )
+        if completed.returncode != 0:
+            return False, "ffprobe could not read the rendered video"
+        data = json.loads(completed.stdout or "{}")
+        streams = data.get("streams") or []
+        video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+        audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+        if len(video_streams) != 1:
+            return False, f"expected exactly one video stream, found {len(video_streams)}"
+        if not audio_streams:
+            return False, "final rendered video has no audio stream"
+
+        video = video_streams[0]
+        width = int(video.get("width") or 0)
+        height = int(video.get("height") or 0)
+        duration = float((data.get("format") or {}).get("duration") or 0.0)
+        format_name = str((data.get("format") or {}).get("format_name") or "")
+        if width <= 0 or height <= 0 or duration <= 0:
+            return False, "rendered video has invalid dimensions or duration"
+        if abs((width / height) - (9 / 16)) > 0.015:
+            return False, f"rendered video is not Shorts-shaped: {width}x{height}"
+        if "mp4" not in format_name.lower() and not str(path).lower().endswith(".mp4"):
+            return False, "rendered video is not an MP4 container"
+        if expected_width is not None and expected_height is not None and (width, height) != (expected_width, expected_height):
+            return False, f"rendered geometry changed {expected_width}x{expected_height} -> {width}x{height}"
+        if expected_duration is not None and abs(duration - expected_duration) > 0.15:
+            return False, f"rendered duration changed {expected_duration:.2f}s -> {duration:.2f}s"
+        if expected_audio_count is not None and len(audio_streams) != expected_audio_count:
+            return False, f"audio stream count changed {expected_audio_count} -> {len(audio_streams)}"
+        return True, f"artifact passed: {width}x{height}, {duration:.2f}s, audio_streams={len(audio_streams)}"
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+        return False, f"artifact QC exception: {type(exc).__name__}: {exc}"
+
 
 
 def _assets(bot) -> Path | None:
