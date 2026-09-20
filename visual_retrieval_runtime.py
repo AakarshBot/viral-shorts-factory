@@ -141,8 +141,8 @@ def _preflight_image(data: Any) -> tuple[bool, str, bytes | None]:
         image = image.convert("RGB")
         width, height = image.size
         short_side = min(width, height)
-        if short_side < HARD_MIN_IMAGE_SIDE:
-            return False, f"resolution-too-low:{width}x{height}", None
+        # Resolution is not a hard rejection. Identity-approved low-resolution
+        # assets are preserved for the manual QC rejection group.
         resolution_note = (
             f"resolution-soft:{width}x{height}"
             if short_side < SOFT_MIN_IMAGE_SIDE
