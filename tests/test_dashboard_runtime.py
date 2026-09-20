@@ -1234,3 +1234,63 @@ def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_p
     snapshot = controller.snapshot()
     assert len(snapshot["visual_search_groups"]) == 1
     assert len(snapshot["visual_search_groups"][0]["items"]) == 5
+
+
+def test_dashboard_manual_upload_preserves_selected_visibility_mode(monkeypatch, tmp_path):
+    import dashboard_runtime
+    import final_qc_runtime
+    import workflow_runtime
+
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"fake video")
+
+    controller = DashboardWorkflowController(_Bot())
+    captured_modes = []
+
+    def fake_uploader(*args, **kwargs):
+        captured_modes.append(args[3])
+        return f"video-{args[3]}"
+
+    controller._real_uploader = fake_uploader
+
+    monkeypatch.setattr(dashboard_runtime, "live_qc_passes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(final_qc_runtime, "validate_final_video", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        final_qc_runtime,
+        "validate_final_upload_metadata",
+        lambda title, description, comment: (title, description, comment),
+    )
+    monkeypatch.setattr(
+        workflow_runtime,
+        "_build_clean_metadata",
+        lambda *_args, **_kwargs: ("Title", "Description", []),
+    )
+
+    genre_cfg = {
+        "label": "News",
+        "hashtags": [],
+        "category_id": "25",
+    }
+
+    private_result = controller.upload_manual(
+        str(video_path),
+        {},
+        "Title",
+        "Description",
+        "Comment",
+        "private",
+        genre_cfg,
+    )
+    public_result = controller.upload_manual(
+        str(video_path),
+        {},
+        "Title",
+        "Description",
+        "Comment",
+        "public",
+        genre_cfg,
+    )
+
+    assert private_result == "video-private"
+    assert public_result == "video-public"
+    assert captured_modes == ["private", "public"]
