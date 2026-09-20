@@ -1424,7 +1424,7 @@ def render_console(snapshot: Dict[str, Any]) -> None:
     if operation_percent is not None:
         st.markdown(f"**{operation_label}** · {operation_percent}%")
         st.progress(max(0.0, min(1.0, operation_percent / 100)))
-    render_powershell_output(lines)
+    # Detailed worker stdout/stderr is shown in the collapsible sidebar PowerShell widget.
 
 
 def render_logs(snapshot: Dict[str, Any]) -> None:
