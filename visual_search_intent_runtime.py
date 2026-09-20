@@ -323,29 +323,21 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
                 queries.append(portrait_query)
             query = queries[0] if queries else ""
         else:
+            # Search the factual subject first. Only add one compact scene
+            # refinement later when the first entity search does not produce
+            # enough verified images. This keeps the query path quick and
+            # avoids burning provider calls on long narrative phrases.
+            query = subject
+            queries = [subject] if subject else []
             if visual_genre in {"ORG_BRANDING", "TEAM_BRANDING"}:
                 anchor = _genre_hint_anchor(visual_genre, scene_terms)
             else:
                 anchor = _primary_visual_anchor(scene_terms)
 
-            query = _compose_query(subject, anchor)
-            queries = []
-
-            # Build a bounded, evidence-backed fallback ladder. Each fallback is
-            # derived from a real visual anchor in the scene, then the exact
-            # factual identity is retained as the final identity-only fallback.
-            # This allows rejected/failed searches to keep trying without inventing
-            # unrelated search terms or creating an unbounded query fan-out.
-            for candidate_anchor in ([anchor] + scene_terms):
-                candidate = _compose_query(subject, candidate_anchor)
-                if candidate and candidate.casefold() not in {item.casefold() for item in queries}:
-                    queries.append(candidate)
-                if len(queries) >= 5:
-                    break
-            if subject and subject.casefold() not in {item.casefold() for item in queries}:
-                queries.append(subject)
-            queries = queries[:6]
-            query = queries[0] if queries else ""
+            refined = _compose_query(subject, anchor)
+            if refined and refined.casefold() not in {item.casefold() for item in queries}:
+                queries.append(refined)
+            queries = queries[:2]
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))
