@@ -6,6 +6,7 @@ It adds only a dashboard-side visual review gate and presentation helpers.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sqlite3
@@ -550,6 +551,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
+        self._visual_search_options: dict[int, list[dict[str, Any]]] = {}
         self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
         self._dashboard_logs: list[str] = []
@@ -574,6 +576,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_rejected = False
         self._visual_packages = []
         self._visual_replacement_history = {}
+        self._visual_search_options = {}
         self._dashboard_logs = []
         self._activity_events = []
         self._audio_paths = []
@@ -902,6 +905,193 @@ class DashboardWorkflowController(WorkflowController):
         else:
             self._visual_approval_event.set()
         return True
+
+
+    def search_visual_options(self, visual_index: int, replacement_query: str) -> tuple[bool, str]:
+        """Search the exact manual query and present at least three verified choices before replacement."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+
+        try:
+            index = int(visual_index)
+        except (TypeError, ValueError):
+            return False, "Invalid visual number."
+
+        query = str(replacement_query or "").strip()
+        packages = snapshot.get("visual_packages") or []
+        script_data = snapshot.get("script_data") or {}
+        scenes = script_data.get("script") if isinstance(script_data, dict) else None
+        if (
+            index < 1
+            or index > len(packages)
+            or not isinstance(scenes, list)
+            or index > len(scenes)
+        ):
+            return False, "That visual is no longer available."
+        if not query:
+            return False, "Enter a search term for this visual."
+
+        scene = scenes[index - 1]
+        if not isinstance(scene, dict):
+            return False, "The selected slide is invalid."
+
+        try:
+            from visual_retrieval_runtime import (
+                _hash_image,
+                collect_manual_visual_options,
+                materialize_manual_visual_pool,
+            )
+            import visual_runtime
+
+            used_hashes: set[str] = set()
+            for package in packages:
+                layer = package[0] if isinstance(package, list) and package else package
+                if not isinstance(layer, dict):
+                    continue
+                image_path = str(layer.get("image") or "").strip()
+                if image_path and os.path.isfile(image_path):
+                    try:
+                        with open(image_path, "rb") as fh:
+                            image_hash = _hash_image(self.bot, fh.read())
+                        if image_hash:
+                            used_hashes.add(image_hash)
+                    except Exception:
+                        pass
+
+            video_title = str(
+                script_data.get("title")
+                or (script_data.get("titles") or [""])[0]
+                or ""
+            ).strip()
+            attempt = len(self._visual_replacement_history.get(index, [])) + 1
+            result = collect_manual_visual_options(
+                visual_runtime,
+                self.bot,
+                scene,
+                query,
+                video_title=video_title,
+                used_hashes=used_hashes,
+                min_options=3,
+                max_options=3,
+            )
+            assets = list(result.get("assets") or [])
+            if len(assets) < 3:
+                with self._lock:
+                    live_packages = self._visual_packages
+                    if 1 <= index <= len(live_packages):
+                        live_layer = (
+                            live_packages[index - 1][0]
+                            if isinstance(live_packages[index - 1], list) and live_packages[index - 1]
+                            else live_packages[index - 1]
+                        )
+                        if isinstance(live_layer, dict):
+                            live_layer.pop("visual_search_options", None)
+                    self._visual_search_options.pop(index, None)
+                return (
+                    False,
+                    f"Only {len(assets)} verified image(s) were found for '{query}'. "
+                    "Refine the query; the current visual was kept.",
+                )
+
+            pool_id = hashlib.sha256(
+                f"qc:{index}:{query}:{attempt}".encode("utf-8")
+            ).hexdigest()[:16]
+            options = materialize_manual_visual_pool(
+                self.bot,
+                assets[:3],
+                pool_id=pool_id,
+            )
+            if len(options) < 3:
+                return (
+                    False,
+                    f"Only {len(options)} usable image(s) could be prepared for '{query}'. "
+                    "The current visual was kept.",
+                )
+
+            with self._lock:
+                self._visual_search_options[index] = [dict(item) for item in options[:3]]
+                live_packages = self._visual_packages
+                if 1 <= index <= len(live_packages):
+                    live_layer = (
+                        live_packages[index - 1][0]
+                        if isinstance(live_packages[index - 1], list) and live_packages[index - 1]
+                        else live_packages[index - 1]
+                    )
+                    if isinstance(live_layer, dict):
+                        live_layer["visual_search_options"] = [dict(item) for item in options[:3]]
+
+            self.update(
+                "visual_approval",
+                76,
+                f"Found 3 verified alternatives for visual {index}. Choose one before continuing.",
+            )
+            return True, f"Found 3 verified alternatives for visual {index}."
+
+        except Exception as exc:
+            return False, f"Visual option search failed: {type(exc).__name__}: {exc}"
+
+    def replace_visual_from_search_option(self, visual_index: int, option_index: int) -> tuple[bool, str]:
+        """Replace a visual with one of the three verified manual-query choices."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+
+        try:
+            index = int(visual_index)
+            selected_index = int(option_index)
+        except (TypeError, ValueError):
+            return False, "Invalid visual or search option number."
+
+        packages = snapshot.get("visual_packages") or []
+        if index < 1 or index > len(packages):
+            return False, "That visual is no longer available."
+
+        layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+        if not isinstance(layer, dict):
+            return False, "The selected visual package is invalid."
+
+        options = [
+            item for item in (layer.get("visual_search_options") or [])
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        ]
+        if selected_index < 1 or selected_index > len(options):
+            return False, "That search option is no longer available."
+
+        # Reuse the existing verified-bank rendering/replacement path so the
+        # selected image is handled exactly like any other reviewed bank asset.
+        original_bank = list(layer.get("visual_asset_bank") or [])
+        layer["visual_asset_bank"] = options
+        ok = False
+        message = "Search option replacement failed."
+        try:
+            ok, message = self.replace_visual_from_bank(index, selected_index)
+        finally:
+            current = self._visual_packages[index - 1] if index - 1 < len(self._visual_packages) else None
+            current_layer = current[0] if isinstance(current, list) and current else current
+            if isinstance(current_layer, dict):
+                current_layer.pop("visual_search_options", None)
+                self._visual_search_options.pop(index, None)
+                # Preserve any pre-existing verified bank alternatives that were
+                # not part of this one-off manual search.
+                if ok and original_bank:
+                    existing = list(current_layer.get("visual_asset_bank") or [])
+                    seen_paths = {
+                        str(item.get("path") or "").strip()
+                        for item in existing
+                        if isinstance(item, dict)
+                    }
+                    for item in original_bank:
+                        if not isinstance(item, dict):
+                            continue
+                        path = str(item.get("path") or "").strip()
+                        if path and path not in seen_paths:
+                            existing.append(item)
+                            seen_paths.add(path)
+                    current_layer["visual_asset_bank"] = existing[:10]
+                elif not ok:
+                    current_layer["visual_asset_bank"] = original_bank
+        return ok, message
 
     def replace_visual(self, visual_index: int, replacement_query: str) -> tuple[bool, str]:
         """Replace exactly one reviewed visual while the production worker is paused."""
@@ -1459,6 +1649,10 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_packages": list(self._visual_packages),
                     "visual_review_required": data.get("stage") == "visual_approval",
                     "visual_review_approved": self._visual_approved,
+                    "visual_search_options": {
+                        key: [dict(item) for item in value]
+                        for key, value in self._visual_search_options.items()
+                    },
                     "visual_replacement_history": {
                         key: list(value)
                         for key, value in self._visual_replacement_history.items()

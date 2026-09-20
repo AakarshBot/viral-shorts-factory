@@ -163,23 +163,27 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 }
 [data-baseweb="popover"] [role="option"]{
   color:var(--text)!important;
-  background:transparent!important;
+  background:#fff!important;
   border-radius:8px!important;
   min-height:38px!important;
 }
+[data-baseweb="popover"] [role="option"] span,
+[data-baseweb="popover"] [role="option"] div{
+  color:var(--text)!important;
+  background:transparent!important;
+  opacity:1!important;
+  text-shadow:none!important;
+}
 [data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [role="option"][aria-selected="true"],
 [data-baseweb="popover"] [aria-selected="true"]{
   background:var(--accent-soft)!important;
   color:var(--text)!important;
 }
 [data-baseweb="popover"] input{
   color:var(--text)!important;
-  background:var(--surface-soft)!important;
+  background:#fff!important;
   border-color:var(--line)!important;
-}
-[data-baseweb="popover"] *{
-  opacity:1!important;
-  text-shadow:none!important;
 }
 .stSelectbox [data-baseweb="select"]>div{
   background:var(--surface)!important;
@@ -189,6 +193,16 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 }
 .stSelectbox [data-baseweb="select"]>div:hover{
   border-color:#b8bec9!important;
+}
+.stSelectbox [data-baseweb="select"] *,
+.stMultiSelect [data-baseweb="select"] *,
+[data-baseweb="input"] input{
+  color:var(--text)!important;
+}
+.stSelectbox [data-baseweb="select"],
+.stMultiSelect [data-baseweb="select"],
+[data-baseweb="input"]{
+  background:#fff!important;
 }
 .crop-shell{background:#f7f8fb;border:1px solid var(--line);border-radius:16px;padding:12px}
 .crop-caption{color:var(--muted);font-size:.73rem;line-height:1.45;margin-bottom:9px}
@@ -820,6 +834,13 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "manual_pool_mode": bool(layer.get("visual_manual_pool_mode", False)),
                 "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
                 "manual_pool_query_stats": list(layer.get("visual_manual_pool_query_stats") or []),
+                "search_options": [
+                    dict(option)
+                    for option in (layer.get("visual_search_options") or [])
+                    if isinstance(option, dict)
+                    and str(option.get("path") or "").strip()
+                    and os.path.isfile(str(option.get("path") or "").strip())
+                ],
                 "factory_rejected": factory_rejected,
                 "scene_rejected": scene_rejected,
                 "bank": unused_verified,
@@ -827,6 +848,40 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return items
+
+
+
+def _recommended_shorts_crop_box(img, aspect_ratio=None) -> dict[str, int]:
+    """Return a large centered 9:16 crop box spanning most of the source image."""
+    width = max(2, int(getattr(img, "width", 2)))
+    height = max(2, int(getattr(img, "height", 2)))
+    target_aspect = 9 / 16
+    if isinstance(aspect_ratio, tuple) and len(aspect_ratio) == 2:
+        try:
+            target_aspect = float(aspect_ratio[0]) / float(aspect_ratio[1])
+        except (TypeError, ValueError, ZeroDivisionError):
+            target_aspect = 9 / 16
+
+    padding = 0.06
+    usable_width = max(2, int(round(width * (1 - 2 * padding))))
+    usable_height = max(2, int(round(height * (1 - 2 * padding))))
+    if usable_width / max(1, usable_height) > target_aspect:
+        crop_height = usable_height
+        crop_width = max(2, int(round(crop_height * target_aspect)))
+    else:
+        crop_width = usable_width
+        crop_height = max(2, int(round(crop_width / target_aspect)))
+
+    crop_width = min(width, crop_width)
+    crop_height = min(height, crop_height)
+    left = max(0, int(round((width - crop_width) / 2)))
+    top = max(0, int(round((height - crop_height) / 2)))
+    return {
+        "left": left,
+        "top": top,
+        "width": crop_width,
+        "height": crop_height,
+    }
 
 
 def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
@@ -1053,8 +1108,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 with st.expander("✂️ Reframe image", expanded=False):
                     original_path = str(item.get("original_path") or "").strip()
                     st.markdown(
-                        "<div class='crop-caption'>Drag the 9:16 frame over the original image. "
-                        "Move or resize the frame until the subject is positioned exactly where you want it.</div>",
+                        "<div class='crop-caption'>The full original image stays visible. "
+                        "Drag the fixed 9:16 frame across it and use the corner handles to zoom in or out. "
+                        "The highlighted area is the exact frame used for the Short.</div>",
                         unsafe_allow_html=True,
                     )
 
@@ -1062,17 +1118,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         from PIL import Image
 
                         original_image = Image.open(original_path).convert("RGB")
-                        stored_box = item.get("crop_box") or {}
-                        default_coords = None
-                        try:
-                            if all(key in stored_box for key in ("left", "top", "width", "height")):
-                                left = int(stored_box["left"])
-                                top = int(stored_box["top"])
-                                width = int(stored_box["width"])
-                                height = int(stored_box["height"])
-                                default_coords = (left, left + width, top, top + height)
-                        except (TypeError, ValueError):
-                            default_coords = None
 
                         if st_cropper is None:
                             st.warning(
@@ -1085,9 +1130,10 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 crop_result = st_cropper(
                                     img_file=original_image,
                                     realtime_update=True,
-                                    default_coords=default_coords,
+                                    default_coords=None,
                                     box_color="#5b46e8",
                                     aspect_ratio=(9, 16),
+                                    box_algorithm=_recommended_shorts_crop_box,
                                     return_type="both",
                                     key=f"visual_cropper_{run_id}_{item['index']}",
                                     should_resize_image=True,
@@ -1123,19 +1169,57 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     else:
                         st.info("The preserved original image is not available for cropping.")
 
+                    search_options = item.get("search_options") or []
+                    if search_options:
+                        with st.expander(
+                            f"🔎 Search results · {len(search_options)} verified",
+                            expanded=True,
+                        ):
+                            st.caption(
+                                "Three verified choices are shown below. The current image stays unchanged "
+                                "until you choose one."
+                            )
+                            option_cols = st.columns(3, gap="small")
+                            for option_index, option in enumerate(search_options[:3], 1):
+                                with option_cols[(option_index - 1) % 3]:
+                                    option_path = str(option.get("path") or "").strip()
+                                    if option_path and os.path.isfile(option_path):
+                                        st.image(option_path, width="stretch")
+                                    option_source = str(option.get("source") or "verified").strip()
+                                    option_query = str(option.get("query") or "").strip()
+                                    option_caption = option_source
+                                    if option_query:
+                                        option_caption += f" · {option_query}"
+                                    st.caption(option_caption)
+                                    if st.button(
+                                        f"Use option {option_index}",
+                                        type="primary" if option_index == 1 else "secondary",
+                                        width="stretch",
+                                        key=f"use_search_option_{run_id}_{item['index']}_{option_index}",
+                                    ):
+                                        ok, message = controller.replace_visual_from_search_option(
+                                            item["index"],
+                                            option_index,
+                                        )
+                                        if ok:
+                                            st.success(message)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
+
                     query_key = f"replace_visual_{run_id}_{item['index']}_query"
                     replacement_query = st.text_input(
-                        "New image search",
-                        placeholder="e.g. Rishabh Pant press conference",
+                        "Search for 3 replacement choices",
+                        placeholder="e.g. Shafali Verma batting",
                         key=query_key,
                     )
                     if st.button(
-                        "Search another image",
+                        "Find 3 verified choices",
                         type="secondary",
                         width="stretch",
                         key=f"replace_visual_{run_id}_{item['index']}_search",
                     ):
-                        ok, message = controller.replace_visual(
+                        ok, message = controller.search_visual_options(
                             item["index"],
                             replacement_query,
                         )

@@ -714,14 +714,15 @@ def collect_manual_visual_pool(
     manual_queries: list[str],
     video_title: str = "",
     used_hashes: set[str] | None = None,
+    pool_target: int | None = None,
+    pool_max: int | None = None,
+    allow_auto_backfill: bool = True,
 ) -> dict:
-    """Build one shared verified pool from exact manual queries, then bounded smart backfill.
+    """Build a bounded verified image pool from exact manual queries.
 
-    Manual queries are processed in the order supplied. Every candidate that
-    survives licensing and basic technical checks is sent through entity-only
-    Gemini QA until the shared pool reaches the target or hard maximum. If the
-    manual queries are not enough, the existing automatic identity + compact
-    scene refinement is used to fill the same pool without creating a second pool.
+    Normal production uses the ten-image shared pool. Dashboard replacement
+    searches can request a smaller exact-query pool without changing the normal
+    production retrieval contract.
     """
     from visual_qa_runtime import (
         GEMINI_VISUAL_BATCH_SIZE,
@@ -729,6 +730,17 @@ def collect_manual_visual_pool(
         strict_gemini_check_batch,
     )
     from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
+
+    requested_max = (
+        MANUAL_POOL_MAX
+        if pool_max is None
+        else max(1, min(MANUAL_POOL_MAX, int(pool_max)))
+    )
+    requested_target = (
+        MANUAL_POOL_TARGET
+        if pool_target is None
+        else max(1, min(requested_max, int(pool_target)))
+    )
 
     used_hashes = used_hashes or set()
     assets = []
@@ -800,7 +812,7 @@ def collect_manual_visual_pool(
 
     def _verify_candidates(candidates, entity_anchor, source_label, query_index=0):
         """Entity-only Gemini QA for all prepared candidates, bounded by the shared pool cap."""
-        if not candidates or len(assets) >= MANUAL_POOL_MAX:
+        if not candidates or len(assets) >= requested_max:
             return 0, 0
 
         start_visual_qa_scene()
@@ -809,7 +821,7 @@ def collect_manual_visual_pool(
         added = 0
 
         for offset in range(0, len(candidates), batch_size):
-            if len(assets) >= MANUAL_POOL_MAX:
+            if len(assets) >= requested_max:
                 break
             batch = candidates[offset : offset + batch_size]
             if not batch:
@@ -857,14 +869,14 @@ def collect_manual_visual_pool(
                     )
                     seen_hashes.add(candidate["hash"])
                     added += 1
-                    if len(assets) >= MANUAL_POOL_MAX:
+                    if len(assets) >= requested_max:
                         break
                 elif verdict is False:
                     rejected_counts["entity_no"] += 1
                 else:
                     rejected_counts["entity_uncertain"] += 1
 
-            if len(assets) >= MANUAL_POOL_MAX:
+            if len(assets) >= requested_max:
                 break
 
         return added, qa_requests
@@ -874,7 +886,7 @@ def collect_manual_visual_pool(
         exact_query = str(raw_query or "").strip()
         if not exact_query:
             continue
-        if len(assets) >= MANUAL_POOL_MAX:
+        if len(assets) >= requested_max:
             break
 
         entity_anchor = str(
@@ -957,22 +969,22 @@ def collect_manual_visual_pool(
         print(
             f"   [Manual Visual Pool] exact query {query_index}/{len(manual_queries)} | "
             f"'{exact_query}' | candidates={len(candidates)} | "
-            f"entity-verified={query_verified} | shared-pool={len(assets)}/{MANUAL_POOL_MAX} "
+            f"entity-verified={query_verified} | shared-pool={len(assets)}/{requested_max} "
             f"| Gemini={qa_requests}",
             flush=True,
         )
 
-        # User supplied queries have priority, but ten verified images is enough
-        # to avoid an endless retrieval loop. The hard maximum remains twenty.
-        if len(assets) >= MANUAL_POOL_TARGET:
+        # User-supplied queries have priority, but the bounded target is enough
+        # to avoid an endless retrieval loop before optional backfill begins.
+        if len(assets) >= requested_target:
             break
 
     # 2) Only after the exact manual-query pass do we use the factory's existing
     # smart identity + one compact scene-context refinement to fill the SAME pool.
     auto_queries_used = 0
-    if len(assets) < MANUAL_POOL_TARGET:
+    if allow_auto_backfill and len(assets) < requested_target:
         for scene_index, scene in enumerate(scenes or []):
-            if len(assets) >= MANUAL_POOL_TARGET or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
+            if len(assets) >= requested_target or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
                 break
             if not isinstance(scene, dict):
                 continue
@@ -1013,7 +1025,7 @@ def collect_manual_visual_pool(
                 source_plan = _source_plan(bot, visual_type)
 
             for query_round, query in enumerate(queries, 1):
-                if len(assets) >= MANUAL_POOL_TARGET or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
+                if len(assets) >= requested_target or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
                     break
 
                 auto_queries_used += 1
@@ -1102,12 +1114,12 @@ def collect_manual_visual_pool(
                 print(
                     f"   [Automatic Visual Pool Backfill] scene={scene_index + 1} "
                     f"query='{query}' | candidates={len(candidates)} | "
-                    f"entity-verified={added} | shared-pool={len(assets)}/{MANUAL_POOL_MAX} "
+                    f"entity-verified={added} | shared-pool={len(assets)}/{requested_max} "
                     f"| Gemini={qa_requests}",
                     flush=True,
                 )
 
-            if len(assets) >= MANUAL_POOL_TARGET:
+            if len(assets) >= requested_target:
                 break
 
     deduped = {}
@@ -1120,16 +1132,48 @@ def collect_manual_visual_pool(
         ),
     ):
         deduped.setdefault(str(asset.get("hash") or ""), asset)
-    final_assets = list(deduped.values())[:MANUAL_POOL_MAX]
+    final_assets = list(deduped.values())[:requested_max]
 
     return {
         "assets": final_assets,
         "queries": [str(item).strip() for item in manual_queries or [] if str(item).strip()],
         "query_stats": query_stats,
         "rejection_counts": rejected_counts,
-        "target": MANUAL_POOL_TARGET,
-        "hard_max": MANUAL_POOL_MAX,
+        "target": requested_target,
+        "hard_max": requested_max,
     }
+
+def collect_manual_visual_options(
+    runtime,
+    bot,
+    scene: dict,
+    query: str,
+    video_title: str = "",
+    used_hashes: set[str] | None = None,
+    min_options: int = 3,
+    max_options: int = 3,
+) -> dict:
+    """Build a small exact-query pool for dashboard replacement choices."""
+    minimum = max(1, min(3, int(min_options or 3)))
+    maximum = max(minimum, min(10, int(max_options or minimum)))
+    result = collect_manual_visual_pool(
+        runtime,
+        bot,
+        [scene] if isinstance(scene, dict) else [],
+        [str(query or "").strip()],
+        video_title=video_title,
+        used_hashes=used_hashes,
+        pool_target=minimum,
+        pool_max=maximum,
+        allow_auto_backfill=False,
+    )
+    options = list(result.get("assets") or [])[:maximum]
+    result["assets"] = options
+    result["minimum_options"] = minimum
+    result["available_options"] = len(options)
+    result["enough_options"] = len(options) >= minimum
+    return result
+
 
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Retrieve a useful entity image bank with a small number of batched AI checks."""

@@ -51,7 +51,7 @@ header[data-testid="stHeader"] {
   backdrop-filter: blur(14px);
 }
 
-h1, h2, h3, h4, p, label, span, div { color: var(--vsf-ink); }
+h1, h2, h3, h4, p, label { color: var(--vsf-ink); }
 .stCaption, [data-testid="stCaptionContainer"] p { color: var(--vsf-muted) !important; }
 
 .brand-card {
@@ -128,16 +128,15 @@ h1, h2, h3, h4, p, label, span, div { color: var(--vsf-ink); }
 .stSelectbox [data-baseweb="select"] input,
 .stSelectbox [data-baseweb="select"] div { color: var(--vsf-ink) !important; }
 [data-baseweb="popover"] {
-  position: relative !important;
   z-index: 1000000 !important;
   border: 1px solid rgba(23,33,43,.10) !important;
   border-radius: 15px !important;
   box-shadow: 0 20px 55px rgba(30,45,60,.18) !important;
   background: #ffffff !important;
   opacity: 1 !important;
-  overflow: hidden !important;
   isolation: isolate !important;
 }
+[data-baseweb="popover"] > div,
 [data-baseweb="popover"] [data-baseweb="menu"],
 [data-baseweb="popover"] [role="listbox"] {
   background: #ffffff !important;
@@ -151,22 +150,42 @@ h1, h2, h3, h4, p, label, span, div { color: var(--vsf-ink); }
   padding: 9px 12px !important;
   border-radius: 9px !important;
   color: var(--vsf-ink) !important;
-  background: transparent !important;
+  background: #ffffff !important;
 }
 [data-baseweb="popover"] [role="option"] span,
 [data-baseweb="popover"] [role="option"] div {
   color: var(--vsf-ink) !important;
+  background: transparent !important;
   opacity: 1 !important;
 }
-[data-baseweb="popover"] [role="option"]:hover { background: var(--vsf-blue-soft) !important; }
-[data-baseweb="menu"] [role="option"]:hover { background: var(--vsf-blue-soft) !important; }
-[data-baseweb="menu"] [aria-selected="true"] {
-  background: #f3f8fc !important;
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [role="option"][aria-selected="true"] {
+  background: var(--vsf-blue-soft) !important;
   color: var(--vsf-blue) !important;
   font-weight: 720 !important;
 }
 
 .stTextInput label, .stTextArea label { font-weight: 720 !important; color: #34414d !important; }
+
+/* Keep every interactive control on an opaque surface so text never shows through. */
+.stSelectbox [data-baseweb="select"],
+.stMultiSelect [data-baseweb="select"],
+.stTextInput [data-baseweb="base-input"],
+.stTextArea [data-baseweb="base-input"],
+.stDateInput [data-baseweb="base-input"],
+.stTimeInput [data-baseweb="base-input"] {
+  background: #ffffff !important;
+  color: var(--vsf-ink) !important;
+  border-color: rgba(23,33,43,.10) !important;
+}
+.stSelectbox [data-baseweb="select"] *,
+.stMultiSelect [data-baseweb="select"] *,
+.stTextInput [data-baseweb="base-input"] *,
+.stTextArea [data-baseweb="base-input"] *,
+.stDateInput [data-baseweb="base-input"] *,
+.stTimeInput [data-baseweb="base-input"] * {
+  color: var(--vsf-ink) !important;
+}
 
 .stButton > button, .stLinkButton > a {
   border-radius: 13px !important;

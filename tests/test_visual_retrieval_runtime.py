@@ -1063,6 +1063,68 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
 
+
+def test_manual_visual_options_returns_three_unique_choices_without_backfill(monkeypatch):
+    from visual_retrieval_runtime import collect_manual_visual_options
+
+    image_candidates = []
+    for index in range(5):
+        buffer = io.BytesIO()
+        Image.new(
+            "RGB",
+            (1200, 1600),
+            (30 + index * 20, 60, 100 + index * 10),
+        ).save(buffer, format="JPEG", quality=95)
+        candidate = _licensed_candidate(buffer.getvalue(), "cc0")
+        candidate["search_title"] = f"Shafali Verma photo {index + 1}"
+        candidate["search_position"] = index + 1
+        image_candidates.append(candidate)
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("Commons", lambda *args: image_candidates),
+        ],
+    )
+
+    import visual_qa_runtime
+    monkeypatch.setattr(
+        visual_qa_runtime,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = collect_manual_visual_options(
+        FakeRuntime(),
+        object(),
+        {
+            "primary_entity": "Shafali Verma",
+            "factual_primary_entity": "Shafali Verma",
+            "voiceover": "Shafali Verma batting for India.",
+        },
+        "Shafali Verma",
+        min_options=3,
+        max_options=3,
+    )
+
+    assets = result["assets"]
+    assert len(assets) == 3
+    assert len({item["hash"] for item in assets}) == 3
+    assert result["target"] == 3
+    assert result["hard_max"] == 3
+    assert result["available_options"] == 3
+    assert result["enough_options"] is True
+    assert all(stat["pool_origin"] == "manual" for stat in result["query_stats"])
+    assert len(result["query_stats"]) == 1
+
 def test_manual_pool_retains_entity_verified_soft_resolution_candidate(monkeypatch):
     low = io.BytesIO()
     Image.new("RGB", (400, 600), (50, 60, 70)).save(low, format="JPEG", quality=95)
