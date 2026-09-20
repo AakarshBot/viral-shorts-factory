@@ -80,11 +80,21 @@ def _manual_entity_from_query(manual: str, resolved_subject: str) -> str:
 
 
 def canonical_manual_entity_anchor(manual: str, resolved_subject: str = "") -> str:
-    """Return a canonical named entity for verification while keeping retrieval exact."""
+    """Canonicalize only named-team manual queries; preserve all other manual anchors."""
     query = _clean(manual)
     anchor = _manual_entity_from_query(query, resolved_subject)
     if not anchor:
         return query
+
+    lowered = query.casefold()
+    is_named_team = bool(
+        re.search(r"\bwomen'?s\b", lowered)
+        and re.search(r"\bnational\b", lowered)
+        and re.search(r"\bteam\b", lowered)
+    )
+    if not is_named_team:
+        return anchor
+
     try:
         from visual_provider_boundary_runtime import resolve_wikidata_entity
         resolved = resolve_wikidata_entity(anchor)
