@@ -418,8 +418,31 @@ def render_header(action_mode: str) -> None:
             unsafe_allow_html=True,
         )
 
+def render_workspace_navigation() -> str:
+    options = [
+        "Live Factory",
+        "Channel Statistics",
+        "Run Offline Diagnostics",
+        "Demo Factory",
+        "Final Branding Preview",
+    ]
+    current = st.session_state.get("dashboard_utility", "Live Factory")
+    if current == "None" or current not in options:
+        current = "Live Factory"
+    st.sidebar.markdown("<div class='sidebar-kicker'>Workspace</div>", unsafe_allow_html=True)
+    selected = st.sidebar.selectbox(
+        "Go to",
+        options,
+        index=options.index(current),
+        key="dashboard_utility",
+        label_visibility="collapsed",
+    )
+    return selected
+
 def render_sidebar_controls() -> Dict[str, Any]:
-    st.sidebar.markdown("## Factory setup")
+    st.sidebar.markdown("<div class='sidebar-kicker'>Production workspace</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("<div class='sidebar-title'>Factory setup</div>", unsafe_allow_html=True)
+
     channel_options = _channel_options()
     st.sidebar.selectbox("Channel", channel_options, key="selected_channel")
 
@@ -454,9 +477,13 @@ def render_sidebar_controls() -> Dict[str, Any]:
             key="requested_topic",
         )
     elif st.session_state.editorial_mode == "AI":
-        st.sidebar.info("AI mode uses current news, channel history, genre fit, vault topics and trend signals to produce a Top 10.")
+        with st.sidebar.expander("How AI mode works", expanded=False):
+            st.caption("AI mode blends current news, channel history, genre fit, vault topics and trend signals into a Top 10.")
     else:
-        options = category_options("top5" if st.session_state.editorial_mode == "Top Five" else "regular", st.session_state.editorial_mode)
+        options = category_options(
+            "top5" if st.session_state.editorial_mode == "Top Five" else "regular",
+            st.session_state.editorial_mode,
+        )
         labels = list(options.keys())
         current_key = st.session_state.get("category_key", next(iter(options.values())))
         current_label = next((label for label, key in options.items() if key == current_key), labels[0])
@@ -469,14 +496,25 @@ def render_sidebar_controls() -> Dict[str, Any]:
         st.session_state.category_key = options[selected_label]
 
     sidebar_snapshot = st.session_state.workflow_controller.snapshot()
+    st.sidebar.divider()
     if sidebar_snapshot.get("thread_alive"):
-        st.sidebar.success("Factory run active", icon="⚙️")
+        status_title = f"Running · {int(sidebar_snapshot.get('percent', 0) or 0)}%"
+        status_copy = str(sidebar_snapshot.get("message") or "Factory production is active.").strip()
     elif sidebar_snapshot.get("completed"):
-        st.sidebar.success("Latest run complete", icon="✅")
+        status_title = "Latest run complete"
+        status_copy = "Review the generated Short below."
     elif sidebar_snapshot.get("stage") == "error":
-        st.sidebar.error("Latest run stopped", icon="⚠️")
+        status_title = "Latest run stopped"
+        status_copy = str(sidebar_snapshot.get("error") or "The factory stopped with an error.").strip()
     else:
-        st.sidebar.info("Ready for a new run")
+        status_title = "Ready"
+        status_copy = "No production run is active."
+
+    st.sidebar.markdown(
+        f"<div class='sidebar-status'><div class='sidebar-status-title'>{status_title}</div>"
+        f"<div class='sidebar-status-copy'>{status_copy}</div></div>",
+        unsafe_allow_html=True,
+    )
 
     if st.sidebar.button(
         "Reset current run",
@@ -485,67 +523,53 @@ def render_sidebar_controls() -> Dict[str, Any]:
     ):
         reset_run()
         st.rerun()
-    if st.session_state.workflow_controller.snapshot().get("thread_alive"):
-        st.sidebar.caption("A live run is active. Use the visual review controls to stop or continue it.")
 
     return build_config()
-
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     stages = [
         ("Discovery", "discovery", 10, 14),
         ("Research", "research", 15, 23),
         ("Script", "script", 24, 38),
-        ("Script Review", "script_review", 39, 40),
+        ("Review", "script_review", 39, 40),
         ("Voiceover", "audio", 41, 54),
         ("Visuals", "visuals", 55, 75),
-        ("Visual Review", "visual_approval", 76, 76),
-        ("Final Render", "render", 77, 95),
+        ("Visual QC", "visual_approval", 76, 76),
+        ("Render", "render", 77, 95),
         ("Final QC", "qc", 96, 100),
     ]
     current = str(snapshot.get("stage") or "idle")
     percent = int(snapshot.get("percent", 0) or 0)
 
-    st.markdown(
-        "<div class='section-kicker'>Production pipeline</div>"
-        "<h3 style='margin-top:0'>Factory progress</h3>",
-        unsafe_allow_html=True,
+    _render_section_header(
+        "Production pipeline",
+        "Factory progress",
+        "One overall progress bar, with each stage reduced to a simple status.",
     )
+    st.progress(max(0.0, min(1.0, percent / 100)), text=f"{percent}% complete")
 
-    # Keep every stage visible, but use a compact grid instead of eight full-width
-    # progress sections. The overall bar remains the primary progress indicator.
-    overall = max(0.0, min(1.0, percent / 100))
-    st.progress(overall, text=f"Overall progress · {percent}%")
-
-    for row_start in range(0, len(stages), 4):
-        row = stages[row_start:row_start + 4]
-        cols = st.columns(len(row), gap="small")
-        for column, (label, key, lo, hi) in zip(cols, row):
-            if current == "error":
-                value = 0.0
-                icon = "⚠️"
-                state = "Stopped"
-            elif percent >= hi:
-                value = 1.0
-                icon = "✓"
-                state = "Complete"
-            elif current == key:
-                value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
-                icon = "●"
-                state = "Active"
-            else:
-                value = 0.0
-                icon = "○"
-                state = "Waiting"
-            with column:
-                st.markdown(f"**{icon} {label}**")
-                st.progress(value)
-                st.caption(state)
+    cards = []
+    for label, key, _lo, hi in stages:
+        if current == "error":
+            state, css_class, icon = "Stopped", "stopped", "⚠️"
+        elif percent >= hi:
+            state, css_class, icon = "Done", "done", "✓"
+        elif current == key:
+            state, css_class, icon = "Now", "active", "●"
+        else:
+            state, css_class, icon = "Next", "", "○"
+        cards.append(
+            f"<div class='stage-card {css_class}'><div class='stage-name'>{icon} {label}</div>"
+            f"<div class='stage-state'>{state}</div></div>"
+        )
+    st.markdown("<div class='stage-strip'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
 
     message = str(snapshot.get("message") or "").strip()
     if message:
-        st.info(message, icon="ℹ️")
-
+        st.markdown(
+            f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {message}</div></div>",
+            unsafe_allow_html=True,
+        )
 
 def _script_text(script_data: Dict[str, Any]) -> str:
     scenes = script_data.get("script", [])
