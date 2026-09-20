@@ -1741,7 +1741,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         with meta_cols[0]:
             description = st.text_area("YouTube description", height=140, key="final_description", disabled=metadata_approved)
         with meta_cols[1]:
-            comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=not editing)
+            comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=metadata_approved)
 
         if not metadata_approved:
             approve_col, note_col = st.columns([1, 2])
@@ -1764,9 +1764,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
 
         if metadata_approved:
             st.success("Metadata approved.", icon="✅")
-        if st.button("Edit metadata", width="content", key="edit_metadata"):
-            st.session_state["metadata_approved"] = False
-            st.rerun()
+            if st.button("Edit metadata", width="content", key="edit_metadata"):
+                st.session_state["metadata_approved"] = False
+                st.rerun()
 
     if not (video_path and os.path.isfile(video_path)):
         st.error("The final video path is recorded, but the file is not accessible from the dashboard process.")
