@@ -269,28 +269,22 @@ AI_DISCOVERY_CATEGORY_KEYS = (
 
 
 def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
-    """Build a diverse current-topic list from bounded global discovery lenses."""
+    """Build an AI-mode topic portfolio from the same broad free discovery radar."""
     from story_ranker import (
-        _canonical_url,
         _candidate_reason,
         _cheap_filter,
-        _discovery_source_pass,
-        _discovery_query_lanes,
-        _recent_topic_cooldown,
+        _discovery_portfolio_pass,
         _deduplicate_stage,
         _editorial_score,
-        _gnews_items,
+        _infer_discovery_category,
         _load_history,
         _load_used_topics,
-        _official_feed_items,
         _originality_stage,
-        _reddit_items,
-        _rss_items,
+        _recent_topic_cooldown,
         _source_label,
         _story_key,
         _story_url,
-        _tokens,
-        discover_event_pool,
+        collect_high_recall_stories,
         diversity_rerank,
     )
 
@@ -298,80 +292,17 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     rows = _load_history(conn)
     used_topics = _load_used_topics(conn)
     language = str(web_config.get("language", "english"))
-    api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
-    raw: list[dict[str, Any]] = []
+    raw, social_titles = collect_high_recall_stories(bot, "", {}, broad_discovery=True)
 
-    gnews_jobs = []
-    source_jobs = []
-    with ThreadPoolExecutor(max_workers=8, thread_name_prefix="ai-discovery") as pool:
-        for category in AI_DISCOVERY_CATEGORY_KEYS:
-            cfg = bot.CONTENT_CATEGORIES.get(category) or {}
-            query = str(cfg.get("gnews_q", "") or "").strip()
-            for lane in _discovery_query_lanes(query, genre_key=category, broad=True)[:4]:
-                if lane and api_key:
-                    gnews_jobs.append((
-                        category,
-                        pool.submit(
-                            _gnews_items,
-                            lane,
-                            api_key,
-                            category,
-                            global_scope=True,
-                        ),
-                    ))
-            rss_url = str(cfg.get("rss_url", "") or "").strip()
-            if rss_url:
-                source_jobs.append(pool.submit(_rss_items, rss_url, category))
-            source_jobs.append(pool.submit(_official_feed_items, category, cfg))
-        for category, future in gnews_jobs:
-            raw.extend(future.result())
-        for future in source_jobs:
-            raw.extend(future.result())
-
-    social_rows = _reddit_items("viral_phenomenon")
-    raw.extend(social_rows)
-    social_titles = [row.get("title", "") for row in social_rows]
-
-    compact: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        key = _canonical_url(item.get("url") or item.get("link"))
-        if not key:
-            key = "title:" + " ".join(sorted(_tokens(item.get("title", ""))))
-        if key and key not in seen:
-            seen.add(key)
-            compact.append(item)
-
-    event_pool = discover_event_pool(
-        query=(
-            "breaking OR latest OR announced OR decision OR deal OR launch OR "
-            "discovery OR incident OR crisis OR court OR business OR technology OR "
-            "sports OR entertainment OR culture OR viral"
-        ),
-        existing_articles=compact,
-        timespan="48h",
-        max_gdelt_records=150,
-    )
-    candidates = event_pool.get("events") or compact
-
-    stage30 = _cheap_filter(candidates, max_items=90, max_age_hours=48)
-    stage20 = _deduplicate_stage(stage30, max_items=70)
+    stage30 = _cheap_filter(raw, max_items=120, max_age_hours=48)
+    stage20 = _deduplicate_stage(stage30, max_items=90)
     stage20 = _recent_topic_cooldown(conn, stage20, hours=36)
-    stage20 = [item for item in stage20 if _discovery_source_pass(item)]
-    # Dashboard discovery keeps provenance on every event but does not require
-    # multi-source corroboration before showing it to the human selector.
-    stage12 = stage20
-    stage10 = _originality_stage(stage12, used_topics, max_items=max_candidates * 2)
+    stage20 = [item for item in stage20 if item.get("url")]
+    stage10 = _originality_stage(stage20, used_topics, max_items=max_candidates * 2)
 
-    ranked: list[dict[str, Any]] = []
+    ranked = []
     for item in stage10:
-        category = str(
-            item.get("primary_genre")
-            or item.get("genre")
-            or "national_global_affairs"
-        )
+        category = _infer_discovery_category(item)
         scored = _editorial_score(
             item,
             rows,
@@ -381,14 +312,14 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
             social_titles,
             ai_cricket=False,
         )
-        # _editorial_score already includes channel-history fit. Reuse its
-        # normalized dimension for the dashboard instead of adding history twice.
+        if not _discovery_portfolio_pass(scored):
+            continue
+        scored["recommended_category"] = category
+        scored["recommended_format"] = "regular"
+        scored["ai_recommendation"] = True
         scored["channel_history_fit"] = float(
             (scored.get("discovery_dimensions") or {}).get("channel_history") or 0.0
         )
-        scored["recommended_category"] = category if category in bot.CONTENT_CATEGORIES else "national_global_affairs"
-        scored["recommended_format"] = "regular"
-        scored["ai_recommendation"] = True
         ranked.append(scored)
 
     ranked = diversity_rerank(ranked, max_items=max_candidates)
@@ -404,11 +335,9 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
             f"({item.get('channel_history_fit', 0):.1f}/10)."
         )
 
-    if not pool:
-        print("   [AI Discovery] No source-backed candidates survived the discovery gates.", flush=True)
     print(
-        f"   [AI Discovery] current intake={len(compact)} -> events={len(candidates)} -> "
-        f"Top {len(pool)}; history used as a fit signal, not a repetition target.",
+        f"   [AI Discovery] broad intake={len(raw)} -> Top {len(pool)}; "
+        "category inferred after discovery, not used as an intake gate.",
         flush=True,
     )
     return pool
