@@ -221,7 +221,7 @@ def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode
     }
 
 
-def _clean_script_result(script_data: dict, story_data: dict) -> dict:
+def _clean_script_result(script_data: dict, story_data: dict, format_mode: str = "regular") -> dict:
     result = dict(script_data or {})
     scenes = result.get("script")
     if not isinstance(scenes, list):
@@ -233,11 +233,7 @@ def _clean_script_result(script_data: dict, story_data: dict) -> dict:
         SCENE_MAX_WORDS,
         SCRIPT_MIN_TOTAL_WORDS,
     )
-    minimum, maximum = _script_scene_bounds(
-        str(story_data.get("format_mode") or "regular")
-        if isinstance(story_data, dict)
-        else "regular"
-    )
+    minimum, maximum = _script_scene_bounds(format_mode)
     if not (minimum <= len(scenes) <= maximum):
         raise ValueError(f"Script contains {len(scenes)} scenes; required {minimum}-{maximum}.")
 
@@ -291,14 +287,14 @@ def _wrap_script_writer(bot):
     def guarded_write_script(story_data, language_cfg, genre_key, conn, format_mode):
         try:
             result = current(story_data, language_cfg, genre_key, conn, format_mode)
-            cleaned = _clean_script_result(result, story_data)
+            cleaned = _clean_script_result(result, story_data, format_mode)
             # A strict fallback is only used when the existing generator fails
             # or produces invalid narration; it never silently patches missing facts.
             return cleaned
         except Exception as exc:
             print(f"   [Script Integrity] AI script rejected: {type(exc).__name__}: {exc}", flush=True)
             fallback = strict_fallback(story_data, language_cfg, genre_key, format_mode)
-            return _clean_script_result(fallback, story_data)
+            return _clean_script_result(fallback, story_data, format_mode)
 
     guarded_write_script._pipeline_integrity_wrapped = True
     bot.write_script = guarded_write_script
