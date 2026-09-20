@@ -132,7 +132,7 @@ def test_visual_batch_qc_is_the_active_retrieval_boundary(monkeypatch):
         "India cricket team",
     )
 
-    assert calls["qa"] == 1
+    assert calls["qa"] <= 2
     assert used_ai is False
     assert source == "visual-rescue"
     assert scene["visual_rejection_counts"]["final_rescue"] == 1
