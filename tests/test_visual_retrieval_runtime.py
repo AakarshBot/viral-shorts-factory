@@ -1379,3 +1379,176 @@ def test_canonical_manual_entity_anchor_normalizes_named_team(monkeypatch):
         == "India women's national cricket team"
     )
 
+
+
+
+def test_manual_pool_uses_descending_rank_targets(monkeypatch):
+    image_sets = {}
+    for query_index, target in enumerate((10, 7, 5), 1):
+        values = []
+        for index in range(target):
+            values.append({
+                "bytes": _jpeg_bytes((900 + index, 1200)),
+                "provenance": {
+                    "provider": "Commons",
+                    "url": f"https://commons.wikimedia.org/wiki/File:{query_index}_{index}.jpg",
+                    "author": "Test",
+                    "license": "cc0",
+                    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+                },
+                "source_image_url": f"https://upload.wikimedia.org/{query_index}_{index}.jpg",
+                "source_page_url": f"https://commons.wikimedia.org/wiki/File:{query_index}_{index}.jpg",
+                "search_title": f"File {query_index} {index}",
+            })
+        image_sets[query_index] = values
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    def fake_plan(_bot, _visual_type, _visual_genre=""):
+        return [
+            ("Commons", lambda query, *_args: image_sets[int(query.split()[1])] ),
+        ]
+
+    monkeypatch.setattr(retrieval, "_source_plan", fake_plan)
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        visual_runtime,
+        FakeBot(),
+        [],
+        ["rank 1", "rank 2", "rank 3"],
+        allow_auto_backfill=False,
+    )
+    assert [row["target"] for row in result["query_stats"]] == [10, 7, 5]
+    assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
+    assert len(result["assets"]) == 22
+
+
+def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
+    values = []
+    for index in range(4):
+        values.append({
+            "bytes": _jpeg_bytes((900 + index, 1200)),
+            "provenance": {
+                "provider": "Commons",
+                "url": f"https://commons.wikimedia.org/wiki/File:Article_image_{index}.jpg",
+                "author": "Test",
+                "license": "cc0",
+                "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            },
+            "source_image_url": f"https://upload.wikimedia.org/article_image_{index}.jpg",
+            "source_page_url": "https://example.com/article",
+            "search_title": f"Article image {index}",
+        })
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *_args: [("Commons", lambda *_args: values)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [],
+        ["same article"],
+        allow_auto_backfill=False,
+    )
+    assert len(result["assets"]) == 4
+    assert result["rejection_counts"]["duplicate"] == 0
+
+
+def test_new_manual_search_applies_only_monetization_filter(monkeypatch):
+    values = [
+        {
+            "bytes": _jpeg_bytes((240, 240)),
+            "provenance": {
+                "provider": "Openverse",
+                "url": f"https://example.com/low-{index}.jpg",
+                "license": "cc-by-nc",
+                "license_url": "",
+            },
+        }
+        for index in range(1)
+    ]
+    values.extend(
+        {
+            "bytes": _jpeg_bytes((280, 280)),
+            "provenance": {
+                "provider": "Openverse",
+                "url": f"https://example.com/valid-{index}.jpg",
+                "license": "cc0",
+                "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            },
+            "source_image_url": f"https://example.com/valid-{index}.jpg",
+            "source_page_url": f"https://example.com/valid-{index}",
+            "search_title": f"valid {index}",
+        }
+        for index in range(5)
+    )
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *_args: [("Openverse", lambda *_args: values)],
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("identity AI must not run for a new manual search")
+
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fail_if_called)
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "BCCI logo",
+    )
+    assert len(result["assets"]) == 5
+    assert result["rejection_counts"]["monetization"] == 1
+
+
+def test_manual_query_planner_has_non_network_fallback(monkeypatch):
+    import manual_visual_query_runtime as planner
+
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    result = planner.generate_visual_query_suggestions(
+        "Virat Kohli joins India camp",
+        "Virat Kohli joined the India cricket camp in Mumbai.",
+        category="sports",
+        max_queries=5,
+    )
+    assert result
+    assert result[0]["query"]
