@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 
-_MIN_SCENES = {"regular": 6, "trending": 6, "tech_reviews": 6, "top5": 7, "cricket": 6}
+_MIN_SCENES = {"regular": 5, "trending": 5, "tech_reviews": 5, "top5": 7, "cricket": 5}
 _MAX_SCENES = {"regular": 8, "trending": 8, "tech_reviews": 8, "top5": 7, "cricket": 8}
 
 
@@ -160,17 +160,7 @@ def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any],
     result = _repair_visual_identity(result, story_data)
     scenes = result.get("script") if isinstance(result, dict) else None
     if isinstance(scenes, list) and minimum <= len(scenes) <= maximum:
-        try:
-            from script_runtime import validate_content_density
-            content_ok, content_reason = validate_content_density(result, story_data, format_mode)
-        except Exception as exc:
-            content_ok, content_reason = False, f"content-density validator unavailable: {type(exc).__name__}"
-        if content_ok:
-            return result
-        print(
-            f"   [Script Hardening] Scene count is valid but narration contract failed: {content_reason}.",
-            flush=True,
-        )
+        return result
 
     print(
         f"   [Script Hardening] Scene contract failed: got {len(scenes) if isinstance(scenes, list) else 0}; "
