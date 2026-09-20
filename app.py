@@ -660,6 +660,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     for offset, item in enumerate(items):
         with columns[offset % 3]:
             st.markdown(f"### Visual {item['index']}")
+            st.markdown("**Chosen for this slide**")
             if item.get("missing"):
                 st.error("No rendered image file is available for this slide.", icon="⛔")
             else:
