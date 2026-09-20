@@ -102,7 +102,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         print("   [Visual QA] IDENTITY | Gemini unavailable (no API key); candidate remains uncertain.", flush=True)
         return None
 
-    key = _cache_key(img_bytes, entity, tier, visual_type, visual_genre)
+    key = _cache_key(img_bytes, entity, "ENTITY", "ENTITY", "ENTITY")
     if key in _CACHE:
         cached = _CACHE[key]
         print(f"   [Visual QA] IDENTITY | cached verdict={'YES' if cached is True else 'NO'}", flush=True)
@@ -204,7 +204,7 @@ def strict_gemini_check_batch(
 
     uncached = []
     for index, data in image_items:
-        key = _cache_key(data, entity, tier, visual_type, visual_genre)
+        key = _cache_key(data, entity, "ENTITY", "ENTITY", "ENTITY")
         if key in _CACHE:
             results[index] = _CACHE[key]
         else:
