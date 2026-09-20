@@ -263,11 +263,6 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     return _bounded_downloads(urls, used_urls)
 
 
-def fetch_commons(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    candidates = fetch_commons_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
-
-
 def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("PEXELS_API_KEY", "")).strip()
     q = _clean_query(query)
