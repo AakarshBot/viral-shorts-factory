@@ -1593,7 +1593,7 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
     monkeypatch.setattr(
         retrieval,
         "_manual_query_visual_context",
-        lambda query, scenes: ("GENERAL_CONTEXT", "SPORTS_ACTION"),
+        lambda query, scenes: ("GENERAL_CONTEXT", "GENERAL_CONTEXT"),
     )
     monkeypatch.setattr(
         retrieval,
@@ -1621,6 +1621,103 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
     assert len(second_hashes) == 5
     assert first_hashes.isdisjoint(second_hashes)
     assert calls == [1, 2]
+
+
+def test_manual_action_search_uses_action_query_variants(monkeypatch):
+    image_bytes = [
+        _jpeg_bytes((900, 1200), (20 + index * 20, 60, 100))
+        for index in range(6)
+    ]
+    queries = []
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def fake_fetcher(*args):
+        search_query = str(args[0])
+        queries.append(search_query)
+        start = (len(queries) - 1) * 2
+        return [
+            {
+                "bytes": image_bytes[index],
+                "source_image_url": f"https://cdn.pexels.com/photos/action-{index + 1}/image.jpg",
+                "provenance": {
+                    "provider": "Pexels",
+                    "url": f"https://www.pexels.com/photo/action-{index + 1}/",
+                    "author": "Tester",
+                    "license": "Pexels License",
+                    "license_url": "https://www.pexels.com/license/",
+                },
+                "search_title": search_query,
+                "search_description": search_query,
+            }
+            for index in range(start, min(start + 2, len(image_bytes)))
+        ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_manual_query_visual_context",
+        lambda query, scenes: ("ORGANIZATION", "TEAM_ACTION"),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("Pexels", fake_fetcher)],
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "India women's national team",
+    )
+
+    assert len(result["assets"]) == 5
+    assert queries[:3] == [
+        "India women's national team",
+        "India women's national team action",
+        "India women's national team celebration",
+    ]
+    assert result["assets"][2]["query"].endswith("action")
+    assert result["assets"][4]["query"].endswith("celebration")
+
+
+def test_action_metadata_boosts_candidate_priority():
+    from visual_retrieval_runtime import _candidate_priority
+
+    action_bytes = _jpeg_bytes((1600, 900), (80, 90, 100))
+    static_bytes = _jpeg_bytes((1600, 900), (80, 90, 100))
+
+    action_score = _candidate_priority(
+        "Pexels",
+        action_bytes,
+        "ORGANIZATION",
+        "India women's national team",
+        "TEAM_ACTION",
+        data={
+            "search_title": "India women's national team celebrating after match",
+            "search_description": "players celebrating and playing cricket",
+            "search_position": 1,
+        },
+    )
+    static_score = _candidate_priority(
+        "Pexels",
+        static_bytes,
+        "ORGANIZATION",
+        "India women's national team",
+        "TEAM_ACTION",
+        data={
+            "search_title": "India women's national team portrait",
+            "search_description": "team headshot",
+            "search_position": 1,
+        },
+    )
+
+    assert action_score > static_score
 
 
 def test_pixabay_manual_search_requests_latest_page(monkeypatch, tmp_path):
