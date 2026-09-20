@@ -248,6 +248,8 @@ def test_real_visual_candidate_reaches_verified_source(monkeypatch):
         lambda bot, visual_type: [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -403,6 +405,8 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [_licensed_candidate(image_bytes, "by")])],
     )
 
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -531,6 +535,8 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
         "_source_plan",
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
+
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
