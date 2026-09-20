@@ -21,7 +21,6 @@ from factory_runtime import install_safe_exception_hook, patch_dashboard_runtime
 from provider_runtime import patch_provider_adapters
 from quality_runtime import patch_quality_control
 from runtime_bindings import bind_dashboard_patches
-from semantic_runtime import patch_semantic_dedup
 from story_ranker import patch_story_selection
 from visual_content_runtime import patch_content_first_visuals as patch_visual_pipeline
 from visual_qa_runtime import install_visual_qa_bridge
