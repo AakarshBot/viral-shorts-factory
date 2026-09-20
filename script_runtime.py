@@ -31,12 +31,18 @@ _CTA_RE = re.compile(
 )
 
 _STRUCTURE_HINTS = {
-    "comparison": "headline → establish both sides → give the defining difference → explain why it matters",
-    "timeline": "headline → key starting point → pivotal development → current consequence",
-    "ranking": "headline → identify the subject → strongest evidence/details → why the ranking matters",
-    "how_to": "headline → explain the mechanism/process → key evidence → practical consequence",
-    "explainer": "headline → core facts → useful context → important development → consequence",
+    "comparison": "headline → establish both sides → defining difference → evidence → consequence",
+    "timeline": "headline → starting point → pivotal development → what changed → current consequence",
+    "ranking": "headline → establish subject → strongest evidence → comparison/context → why the ranking matters",
+    "how_to": "headline → explain mechanism/process → evidence → practical consequence",
+    "explainer": "headline → core facts → useful context → important development → what it means",
 }
+
+SCRIPT_MIN_SCENES = 6
+SCRIPT_MAX_SCENES = 8
+SCENE_MIN_WORDS = 12
+SCENE_MAX_WORDS = 48
+SCRIPT_MIN_TOTAL_WORDS = 110
 
 
 def _originality_words(text):
@@ -90,7 +96,7 @@ def check_script_originality(script_data, story_data):
             source_sixgrams = {tuple(source_words[i:i+6]) for i in range(max(0, len(source_words)-5))}
             longest = _longest_originality_run(words, source_words)
             ratio = len(sixgrams & source_sixgrams) / max(1, len(sixgrams))
-            if longest >= 8 or ratio > 0.15:
+            if longest >= 10 or (longest >= 7 and ratio > 0.20):
                 failures.append({"scene": scene_index, "source_index": source_index, "longest_run": longest, "sixgram_ratio": ratio})
                 break
     return {"passed": not failures, "failures": failures, "source_count": len(sources)}
@@ -100,14 +106,18 @@ def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
 def _script_scene_bounds(format_mode):
-    return (7, 7) if str(format_mode or "").lower() == "top5" else (5, 8)
+    return (
+        (7, 7)
+        if str(format_mode or "").lower() == "top5"
+        else (SCRIPT_MIN_SCENES, SCRIPT_MAX_SCENES)
+    )
 
 
 def _scene_word_count(text):
     return len(str(text or "").split())
 
 
-def _split_scene_text(text, min_words=8, max_words=30):
+def _split_scene_text(text, min_words=SCENE_MIN_WORDS, max_words=SCENE_MAX_WORDS):
     value = re.sub(r"\s+", " ", str(text or "").strip())
     if not value:
         return []
@@ -162,7 +172,7 @@ def _split_scene_text(text, min_words=8, max_words=30):
     return [part.strip() for part in packed if min_words <= _scene_word_count(part) <= max_words]
 
 
-def _split_scene_at_midpoint(text, min_words=8, max_words=30):
+def _split_scene_at_midpoint(text, min_words=SCENE_MIN_WORDS, max_words=SCENE_MAX_WORDS):
     words = str(text or "").split()
     if len(words) < min_words * 2:
         return []
@@ -195,7 +205,10 @@ def repair_script_structure(script_data, format_mode):
 
     if (
         minimum <= len(original_scenes) <= maximum
-        and all(8 <= _scene_word_count(scene.get("voiceover")) <= 30 for scene in original_scenes)
+        and all(
+            SCENE_MIN_WORDS <= _scene_word_count(scene.get("voiceover")) <= SCENE_MAX_WORDS
+            for scene in original_scenes
+        )
     ):
         return script_data, {"changed": False, "reason": "scene contract already satisfied"}
 
@@ -240,7 +253,7 @@ def repair_script_structure(script_data, format_mode):
                 + str(expanded[index + 1].get("voiceover") or "").strip()
             ).strip()
             size = _scene_word_count(combined)
-            if 8 <= size <= 30 and (best_size is None or size < best_size):
+            if SCENE_MIN_WORDS <= size <= SCENE_MAX_WORDS and (best_size is None or size < best_size):
                 best_pair = index
                 best_size = size
         if best_pair is None:
@@ -262,7 +275,10 @@ def repair_script_structure(script_data, format_mode):
             "changed": False,
             "reason": f"could not safely reach {minimum}-{maximum} scenes from supplied narration",
         }
-    if not all(8 <= _scene_word_count(scene.get("voiceover")) <= 30 for scene in expanded):
+    if not all(
+        SCENE_MIN_WORDS <= _scene_word_count(scene.get("voiceover")) <= SCENE_MAX_WORDS
+        for scene in expanded
+    ):
         return None, {"changed": False, "reason": "repaired scenes still violate the word contract"}
 
     repaired = dict(script_data)
@@ -542,7 +558,7 @@ def _rewrite_for_originality_once(script_data, story_data, overlap):
     scenes = [{"index": i, "voiceover": str(s.get("voiceover") or "")} for i, s in enumerate(script_data.get("script") or [], 1) if isinstance(s, dict) and not s.get("human_contributed")]
     evidence = "\n\n".join(_originality_sources(story_data)[:10])
     prompt = (
-        "Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts and order. "
+        "Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts, scene count and narrative meaning. "
         "Do not add facts or quote sources. Return JSON with script entries containing index and voiceover.\n"
         "Detected overlap:" + json.dumps(overlap) + "\nSCENES:\n" + json.dumps(scenes, ensure_ascii=False)
         + "\nEVIDENCE:\n" + evidence[:16000]
@@ -631,21 +647,43 @@ def validate_content_density(script_data, story_data, format_mode):
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
         return False, "Script became empty after removing performative filler."
+
+    minimum, maximum = _script_scene_bounds(format_mode)
+    if not (minimum <= len(scenes) <= maximum):
+        return False, f"Script has {len(scenes)} scenes; required {minimum}-{maximum}."
+
     topic_terms = _topic_terms(story_data)
     grounding_words = []
     filler_hits = []
+    total_words = 0
+
     for index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict):
+            return False, f"Scene {index} is malformed."
         text = str(scene.get("voiceover", "")).strip()
         words = _words(text)
+        total_words += len(words)
         grounding_words.extend(words)
         grounding_words.extend(_words(scene.get("primary_entity", "")))
         grounding_words.extend(_words(scene.get("specific_search_prompt", "")))
-        if len(words) < 3:
-            return False, f"Scene {index} contains too little usable narration."
+
+        if len(words) < SCENE_MIN_WORDS:
+            return False, f"Scene {index} has {len(words)} words; minimum is {SCENE_MIN_WORDS}."
+        if len(words) > SCENE_MAX_WORDS:
+            return False, f"Scene {index} has {len(words)} words; maximum is {SCENE_MAX_WORDS}."
         if _looks_like_filler(text):
             filler_hits.append(index)
+
+    if total_words < SCRIPT_MIN_TOTAL_WORDS:
+        return False, f"Script contains only {total_words} narration words; minimum is {SCRIPT_MIN_TOTAL_WORDS}."
+
+    angle = str(script_data.get("editorial_angle") or "").strip()
+    if len(_words(angle)) < 8:
+        return False, "Script is missing a substantive editorial angle."
+
     if filler_hits:
         return False, "Performative filler remains in scene(s): " + ", ".join(map(str, filler_hits))
+
     if topic_terms:
         overlap = len(set(grounding_words) & topic_terms)
         required = 1 if any(
@@ -654,122 +692,76 @@ def validate_content_density(script_data, story_data, format_mode):
         ) else min(2, len(topic_terms))
         if overlap < required:
             return False, "Narration is not sufficiently grounded in the selected topic."
+
     return True, "Passed story-specific content-density and anti-filler checks"
 
 
-
 def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode):
-    """Build a strictly source-grounded emergency script without an LLM.
-
-    This is used only when all configured script providers are exhausted or
-    produce unusable output. It never invents facts; it reuses the selected
-    story title/source text and gives every scene explicit visual metadata.
-    """
+    """Build a source-only emergency script without weakening the script contract."""
     story_data = story_data if isinstance(story_data, dict) else {}
     title = re.sub(r"\s+", " ", str(story_data.get("title") or story_data.get("topic") or "Untitled story")).strip()
     raw_source = " ".join(
         str(story_data.get(key) or "")
-        for key in ("text", "summary", "description")
+        for key in ("research_evidence_text", "text", "summary", "description")
     )
     raw_source = re.sub(r"<[^>]+>", " ", raw_source)
     raw_source = re.sub(r"https?://\S+", " ", raw_source)
     raw_source = re.sub(r"\s+", " ", raw_source).strip()
 
-    combined = " ".join(part for part in (title, raw_source) if part).strip()
-    words = combined.split()
+    source_words = raw_source.split()
+    minimum, maximum = _script_scene_bounds(format_mode)
+    if len(source_words) < minimum * SCENE_MIN_WORDS:
+        raise ValueError(
+            f"Source-grounded fallback needs at least {minimum * SCENE_MIN_WORDS} usable source words; "
+            f"only {len(source_words)} were available."
+        )
 
-    # Keep chunks contiguous and source-derived. We prefer five distinct
-    # chunks; when the source is short, use the title as limited overlap.
+    target = max(minimum, min(maximum, int(round(len(source_words) / 18.0))))
+    while target > minimum and len(source_words) // target < SCENE_MIN_WORDS:
+        target -= 1
+    if len(source_words) // target > SCENE_MAX_WORDS:
+        target = maximum
+
+    base, extra = divmod(len(source_words), target)
+    if not (SCENE_MIN_WORDS <= base <= SCENE_MAX_WORDS):
+        raise ValueError("Source-grounded fallback cannot distribute evidence within the scene word envelope.")
+
     chunks = []
-    if len(words) >= 40:
-        chunk_size = max(8, (len(words) + 4) // 5)
-        for start in range(0, len(words), chunk_size):
-            chunk = " ".join(words[start:start + chunk_size]).strip()
-            if chunk:
-                chunks.append(chunk)
-            if len(chunks) == 5:
-                break
-    else:
-        sentences = [
-            re.sub(r"\s+", " ", s).strip(" -")
-            for s in re.split(r"(?<=[.!?])\s+", raw_source)
-            if len(re.findall(r"[A-Za-z0-9]+", s)) >= 5
-        ]
-        chunks.extend(sentences[:5])
-        if title and len(chunks) < 5:
-            chunks.insert(0, title)
-        # Pad only with source-derived combinations, never new factual claims.
-        source_fragments = [title] + [s for s in sentences if s != title]
-        cursor = 0
-        while len(chunks) < 5 and source_fragments:
-            a = source_fragments[cursor % len(source_fragments)]
-            b = source_fragments[(cursor + 1) % len(source_fragments)]
-            candidate = re.sub(r"\s+", " ", f"{a} {b}").strip()
-            if candidate and candidate not in chunks:
-                chunks.append(candidate)
-            cursor += 1
-            if cursor > 12:
-                break
+    cursor = 0
+    for index in range(target):
+        size = base + (1 if index < extra else 0)
+        if not (SCENE_MIN_WORDS <= size <= SCENE_MAX_WORDS):
+            raise ValueError("Source-grounded fallback exceeded the scene word envelope.")
+        chunks.append(" ".join(source_words[cursor:cursor + size]).strip())
+        cursor += size
 
-    # Guarantee five renderable scenes. The selected headline is the only
-    # source we may repeat when upstream text is unusually short.
-    fallback_seed = title or "Selected story"
-    while len(chunks) < 5:
-        chunks.append(fallback_seed)
-
-    def fit_words(value, minimum=8, maximum=30):
-        parts = value.split()
-        if len(parts) > maximum:
-            value = " ".join(parts[:maximum])
-            parts = value.split()
-        if len(parts) < minimum:
-            seed_parts = fallback_seed.split()
-            while len(parts) < minimum and seed_parts:
-                parts.append(seed_parts[(len(parts) - minimum) % len(seed_parts)])
-        return " ".join(parts[:maximum]).strip()
-
-    # Use the strongest obvious entity token from the headline/source.
-    entity = ""
-    for token in re.findall(r"\b[A-Z][A-Za-z0-9&.-]{2,}\b", title):
-        if token.lower() not in {"The", "This", "After", "Report", "Latest"}:
-            entity = token
-            break
-    if not entity:
-        entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
-
+    entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category_label = str(genre_key or "news").replace("_", " ").title()
-    search_prompt = re.sub(r"[|#]+", " ", title).strip()
-    if len(search_prompt.split()) < 3:
-        search_prompt = f"{search_prompt} {category_label}".strip()
+    search_prompt = re.sub(r"[|#]+", " ", title).strip() or entity
 
-    scenes = []
-    for idx in range(5):
-        voiceover = fit_words(chunks[idx])
-        scenes.append({
-            "voiceover": voiceover,
+    scenes = [
+        {
+            "voiceover": chunk,
             "primary_entity": entity,
-            "visual_intent": "news_event" if idx else "editorial_person",
+            "visual_intent": "news_event" if index > 1 else "editorial_person",
             "specific_search_prompt": search_prompt,
             "sport_or_topic_category": category_label,
-        })
+            "scene_id": index,
+        }
+        for index, chunk in enumerate(chunks, 1)
+    ]
 
-    clean_title = title[:92].strip()
-    description_source = re.sub(r"\s+", " ", raw_source or title).strip()
-    description_source = description_source[:700]
-    return {
+    result = {
         "step_1_headline": title,
         "step_2_data_points": raw_source or title,
-        "step_3_critique": "Deterministic source-grounded fallback used because script providers were unavailable.",
+        "step_3_critique": "Deterministic source-grounded fallback used because script providers were exhausted.",
         "step_4_metadata": entity,
-        "titles": [
-            clean_title[:100].strip(),
-            f"{clean_title[:81].strip()} | Latest Update",
-            f"{clean_title[:81].strip()} | What We Know",
-        ],
+        "editorial_angle": "Emergency source-only mode provides no original editorial analysis.",
+        "titles": [title[:100].strip(), f"{title[:80].strip()} | What We Know", f"{title[:80].strip()} | Latest Facts"],
         "recommended_title_index": 1,
-        "seo_description": description_source,
-        "tags": [entity, category_label, "Shorts"],
-        "pinned_comment": "What do you make of this latest development?",
+        "seo_description": re.sub(r"\s+", " ", raw_source or title).strip()[:700],
+        "tags": [tag for tag in (entity, category_label, "Shorts") if tag],
+        "pinned_comment": "What do you make of this development?",
         "hook_type": "Direct Factual Headline",
         "hook_style_used": "Direct Factual Headline",
         "structure_used": "Source-grounded explainer",
@@ -778,14 +770,20 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         "fallback_mode": "extractive_source_grounded",
         "public_publish_blocked": True,
     }
+    valid, reason = validate_content_density(result, story_data, format_mode)
+    if not valid:
+        raise ValueError(f"Source-grounded fallback failed script contract: {reason}")
+    return result
+
 
 def wrap_write_script(bot):
     current = getattr(bot, "write_script", None)
     if current is None or getattr(current, "_content_dense_bound", False): return current
 
     def write_script(story_data, language_cfg, genre_key, conn, format_mode):
-        contracted_story = _add_editorial_contract(story_data, format_mode)
-        result = current(contracted_story, language_cfg, genre_key, conn, format_mode)
+        # The primary writer owns the editorial instructions. Do not mix hidden
+        # prompt text into source material used for grounding or originality checks.
+        result = current(story_data, language_cfg, genre_key, conn, format_mode)
 
         cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
         repaired, structure_diag = repair_script_structure(cleaned, format_mode)
@@ -841,6 +839,9 @@ def wrap_write_script(bot):
                 )
                 return cleaned
             cleaned, rewrite_diag = clean_script_data(rewritten, story_data, format_mode)
+            repaired, structure_diag = repair_script_structure(cleaned, format_mode)
+            if repaired is not None:
+                cleaned = repaired
             ok, reason = validate_content_density(cleaned, story_data, format_mode)
             if not ok:
                 raise ValueError(f"Originality rewrite failed script validation: {reason}")
