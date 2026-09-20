@@ -452,19 +452,27 @@ class WorkflowController:
         # uploader itself must remain safe if called through another dashboard
         # path or against a stale Streamlit snapshot.
         try:
-            from dashboard_runtime import live_qc_passes
+            from dashboard_runtime import evaluate_live_qc_gates, live_qc_passes
             live_snapshot = self.snapshot()
-            if not live_qc_passes(
-                live_snapshot,
-                {
-                    "title": str(title or ""),
-                    "description": str(description or ""),
-                    "comment": str(comment or ""),
-                },
-            ):
+            live_metadata = {
+                "title": str(title or ""),
+                "description": str(description or ""),
+                "comment": str(comment or ""),
+            }
+            if not live_qc_passes(live_snapshot, live_metadata):
                 raise RuntimeError(
                     "Upload blocked: one or more live release QC gates are not passing."
                 )
+            if str(publish_mode or "").strip().lower() == "public":
+                public_blocks = [
+                    str(gate.get("detail") or "Public release policy blocked.")
+                    for gate in evaluate_live_qc_gates(live_snapshot, live_metadata)
+                    if bool(gate.get("public_blocked"))
+                ]
+                if public_blocks:
+                    raise RuntimeError(
+                        "Public upload blocked by release policy: " + " ".join(public_blocks)
+                    )
         except ImportError:
             # The standalone factory workflow does not load dashboard QC.
             pass
