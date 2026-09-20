@@ -510,7 +510,6 @@ def patch_content_first_visuals(bot):
 
         manual_pool_result = None
         manual_pool_materialized = []
-        manual_pool_by_hash = {}
         if manual_queries:
             manual_pool_result = collect_manual_visual_pool(
                 visual_runtime,
@@ -525,11 +524,6 @@ def patch_content_first_visuals(bot):
                 manual_pool_result.get("assets") or [],
                 pool_id=hash(";".join(manual_queries)) & 0xffffffff,
             )
-            manual_pool_by_hash = {
-                str(item.get("hash") or "").strip(): item
-                for item in manual_pool_materialized
-                if str(item.get("hash") or "").strip()
-            }
             script_data["visual_manual_queries"] = list(manual_queries)
             script_data["visual_manual_pool_size"] = len(manual_pool_materialized)
             script_data["visual_manual_pool_query_stats"] = list(
@@ -590,7 +584,6 @@ def patch_content_first_visuals(bot):
                 seg["visual_rescue_reason"] = ""
                 seg["visual_fallback_reason"] = ""
                 used_hashes.add(selected_hash)
-                verified_count += 1
                 print(
                     f"   [Manual Visual Pool] Scene {idx + 1} selected "
                     f"query='{manual_selected.get('query', '')}' status={manual_selected.get('status', '')}",
