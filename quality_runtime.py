@@ -4,7 +4,7 @@ import re
 
 
 def _words(text):
-    return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
+    return re.findall(r"\b\w+\b", str(text or "").lower(), flags=re.UNICODE)
 
 
 def _overlap(a, b):
@@ -19,23 +19,13 @@ def _normalise(text):
 
 
 def _quality_validate(original_validate, script_data, source_text, format_mode):
-    """Run legacy validation while deliberately ignoring obsolete CTA/#shorts rules."""
+    """Run the existing validator plus deterministic non-numeric script QC."""
     ok, message = original_validate(script_data, source_text, format_mode)
     if not ok:
-        legacy_message = str(message or "").lower()
-        obsolete = (
-            "required cta",
-            "missing the required cta",
-            "missing cta",
-            "#shorts",
-            "contains #shorts",
-            "title must contain",
-        )
-        if not any(token in legacy_message for token in obsolete):
-            return ok, message
+        return ok, message
 
     scenes = script_data.get("script", [])
-    if not scenes:
+    if not isinstance(scenes, list) or not scenes:
         return False, "Script contains no scenes."
 
     for i, scene in enumerate(scenes, 1):
@@ -82,21 +72,11 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
     if len(_words(description)) < 10:
         return False, "SEO description is too short."
 
-    source_words = set(_words(source_text))
-    if len(source_words) >= 12 and format_mode in ("regular", "trending"):
-        weak = 0
-        for scene in scenes[1:-1]:
-            scene_words = set(_words(scene.get("voiceover", "")))
-            if len(scene_words & source_words) < 2:
-                weak += 1
-        if weak > 2:
-            return False, "Too many middle scenes are weakly grounded in the source."
-
     return True, "Passed deterministic Shorts QC"
 
 
 def _self_critique(script_data, format_mode):
-    """Score useful storytelling properties without rewarding CTAs or filler."""
+    """Score useful storytelling properties without rewarding CTAs, filler or scene count."""
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
         return 0, "No scenes"
@@ -107,15 +87,27 @@ def _self_critique(script_data, format_mode):
     if any(first.startswith(x) for x in ("welcome to", "hey everyone", "today we are going to", "in this video")):
         score -= 2
         reasons.append("generic opener")
-    if len(scenes) < 4:
-        score -= 1
-        reasons.append("low scene count; verify information density")
+
+    try:
+        from script_runtime import assess_narrative_completeness
+        completeness = assess_narrative_completeness(script_data)
+        if not completeness["passed"]:
+            score -= 3
+            reasons.append("incomplete narrative")
+    except Exception:
+        pass
+
     for i in range(len(scenes)):
         for j in range(i + 1, len(scenes)):
-            if difflib.SequenceMatcher(None, _normalise(scenes[i].get("voiceover")), _normalise(scenes[j].get("voiceover"))).ratio() >= 0.88:
+            if difflib.SequenceMatcher(
+                None,
+                _normalise(scenes[i].get("voiceover")),
+                _normalise(scenes[j].get("voiceover")),
+            ).ratio() >= 0.88:
                 score -= 1
                 reasons.append("repeated scene")
                 break
+
     score = max(0, min(10, round(score, 1)))
     return score, ("Passed" if not reasons else "; ".join(dict.fromkeys(reasons)))
 

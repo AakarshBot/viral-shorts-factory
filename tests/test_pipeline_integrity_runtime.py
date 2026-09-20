@@ -43,18 +43,22 @@ def test_prompt_and_provider_noise_is_rejected():
 
 def test_strict_fallback_uses_only_source_words():
     source = (
-        "India announced a new policy today. The ministry said the measure will begin next month. "
-        "Officials described the change as a response to recent developments. The first phase covers major cities. "
-        "The government said more details will be published before implementation."
+        "India announced a new policy today, according to the ministry. "
+        "Officials said the measure will begin next month after the published timetable is finalized. "
+        "The first phase covers major cities while agencies prepare implementation guidance. "
+        "The latest documents explain the administrative process and the responsibilities of affected departments."
     )
-    result = strict_fallback({"title": "India announces new policy", "text": source}, genre_key="national_global_affairs")
+    result = strict_fallback(
+        {"title": "India announces new policy", "text": source},
+        genre_key="national_global_affairs",
+        format_mode="regular",
+    )
     assert result["fallback_mode"] == "strict_source_only"
-    assert len(result["script"]) == 5
-    for scene in result["script"]:
-        assert 8 <= len(scene["voiceover"].split()) <= 30
-        assert "nbsp" not in scene["voiceover"].lower()
-        assert scene["scene_source"] == "validated_source_fallback"
-
+    assert result["public_publish_blocked"] is True
+    assert len(result["script"]) == 4
+    assert [scene["narrative_role"] for scene in result["script"]] == [
+        "hook", "development", "context", "consequence"
+    ]
 
 def test_strict_fallback_refuses_thin_source_instead_of_inventing_text():
     try:
@@ -70,12 +74,36 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
 
     def dirty_writer(story_data, language_cfg, genre_key, conn, format_mode):
         return {
+            "editorial_angle": "The script explains the practical consequence and context beyond the headline.",
+            "titles": ["Headline", "Context", "Question"],
+            "recommended_title_index": 1,
+            "seo_description": "A factual explanation of the development, its background, and practical consequence.",
             "script": [
                 {
-                    "voiceover": "India&nbsp;announced <b>a new plan</b> today. https://example.com\u200b",
-                    "primary_entity": "India&nbsp;",
-                }
-            ]
+                    "voiceover": "India&nbsp;announced <b>a new plan</b> today. Officials explained the immediate implementation details.",
+                    "narrative_role": "hook",
+                    "primary_entity": "India",
+                    "specific_search_prompt": "India new plan",
+                },
+                {
+                    "voiceover": "Officials are coordinating the rollout while departments prepare for the announced change.",
+                    "narrative_role": "development",
+                    "primary_entity": "India",
+                    "specific_search_prompt": "India rollout",
+                },
+                {
+                    "voiceover": "The background matters because the change affects several agencies and the published implementation process.",
+                    "narrative_role": "context",
+                    "primary_entity": "India",
+                    "specific_search_prompt": "India implementation process",
+                },
+                {
+                    "voiceover": "The practical consequence is that departments must align their preparation with the timetable already announced.",
+                    "narrative_role": "consequence",
+                    "primary_entity": "India",
+                    "specific_search_prompt": "India policy timetable",
+                },
+            ],
         }
 
     bot.write_script = dirty_writer
@@ -86,11 +114,10 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
     assert result["authoritative_narration"] is True
     assert result["integrity_version"]
     assert scene["narration_source"] == "validated_script"
-    assert scene["voiceover"] == "India announced a new plan today."
+    assert scene["voiceover"].startswith("India announced a new plan today.")
     assert "http" not in scene["voiceover"].lower()
     assert "<b>" not in scene["voiceover"].lower()
     assert "nbsp" not in scene["voiceover"].lower()
-
 
 def test_provider_garbage_falls_back_without_leaking_into_script():
     bot = _Bot()
@@ -107,14 +134,22 @@ def test_provider_garbage_falls_back_without_leaking_into_script():
     bot.write_script = broken_writer
     _wrap_script_writer(bot)
     source = (
-        "India announced a new policy today. The ministry said the measure will begin next month. "
-        "Officials described the change as a response to recent developments. The first phase covers major cities. "
-        "The government said more details will be published before implementation."
+        "India announced a new policy today. "
+        "The ministry said the measure will begin next month after the published timetable is finalized. "
+        "Officials described the change as a response to recent developments and outlined the first phase for major cities. "
+        "The latest documents explain the administrative process and the responsibilities of affected departments."
     )
-    result = bot.write_script({"title": "India announces new policy", "text": source}, {}, "news", None, "regular")
+    result = bot.write_script(
+        {"title": "India announces new policy", "text": source},
+        {},
+        "news",
+        None,
+        "regular",
+    )
 
     assert result["fallback_mode"] == "strict_source_only"
     assert result["authoritative_narration"] is True
+    assert result["public_publish_blocked"] is True
     assert all("Groq" not in scene["voiceover"] for scene in result["script"])
     assert all("JSON schema" not in scene["voiceover"] for scene in result["script"])
     assert all(scene["narration_source"] == "validated_script" for scene in result["script"])

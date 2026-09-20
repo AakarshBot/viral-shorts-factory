@@ -93,111 +93,29 @@ def _sentences(text: str) -> list[str]:
     return result
 
 
-def _contiguous_chunks(text: str, target: int, minimum_words: int = 8, maximum_words: int = 30) -> list[str]:
-    """Partition source words contiguously; never add filler words."""
-    words = clean_narration(text).split()
-    if len(words) < target * minimum_words:
-        return []
-    target = max(1, target)
-    chunks = []
-    remaining = len(words)
-    cursor = 0
-    for index in range(target):
-        slots_left = target - index
-        ideal = max(minimum_words, min(maximum_words, round(remaining / slots_left)))
-        end = min(len(words), cursor + ideal)
-        if slots_left > 1:
-            max_end = len(words) - minimum_words * (slots_left - 1)
-            end = min(end, max_end)
-        chunk = " ".join(words[cursor:end]).strip()
-        if len(chunk.split()) < minimum_words:
-            return []
-        chunks.append(chunk)
-        cursor = end
-        remaining = len(words) - cursor
-    if cursor < len(words):
-        tail = " ".join(words[cursor:]).strip()
-        if len(chunks[-1].split()) + len(tail.split()) <= maximum_words:
-            chunks[-1] = f"{chunks[-1]} {tail}".strip()
-        else:
-            return []
-    return chunks
-
-
 def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode="regular"):
-    """Build a source-only emergency script, or fail instead of inventing filler."""
-    story_data = story_data if isinstance(story_data, dict) else {}
-    title = clean_narration(story_data.get("title") or story_data.get("topic") or "")
-    source = _source_text(story_data)
-    if not source and title:
-        source = title
-    if not source:
-        raise ValueError("No usable source text is available for emergency script generation.")
+    """Delegate emergency script recovery to the canonical semantic fallback."""
+    from script_runtime import _extractive_script_fallback
 
-    # For Top 5, the selected story data may be JSON. Extract only its textual fields.
-    if format_mode == "top5":
-        try:
-            items = json.loads(str(story_data.get("text", "")))
-            if isinstance(items, list):
-                source_parts = []
-                for item in items:
-                    if isinstance(item, dict):
-                        source_parts.append(clean_narration(item.get("title", "")))
-                        source_parts.append(clean_narration(item.get("text", "")))
-                source = " ".join(part for part in source_parts if part)
-        except Exception:
-            pass
-
-    sentence_text = " ".join(_sentences(source)) or clean_narration(source)
-    target = 7 if str(format_mode).lower() == "top5" else 5
-    chunks = _contiguous_chunks(sentence_text, target)
-    if not chunks:
-        raise ValueError(
-            f"Source-grounded fallback refused to invent narration: need at least {target * 8} usable source words."
-        )
-
-    entity_words = re.findall(r"\b[A-Z][A-Za-z0-9&.'-]{2,}\b", title)
-    entity = " ".join(entity_words[:3]) or title[:80] or "Selected story"
-    category = clean_narration(genre_key or "news").replace("_", " ").title()
-    search_prompt = title or entity
-
-    scenes = [
-        {
-            "voiceover": clean_narration(chunk),
-            "primary_entity": entity,
-            "visual_intent": "news_event",
-            "specific_search_prompt": search_prompt,
-            "sport_or_topic_category": category,
-            "scene_source": "validated_source_fallback",
-            "scene_id": index + 1,
-        }
-        for index, chunk in enumerate(chunks)
-    ]
-    return {
-        "step_1_headline": title,
-        "step_2_data_points": source,
-        "step_3_critique": "Deterministic source-only fallback. No provider instructions or generated facts were used.",
-        "step_4_metadata": entity,
-        "titles": [title, f"{title} | What We Know" if title else "What We Know", f"{title} | Latest Facts" if title else "Latest Facts"],
-        "recommended_title_index": 1,
-        "seo_description": clean_text(source)[:700],
-        "tags": [tag for tag in (entity, category, "Shorts") if tag],
-        "pinned_comment": "What do you make of this development?",
-        "hook_type": "Direct Factual Headline",
-        "hook_style_used": "Direct Factual Headline",
-        "structure_used": "Source-grounded explainer",
-        "persona_used": "Analytical Insider",
-        "script": scenes,
-        "fallback_mode": "strict_source_only",
-        "integrity_version": VERSION,
-    }
+    result = _extractive_script_fallback(
+        story_data,
+        language_cfg or {},
+        genre_key,
+        format_mode,
+    )
+    result = dict(result or {})
+    result["fallback_mode"] = "strict_source_only"
+    result["integrity_version"] = VERSION
+    result["public_publish_blocked"] = True
+    return result
 
 
-def _clean_script_result(script_data: dict, story_data: dict) -> dict:
+def _clean_script_result(script_data: dict, story_data: dict, format_mode: str = "regular") -> dict:
     result = dict(script_data or {})
     scenes = result.get("script")
-    if not isinstance(scenes, list):
-        raise ValueError("Script output does not contain a valid scene list.")
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("Script output does not contain usable narration scenes.")
+
     cleaned = []
     for index, scene in enumerate(scenes, 1):
         if not isinstance(scene, dict):
@@ -205,8 +123,6 @@ def _clean_script_result(script_data: dict, story_data: dict) -> dict:
         voiceover = clean_narration(scene.get("voiceover", ""))
         if not voiceover or is_noise(voiceover):
             raise ValueError(f"Scene {index} contains empty/noise narration.")
-        if len(voiceover.split()) < 3:
-            raise ValueError(f"Scene {index} contains too little narration.")
         copy = dict(scene)
         copy["voiceover"] = voiceover
         copy["primary_entity"] = clean_text(copy.get("primary_entity", ""))
@@ -216,14 +132,34 @@ def _clean_script_result(script_data: dict, story_data: dict) -> dict:
         copy["scene_id"] = index
         copy["narration_source"] = "validated_script"
         cleaned.append(copy)
+
     result["script"] = cleaned
     result["integrity_version"] = VERSION
     result["authoritative_narration"] = True
-    for key in ("step_1_headline", "step_2_data_points", "step_3_critique", "step_4_metadata", "seo_description", "pinned_comment"):
+
+    for key in (
+        "step_1_headline",
+        "step_2_data_points",
+        "step_3_critique",
+        "step_4_metadata",
+        "editorial_angle",
+        "seo_description",
+        "pinned_comment",
+    ):
         if key in result:
             result[key] = clean_text(result[key])
+
     if isinstance(result.get("titles"), list):
-        result["titles"] = [clean_text(title).replace("#shorts", "").strip() for title in result["titles"] if clean_text(title)]
+        result["titles"] = [
+            clean_text(title).replace("#shorts", "").strip()
+            for title in result["titles"]
+            if clean_text(title)
+        ]
+
+    from script_runtime import validate_content_density
+    valid, reason = validate_content_density(result, story_data, format_mode)
+    if not valid:
+        raise ValueError(f"Canonical script validation failed: {reason}")
     return result
 
 
@@ -235,49 +171,19 @@ def _wrap_script_writer(bot):
     def guarded_write_script(story_data, language_cfg, genre_key, conn, format_mode):
         try:
             result = current(story_data, language_cfg, genre_key, conn, format_mode)
-            cleaned = _clean_script_result(result, story_data)
+            cleaned = _clean_script_result(result, story_data, format_mode)
             # A strict fallback is only used when the existing generator fails
             # or produces invalid narration; it never silently patches missing facts.
             return cleaned
         except Exception as exc:
             print(f"   [Script Integrity] AI script rejected: {type(exc).__name__}: {exc}", flush=True)
             fallback = strict_fallback(story_data, language_cfg, genre_key, format_mode)
-            return _clean_script_result(fallback, story_data)
+            return _clean_script_result(fallback, story_data, format_mode)
 
     guarded_write_script._pipeline_integrity_wrapped = True
     bot.write_script = guarded_write_script
     if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
         bot.run_robot.__globals__["write_script"] = guarded_write_script
-
-
-def _prepare_audio_handoff(script_data):
-    """Normalize the one known source-grounded scene-count repair handoff."""
-    if not isinstance(script_data, dict):
-        return script_data
-    if script_data.get("authoritative_narration") is True:
-        return script_data
-    if script_data.get("fallback_reason") != "scene_count_contract":
-        return script_data
-    candidate = dict(script_data)
-    scenes = candidate.get("script")
-    if not isinstance(scenes, list) or not scenes:
-        return script_data
-    normalized = []
-    for index, scene in enumerate(scenes, 1):
-        if not isinstance(scene, dict):
-            return script_data
-        voiceover = clean_narration(scene.get("voiceover", ""))
-        if not voiceover or is_noise(voiceover):
-            return script_data
-        copy = dict(scene)
-        copy["voiceover"] = voiceover
-        copy["scene_id"] = index
-        copy["narration_source"] = "validated_script"
-        normalized.append(copy)
-    candidate["script"] = normalized
-    candidate["authoritative_narration"] = True
-    candidate["integrity_version"] = VERSION
-    return candidate
 
 
 def _wrap_audio(bot):
@@ -286,7 +192,6 @@ def _wrap_audio(bot):
         return
 
     async def script_bound_audio(script_data, language_cfg):
-        script_data = _prepare_audio_handoff(script_data)
         scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
         if not isinstance(script_data, dict) or not script_data.get("authoritative_narration") is True:
             raise ValueError("Audio refused: narration must come from the validated generated script.")

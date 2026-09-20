@@ -2,8 +2,8 @@ from pathlib import Path
 
 import ultimate_bot
 from final_qc_runtime import _validate_metadata, validate_final_upload_metadata
-from script_guard_runtime import source_only_fallback
-from script_runtime import _extractive_script_fallback
+from script_runtime import _extractive_script_fallback, contains_retention_bait, validate_content_density
+from script_runtime import _extractive_script_fallback, contains_retention_bait, validate_content_density
 from subtitle_runtime import generate_readable_karaoke_clip
 from youtube_comment_runtime import build_description_hashtags, ensure_shorts_title
 from factory_function_coverage import collect_factory_function_coverage
@@ -87,17 +87,56 @@ def test_description_has_at_most_three_relevant_hashtags():
 def test_fallback_title_variants_have_no_shorts_suffix():
     story = {
         "title": "Example story",
-        "text": "This is a sufficiently detailed source sentence with many useful words. "
-                "Another source sentence provides additional factual context for testing.",
+        "text": (
+            "The organizer confirmed the latest development. "
+            "Officials are working through the immediate issue and reviewing the current position. "
+            "The background matters because the change affects the next scheduled stage. "
+            "The practical consequence is that the response now focuses on resolving the issue without disrupting the wider plan."
+        ),
     }
-    for builder in (
-        lambda: source_only_fallback(story, {}, "news", "regular"),
-        lambda: _extractive_script_fallback(story, {}, "news", "regular"),
-    ):
-        titles = builder()["titles"]
-        assert len(titles) == 3
-        assert all("#shorts" not in title.lower() for title in titles)
 
+    titles = _extractive_script_fallback(story, {}, "news", "regular")["titles"]
+    assert len(titles) == 3
+    assert all("#shorts" not in title.lower() for title in titles)
+
+
+def test_retention_bait_phrase_is_rejected_by_script_qc():
+    assert contains_retention_bait("Wait till the end to find out what happened.")
+    script = {
+        "editorial_angle": "This explains the development, background, and practical consequence for viewers.",
+        "titles": ["Headline", "Context", "Question"],
+        "recommended_title_index": 1,
+        "seo_description": "A factual explanation of the development, context, and practical consequence.",
+        "script": [
+            {
+                "voiceover": "The organizer confirmed the latest development today.",
+                "narrative_role": "hook",
+                "primary_entity": "Organizer",
+                "specific_search_prompt": "Organizer latest development",
+            },
+            {
+                "voiceover": "Officials are working through the immediate issue and reviewing the current position.",
+                "narrative_role": "development",
+                "primary_entity": "Officials",
+                "specific_search_prompt": "Officials current position",
+            },
+            {
+                "voiceover": "The background matters because the change affects the next scheduled stage.",
+                "narrative_role": "context",
+                "primary_entity": "Organization",
+                "specific_search_prompt": "Organization scheduled stage",
+            },
+            {
+                "voiceover": "Wait till the end to find out why this matters, while officials prepare the response.",
+                "narrative_role": "consequence",
+                "primary_entity": "Officials",
+                "specific_search_prompt": "Officials response",
+            },
+        ],
+    }
+    valid, reason = validate_content_density(script, {}, "regular")
+    assert valid is False
+    assert "retention" in reason.lower()
 
 def test_retention_helpers_are_accounted_for_in_coverage():
     report = collect_factory_function_coverage()
