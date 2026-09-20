@@ -521,6 +521,8 @@ def _commons_search_queries(
 
     searches: list[tuple[str, str, str]] = []
     person_seed = _commons_person_seed(exact)
+    person_qid = ""
+    person_label = ""
     if person_seed:
         resolved_person = resolve_person_identity(person_seed)
         person_qid = str((resolved_person or {}).get("qid") or "").strip()
@@ -535,10 +537,6 @@ def _commons_search_queries(
             )
 
     structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
-    person_qid = ""
-    if person_seed:
-        person_probe = resolve_person_identity(person_seed)
-        person_qid = str((person_probe or {}).get("qid") or "").strip()
     if str(visual_type or "").strip().upper() in structured_types and not person_qid:
         resolved_entity = resolve_wikidata_entity(exact)
         entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
@@ -552,23 +550,8 @@ def _commons_search_queries(
                 )
             )
 
-    genre = str(visual_genre or "").strip().upper()
-    if genre in {"SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION", "PERSON_ACTION"}:
-        if person_seed:
-            action_query = f"{person_seed} action"
-            if action_query.casefold() != exact.casefold():
-                searches.append((action_query, "text-action", person_seed))
-        elif genre in {"SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION"}:
-            searches.append((f"{exact} match", "text-match", exact))
-
-    if genre in {"HISTORICAL_PHOTO", "EVENT_SCENE"}:
-        searches.append((f"{exact} photo", "text-photo", exact))
-
-    if genre in {"ORG_BRANDING", "TEAM_BRANDING"}:
-        searches.append((f"{exact} logo", "text-branding", exact))
-
-    # Always retain the literal query so structured discovery cannot suppress
-    # older/unstructured Commons files.
+    # Always retain the literal query. Scene-specific refinements are already
+    # generated upstream, so this provider remains bounded to two searches.
     searches.append((exact, "text", ""))
     return searches
 
