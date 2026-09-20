@@ -1534,6 +1534,11 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.video(video_path)
     with publish_col:
         st.markdown("#### 3 · Publish")
+        st.markdown("##### Choose upload visibility")
+        st.info(
+            "Private keeps the Short hidden on YouTube. Public publishes it immediately "
+            "after the final confirmation."
+        )
         st.caption("Private stays hidden. Public needs explicit confirmation.")
         if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not qc_ready):
             if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
