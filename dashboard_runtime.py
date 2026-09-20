@@ -22,6 +22,34 @@ from PIL import Image
 from workflow_runtime import WorkflowController
 
 
+def _manual_crop_to_shorts(img: Image.Image, zoom: float = 1.0, x_center: float = 0.5, y_center: float = 0.5) -> Image.Image:
+    """Create a user-positioned 9:16 crop from the preserved original source."""
+    source = img.convert("RGB")
+    target_aspect = 1080 / 1920
+    source_aspect = source.width / max(1, source.height)
+
+    if source_aspect >= target_aspect:
+        crop_h = source.height
+        crop_w = max(1, int(round(crop_h * target_aspect)))
+    else:
+        crop_w = source.width
+        crop_h = max(1, int(round(crop_w / target_aspect)))
+
+    zoom = max(1.0, min(4.0, float(zoom or 1.0)))
+    crop_w = max(1, int(round(crop_w / zoom)))
+    crop_h = max(1, int(round(crop_h / zoom)))
+
+    max_left = max(0, source.width - crop_w)
+    max_top = max(0, source.height - crop_h)
+    x_center = max(0.0, min(1.0, float(x_center)))
+    y_center = max(0.0, min(1.0, float(y_center)))
+
+    left = int(round(max_left * x_center))
+    top = int(round(max_top * y_center))
+    cropped = source.crop((left, top, left + crop_w, top + crop_h))
+    return cropped.resize((1080, 1920), Image.Resampling.LANCZOS)
+
+
 def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
     """Return True only when a completed, idle render is ready for upload visibility selection."""
     video_path = str(snapshot.get("video_path") or "").strip()
@@ -1130,14 +1158,15 @@ class DashboardWorkflowController(WorkflowController):
                 item for item in bank
                 if str(item.get("path") or "").strip() != selected_path
             ]
+            old_original_path = str(layer.get("visual_original_path") or "").strip() or old_path
             if (
-                old_path
-                and os.path.isfile(old_path)
-                and old_path != selected_path
+                old_original_path
+                and os.path.isfile(old_original_path)
+                and old_original_path != selected_path
                 and bool(layer.get("visual_verified"))
             ):
                 old_entry = {
-                    "path": old_path,
+                    "path": old_original_path,
                     "subject": str(
                         layer.get("related_subject")
                         or scene.get("primary_entity")
@@ -1165,18 +1194,26 @@ class DashboardWorkflowController(WorkflowController):
 
             selected_source = str(selected.get("source") or "verified-bank").strip()
             selected_query = str(selected.get("query") or "").strip()
+            selected_status = str(selected.get("status") or "entity-verified").strip()
+            low_resolution_manual_qc = selected_status == "factory-rejected-resolution"
             new_layer = dict(layer)
             new_layer.update(
                 {
                     "image": replacement_path,
                     "source_type": "verified-bank",
                     "visual_verified": True,
-                    "visual_qc_blocked": False,
-                    "visual_qc_block_reason": "",
+                    "visual_qc_blocked": low_resolution_manual_qc,
+                    "visual_qc_block_reason": (
+                        "Entity verified, but this image is below the normal resolution threshold and requires manual visual QC."
+                        if low_resolution_manual_qc
+                        else ""
+                    ),
                     "visual_rescue_reason": "",
                     "visual_fallback_reason": "",
                     "visual_query_used": f"bank:{selected_query}",
+                    "visual_original_path": selected_path,
                     "source_credit": source_credit_for_type(selected_source),
+                    "bank_selected_status": selected_status,
                     "source_image_url": str(
                         (selected.get("provenance") or {}).get("url") or ""
                     ).strip(),
@@ -1216,6 +1253,138 @@ class DashboardWorkflowController(WorkflowController):
 
         except Exception as exc:
             return False, f"Bank replacement failed: {type(exc).__name__}: {exc}"
+
+
+    def crop_visual(
+        self,
+        visual_index: int,
+        zoom: float = 1.0,
+        x_center: float = 0.5,
+        y_center: float = 0.5,
+    ) -> tuple[bool, str]:
+        """Apply a dashboard-selected crop to the preserved original visual source."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+
+        try:
+            index = int(visual_index)
+        except (TypeError, ValueError):
+            return False, "Invalid visual number."
+
+        packages = snapshot.get("visual_packages") or []
+        script_data = snapshot.get("script_data") or {}
+        scenes = script_data.get("script") if isinstance(script_data, dict) else None
+        if index < 1 or index > len(packages) or not isinstance(scenes, list) or index > len(scenes):
+            return False, "That visual is no longer available."
+
+        layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+        if not isinstance(layer, dict):
+            return False, "The selected visual package is invalid."
+
+        source_path = str(layer.get("visual_original_path") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            source_path = str(layer.get("image") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            return False, "The original visual source is not available for cropping."
+
+        scene = scenes[index - 1]
+        if not isinstance(scene, dict):
+            return False, "The selected slide is invalid."
+
+        try:
+            import visual_runtime
+            from branding_runtime import source_credit_for_type
+
+            bot = self.bot
+            active_config = getattr(bot, "_active_web_config", {}) or {}
+            format_mode = str(active_config.get("format_mode", "regular")).lower()
+            language_key = str(active_config.get("language") or "english")
+            language_cfg = getattr(bot, "LANGUAGES", {}).get(language_key, {})
+            font_choice = language_cfg.get("font")
+            video_title = str(
+                script_data.get("title")
+                or (script_data.get("titles") or [""])[0]
+                or ""
+            ).strip()
+
+            original = Image.open(source_path).convert("RGB")
+            cropped = _manual_crop_to_shorts(original, zoom, x_center, y_center).convert("RGBA")
+
+            if format_mode == "top5" and index == 1:
+                rendered = visual_runtime._render_image_slide(
+                    bot,
+                    cropped,
+                    video_title or scene.get("voiceover", "Top 5"),
+                    "TODAY'S TOP 5",
+                    font_choice,
+                )
+            elif format_mode == "top5":
+                clean = re.sub(
+                    r"(number\s*\d+|story\s*#?\d+|#\d+)",
+                    "",
+                    str(scene.get("voiceover", "")),
+                    flags=re.IGNORECASE,
+                ).strip()
+                rendered = bot.render_top5_card(
+                    cropped,
+                    max(1, 6 - index),
+                    5,
+                    clean or scene.get("voiceover", ""),
+                    font_choice=font_choice,
+                )
+            else:
+                rendered = cropped
+
+            history = self._visual_replacement_history.setdefault(index, [])
+            attempt = len(history) + 1
+            output_path = os.path.join(
+                bot.ASSETS_DIR,
+                f"scene_{index}_manual_crop_{attempt}.jpg",
+            )
+            rendered.convert("RGBA").convert("RGB").save(output_path, "JPEG", quality=95)
+
+            new_layer = dict(layer)
+            new_layer.update(
+                {
+                    "image": output_path,
+                    "visual_original_path": source_path,
+                    "visual_crop_zoom": float(max(1.0, min(4.0, zoom))),
+                    "visual_crop_x": float(max(0.0, min(1.0, x_center))),
+                    "visual_crop_y": float(max(0.0, min(1.0, y_center))),
+                    "visual_crop_manual": True,
+                    "source_credit": source_credit_for_type(
+                        str(layer.get("source_type") or "visual")
+                    ),
+                }
+            )
+
+            with self._lock:
+                self._visual_packages[index - 1] = [new_layer]
+                live_script = self.state.script_data
+                if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
+                    live_script["script"][index - 1]["visual_crop_manual"] = True
+                history.append(
+                    {
+                        "old_path": str(layer.get("image") or ""),
+                        "new_query": "manual-crop",
+                        "attempt": attempt,
+                        "time": datetime.now(timezone.utc).isoformat(),
+                        "replacement_type": "manual_crop",
+                    }
+                )
+                self._visual_approved = False
+                self._visual_rejected = False
+
+            self.update(
+                "visual_approval",
+                76,
+                f"Visual {index} manually cropped. Review the updated image before continuing.",
+            )
+            return True, f"Visual {index} manually cropped successfully."
+
+        except Exception as exc:
+            return False, f"Manual crop failed: {type(exc).__name__}: {exc}"
 
     def reject_visuals(self) -> bool:
         snapshot = self.snapshot()
