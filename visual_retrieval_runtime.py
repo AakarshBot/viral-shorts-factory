@@ -1335,6 +1335,7 @@ def collect_manual_visual_search(
             "visual_type": item["visual_type"],
             "visual_genre": item["visual_genre"],
             "provenance": dict(item["provenance"]),
+            "provenance_status": str(item.get("provenance_status") or "commercial-verified"),
             "priority": float(item["priority"]),
             "search_text": _candidate_search_text(item["data"]),
             "source_page_url": str(item.get("source_page_url") or "").strip(),
