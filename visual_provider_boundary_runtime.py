@@ -129,7 +129,7 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
             continue
         qid = str(item.get("id") or "").strip()
         label = str(item.get("label") or "").strip()
-        if not re.fullmatch(r"Q\\d+", qid):
+        if not re.fullmatch(r"Q\d+", qid):
             continue
         candidate_ids.append(qid)
         if label:
@@ -244,7 +244,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             continue
         title = str(page.get("title", "")).strip()
         qid = str((page.get("pageprops") or {}).get("wikibase_item") or "").strip()
-        if qid and re.fullmatch(r"Q\\d+", qid):
+        if qid and re.fullmatch(r"Q\d+", qid):
             cache_key = entity.casefold()
             if cache_key not in _PERSON_IDENTITY_CACHE:
                 resolved = {"qid": qid, "label": title}
