@@ -1355,6 +1355,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
         _test_scene_branding,
         _test_script_and_audio,
         _test_visual_strategy,
+        _test_visual_queries,
     )
 
     checks: dict[str, Callable[[], str]] = {
@@ -1362,6 +1363,7 @@ def run_demo_section(section: str) -> dict[str, Any]:
         "environment": _test_environment,
         "database": _test_database,
         "visual_strategy": _test_visual_strategy,
+        "visual_queries": _test_visual_queries,
         "scene_branding": _test_scene_branding,
         "script_audio": _test_script_and_audio,
         "runtime_bindings": _test_runtime_bindings,
