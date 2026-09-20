@@ -6,14 +6,47 @@ import re
 
 from script_runtime import check_script_originality
 
-def _validate_final_artifact(path: str) -> tuple[bool, str]:
+def _artifact_qc(path: str) -> tuple[bool, str]:
+    """Validate the rendered MP4 without depending on the branding compositor."""
     if not path or not os.path.isfile(path):
         return False, "final video file is missing"
     try:
-        from branding_runtime import _artifact_qc
-        return _artifact_qc(path)
+        import cv2
+
+        capture = cv2.VideoCapture(path)
+        if not capture.isOpened():
+            capture.release()
+            return False, "final video could not be opened by the local video decoder"
+
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        duration = frame_count / fps if fps > 0 else 0.0
+
+        ok_first, _ = capture.read()
+        capture.release()
+
+        if not ok_first:
+            return False, "final video contains no readable frames"
+        if width != 1080 or height != 1920:
+            return False, f"final video geometry is {width}x{height}; expected 1080x1920"
+        if fps <= 0 or frame_count <= 0:
+            return False, "final video has no usable frame timing"
+        if duration < 1.0:
+            return False, f"final video duration is only {duration:.2f}s"
+
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        return True, (
+            f"Rendered MP4 passed artifact QC: {width}x{height}, "
+            f"{fps:.2f} fps, {duration:.2f}s, {size_mb:.1f} MB."
+        )
     except Exception as exc:
         return False, f"artifact QC unavailable: {type(exc).__name__}: {exc}"
+
+
+def _validate_final_artifact(path: str) -> tuple[bool, str]:
+    return _artifact_qc(path)
 
 
 def _validate_metadata(title: str, description: str, comment: str = "") -> tuple[bool, str]:

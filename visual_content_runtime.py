@@ -388,6 +388,8 @@ def _select_related_asset(
     return candidates[0][1] if candidates else None
 
 def patch_content_first_visuals(bot):
+    if getattr(bot, "_content_first_visuals_patched", False):
+        return bot
     try:
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
@@ -558,8 +560,17 @@ def patch_content_first_visuals(bot):
 
             manual_selected = None
             if manual_available_pool:
+                selection_pool = manual_available_pool
+                if idx == 0:
+                    action_pool = [
+                        item
+                        for item in manual_available_pool
+                        if bool(item.get("action_search"))
+                    ]
+                    if action_pool:
+                        selection_pool = action_pool
                 manual_selected = select_manual_visual_candidate(
-                    manual_available_pool,
+                    selection_pool,
                     seg,
                     used_hashes,
                 )
@@ -906,4 +917,5 @@ def patch_content_first_visuals(bot):
         return packages
 
     bot.process_visuals_async = process
+    bot._content_first_visuals_patched = True
     return bot

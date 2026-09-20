@@ -393,7 +393,19 @@ class WorkflowController:
                     config.get("trend_keyword", ""),
                 )
                 comment = build_pinned_comment(script, title, genre_cfg.get("label", ""))
-                self._mark_latest_run_ready_for_qc(selected.get("title", ""))
+                ready_error = ""
+                try:
+                    self._mark_latest_run_ready_for_qc(selected.get("title", ""))
+                except Exception as exc:
+                    # Final QC failures must not turn a completed render into a
+                    # dead-end dashboard state. Keep the run in the QC stage so
+                    # the user can inspect the failed gate and the dashboard can
+                    # safely keep upload locked until the gate passes.
+                    ready_error = f"{type(exc).__name__}: {exc}"
+                    print(
+                        f"   [Final QC] READY_FOR_UPLOAD checkpoint deferred: {ready_error}",
+                        flush=True,
+                    )
 
                 with self._lock:
                     self.state.final_metadata = {
@@ -403,7 +415,12 @@ class WorkflowController:
                     }
                     self.state.stage = "qc"
                     self.state.percent = 100
-                    self.state.message = "Production complete. Final QC is waiting for you."
+                    self.state.message = (
+                        "Production complete. Review final QC before upload."
+                        if ready_error
+                        else "Production complete. Final QC is waiting for you."
+                    )
+                    self.state.error = ready_error
                     self.state.completed = True
             except Exception as exc:
                 with self._lock:

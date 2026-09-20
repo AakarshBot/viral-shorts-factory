@@ -76,13 +76,19 @@ def _manual_crop_to_shorts(img: Image.Image, zoom: float = 1.0, x_center: float 
 
 
 def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
-    """Return True only when a completed, idle render is ready for upload visibility selection."""
+    """Expose Final QC whenever a complete idle render exists, including recoverable QC errors."""
+    snapshot = snapshot or {}
     video_path = str(snapshot.get("video_path") or "").strip()
-    return (
-        bool(snapshot.get("completed"))
-        and not bool(snapshot.get("thread_alive"))
-        and bool(video_path)
-    )
+    if not video_path or bool(snapshot.get("thread_alive")):
+        return False
+    if bool(snapshot.get("completed")):
+        return True
+    # Older runs could have completed rendering and then fallen into an error while
+    # entering final QC. Keep that render recoverable; the live release gates still
+    # decide whether an upload button may be used.
+    return str(snapshot.get("stage") or "").strip().lower() == "error" and int(
+        snapshot.get("percent", 0) or 0
+    ) >= 100 and os.path.isfile(video_path)
 
 
 _ARTIFACT_QC_CACHE: dict[tuple[str, int], tuple[bool, str]] = {}
@@ -597,6 +603,25 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_visual_gate_wrapper = None
         self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
+
+        # Restore the canonical factory callables before the next production run.
+        # Dashboard review/progress wrappers close over this controller instance;
+        # keeping them attached across runs would route the next run into stale
+        # gates and stale Streamlit state.
+        canonical = getattr(self.bot, "_canonical_dashboard_runtime_bindings", {})
+        run_robot = getattr(self.bot, "run_robot", None)
+        namespace = getattr(run_robot, "__globals__", None)
+        if isinstance(canonical, dict):
+            for name, value in canonical.items():
+                if value is None:
+                    continue
+                try:
+                    setattr(self.bot, name, value)
+                except Exception:
+                    pass
+                if isinstance(namespace, dict):
+                    namespace[name] = value
+
         super().reset()
 
     @staticmethod
@@ -1000,6 +1025,11 @@ class DashboardWorkflowController(WorkflowController):
             return False, "That image is no longer available on the dashboard host."
 
         layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+        if isinstance(layer, dict):
+            outgoing_path = str(layer.get("visual_original_path") or "").strip()
+            if not outgoing_path or not os.path.isfile(outgoing_path):
+                outgoing_path = str(layer.get("image") or "").strip()
+            self._preserve_replaced_visual_in_pool(layer, outgoing_path)
         if not isinstance(layer, dict):
             return False, "The selected slide is invalid."
 
@@ -1056,7 +1086,9 @@ class DashboardWorkflowController(WorkflowController):
         origin, position, asset = self._locate_visual_pool_asset(asset_hash)
         if asset is None:
             return False, "That image is no longer available."
-        source_path = str(asset.get("path") or "").strip()
+        source_path = str(asset.get("original_path") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            source_path = str(asset.get("path") or "").strip()
         if not source_path or not os.path.isfile(source_path):
             return False, "That image is no longer available on the dashboard host."
 
@@ -1089,6 +1121,7 @@ class DashboardWorkflowController(WorkflowController):
                 group_index = int(str(origin).split(":", 1)[1])
                 live_item = self._visual_search_groups[group_index]["items"][position]
             live_item["path"] = target_path
+            live_item["original_path"] = str(asset.get("original_path") or "").strip() or source_path
             live_item["cropped"] = True
             live_item["crop_box"] = {
                 "left": left,
@@ -1484,6 +1517,16 @@ class DashboardWorkflowController(WorkflowController):
             old_layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
             old_path = str(old_layer.get("image") or "").strip() if isinstance(old_layer, dict) else ""
             old_query = str(old_layer.get("manual_visual_query") or "").strip() if isinstance(old_layer, dict) else ""
+            old_source_path = (
+                str(old_layer.get("visual_original_path") or "").strip()
+                if isinstance(old_layer, dict)
+                else ""
+            )
+            if not old_source_path or not os.path.isfile(old_source_path):
+                old_source_path = old_path
+
+            if isinstance(old_layer, dict):
+                self._preserve_replaced_visual_in_pool(old_layer, old_source_path)
 
             if format_mode == "top5" and index == 1:
                 rendered = visual_runtime._render_image_slide(
@@ -1564,6 +1607,81 @@ class DashboardWorkflowController(WorkflowController):
 
         except Exception as exc:
             return False, f"Replacement search failed: {type(exc).__name__}: {exc}"
+
+    def _preserve_replaced_visual_in_pool(self, layer: dict[str, Any], old_path: str) -> None:
+        """Return the outgoing chosen visual to the shared pool exactly once."""
+        path = str(old_path or "").strip()
+        if not path or not os.path.isfile(path):
+            return
+
+        try:
+            from visual_retrieval_runtime import _hash_image
+            with open(path, "rb") as fh:
+                image_hash = _hash_image(self.bot, fh.read())
+        except Exception:
+            image_hash = ""
+        if not image_hash:
+            return
+
+        # If the visual already belongs to the pool, it is no longer assigned
+        # after replacement and must become available again.
+        for item in self._visual_pool:
+            if isinstance(item, dict) and str(item.get("hash") or "").strip() == image_hash:
+                item["used"] = False
+                item["assigned_slide"] = 0
+                item["assigned_time"] = ""
+                item["preserved_from_replacement"] = True
+                return
+
+        # A visual selected from a one-off search group should move into the
+        # shared pool when it becomes the outgoing slide image.
+        for group in self._visual_search_groups:
+            group_items = list(group.get("items") or [])
+            for item_index, item in enumerate(group_items):
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("hash") or "").strip() != image_hash:
+                    continue
+                moved = dict(item)
+                moved["path"] = path
+                moved["original_path"] = (
+                    str(layer.get("visual_original_path") or "").strip() or path
+                )
+                moved["used"] = False
+                moved["assigned_slide"] = 0
+                moved["assigned_time"] = ""
+                moved["preserved_from_replacement"] = True
+                del group_items[item_index]
+                group["items"] = group_items
+                self._visual_pool.append(moved)
+                return
+
+        self._visual_pool.append(
+            {
+                "path": path,
+                "original_path": str(layer.get("visual_original_path") or "").strip() or path,
+                "subject": str(
+                    layer.get("related_subject")
+                    or layer.get("primary_entity")
+                    or ""
+                ).strip(),
+                "hash": image_hash,
+                "source": str(layer.get("source_type") or "visual").strip(),
+                "query": str(
+                    layer.get("visual_query_used")
+                    or layer.get("manual_visual_query")
+                    or ""
+                ).strip(),
+                "visual_type": str(layer.get("visual_type") or "").strip().upper(),
+                "visual_genre": str(layer.get("visual_genre") or "").strip().upper(),
+                "provenance": dict(layer.get("asset_provenance") or {}),
+                "status": "previously-selected",
+                "used": False,
+                "assigned_slide": 0,
+                "assigned_time": "",
+                "preserved_from_replacement": True,
+            }
+        )
 
     def replace_visual_from_bank(self, visual_index: int, bank_index: int) -> tuple[bool, str]:
         """Replace one reviewed visual with a previously entity-verified bank image."""
@@ -1661,7 +1779,10 @@ class DashboardWorkflowController(WorkflowController):
                 item for item in bank
                 if str(item.get("path") or "").strip() != selected_path
             ]
-            old_original_path = str(layer.get("visual_original_path") or "").strip() or old_path
+            old_original_path = str(layer.get("visual_original_path") or "").strip()
+            if not old_original_path or not os.path.isfile(old_original_path):
+                old_original_path = old_path
+            self._preserve_replaced_visual_in_pool(layer, old_original_path)
             if (
                 old_original_path
                 and os.path.isfile(old_original_path)
@@ -1854,6 +1975,18 @@ class DashboardWorkflowController(WorkflowController):
                 f"scene_{index}_manual_crop_{attempt}.jpg",
             )
             rendered.convert("RGBA").convert("RGB").save(output_path, "JPEG", quality=95)
+
+            # The dashboard pool must retain the actual cropped visual, not a
+            # Top-5/text-rendered card built from that crop.
+            pool_crop_path = os.path.join(
+                bot.ASSETS_DIR,
+                f"visual_pool_scene_{index}_crop_{attempt}.jpg",
+            )
+            cropped.convert("RGBA").convert("RGB").save(pool_crop_path, "JPEG", quality=95)
+            cropped_pool_layer = dict(layer)
+            cropped_pool_layer["visual_query_used"] = "manual-crop"
+            cropped_pool_layer["visual_original_path"] = source_path
+            self._preserve_replaced_visual_in_pool(cropped_pool_layer, pool_crop_path)
 
             new_layer = dict(layer)
             new_layer.update(

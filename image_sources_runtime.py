@@ -300,6 +300,7 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
     q = _clean_query(query)
     page = _provider_page(_args)
     manual_mode = _manual_mode(_args)
+    visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
     if not key or not q:
         if not key:
             print("   [Visual Source] Pixabay | API key not configured; skipped.", flush=True)
@@ -315,6 +316,9 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
                     "q": q,
                     "image_type": "photo",
                     "safesearch": "true",
+                    "category": "sports"
+                    if visual_genre in {"TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH"}
+                    else None,
                     "order": "latest" if manual_mode else "popular",
                     "page": page,
                     "per_page": 20,

@@ -314,9 +314,10 @@ def bind_dashboard_patches(bot):
     _patch_subtitles(bot)
     _patch_youtube_creator_comments(bot)
 
-    # Keep run_robot's production globals aligned with the live bot bindings.
-    # Several pipeline stages are invoked by functions defined in ultimate_bot.py,
-    # so rebinding bot attributes alone is not sufficient for the module namespace.
+    # Capture the post-hardening, pre-dashboard wrappers as the canonical
+    # per-run baseline. A Streamlit rerun can leave dashboard wrappers attached
+    # to bot attributes; those wrappers close over the previous controller and
+    # must never become the next run's starting point.
     namespace = run_robot.__globals__
     names = (
         "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
@@ -324,12 +325,21 @@ def bind_dashboard_patches(bot):
         "auto_pilot_selection", "run_analytics_sweep",
         "upload_to_youtube", "generate_karaoke_clip",
     )
+    canonical = getattr(bot, "_canonical_dashboard_runtime_bindings", None)
+    if not isinstance(canonical, dict):
+        canonical = {}
     bound = []
     for name in names:
         value = getattr(bot, name, None)
         if value is not None:
+            if name not in canonical:
+                canonical[name] = value
             namespace[name] = value
             bound.append(name)
+    try:
+        setattr(bot, "_canonical_dashboard_runtime_bindings", canonical)
+    except Exception:
+        pass
     print("   [Bindings] Production runtime globals bound: " + ", ".join(bound), flush=True)
 
     _install_visual_cache_safety()

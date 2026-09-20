@@ -1,3 +1,4 @@
+import os
 import asyncio
 import sqlite3
 import threading
@@ -851,8 +852,11 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": verified and not missing' in app_source
-    assert 'disabled=bool(sum(1 for item in items if not item.get("qc_passed")))' in app_source
-    assert 'Choose from the visual pool' in app_source
+    assert 'disabled=bool(unresolved)' in app_source
+    assert 'Review the images' in app_source
+    assert "popover = st.popover(" in app_source
+    assert '"Crop"' in app_source
+    assert 'on_change="rerun"' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
 
@@ -877,20 +881,21 @@ def test_dashboard_manual_crop_returns_shorts_frame():
     assert cropped.size == (1080, 1920)
 
 
-def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
+def test_dashboard_visual_review_uses_simple_popover_crop_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert "Choose from the visual pool" in source
-    assert "Available verified images" in source
-    assert "Identity-verified, lower-resolution images" in source
-    assert "Search 5 new images" in source
-    assert "Apply crop" in source
+    assert "Review the images" in source
+    assert "popover = st.popover(" in source
+    assert '"Crop"' in source
+    assert "if not popover.open" in source
     assert "controller.crop_visual(" in source
+    assert "controller.crop_visual_pool_asset(" in source
     assert 'aspect_ratio=(9, 16)' in source
     assert 'return_type="both"' in source
-    assert 'should_resize_image=False' in source
+    assert 'should_resize_image=True' in source
+    assert "Save crop" in source
+    assert "Search for new images" in source
     assert "Use on slide" in source
-    assert "Crop / reframe selected image" in source
 
 
 def test_repository_does_not_use_deprecated_streamlit_container_width():
@@ -978,6 +983,194 @@ def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, 
     assert "already assigned to slide 2" in message
 
 
+def test_dashboard_pool_replacement_preserves_previous_visual(tmp_path, monkeypatch):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    current = tmp_path / "current.jpg"
+    replacement = tmp_path / "replacement.jpg"
+    Image.new("RGB", (1080, 1920), (20, 30, 40)).save(current, "JPEG")
+    Image.new("RGB", (900, 1200), (80, 100, 120)).save(replacement, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Replacement test",
+        "script": [{"primary_entity": "India", "voiceover": "Current visual."}],
+    }
+    controller._visual_packages = [[{
+        "image": str(current),
+        "visual_original_path": str(current),
+        "visual_verified": True,
+        "visual_type": "ORGANIZATION",
+        "visual_genre": "TEAM_ACTION",
+        "source_type": "Pexels",
+        "visual_query_used": "India cricket team action",
+        "asset_provenance": {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/current/",
+            "author": "Tester",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+        },
+    }]]
+    controller._visual_pool = [{
+        "path": str(replacement),
+        "hash": "replacement-hash",
+        "source": "Pexels",
+        "query": "India cricket team action",
+        "visual_type": "ORGANIZATION",
+        "visual_genre": "TEAM_ACTION",
+        "provenance": {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/replacement/",
+            "author": "Tester",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+        },
+        "used": False,
+        "assigned_slide": 0,
+        "status": "entity-verified",
+    }]
+
+    def fake_replace(index, bank_index):
+        layer = controller._visual_packages[index - 1][0]
+        selected = controller._visual_pool[0]
+        layer = dict(layer)
+        layer["image"] = selected["path"]
+        controller._visual_packages[index - 1] = [layer]
+        return True, "ok"
+
+    monkeypatch.setattr(controller, "replace_visual_from_bank", fake_replace)
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, _ = controller.assign_visual_pool_asset("replacement-hash", 1)
+    assert ok is True
+    preserved = [
+        item for item in controller._visual_pool
+        if item.get("preserved_from_replacement")
+    ]
+    assert preserved
+    assert preserved[-1]["path"] == str(current)
+    assert preserved[-1]["used"] is False
+
+
+def test_dashboard_reset_restores_canonical_factory_bindings():
+    from dashboard_runtime import DashboardWorkflowController
+
+    def run_robot():
+        return None
+
+    bot = _Bot()
+    bot.run_robot = run_robot
+    canonical = {
+        "write_script": lambda: "canonical-script",
+        "generate_voiceover_and_timestamps": lambda: "canonical-audio",
+        "process_visuals_async": lambda: "canonical-visuals",
+        "compile_video": lambda: "canonical-compile",
+    }
+    bot._canonical_dashboard_runtime_bindings = canonical
+    namespace = bot.run_robot.__globals__
+    for name in canonical:
+        stale = lambda name=name: f"stale-{name}"
+        setattr(bot, name, stale)
+        namespace[name] = stale
+
+    controller = DashboardWorkflowController(bot)
+    controller.reset()
+
+    for name, expected in canonical.items():
+        assert getattr(bot, name) is expected
+        assert namespace[name] is expected
+
+
+def test_dashboard_replaced_pool_visual_becomes_available_again(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+    from visual_retrieval_runtime import _hash_image
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    source = tmp_path / "source.jpg"
+    Image.new("RGB", (900, 1200), (30, 60, 90)).save(source, "JPEG")
+    with open(source, "rb") as fh:
+        image_hash = _hash_image(bot, fh.read())
+
+    controller = DashboardWorkflowController(bot)
+    controller._visual_pool = [{
+        "path": str(source),
+        "original_path": str(source),
+        "hash": image_hash,
+        "used": True,
+        "assigned_slide": 2,
+        "assigned_time": "2026-09-21T00:00:00+00:00",
+        "source": "Pexels",
+        "status": "entity-verified",
+    }]
+    controller._preserve_replaced_visual_in_pool(
+        {"visual_original_path": str(source), "source_type": "Pexels"},
+        str(source),
+    )
+
+    assert len(controller._visual_pool) == 1
+    assert controller._visual_pool[0]["used"] is False
+    assert controller._visual_pool[0]["assigned_slide"] == 0
+    assert controller._visual_pool[0]["preserved_from_replacement"] is True
+
+
+def test_dashboard_crop_keeps_cropped_version_in_shared_pool(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    source = tmp_path / "source.jpg"
+    Image.new("RGB", (1200, 1600), (30, 60, 90)).save(source, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Crop test",
+        "script": [{
+            "primary_entity": "India",
+            "voiceover": "A crop test visual.",
+        }],
+    }
+    controller._visual_packages = [[{
+        "image": str(source),
+        "visual_original_path": str(source),
+        "visual_verified": True,
+        "visual_type": "ORGANIZATION",
+        "visual_genre": "TEAM_ACTION",
+        "source_type": "Pexels",
+        "visual_query_used": "India cricket team action",
+        "asset_provenance": {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/source/",
+            "author": "Tester",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+        },
+    }]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, _ = controller.crop_visual(
+        1,
+        crop_box={"left": 150, "top": 0, "width": 900, "height": 1600},
+    )
+    assert ok is True
+    assert len(controller._visual_pool) == 1
+    assert controller._visual_pool[0]["path"].endswith(".jpg")
+    assert controller._visual_pool[0]["preserved_from_replacement"] is True
+    assert controller._visual_pool[0]["original_path"] == str(source)
+    assert os.path.isfile(controller._visual_pool[0]["path"])
+
 def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_path):
     from dashboard_runtime import DashboardWorkflowController
 
@@ -1041,3 +1234,63 @@ def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_p
     snapshot = controller.snapshot()
     assert len(snapshot["visual_search_groups"]) == 1
     assert len(snapshot["visual_search_groups"][0]["items"]) == 5
+
+
+def test_dashboard_manual_upload_preserves_selected_visibility_mode(monkeypatch, tmp_path):
+    import dashboard_runtime
+    import final_qc_runtime
+    import workflow_runtime
+
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"fake video")
+
+    controller = DashboardWorkflowController(_Bot())
+    captured_modes = []
+
+    def fake_uploader(*args, **kwargs):
+        captured_modes.append(args[3])
+        return f"video-{args[3]}"
+
+    controller._real_uploader = fake_uploader
+
+    monkeypatch.setattr(dashboard_runtime, "live_qc_passes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(final_qc_runtime, "validate_final_video", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        final_qc_runtime,
+        "validate_final_upload_metadata",
+        lambda title, description, comment: (title, description, comment),
+    )
+    monkeypatch.setattr(
+        workflow_runtime,
+        "_build_clean_metadata",
+        lambda *_args, **_kwargs: ("Title", "Description", []),
+    )
+
+    genre_cfg = {
+        "label": "News",
+        "hashtags": [],
+        "category_id": "25",
+    }
+
+    private_result = controller.upload_manual(
+        str(video_path),
+        {},
+        "Title",
+        "Description",
+        "Comment",
+        "private",
+        genre_cfg,
+    )
+    public_result = controller.upload_manual(
+        str(video_path),
+        {},
+        "Title",
+        "Description",
+        "Comment",
+        "public",
+        genre_cfg,
+    )
+
+    assert private_result == "video-private"
+    assert public_result == "video-public"
+    assert captured_modes == ["private", "public"]

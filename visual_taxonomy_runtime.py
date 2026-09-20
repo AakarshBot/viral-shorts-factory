@@ -68,7 +68,7 @@ _POLICIES = {
         "A specific person's portrait or headshot.",
     ),
     "PERSON_ACTION": VisualGenrePolicy(
-        ("Commons", "Wikipedia", "DDG", "Pexels", "Unsplash", "Openverse", "Pixabay"),
+        ("Pexels", "Commons", "Pixabay", "Openverse", "Wikipedia", "Unsplash", "DDG"),
         (),
         ("Wikipedia:person", "Commons:person"),
         False,
@@ -96,7 +96,7 @@ _POLICIES = {
         "Team logo, crest, jersey or other team identity asset.",
     ),
     "TEAM_ACTION": VisualGenrePolicy(
-        ("Commons", "DDG", "Pexels", "Unsplash", "Openverse", "Pixabay"),
+        ("Pexels", "Pixabay", "Openverse", "Commons", "Unsplash", "DDG"),
         (),
         ("Commons:team",),
         False,
@@ -159,21 +159,21 @@ _POLICIES = {
         "Street, neighbourhood, cityscape, venue or general geographic setting.",
     ),
     "EVENT_SCENE": VisualGenrePolicy(
-        ("Commons", "DDG", "Openverse", "Pexels", "Unsplash", "Pixabay"),
+        ("Pexels", "Pixabay", "Openverse", "Commons", "Unsplash", "DDG"),
         (),
         (),
         False,
         "Named event, conference, ceremony, summit, festival or launch scene.",
     ),
     "SPORTS_ACTION": VisualGenrePolicy(
-        ("Commons", "DDG", "Pexels", "Unsplash", "Openverse", "Pixabay"),
+        ("Pexels", "Pixabay", "Openverse", "Commons", "Unsplash", "DDG"),
         (),
         ("Commons:sports",),
         False,
         "A sport action such as batting, bowling, scoring, racing or competing.",
     ),
     "SPORTS_MATCH": VisualGenrePolicy(
-        ("Commons", "DDG", "Openverse", "Pexels", "Unsplash", "Pixabay"),
+        ("Pexels", "Pixabay", "Openverse", "Commons", "Unsplash", "DDG"),
         (),
         ("Commons:sports",),
         False,
