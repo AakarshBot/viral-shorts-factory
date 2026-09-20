@@ -535,6 +535,32 @@ def auto_pilot_selection(conn):
     from autopilot_runtime import select_auto_pilot
     return select_auto_pilot(sys.modules[__name__], conn)
 
+def fetch_trending_topics(target="india", query_filter=None):
+    """Return live Google Trends topics while preserving the manual workflow filter."""
+    from story_ranker import fetch_google_trending_topics
+
+    geo = {
+        "india": "IN",
+        "us": "US",
+        "united states": "US",
+        "uk": "GB",
+        "great britain": "GB",
+    }.get(str(target or "").strip().lower(), "IN")
+    trends = fetch_google_trending_topics((geo,), max_terms=30)
+    if query_filter:
+        terms = [
+            token.strip()
+            for token in re.split(r"\\s+(?:OR|AND)\\s+", str(query_filter), flags=re.IGNORECASE)
+            if token.strip()
+        ]
+        filtered = [
+            trend for trend in trends
+            if any(term.casefold() in trend.casefold() for term in terms)
+        ]
+        if filtered:
+            trends = filtered
+    return trends or ["India Tech", "Bollywood", "Cricket", "Stock Market", "AI"]
+
 def manual_prompts(conn):
     scores = get_smart_metrics(conn, "format_used", metric_col="avg_view_percentage")
     print_metric_recommendations("Format Retention History", scores, is_retention=True)
