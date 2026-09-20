@@ -1053,6 +1053,54 @@ def test_dashboard_pool_replacement_preserves_previous_visual(tmp_path, monkeypa
     assert preserved[-1]["used"] is False
 
 
+def test_dashboard_crop_keeps_cropped_version_in_shared_pool(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    source = tmp_path / "source.jpg"
+    Image.new("RGB", (1200, 1600), (30, 60, 90)).save(source, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Crop test",
+        "script": [{
+            "primary_entity": "India",
+            "voiceover": "A crop test visual.",
+        }],
+    }
+    controller._visual_packages = [[{
+        "image": str(source),
+        "visual_original_path": str(source),
+        "visual_verified": True,
+        "visual_type": "ORGANIZATION",
+        "visual_genre": "TEAM_ACTION",
+        "source_type": "Pexels",
+        "visual_query_used": "India cricket team action",
+        "asset_provenance": {
+            "provider": "Pexels",
+            "url": "https://www.pexels.com/photo/source/",
+            "author": "Tester",
+            "license": "Pexels License",
+            "license_url": "https://www.pexels.com/license/",
+        },
+    }]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, _ = controller.crop_visual(
+        1,
+        crop_box={"left": 150, "top": 0, "width": 900, "height": 1600},
+    )
+    assert ok is True
+    assert len(controller._visual_pool) == 1
+    assert controller._visual_pool[0]["path"].endswith(".jpg")
+    assert controller._visual_pool[0]["preserved_from_replacement"] is True
+    assert os.path.isfile(controller._visual_pool[0]["path"])
+
 def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_path):
     from dashboard_runtime import DashboardWorkflowController
 
