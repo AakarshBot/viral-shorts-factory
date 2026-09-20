@@ -617,14 +617,16 @@ def patch_content_first_visuals(bot):
                 source_credit = source_credit_for_type(source_type)
                 seg["visual_verified"] = False
                 seg["visual_qc_blocked"] = True
-                seg["visual_qc_block_reason"] = "Manual visual pool produced no entity-verified candidate for this slide."
+                seg["visual_qc_block_reason"] = "Manual visual pool produced no identity-verified candidate for this slide."
                 seg["visual_rescue_reason"] = "manual-pool-exhausted"
                 seg["visual_fallback_reason"] = ""
                 seg["visual_query_used"] = ""
                 seg["visual_original_path"] = ""
-                seg["visual_asset_bank"] = [
-                    dict(item) for item in manual_classified_pool
-                ]
+                seg["visual_asset_bank"] = []
+                seg["visual_manual_pool_mode"] = True
+                seg["visual_rejection_counts"] = dict(
+                    (manual_pool_result or {}).get("rejection_counts") or {}
+                )
             elif idx == news_source_scene_index and isinstance(news_source_candidate, dict):
                 bg_img = news_source_candidate["image"]
                 used_ai = False
