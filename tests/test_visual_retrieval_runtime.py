@@ -1601,9 +1601,10 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
         lambda bot, visual_type, visual_genre="": [("Pexels", fake_fetcher)],
     )
 
+    bot = FakeBot()
     first = retrieval.collect_manual_visual_search(
         FakeRuntime(),
-        FakeBot(),
+        bot,
         "Indian cricket team",
     )
     first_hashes = {item["hash"] for item in first["assets"]}
@@ -1612,7 +1613,7 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
 
     second = retrieval.collect_manual_visual_search(
         FakeRuntime(),
-        FakeBot(),
+        bot,
         "Indian cricket team",
         used_hashes=first_hashes,
     )
@@ -1663,6 +1664,9 @@ def test_pexels_search_requests_requested_page(monkeypatch):
     requested = {}
 
     class Response:
+        status_code = 200
+        headers = {}
+
         def raise_for_status(self):
             return None
 
