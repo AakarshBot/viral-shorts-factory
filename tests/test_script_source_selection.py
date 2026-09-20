@@ -1,3 +1,4 @@
+from ultimate_bot import validate_script
 import json
 
 from research_runtime import _prepare_primary_writer_data
@@ -31,3 +32,52 @@ def test_non_cricket_modes_keep_original_story_payload():
     prepared = _prepare_primary_writer_data(story, "regular")
 
     assert prepared["text"] == story["text"]
+
+
+def test_primary_script_validator_rejects_thin_five_scene_output():
+    scenes = [
+        {
+            "voiceover": "India team faces delay today.",
+            "primary_entity": "India Men's Cricket Team",
+            "visual_intent": "news_event",
+            "specific_search_prompt": "India Men's Cricket Team",
+            "sport_or_topic_category": "Cricket",
+        }
+        for _ in range(5)
+    ]
+    valid, reason = validate_script(
+        {
+            "editorial_angle": "This explains the confirmed development and why it matters to the team's preparation.",
+            "script": scenes,
+        },
+        "India team faces clothing delay before the Asian Games.",
+        "regular",
+    )
+    assert valid is False
+    assert "6" in reason or "12" in reason
+
+
+def test_primary_script_validator_accepts_six_substantive_scenes_without_bridge_keyword_rule():
+    scenes = [
+        {
+            "voiceover": (
+                "The latest development affects the team's preparation, while officials work through the immediate issue and organizers assess the wider implications."
+            ),
+            "primary_entity": "India Men's Cricket Team",
+            "visual_intent": "news_event",
+            "specific_search_prompt": "India Men's Cricket Team",
+            "sport_or_topic_category": "Cricket",
+        }
+        for _ in range(6)
+    ]
+    valid, reason = validate_script(
+        {
+            "editorial_angle": (
+                "The script adds context about the practical consequence rather than simply repeating the source article's sequence."
+            ),
+            "script": scenes,
+        },
+        "India team faces clothing delay before the Asian Games.",
+        "regular",
+    )
+    assert valid is True, reason
