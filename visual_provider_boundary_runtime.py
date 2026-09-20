@@ -92,6 +92,56 @@ def _api_json(
         return None
 
 
+_PERSON_IDENTITY_CACHE: dict[str, dict[str, str]] = {}
+_PERSON_IDENTITY_CACHE_MAX = 128
+
+
+def resolve_person_identity(entity: str) -> dict[str, str]:
+    """Resolve a person name to a Wikidata item so identity survives spelling/query variants."""
+    normalized = _clean_query(entity)
+    if not normalized:
+        return {}
+    cache_key = normalized.casefold()
+    cached = _PERSON_IDENTITY_CACHE.get(cache_key)
+    if cached:
+        return dict(cached)
+
+    payload = _api_json(
+        "https://www.wikidata.org/w/api.php",
+        params={
+            "action": "wbsearchentities",
+            "search": normalized,
+            "language": "en",
+            "uselang": "en",
+            "type": "item",
+            "limit": 5,
+            "format": "json",
+        },
+    )
+    results = payload.get("search", []) if payload else []
+    if not isinstance(results, list):
+        return {}
+
+    # Wikidata's own relevance ranking is the identity resolver. Do not impose
+    # a brittle local spelling comparison that would discard legitimate aliases
+    # or transliterations; the downstream semantic-QA gate remains authoritative.
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        qid = str(item.get("id") or "").strip()
+        label = str(item.get("label") or "").strip()
+        if not re.fullmatch(r"Q\\d+", qid):
+            continue
+        resolved = {"qid": qid, "label": label}
+        if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
+            oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
+            if oldest_key:
+                _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
+        _PERSON_IDENTITY_CACHE[cache_key] = resolved
+        return dict(resolved)
+    return {}
+
+
 def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -127,8 +177,9 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             "redirects": 1,
             "gsrnamespace": 0,
             "gsrlimit": MAX_PROVIDER_CANDIDATES,
-            "prop": "pageimages",
+            "prop": "pageimages|pageprops",
             "piprop": "name|original|thumbnail",
+            "ppprop": "wikibase_item",
             "pilicense": "free",
             "pithumbsize": 1600,
             "format": "json",
@@ -140,6 +191,15 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
         if not isinstance(page, dict):
             continue
         title = str(page.get("title", "")).strip()
+        qid = str((page.get("pageprops") or {}).get("wikibase_item") or "").strip()
+        if qid and re.fullmatch(r"Q\\d+", qid):
+            cache_key = entity.casefold()
+            resolved = {"qid": qid, "label": title}
+            if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX and cache_key not in _PERSON_IDENTITY_CACHE:
+                oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
+                if oldest_key:
+                    _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
+            _PERSON_IDENTITY_CACHE[cache_key] = resolved
         # Wikipedia's search engine is the relevance filter. Do not impose a
         # brittle token-level name match here: legitimate pages commonly use
         # compacted names, punctuation, initials, aliases, transliterations or
@@ -384,6 +444,7 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
 __all__ = [
     "MAX_PROVIDER_CANDIDATES",
     "build_raw_source_plan",
+    "resolve_person_identity",
     "fetch_commons_candidates",
     "fetch_pexels_candidates",
     "fetch_unsplash_candidates",
