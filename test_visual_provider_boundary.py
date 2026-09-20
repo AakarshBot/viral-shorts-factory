@@ -172,6 +172,83 @@ def test_person_identity_resolver_uses_wikidata_and_caches(monkeypatch):
     boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
 
 
+def test_person_identity_resolver_falls_back_to_wikipedia_for_spelling_variants(monkeypatch):
+    cache_keys = {"smriti mandana", "smriti mandhana"}
+    for cache_key in cache_keys:
+        boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+    calls = []
+
+    def fake_api(url, *, params=None, headers=None):
+        calls.append((url, dict(params or {})))
+        action = (params or {}).get("action")
+        if action == "wbsearchentities":
+            return {"search": []}
+        if url == "https://en.wikipedia.org/w/api.php":
+            return {
+                "query": {
+                    "pages": {
+                        "16224802": {
+                            "pageid": 16224802,
+                            "index": 1,
+                            "title": "Smriti Mandhana",
+                            "pageprops": {"wikibase_item": "Q16224802"},
+                        }
+                    }
+                }
+            }
+        return {
+            "entities": {
+                "Q16224802": {
+                    "claims": {
+                        "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}]
+                    },
+                    "labels": {"en": {"value": "Smriti Mandhana"}},
+                }
+            }
+        }
+
+    monkeypatch.setattr(boundary, "_api_json", fake_api)
+    first = boundary.resolve_person_identity("Smriti Mandana")
+    second = boundary.resolve_person_identity("Smriti Mandana")
+
+    assert first == second == {"qid": "Q16224802", "label": "Smriti Mandhana"}
+    actions = [params.get("action") for _url, params in calls]
+    assert actions == ["wbsearchentities", "query", "wbgetentities"]
+    assert boundary._PERSON_IDENTITY_CACHE["smriti mandana"] == first
+    assert boundary._PERSON_IDENTITY_CACHE["smriti mandhana"] == first
+
+    for cache_key in cache_keys:
+        boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+
+def test_wikipedia_person_search_does_not_poison_identity_cache(monkeypatch):
+    cache_key = "cache poisoning test person"
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+    def fake_api(url, *, params=None, headers=None):
+        action = (params or {}).get("action")
+        if action == "query":
+            return {
+                "query": {
+                    "pages": {
+                        "123": {
+                            "pageid": 123,
+                            "title": "Not Yet Verified Person",
+                            "index": 1,
+                            "pageprops": {"wikibase_item": "Q999"},
+                        }
+                    }
+                }
+            }
+        return None
+
+    monkeypatch.setattr(boundary, "_api_json", fake_api)
+    boundary.fetch_wikipedia_person_candidates("Cache Poisoning Test Person")
+    assert "cache poisoning test person" not in boundary._PERSON_IDENTITY_CACHE
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+
 
 def test_person_identity_resolver_prefers_verified_human(monkeypatch):
     cache_key = "human identity resolver test"
