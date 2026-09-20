@@ -324,6 +324,9 @@ def _init_state() -> None:
         "offline_diagnostics": {},
         "pending_candidate": None,
         "visual_search_queries": "",
+        "visual_query_story_key": "",
+        "visual_query_suggestions": [],
+        "visual_query_field_count": 0,
         "discovery_headline_selection": None,
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
@@ -350,6 +353,9 @@ def reset_run() -> None:
         "final_comment": "",
         "pending_candidate": None,
         "visual_search_queries": "",
+        "visual_query_story_key": "",
+        "visual_query_suggestions": [],
+        "visual_query_field_count": 0,
         "discovery_headline_selection": None,
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
@@ -1791,10 +1797,13 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         source = str(pending_candidate.get("source_label") or "News source").strip()
         url = str(pending_candidate.get("story_url") or "").strip()
 
+        config_for_queries = dict(st.session_state.web_config or {})
+        query_story_key, query_suggestions = _ensure_visual_query_plan(pending_candidate, config_for_queries)
+
         _render_section_header(
             "Step 02",
-            "Review your story",
-            "Confirm the headline before the factory spends time producing it.",
+            "Review your story & search terms",
+            "The factory has pre-built ranked image-search phrases. Edit them before production; only the terms left here will be searched.",
         )
         with st.container(border=True):
             st.markdown("<div class='story-rank'>SELECTED HEADLINE</div>", unsafe_allow_html=True)
@@ -1805,19 +1814,61 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             st.caption(f"Source · {source}")
             if url.startswith(("http://", "https://")):
                 st.link_button("Open source article", url, width="content")
-            with st.expander("Optional visual-search hints", expanded=False):
-                st.caption("Add exact image searches up front. Leave blank to keep automatic visual search.")
+
+            st.markdown("### Ranked visual search terms")
+            st.caption(
+                "These are query suggestions only. No image search starts here. Keep, edit, clear, or add terms; "
+                "their top-to-bottom order becomes the fetch budget rank."
+            )
+            field_count = max(
+                1,
+                int(st.session_state.get("visual_query_field_count") or len(query_suggestions) or 1),
+            )
+            for index in range(field_count):
+                field_key = f"visual_query_field_{query_story_key}_{index}"
                 st.text_input(
-                    "Search queries",
-                    placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
-                    key="visual_search_queries",
+                    f"Query {index + 1}",
+                    key=field_key,
+                    placeholder="e.g. Virat Kohli India cricket, BCCI logo, India women's cricket team",
                 )
+                if index < len(query_suggestions):
+                    suggestion = query_suggestions[index]
+                    hint = str(suggestion.get("source_hint") or "Configured image source").strip()
+                    reason = str(suggestion.get("reason") or "").strip()
+                    if hint or reason:
+                        st.caption(
+                            (f"{hint}" if hint else "")
+                            + (f" · {reason}" if reason else "")
+                        )
+
+            if st.button(
+                "＋ Add another query",
+                type="secondary",
+                width="content",
+                key=f"add_visual_query_{query_story_key}",
+            ):
+                next_index = field_count
+                st.session_state.visual_query_field_count = field_count + 1
+                st.session_state[f"visual_query_field_{query_story_key}_{next_index}"] = ""
+                st.rerun()
 
         start_col, cancel_col = st.columns([1.5, 1])
         with start_col:
             if st.button("Start production", type="primary", width="stretch", key="start_selected_topic"):
                 config = dict(st.session_state.web_config)
-                config["visual_search_queries"] = str(st.session_state.get("visual_search_queries", "") or "").strip()
+                accepted_queries = [
+                    str(
+                        st.session_state.get(
+                            f"visual_query_field_{query_story_key}_{index}",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+                    for index in range(field_count)
+                ]
+                accepted_queries = [query for query in accepted_queries if query]
+                config["visual_search_queries"] = "\n".join(accepted_queries)
+                config["visual_search_query_list"] = list(accepted_queries)
                 if config.get("editorial_mode") == "AI":
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
@@ -1830,6 +1881,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             if st.button("Choose another headline", width="stretch", key="cancel_selected_topic"):
                 st.session_state.pending_candidate = None
                 st.session_state.visual_search_queries = ""
+                st.session_state.visual_query_story_key = ""
+                st.session_state.visual_query_suggestions = []
+                st.session_state.visual_query_field_count = 0
                 st.rerun()
         return
 
@@ -1884,6 +1938,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         if st.button("Use headline →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
                             st.session_state.pending_candidate = dict(candidate)
                             st.session_state.visual_search_queries = ""
+                            st.session_state.visual_query_story_key = ""
+                            st.session_state.visual_query_suggestions = []
+                            st.session_state.visual_query_field_count = 0
                             st.rerun()
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
