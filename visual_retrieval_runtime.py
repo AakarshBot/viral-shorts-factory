@@ -433,6 +433,39 @@ def _record_verified_related_assets(
         seg["_verified_subject_assets"] = existing
 
 
+def _provider_search_query(
+    source: str,
+    query: str,
+    identity: str,
+    visual_type: str,
+    visual_genre: str,
+    identity_qid: str = "",
+    query_index: int = 1,
+) -> str:
+    """Translate canonical intent into the vocabulary each provider searches best."""
+    source_l = str(source or "").strip().casefold()
+    visual_l = str(visual_type or "").strip().upper()
+    genre_l = str(visual_genre or "").strip().upper()
+    identity = str(identity or "").strip()
+    query = str(query or "").strip()
+
+    # Wikipedia is an identity resolver, not a scene search engine. Keep its
+    # query anchored to the locked person on every intent round.
+    if visual_l == "PERSON" and source_l == "wikipedia" and identity:
+        return identity
+
+    # For portraits, Commons has structured Wikidata depicts data that survives
+    # spelling variants and transliterations. Use that identity query first,
+    # then fall back to the plain name so older/unstructured files still work.
+    if visual_l == "PERSON" and genre_l == "PERSON_PORTRAIT" and source_l == "commons":
+        if query_index == 1 and identity_qid:
+            return f"haswbstatement:P180={identity_qid}"
+        if identity:
+            return identity
+
+    return query or identity
+
+
 def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[str], used_hashes: set[str], video_title: str = ""):
     """Search grounded phrases through raw providers and apply one QA boundary."""
     entity = str(seg.get("primary_entity", "")).strip()
@@ -538,6 +571,23 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 flush=True,
             )
 
+    identity_qid = ""
+    if visual_type == "PERSON":
+        try:
+            from visual_provider_boundary_runtime import resolve_person_identity
+            identity_context = resolve_person_identity(cache_entity)
+            identity_qid = str(identity_context.get("qid") or "").strip()
+            if identity_qid:
+                print(
+                    f"   [Visual Identity] Wikidata identity resolved: {cache_entity} -> {identity_qid}",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(
+                f"   [Visual Identity] Wikidata resolver unavailable; using name search: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+
     verification_attempts = 0
     max_verification = max(1, int(getattr(runtime, "VISUAL_MAX_VERIFICATION_ATTEMPTS", 8)))
     try:
@@ -566,6 +616,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     query_index = 0
     qa_hard_stop = False
     sources_queried = 0
+    attempted_source_queries: set[tuple[str, str]] = set()
     while query_index < len(queries):
         query = queries[query_index]
         query_index += 1
@@ -575,12 +626,26 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             if verification_attempts >= max_verification or qa_hard_stop:
                 break
 
-            fetch_entity = cache_entity if str(source).casefold() == "wikipedia" else query
+            source_query = _provider_search_query(
+                source,
+                query,
+                cache_entity,
+                visual_type,
+                visual_genre,
+                identity_qid,
+                query_index,
+            )
+            source_key = (str(source or "").strip().casefold(), str(source_query or "").strip().casefold())
+            if not source_query or source_key in attempted_source_queries:
+                continue
+            attempted_source_queries.add(source_key)
+
+            fetch_entity = cache_entity if str(source).casefold() == "wikipedia" else source_query
             local_used_urls = set(used_urls)
             args = (
                 (fetch_entity, local_used_urls, query, video_title)
                 if str(source).casefold() == "wikipedia"
-                else (query, local_used_urls, query, video_title)
+                else (source_query, local_used_urls, query, video_title)
             )
 
             raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
