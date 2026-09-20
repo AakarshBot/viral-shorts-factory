@@ -1574,17 +1574,22 @@ def render_console(snapshot: Dict[str, Any]) -> None:
     if not lines:
         return
 
-    latest = lines[-1]
-    upload_match = re.search(r"\[Upload Progress\]\s*(\d+)%", latest)
-    render_match = re.search(r"(?:Rendering Video Scenes|Writing video file).*?(\d{1,3})%", latest)
+    # The worker often writes informational lines after a progress line. Search
+    # backwards so the dashboard keeps showing the latest known operation instead
+    # of making the progress indicator disappear on the next log message.
     operation_percent = None
     operation_label = ""
-    if upload_match:
-        operation_percent = int(upload_match.group(1))
-        operation_label = "YouTube upload"
-    elif render_match:
-        operation_percent = int(render_match.group(1))
-        operation_label = "Final video render"
+    for latest in reversed(lines[-100:]):
+        upload_match = re.search(r"\[Upload Progress\]\s*(\d+)%", latest)
+        render_match = re.search(r"(?:Rendering Video Scenes|Writing video file).*?(\d{1,3})%", latest)
+        if upload_match:
+            operation_percent = int(upload_match.group(1))
+            operation_label = "YouTube upload"
+            break
+        if render_match:
+            operation_percent = int(render_match.group(1))
+            operation_label = "Final video render"
+            break
 
     st.markdown("### Live factory activity")
     if operation_percent is not None:
@@ -1629,7 +1634,8 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
     cols = st.columns(4)
     cols[0].metric("Script", "Ready" if script_data else "Waiting")
     cols[1].metric("Voiceover", f"{len(audio)} tracks" if audio else "Waiting")
-    cols[2].metric("Visuals", f"{len(visuals)} ready" if visuals else "Waiting")
+    ready_visuals = sum(1 for item in visuals if item.get("qc_passed"))
+    cols[2].metric("Visuals", f"{ready_visuals}/{len(visuals)} ready" if visuals else "Waiting")
     cols[3].metric("Final video", "Ready" if video_path and os.path.isfile(video_path) else "Waiting")
 
     if title or description or comment:
