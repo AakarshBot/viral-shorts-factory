@@ -452,8 +452,8 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
 def _commons_search_query(query: str) -> str:
     """Use the vocabulary Commons actually uses for match/event media."""
     q = _clean_query(query)
-    q = re.sub(r"\\bversus\\b", "v", q, flags=re.IGNORECASE)
-    q = re.sub(r"\\bvs\\.?\\b", "v", q, flags=re.IGNORECASE)
+    q = re.sub(r"\bversus\b", "v", q, flags=re.IGNORECASE)
+    q = re.sub(r"\bvs\.?\b", "v", q, flags=re.IGNORECASE)
     return q
 
 
