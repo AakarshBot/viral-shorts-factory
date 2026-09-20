@@ -51,8 +51,10 @@ def test_multilingual_script_grounding_and_metadata():
     }
 
     for sample in samples.values():
+        sample["script"] = sample["script"] * 2
         script = {
             "script": sample["script"],
+            "editorial_angle": "This script adds implementation context and practical consequences beyond the headline itself.",
             "titles": [sample["title"], sample["title"] + " వివరాలు", sample["title"] + " తాజా సమాచారం"],
             "recommended_title_index": 1,
             "seo_description": sample["summary"],
