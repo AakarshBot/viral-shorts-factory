@@ -6,6 +6,7 @@ It adds only a dashboard-side visual review gate and presentation helpers.
 """
 from __future__ import annotations
 
+import copy
 import os
 import sqlite3
 import sys
@@ -14,6 +15,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from PIL import Image
@@ -29,6 +31,193 @@ def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
         and not bool(snapshot.get("thread_alive"))
         and bool(video_path)
     )
+
+def run_visual_query_dry_run(
+    bot,
+    selected_story: dict[str, Any],
+    web_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run the live research/script/query path and stop before image retrieval."""
+    if not isinstance(selected_story, dict) or not str(selected_story.get("title") or "").strip():
+        raise ValueError("Visual query dry run requires a selected story.")
+
+    config = dict(web_config or {})
+    format_mode = str(config.get("format_mode") or selected_story.get("format_mode") or "regular").strip().lower()
+    if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
+        format_mode = "cricket"
+    genre_key = str(config.get("category") or selected_story.get("category") or "national_global_affairs").strip()
+    language_key = str(config.get("language") or "english").strip()
+    language_cfg = getattr(bot, "LANGUAGES", {}).get(language_key)
+    if not isinstance(language_cfg, dict):
+        raise ValueError(f"Unknown language configuration: {language_key}")
+    if not getattr(bot, "CONTENT_CATEGORIES", {}).get(genre_key):
+        raise ValueError(f"Unknown category configuration: {genre_key}")
+
+    previous_web_config = getattr(bot, "_active_web_config", None)
+    conn = sqlite3.connect(bot.DB_PATH)
+    try:
+        # The same hardening/research/query bindings used by production are
+        # installed before invoking the canonical write_script callable.
+        from production_hardening_runtime import install_production_hardening
+        install_production_hardening(bot)
+        bot._active_web_config = dict(config)
+
+        run_robot = getattr(bot, "run_robot", None)
+        namespace = getattr(run_robot, "__globals__", {}) if run_robot is not None else {}
+        writer = namespace.get("write_script") or getattr(bot, "write_script", None)
+        if not callable(writer):
+            raise RuntimeError("Canonical production write_script callable is unavailable.")
+
+        script_data = writer(
+            dict(selected_story),
+            language_cfg,
+            genre_key,
+            conn,
+            format_mode,
+        )
+    finally:
+        conn.close()
+        if previous_web_config is None:
+            try:
+                delattr(bot, "_active_web_config")
+            except AttributeError:
+                pass
+        else:
+            bot._active_web_config = previous_web_config
+
+    if not isinstance(script_data, dict):
+        raise RuntimeError("The canonical script pipeline returned no usable script.")
+
+    raw_scenes = script_data.get("script") or []
+    if not isinstance(raw_scenes, list) or not raw_scenes:
+        raise RuntimeError("The canonical script pipeline returned no scenes.")
+
+    from visual_entity_grounding_runtime import apply_grounding
+    from visual_query_entities_runtime import search_slide_visual
+
+    title = str(
+        script_data.get("title")
+        or selected_story.get("title")
+        or ""
+    ).strip()
+
+    # Manual slide queries are deliberately removed from this diagnostic copy.
+    # The real production path still honours them exactly when the creator
+    # supplies them through the dashboard.
+    scenes = copy.deepcopy(raw_scenes)
+    manual_fields = (
+        "manual_visual_query",
+        "manual_visual_query_score",
+        "manual_visual_query_index",
+        "manual_visual_query_source",
+    )
+    grounded_scenes: list[dict[str, Any]] = []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            grounded_scenes.append({})
+            continue
+        for field in manual_fields:
+            scene.pop(field, None)
+        grounded_scenes.append(apply_grounding(scene, script_data))
+
+    preview_script = dict(script_data)
+    preview_script["script"] = grounded_scenes
+
+    captured: list[dict[str, Any]] = []
+
+    def capture_without_retrieval(
+        _runtime_bot,
+        scene,
+        category,
+        used_urls,
+        used_hashes,
+        video_title="",
+    ):
+        intent = scene.get("_visual_search_intent")
+        if intent is not None:
+            captured.append(
+                {
+                    "subject": str(intent.subject or "").strip(),
+                    "query": str(intent.query or "").strip(),
+                    "queries": [str(query).strip() for query in (intent.queries or ()) if str(query).strip()],
+                    "visual_type": str(intent.visual_type or "").strip(),
+                    "visual_genre": str(intent.visual_genre or "").strip(),
+                    "confidence": float(intent.confidence or 0.0),
+                }
+            )
+        # The production search function expects a retrieval result, but this
+        # diagnostic boundary never calls a provider or creates/downloads an image.
+        return None, False, "dry-run"
+
+    dry_runtime = SimpleNamespace(
+        _generic_semantic_query_guard=False,
+        _relevant_asset=capture_without_retrieval,
+    )
+
+    results: list[dict[str, Any]] = []
+    category = genre_key
+    for index, scene in enumerate(grounded_scenes, 1):
+        before = len(captured)
+        record = {
+            "slide": index,
+            "voiceover": str(scene.get("voiceover") or "").strip(),
+            "subject": str(
+                scene.get("primary_entity")
+                or scene.get("visual_search_subject")
+                or ""
+            ).strip(),
+            "grounded": bool(scene.get("visual_entity_grounded")),
+            "grounding_reason": str(scene.get("visual_entity_grounding_reason") or "").strip(),
+            "queries": [],
+            "status": "READY",
+            "error": "",
+        }
+        try:
+            search_slide_visual(
+                dry_runtime,
+                bot,
+                scene,
+                category,
+                set(),
+                set(),
+                title,
+                manual_query="",
+            )
+            if len(captured) > before:
+                capture = captured[-1]
+                record.update(
+                    {
+                        "subject": capture["subject"] or record["subject"],
+                        "query": capture["query"],
+                        "queries": capture["queries"],
+                        "visual_type": capture["visual_type"],
+                        "visual_genre": capture["visual_genre"],
+                        "confidence": capture["confidence"],
+                    }
+                )
+        except Exception as exc:
+            record["status"] = "BLOCKED"
+            record["error"] = f"{type(exc).__name__}: {exc}"
+        results.append(record)
+
+    successful = [item for item in results if item["status"] == "READY" and item.get("query")]
+    blocked = [item for item in results if item["status"] == "BLOCKED"]
+    return {
+        "status": "PASS" if results and not blocked else "BLOCKED" if results else "FAIL",
+        "detail": (
+            f"Generated visual queries for {len(successful)}/{len(results)} scenes. "
+            f"No image retrieval or image generation was performed."
+        ),
+        "story_title": title,
+        "scene_count": len(results),
+        "research_source_count": int(script_data.get("research_source_count") or 0),
+        "research_evidence_status": str(script_data.get("research_evidence_status") or ""),
+        "results": results,
+        "script": preview_script,
+        "manual_queries_excluded": True,
+        "image_retrieval_performed": False,
+    }
+
 
 
 _ARTIFACT_QC_CACHE: dict[tuple[str, int], tuple[bool, str]] = {}
