@@ -122,9 +122,8 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
     if not isinstance(results, list):
         return {}
 
-    # Wikidata's own relevance ranking is the identity resolver. Do not impose
-    # a brittle local spelling comparison that would discard legitimate aliases
-    # or transliterations; the downstream semantic-QA gate remains authoritative.
+    candidate_ids: list[str] = []
+    labels: dict[str, str] = {}
     for item in results:
         if not isinstance(item, dict):
             continue
@@ -132,14 +131,61 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
         label = str(item.get("label") or "").strip()
         if not re.fullmatch(r"Q\\d+", qid):
             continue
-        resolved = {"qid": qid, "label": label}
-        if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
-            oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
-            if oldest_key:
-                _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
-        _PERSON_IDENTITY_CACHE[cache_key] = resolved
-        return dict(resolved)
-    return {}
+        candidate_ids.append(qid)
+        if label:
+            labels[qid] = label
+
+    # wbsearchentities is intentionally relevance-ranked but does not itself
+    # guarantee that the top item is a human. Verify the candidate type through
+    # P31=Q5 (human) when available, then use the first relevant item as a
+    # compatibility fallback if structured type data is incomplete.
+    verified_qid = ""
+    if candidate_ids:
+        detail_payload = _api_json(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbgetentities",
+                "ids": "|".join(candidate_ids[:5]),
+                "props": "claims|labels",
+                "languages": "en",
+                "format": "json",
+            },
+        )
+        entities = detail_payload.get("entities", {}) if detail_payload else {}
+        if isinstance(entities, dict):
+            for qid in candidate_ids[:5]:
+                entity = entities.get(qid)
+                claims = entity.get("claims", {}) if isinstance(entity, dict) else {}
+                p31 = claims.get("P31", []) if isinstance(claims, dict) else []
+                for claim in p31 if isinstance(p31, list) else []:
+                    main_snak = claim.get("mainsnak", {}) if isinstance(claim, dict) else {}
+                    value = main_snak.get("datavalue", {}).get("value", {}) if isinstance(main_snak, dict) else {}
+                    if isinstance(value, dict) and str(value.get("id") or "").strip() == "Q5":
+                        verified_qid = qid
+                        break
+                if verified_qid:
+                    break
+
+    qid = verified_qid or (candidate_ids[0] if candidate_ids else "")
+    if not qid:
+        return {}
+    label = labels.get(qid, "")
+    entity = {}
+    if candidate_ids:
+        detail_payload = detail_payload if "detail_payload" in locals() and isinstance(detail_payload, dict) else {}
+        detail_entities = detail_payload.get("entities", {}) if detail_payload else {}
+        if isinstance(detail_entities, dict) and isinstance(detail_entities.get(qid), dict):
+            entity = detail_entities[qid]
+            label_data = entity.get("labels", {}).get("en", {}) if isinstance(entity.get("labels"), dict) else {}
+            label = str(label_data.get("value") or label).strip()
+
+    resolved = {"qid": qid, "label": label}
+    if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
+        oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
+        if oldest_key:
+            _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
+    _PERSON_IDENTITY_CACHE[cache_key] = resolved
+    return dict(resolved)
 
 
 def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[dict[str, Any]]:
