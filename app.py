@@ -46,17 +46,94 @@ MAX_DASHBOARD_DISCOVERY_HEADLINES = 28
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
 
-st.markdown("<style>\n.block-container{padding-top:1.5rem;padding-bottom:3rem;max-width:1500px}\nsection[data-testid=\"stSidebar\"]{border-right:1px solid rgba(255,255,255,.08)}\n.brand-card{background:linear-gradient(135deg,#161e35,#10172a 60%,#1a1434);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:26px 30px;margin-bottom:22px;box-shadow:0 16px 50px rgba(0,0,0,.18)}\n.brand-title{font-size:2rem;font-weight:800;letter-spacing:-.04em}.brand-sub{color:#91a0bb;margin-top:6px}\n.section-kicker{color:#9eacc4;text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;font-weight:700;margin-bottom:4px}\n.panel,.candidate{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.018));border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.1)}\n.candidate{min-height:245px}.candidate-rank{color:#9aa9c4;font-size:.72rem;font-weight:800;letter-spacing:.1em}.candidate-title{font-size:1.06rem;font-weight:750;line-height:1.35;margin:9px 0 10px}.candidate-reason{color:#aebbd0;font-size:.88rem;line-height:1.45;min-height:74px}.small-muted{color:#91a0bb;font-size:.82rem}\n.stage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0 18px}.stage-card{border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:11px 12px;background:rgba(255,255,255,.02)}.stage-card.active{border-color:rgba(124,92,255,.55);background:rgba(124,92,255,.08)}.stage-card.done{border-color:rgba(45,212,191,.3)}.stage-name{font-size:.8rem;font-weight:700}.stage-state{color:#91a0bb;font-size:.72rem;margin-top:3px}\ndiv[data-testid=\"stMetric\"]{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:12px 14px}.stButton>button,.stLinkButton>a{border-radius:10px;font-weight:650;min-height:42px}.dashboard-footer{text-align:center;color:#91a0bb;font-size:.78rem;padding:8px 0}\n@media(max-width:900px){.stage-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand-title{font-size:1.55rem}}\n</style>", unsafe_allow_html=True)
-
 st.markdown("""<style>
-*{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
-.brand-card{background:linear-gradient(135deg,#2a0d35,#1a1030 60%,#3a0d5c);border:1px solid rgba(190,140,255,.15);box-shadow:0 16px 50px rgba(80,20,120,.35);border-radius:18px;padding:22px 28px;margin-bottom:20px}
-.brand-title{font-family:system-ui,sans-serif;font-size:1.9rem;font-weight:800;color:#f8e8ff;letter-spacing:-.03em;line-height:1.1;text-shadow:0 2px 14px rgba(190,140,255,.4)}
-.stButton>button{background:linear-gradient(180deg,#7b3fe6,#5a2fc0);border:1px solid rgba(255,255,255,.25);box-shadow:0 6px 18px rgba(123,63,230,.45),inset 0 1px 0 rgba(255,255,255,.2)}
+:root{
+  --bg:#0b0d12;--surface:#11151d;--surface-2:#151a23;--line:rgba(255,255,255,.09);
+  --line-strong:rgba(255,255,255,.14);--text:#f5f7fb;--muted:#95a0b2;--muted-2:#6f7a8c;
+  --accent:#8b5cf6;--accent-soft:rgba(139,92,246,.12);--good:#34d399;--good-soft:rgba(52,211,153,.11);
+  --warn:#f59e0b;--warn-soft:rgba(245,158,11,.1);
+}
+html,body,[data-testid="stAppViewContainer"]{background:var(--bg)}
+[data-testid="stHeader"]{background:rgba(11,13,18,.72)}
+.block-container{max-width:1320px;padding-top:1.4rem;padding-bottom:3rem}
+section[data-testid="stSidebar"]{background:#0d1016;border-right:1px solid var(--line)}
+section[data-testid="stSidebar"]>div{padding-top:1.25rem}
+*{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important}
+h1,h2,h3,h4{letter-spacing:-.035em}
+p{color:var(--text)}
+.small-muted{color:var(--muted);font-size:.82rem}
+.section-kicker{color:#a995ff;text-transform:uppercase;letter-spacing:.14em;font-size:.68rem;font-weight:800;margin-bottom:.25rem}
+.section-title{font-size:1.65rem;font-weight:800;line-height:1.15;margin:0}
+.section-subtitle{color:var(--muted);font-size:.9rem;line-height:1.5;margin:.45rem 0 1.15rem}
+.brand-card{background:linear-gradient(135deg,#151925 0%,#11151d 58%,#171329 100%);border:1px solid var(--line-strong);border-radius:20px;padding:18px 22px;min-height:86px;display:flex;flex-direction:column;justify-content:center}
+.brand-title{font-size:1.9rem;font-weight:850;line-height:1.05;letter-spacing:-.045em}
+.brand-sub{color:var(--muted);font-size:.88rem;margin-top:7px}
+.brand-pill{display:inline-block;width:max-content;border-radius:999px;padding:5px 9px;background:var(--accent-soft);border:1px solid rgba(139,92,246,.28);color:#cbbcff;font-size:.68rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;margin-bottom:8px}
+.panel,.candidate,.story-card,.output-card,.release-card{background:var(--surface);border:1px solid var(--line);border-radius:16px}
+.panel{padding:16px 18px}
+.story-card{padding:17px 18px;height:100%}
+.output-card{padding:15px 16px}
+.release-card{padding:16px 18px}
+.story-rank{color:#a995ff;font-size:.68rem;font-weight:850;letter-spacing:.12em}
+.story-title{font-size:1.02rem;font-weight:780;line-height:1.35;margin:7px 0}
+.story-meta{color:var(--muted);font-size:.78rem;line-height:1.45}
+.story-reason{color:#bcc5d4;font-size:.84rem;line-height:1.45;margin:10px 0 13px}
+.score-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;background:rgba(255,255,255,.04);border:1px solid var(--line);color:#d9deea;font-size:.7rem;font-weight:750}
+.stage-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0 14px}
+.stage-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 11px}
+.stage-card.active{border-color:rgba(139,92,246,.5);background:var(--accent-soft)}
+.stage-card.done{border-color:rgba(52,211,153,.25);background:var(--good-soft)}
+.stage-card.stopped{border-color:rgba(245,158,11,.35);background:var(--warn-soft)}
+.stage-name{font-size:.77rem;font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-state{color:var(--muted);font-size:.66rem;margin-top:4px}
+.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 18px}
+.qc-guide-step{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
+.qc-guide-step b{display:block;font-size:.78rem;margin-bottom:3px}
+.qc-guide-step span{color:var(--muted);font-size:.72rem;line-height:1.4}
+.qc-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.67rem;font-weight:850;letter-spacing:.08em}
+.qc-status.ready{color:#a9f5d6;background:var(--good-soft);border:1px solid rgba(52,211,153,.24)}
+.qc-status.attention{color:#ffd597;background:var(--warn-soft);border:1px solid rgba(245,158,11,.25)}
+.qc-meta{color:var(--muted);font-size:.75rem;line-height:1.45}
+.qc-card-title{font-size:.98rem;font-weight:800;margin-bottom:7px}
+.timeline{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 16px}
+.timeline-row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.timeline-row:last-child{border-bottom:0}
+.timeline-dot{width:22px;flex:0 0 22px;text-align:center}
+.timeline-main{min-width:0;flex:1}.timeline-head{font-size:.78rem;font-weight:780}
+.timeline-time{color:var(--muted-2);font-size:.68rem;margin-left:7px}
+.timeline-message{color:var(--muted);font-size:.78rem;line-height:1.4;margin-top:2px}
+.sidebar-title{font-size:1.05rem;font-weight:800;letter-spacing:-.02em}
+.sidebar-kicker{color:#a995ff;text-transform:uppercase;letter-spacing:.12em;font-size:.65rem;font-weight:800}
+.sidebar-status{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:12px 13px;margin-top:10px}
+.sidebar-status-title{font-size:.76rem;font-weight:780}
+.sidebar-status-copy{color:var(--muted);font-size:.72rem;margin-top:3px;line-height:1.4}
+.release-gates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.release-gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
+.release-gate.pass{border-color:rgba(52,211,153,.22)}
+.release-gate.block{border-color:rgba(245,158,11,.22)}
+.release-gate-name{font-size:.76rem;font-weight:800}
+.release-gate-detail{color:var(--muted);font-size:.7rem;line-height:1.4;margin-top:3px}
+.live-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141b;border:1px solid var(--line);border-radius:14px;padding:10px 13px;margin:10px 0 16px}
+.live-bar-copy{color:var(--muted);font-size:.76rem}.live-bar-copy b{color:var(--text)}
+.empty-state{background:linear-gradient(145deg,#11151d,#151225);border:1px solid var(--line-strong);border-radius:20px;padding:26px}
+.empty-title{font-size:1.55rem;font-weight:820;letter-spacing:-.035em}
+.empty-copy{color:var(--muted);font-size:.88rem;line-height:1.55;max-width:720px}
+.meta-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.meta-chip{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:999px;padding:5px 9px;color:#c2cad7;font-size:.7rem}
+[data-testid="stMetric"]{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:11px 13px}
+[data-testid="stMetricLabel"]{color:var(--muted)!important;font-size:.72rem!important}
+[data-testid="stMetricValue"]{font-size:1.28rem!important}
+.stButton>button,.stLinkButton>a{border-radius:10px;min-height:40px;font-weight:750;border:1px solid var(--line-strong)}
+.stButton>button[kind="primary"]{background:linear-gradient(180deg,#8b5cf6,#7046da);border-color:rgba(255,255,255,.16);box-shadow:0 7px 20px rgba(112,70,218,.22)}
+.stTextInput>div>div,.stTextArea>div>div,.stSelectbox>div>div{background:#0f1319!important;border-color:var(--line)!important}
+div[data-testid="stExpander"]{border:1px solid var(--line)!important;border-radius:12px!important;background:rgba(255,255,255,.015)!important}
+div[data-testid="stExpander"] summary p{font-size:.82rem;font-weight:750}
+[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.dashboard-footer{text-align:center;color:var(--muted-2);font-size:.72rem;padding:10px 0}
+@media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
+@media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>""", unsafe_allow_html=True)
-
-
-st.markdown("<style>\n.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 22px}\n.qc-guide-step{border:1px solid rgba(190,140,255,.14);background:rgba(255,255,255,.025);border-radius:14px;padding:13px 14px}\n.qc-guide-step b{display:block;font-size:.9rem;margin-bottom:4px}\n.qc-guide-step span{color:#9da9bf;font-size:.8rem;line-height:1.4}\n.qc-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:.72rem;font-weight:800;letter-spacing:.06em}\n.qc-status.ready{color:#b7f7df;background:rgba(45,212,191,.11);border:1px solid rgba(45,212,191,.24)}\n.qc-status.attention{color:#ffd7ad;background:rgba(251,146,60,.11);border:1px solid rgba(251,146,60,.24)}\n.qc-meta{color:#9da9bf;font-size:.8rem;line-height:1.45}\n.qc-card-title{font-size:1.05rem;font-weight:800;margin-bottom:8px}\n@media(max-width:900px){.qc-guide{grid-template-columns:1fr}}\n</style>", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
@@ -292,14 +369,24 @@ def build_config() -> Dict[str, Any]:
     }
 
 
+def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
+    st.markdown(
+        f"<div class='section-kicker'>{kicker}</div>"
+        f"<div class='section-title'>{title}</div>"
+        + (f"<div class='section-subtitle'>{subtitle}</div>" if subtitle else ""),
+        unsafe_allow_html=True,
+    )
+
 def render_header(action_mode: str) -> None:
     titles = {
-        "Live Factory": ("Live Factory", "Run a complete Short from topic discovery through final upload review."),
-        "Channel Statistics": ("Channel Statistics", "See the performance history currently recorded by the factory."),
-        "Run Offline Diagnostics": ("Offline Diagnostics", "Run code and runtime checks without using production provider calls."),
-        "Demo Factory": ("Demo Factory", "Exercise individual factory sections with safe, controlled test inputs."),
+        "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
+        "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
+        "Demo Factory": ("Demo Factory", "Controlled tests for factory components."),
+        "Final Branding Preview": ("Final Branding Preview", "Inspect the canonical branding compositor."),
     }
-    title, subtitle = titles[action_mode]
+    title, subtitle = titles.get(action_mode, ("Dashboard", "Viral Shorts Factory"))
+
     logo_path = ""
     brand_dir = getattr(ultimate_bot, "BRAND_ASSETS_DIR", None)
     if brand_dir:
@@ -309,31 +396,27 @@ def render_header(action_mode: str) -> None:
                 logo_path = candidate_path
                 break
 
-    if logo_path:
-        left, right = st.columns([1, 7])
-        with left:
-            st.image(logo_path, width=86)
-        with right:
-            st.markdown(
-                f"""
-<div class="brand-card">
-  <div class="brand-title">Viral Shorts Factory</div>
-  <div class="brand-sub">{title} · {subtitle}</div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-    else:
+    left, middle, right = st.columns([0.8, 5.7, 1.2], gap="medium")
+    with left:
+        if logo_path:
+            st.image(logo_path, width=72)
+        else:
+            st.markdown("<div style='font-size:2.3rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
+    with middle:
         st.markdown(
-            f"""
-<div class="brand-card">
-  <div class="brand-title">🎬 Viral Shorts Factory</div>
-  <div class="brand-sub">{title} · {subtitle}</div>
-</div>
-""",
+            f"<div class='brand-card'><span class='brand-pill'>{title}</span>"
+            f"<div class='brand-title'>Viral Shorts Factory</div>"
+            f"<div class='brand-sub'>{subtitle}</div></div>",
             unsafe_allow_html=True,
         )
-
+    with right:
+        snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
+        status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
+        st.markdown(
+            f"<div style='text-align:right;padding-top:12px'><div class='small-muted'>FACTORY STATUS</div>"
+            f"<div style='font-size:1rem;font-weight:800;margin-top:4px'>{status}</div></div>",
+            unsafe_allow_html=True,
+        )
 
 def render_sidebar_controls() -> Dict[str, Any]:
     st.sidebar.markdown("## Factory setup")
