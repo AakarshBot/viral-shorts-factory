@@ -619,6 +619,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "crop_zoom": float(layer.get("visual_crop_zoom") or 1.0),
                 "crop_x": float(layer.get("visual_crop_x") if layer.get("visual_crop_x") is not None else 0.5),
                 "crop_y": float(layer.get("visual_crop_y") if layer.get("visual_crop_y") is not None else 0.5),
+                "original_path": str(layer.get("visual_original_path") or "").strip(),
                 "manual_pool_mode": bool(layer.get("visual_manual_pool_mode", False)),
                 "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
                 "manual_pool_query_stats": list(layer.get("visual_manual_pool_query_stats") or []),
@@ -770,6 +771,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 st.caption(
                     "Crop from the preserved original source. This does not make another provider or AI call."
                 )
+                original_path = str(item.get("original_path") or "").strip()
+                if original_path and os.path.isfile(original_path):
+                    st.image(
+                        original_path,
+                        caption="Original source used for the crop",
+                        width=320,
+                    )
                 crop_cols = st.columns(3, gap="small")
                 with crop_cols[0]:
                     crop_zoom = st.slider(
