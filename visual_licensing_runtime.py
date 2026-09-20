@@ -45,6 +45,7 @@ def provider_allowed(provider: str) -> bool:
 def normalize_license_code(value: Any) -> str:
     text = re.sub(r"\s+", "-", str(value or "").strip().casefold())
     text = re.sub(r"[^a-z0-9-]+", "", text)
+    text = re.sub(r"-+", "-", text).strip("-")
     if text.startswith("cc-"):
         text = text[3:]
     text = re.sub(r"-[0-9]+(?:-[0-9]+)?$", "", text)
