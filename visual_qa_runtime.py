@@ -200,6 +200,7 @@ def strict_gemini_check_batch(
     tier="IDENTITY",
     visual_type="",
     visual_genre="",
+    _allow_transient_retry=True,
 ):
     """Verify several candidates for the same subject in one entity-only Gemini call."""
     global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN, LAST_VISUAL_QA_FAILURE
@@ -299,7 +300,7 @@ def strict_gemini_check_batch(
             token in msg
             for token in ("503", "unavailable", "deadline expired", "deadline exceeded")
         )
-        if transient_503 and len(uncached) >= 4:
+        if transient_503 and _allow_transient_retry and len(uncached) >= 4:
             midpoint = max(1, len(uncached) // 2)
             retry_groups = (uncached[:midpoint], uncached[midpoint:])
             print(
@@ -318,6 +319,7 @@ def strict_gemini_check_batch(
                     tier=tier,
                     visual_type=visual_type,
                     visual_genre=visual_genre,
+                    _allow_transient_retry=False,
                 )
                 for local_index, verdict in retry_results.items():
                     original_index = retry_group[int(local_index)][0]
