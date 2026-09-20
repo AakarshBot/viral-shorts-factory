@@ -18,7 +18,8 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "5")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-GEMINI_VISUAL_BATCH_SIZE = max(2, min(10, int(os.getenv("GEMINI_VISUAL_BATCH_SIZE", "10"))))
+GEMINI_VISUAL_BATCH_SIZE = max(2, min(5, int(os.getenv("GEMINI_VISUAL_BATCH_SIZE", "5"))))
+GEMINI_VISUAL_QA_MAX_SIDE = max(512, min(1400, int(os.getenv("GEMINI_VISUAL_QA_MAX_SIDE", "1024"))))
 VISUAL_QA_RUNTIME_VERSION = "2026-09-20-v15-entity-only-batch"
 
 _VIDEO_CALLS = 0
@@ -156,17 +157,31 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         return None
 
 
+def _prepare_batch_image(img_bytes: bytes) -> Image.Image:
+    """Shrink only the Gemini QA copy; stored/downloaded originals are untouched."""
+    image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    if max(image.size) > GEMINI_VISUAL_QA_MAX_SIDE:
+        image.thumbnail(
+            (GEMINI_VISUAL_QA_MAX_SIDE, GEMINI_VISUAL_QA_MAX_SIDE),
+            Image.Resampling.LANCZOS,
+        )
+    return image
+
+
 def _parse_batch_verdicts(raw_text, expected_count):
     """Parse compact numbered YES/NO/UNCERTAIN verdicts from one batch response."""
     import re
     verdicts = {}
-    for match in re.finditer(
+    text = str(raw_text or "")
+    patterns = (
         r"(?im)^\s*(\d+)\s*[-:.)]?\s*(YES|NO|UNCERTAIN)\b",
-        str(raw_text or ""),
-    ):
-        index = int(match.group(1)) - 1
-        if 0 <= index < int(expected_count):
-            verdicts[index] = match.group(2).upper()
+        r"(?im)^\s*IMAGE\s*(\d+)\s*[-:.)]?\s*(YES|NO|UNCERTAIN)\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            index = int(match.group(1)) - 1
+            if 0 <= index < int(expected_count):
+                verdicts[index] = match.group(2).upper()
     return verdicts
 
 
@@ -241,7 +256,7 @@ def strict_gemini_check_batch(
         contents = [prompt]
         for index, data, _key in uncached:
             contents.append(f"\nIMAGE {index + 1}")
-            contents.append(Image.open(io.BytesIO(data)).convert("RGB"))
+            contents.append(_prepare_batch_image(data))
 
         response = client.models.generate_content(
             model=GEMINI_VISUAL_MODEL,
@@ -267,6 +282,35 @@ def strict_gemini_check_batch(
         return results
     except Exception as exc:
         msg = str(exc).lower()
+        transient_503 = any(
+            token in msg
+            for token in ("503", "unavailable", "deadline expired", "deadline exceeded")
+        )
+        if transient_503 and len(uncached) > 2:
+            midpoint = max(1, len(uncached) // 2)
+            retry_groups = (uncached[:midpoint], uncached[midpoint:])
+            print(
+                f"   [Visual QA] ENTITY-BATCH transient 503/deadline; "
+                f"retrying as {len(retry_groups[0])}+{len(retry_groups[1])} smaller batch(es).",
+                flush=True,
+            )
+            for retry_group in retry_groups:
+                if not retry_group:
+                    continue
+                retry_results = strict_gemini_check_batch(
+                    [data for _index, data, _key in retry_group],
+                    entity,
+                    api_key,
+                    tier=tier,
+                    visual_type=visual_type,
+                    visual_genre=visual_genre,
+                )
+                for local_index, verdict in retry_results.items():
+                    original_index = retry_group[int(local_index)][0]
+                    results[original_index] = verdict
+            LAST_VISUAL_QA_FAILURE = ""
+            return results
+
         if any(x in msg for x in ("429", "quota", "resource exhausted", "rate limit")):
             LAST_VISUAL_QA_FAILURE = "quota_or_rate_limit"
             with _LOCK:
