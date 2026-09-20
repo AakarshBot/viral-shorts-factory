@@ -1,81 +1,151 @@
-from script_runtime import repair_script_structure, _extractive_script_fallback
 from final_qc_runtime import evaluate_originality_gate
+from script_runtime import (
+    _extractive_script_fallback,
+    assess_narrative_completeness,
+    contains_retention_bait,
+    validate_content_density,
+)
 
 
-def _scene(text):
+def _scene(text, role):
     return {
         "voiceover": text,
+        "narrative_role": role,
         "primary_entity": "India Men's Cricket Team",
         "visual_intent": "news_event",
-        "specific_search_prompt": "India Men's Cricket Team",
+        "specific_search_prompt": "India Men's Cricket Team latest development",
         "sport_or_topic_category": "Cricket",
     }
 
 
-def test_three_scene_script_can_be_repaired_without_inventing_text():
-    script = {
+def _complete_script():
+    return {
+        "editorial_angle": (
+            "This script explains what changed, the relevant background, and why the development matters beyond the headline."
+        ),
+        "titles": ["Headline", "Context", "Question"],
+        "recommended_title_index": 1,
+        "seo_description": "A factual explanation of the latest development, its background, and its practical consequence.",
         "script": [
-            _scene("India Men's Cricket Team faces a clothing delay before the Asian Games as officials work through the issue."),
-            _scene("The delay concerns the team's playing clothing and has become a preparation issue ahead of the tournament."),
-            _scene("Officials are working through the supply problem while the squad prepares for the Asian Games campaign."),
-        ]
-    }
-
-    repaired, diagnostics = repair_script_structure(script, "cricket")
-
-    assert diagnostics["changed"] is True
-    assert 5 <= len(repaired["script"]) <= 8
-    assert all(8 <= len(scene["voiceover"].split()) <= 30 for scene in repaired["script"])
-    assert all(scene["primary_entity"] == "India Men's Cricket Team" for scene in repaired["script"])
-
-
-def test_overlong_scene_list_is_merged_to_the_production_ceiling():
-    script = {
-        "script": [
-            _scene(f"Scene {index} contains factual information about the selected cricket story.")
-            for index in range(1, 10)
-        ]
-    }
-
-    repaired, diagnostics = repair_script_structure(script, "cricket")
-
-    assert diagnostics["changed"] is True
-    assert len(repaired["script"]) == 8
-    assert all(8 <= len(scene["voiceover"].split()) <= 30 for scene in repaired["script"])
-
-
-def test_repair_refuses_to_duplicate_or_invent_when_evidence_is_too_short():
-    script = {
-        "script": [
-            _scene("India team prepares for Asian Games today."),
-            _scene("Officials discuss the clothing delay."),
-            _scene("The squad continues tournament preparations."),
-        ]
-    }
-
-    repaired, diagnostics = repair_script_structure(script, "cricket")
-
-    assert repaired is None
-    assert diagnostics["changed"] is False
-    assert "safely" in diagnostics["reason"] or "word contract" in diagnostics["reason"]
-
-
-def test_extractives_are_explicitly_publication_blocked():
-    fallback = _extractive_script_fallback(
-        {
-            "title": "India Men's Cricket Team faces clothing delay",
-            "text": (
-                "India Men's Cricket Team faces a clothing delay before the Asian Games. "
-                "Officials are working through the supply issue while the squad prepares for the tournament."
+            _scene(
+                "India's cricket team is dealing with a clothing issue ahead of the tournament, according to the latest reported update.",
+                "hook",
             ),
-        },
+            _scene(
+                "Officials are working through the supply problem while the squad continues preparations for the upcoming competition.",
+                "development",
+            ),
+            _scene(
+                "The issue matters because tournament preparation depends on equipment arriving on time and meeting the team's requirements.",
+                "context",
+            ),
+            _scene(
+                "That means the immediate focus is resolving the logistics problem without disrupting the team's wider preparation schedule.",
+                "consequence",
+            ),
+        ],
+    }
+
+
+def test_one_two_three_scene_outputs_fail_without_a_scene_count_rule():
+    for scenes in (
+        [_scene("The latest development is confirmed today.", "hook")],
+        [
+            _scene("The latest development is confirmed today.", "hook"),
+            _scene("Officials are now working through the reported issue.", "development"),
+        ],
+        [
+            _scene("The latest development is confirmed today.", "hook"),
+            _scene("Officials are now working through the reported issue.", "development"),
+            _scene("The background explains why the issue matters.", "context"),
+        ],
+    ):
+        result = {"editorial_angle": "A useful explanatory angle for the selected story.", "script": scenes}
+        valid, reason = validate_content_density(result, {}, "regular")
+        assert valid is False
+        assert "incomplete" in reason.lower() or "missing" in reason.lower()
+
+
+def test_four_role_story_passes_without_word_or_scene_quotas():
+    script = _complete_script()
+    valid, reason = validate_content_density(script, {}, "regular")
+    assert valid, reason
+
+    assessment = assess_narrative_completeness(script)
+    assert assessment["passed"] is True
+    assert set(assessment["roles"]) == {"hook", "development", "context", "consequence"}
+
+
+def test_longer_story_is_not_rejected_for_scene_count_or_word_count():
+    script = _complete_script()
+    script["script"] = script["script"] * 4
+    for index, scene in enumerate(script["script"]):
+        scene["scene_id"] = index + 1
+        if index % 4 == 0:
+            scene["narrative_role"] = "hook"
+        elif index % 4 == 1:
+            scene["narrative_role"] = "development"
+        elif index % 4 == 2:
+            scene["narrative_role"] = "context"
+        else:
+            scene["narrative_role"] = "consequence"
+
+    valid, reason = validate_content_density(script, {}, "regular")
+    assert valid, reason
+
+
+def test_retention_bait_is_explicitly_rejected():
+    banned = "Wait till the end to find out what happened."
+    assert contains_retention_bait(banned)
+
+    script = _complete_script()
+    script["script"][1]["voiceover"] = (
+        "Wait till the end to find out what happened, then officials explained the latest supply update."
+    )
+    valid, reason = validate_content_density(script, {}, "regular")
+    assert valid is False
+    assert "retention" in reason.lower()
+
+
+def test_source_fallback_refuses_thin_evidence_instead_of_repeating_or_padding():
+    try:
+        _extractive_script_fallback(
+            {
+                "title": "Example story",
+                "text": "Only one short source sentence is available.",
+            },
+            {},
+            "news",
+            "regular",
+        )
+    except ValueError as exc:
+        assert "distinct narrative beats" in str(exc).lower() or "fallback refused" in str(exc).lower()
+    else:
+        raise AssertionError("Thin evidence must not be padded into a script.")
+
+
+def test_source_fallback_preserves_real_source_sentences_and_marks_preview_only():
+    source = (
+        "The tournament organizer confirmed the latest logistics issue. "
+        "Officials are coordinating with the team and reviewing the immediate supply position. "
+        "The background matters because preparation depends on equipment arriving before the next scheduled stage. "
+        "The immediate consequence is that organizers must resolve the issue without disrupting the wider preparation plan."
+    )
+    fallback = _extractive_script_fallback(
+        {"title": "Tournament logistics update", "research_evidence_text": source},
         {},
-        "cricket",
-        "cricket",
+        "news",
+        "regular",
     )
 
-    assert fallback["fallback_mode"] == "extractive_source_grounded"
     assert fallback["public_publish_blocked"] is True
+    assert len(fallback["script"]) == 4
+    assert [scene["narrative_role"] for scene in fallback["script"]] == [
+        "hook",
+        "development",
+        "context",
+        "consequence",
+    ]
 
 
 def test_upstream_public_publish_block_survives_final_qc():
@@ -88,6 +158,5 @@ def test_upstream_public_publish_block_survives_final_qc():
     }
 
     gate = evaluate_originality_gate(script)
-
     assert gate["passed"] is True
     assert gate["public_blocked"] is True
