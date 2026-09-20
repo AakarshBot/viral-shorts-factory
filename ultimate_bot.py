@@ -532,63 +532,10 @@ def print_metric_recommendations(title, scores, is_retention=False):
     if out: print(" > ".join(out))
     else: print("   Not enough historical data to generate recommendations.")
 
-def epsilon_greedy_selection(options_dict, scores_dict, epsilon=0.2):
-    valid_keys = list(options_dict.keys())
-    undertested = [k for k in valid_keys if k not in scores_dict or scores_dict[k]['score'] is None or scores_dict[k]['count'] < 5]
-    
-    if random.random() < epsilon and undertested:
-        choice = random.choice(undertested)
-        print(f"   [Auto-Pilot] 🎲 EXPLORE Mode: Selected '{choice}' (gathering more data)")
-        return choice
-    
-    best_choice, best_score = random.choice(valid_keys), -1
-    for k in valid_keys:
-        score = scores_dict.get(k, {}).get("score")
-        if score is not None and score > best_score:
-            best_score, best_choice = score, k
-            
-    print(f"   [Auto-Pilot] 📈 EXPLOIT Mode: Selected '{best_choice}' (Score: {round(best_score, 2) if best_score != -1 else 'N/A'})")
-    return best_choice
-
 def auto_pilot_selection(conn):
-    print("\n🤖 AUTO-PILOT ACTIVATED. Processing Epsilon-Greedy Selections...")
-    format_scores = get_smart_metrics(conn, "format_used", "avg_view_percentage")
-    format_choice = epsilon_greedy_selection({"regular": 1, "top5": 1, "trending": 1}, format_scores)
-    
-    cat_scores = get_smart_metrics(conn, "genre", "avg_view_percentage")
-    valid_cats = {k: v for k, v in CONTENT_CATEGORIES.items() if (v["usable_regular"] if format_choice in ["regular", "trending"] else v["usable_top5"]) and k != "tech_reviews"}
-    cat_choice = epsilon_greedy_selection(valid_cats, cat_scores)
-    
-    lang_scores = get_smart_metrics(conn, "language_used", "avg_view_percentage")
-    lang_choice = epsilon_greedy_selection(LANGUAGES, lang_scores)
-    
-    combo_key = f"{format_choice}|{cat_choice}|{lang_choice}"
-    return format_choice, cat_choice, LANGUAGES[lang_choice], combo_key
-
-def fetch_trending_topics(target="india", query_filter=None):
-    from story_ranker import fetch_google_trending_topics
-    geo = {
-        "india": "IN",
-        "us": "US",
-        "united states": "US",
-        "uk": "GB",
-        "great britain": "GB",
-    }.get(str(target or "").strip().lower(), "IN")
-    trends = fetch_google_trending_topics((geo,), max_terms=30)
-    if query_filter:
-        terms = [
-            token.strip()
-            for token in re.split(r"\s+(?:OR|AND)\s+", str(query_filter), flags=re.IGNORECASE)
-            if token.strip()
-        ]
-        filtered = [
-            trend for trend in trends
-            if any(term.casefold() in trend.casefold() for term in terms)
-        ]
-        if filtered:
-            trends = filtered
-    return trends or ["India Tech", "Bollywood", "Cricket", "Stock Market", "AI"]
-
+    """Compatibility entry point delegated to the canonical Shorts selector."""
+    from autopilot_runtime import select_auto_pilot
+    return select_auto_pilot(sys.modules[__name__], conn)
 
 def manual_prompts(conn):
     scores = get_smart_metrics(conn, "format_used", metric_col="avg_view_percentage")
