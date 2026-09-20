@@ -1308,10 +1308,14 @@ def collect_manual_visual_search(
         for token in re.findall(r"[\w-]+", exact_query, flags=re.UNICODE)
     }
     sports_context = bool(query_tokens & _SPORTS_CONTEXT_TERMS)
+    team_context = bool(
+        re.search(r"\bnational\s+team\b", exact_query, flags=re.IGNORECASE)
+        or re.search(r"\b(?:xi|squad)\b", exact_query, flags=re.IGNORECASE)
+    )
     branding_or_portrait = visual_genre in {"TEAM_BRANDING", "ORG_BRANDING", "PERSON_PORTRAIT"}
     action_search = (
         visual_genre in ACTION_VISUAL_GENRES
-        or (sports_context and not branding_or_portrait)
+        or ((sports_context or team_context) and not branding_or_portrait)
     )
 
     action_variants = [exact_query]
