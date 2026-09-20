@@ -219,6 +219,12 @@ def search_slide_visual(
             "visual_verification_attempts",
             "visual_type",
             "visual_genre",
+            "visual_selected_hash",
+            "visual_provider_query_used",
+            "visual_qc_blocked",
+            "visual_qc_block_reason",
+            "visual_rejection_counts",
+            "asset_provenance",
             "_verified_subject_assets",
         ):
             if key_name in candidate:
