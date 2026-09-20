@@ -1680,39 +1680,71 @@ def _perform_upload(
         st.error(f"Upload failed: {type(exc).__name__}: {exc}")
 
 
+def _render_live_monitor_content(
+    controller: DashboardWorkflowController,
+    snapshot: Dict[str, Any],
+    *,
+    include_visual_review: bool,
+) -> None:
+    render_stage_progress(snapshot)
+
+    selected = snapshot.get("selected_story") or {}
+    if selected:
+        st.markdown(
+            f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
+            unsafe_allow_html=True,
+        )
+
+    render_research_summary(snapshot)
+    if snapshot.get("script_review_required"):
+        render_script_visual_query_review(controller, snapshot)
+    else:
+        render_script(snapshot)
+    render_audio_preview(snapshot)
+    render_generated_outputs(snapshot)
+
+    if include_visual_review and snapshot.get("visual_review_required"):
+        render_visual_review(controller, snapshot)
+    render_visual_details(snapshot)
+
+    render_activity_timeline(snapshot)
+    render_console(snapshot)
+    render_logs(snapshot)
+
+    if snapshot.get("stage") == "error":
+        st.error(snapshot.get("error") or "The factory stopped with an error.")
+
+    render_upload_panel(controller, snapshot)
+
+
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
+    initial = controller.snapshot()
+
+    # Once visual review is active, freeze the live polling UI. The worker is
+    # intentionally waiting for the human decision, so a one-second redraw only
+    # makes the review screen flicker/refresh without adding useful information.
+    # The next user action performs the normal full-app rerun.
+    if initial.get("visual_review_required") or not initial.get("thread_alive"):
+        _render_live_monitor_content(
+            controller,
+            initial,
+            include_visual_review=True,
+        )
+        return
+
     @st.fragment(run_every="1s")
     def _fragment():
         snapshot = controller.snapshot()
-        render_stage_progress(snapshot)
-
-        selected = snapshot.get("selected_story") or {}
-        if selected:
-            st.markdown(
-                f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
-                unsafe_allow_html=True,
-            )
-
-        render_research_summary(snapshot)
-        if snapshot.get("script_review_required"):
-            render_script_visual_query_review(controller, snapshot)
-        else:
-            render_script(snapshot)
-        render_audio_preview(snapshot)
-        render_generated_outputs(snapshot)
-
-        if snapshot.get("visual_review_required"):
-            render_visual_review(controller, snapshot)
-        render_visual_details(snapshot)
-
-        render_activity_timeline(snapshot)
-        render_console(snapshot)
-        render_logs(snapshot)
-
-        if snapshot.get("stage") == "error":
-            st.error(snapshot.get("error") or "The factory stopped with an error.")
-
-        render_upload_panel(controller, snapshot)
+        if snapshot.get("visual_review_required") or not snapshot.get("thread_alive"):
+            # The outer app must re-render so the frozen review/final state is
+            # promoted out of the one-second fragment loop.
+            st.rerun()
+            return
+        _render_live_monitor_content(
+            controller,
+            snapshot,
+            include_visual_review=False,
+        )
 
     _fragment()
 
