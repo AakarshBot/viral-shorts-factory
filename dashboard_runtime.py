@@ -1585,10 +1585,11 @@ class DashboardWorkflowController(WorkflowController):
             return False, f"Replacement search failed: {type(exc).__name__}: {exc}"
 
     def _preserve_replaced_visual_in_pool(self, layer: dict[str, Any], old_path: str) -> None:
-        """Keep the exact previously-chosen visual source visible in the shared review pool."""
+        """Return the outgoing chosen visual to the shared pool exactly once."""
         path = str(old_path or "").strip()
         if not path or not os.path.isfile(path):
             return
+
         try:
             from visual_retrieval_runtime import _hash_image
             with open(path, "rb") as fh:
@@ -1597,17 +1598,39 @@ class DashboardWorkflowController(WorkflowController):
             image_hash = ""
         if not image_hash:
             return
-        if any(
-            isinstance(item, dict) and str(item.get("hash") or "").strip() == image_hash
-            for item in self._visual_pool
-        ):
-            return
-        if any(
-            isinstance(item, dict) and str(item.get("hash") or "").strip() == image_hash
-            for group in self._visual_search_groups
-            for item in (group.get("items") or [])
-        ):
-            return
+
+        # If the visual already belongs to the pool, it is no longer assigned
+        # after replacement and must become available again.
+        for item in self._visual_pool:
+            if isinstance(item, dict) and str(item.get("hash") or "").strip() == image_hash:
+                item["used"] = False
+                item["assigned_slide"] = 0
+                item["assigned_time"] = ""
+                item["preserved_from_replacement"] = True
+                return
+
+        # A visual selected from a one-off search group should move into the
+        # shared pool when it becomes the outgoing slide image.
+        for group in self._visual_search_groups:
+            group_items = list(group.get("items") or [])
+            for item_index, item in enumerate(group_items):
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("hash") or "").strip() != image_hash:
+                    continue
+                moved = dict(item)
+                moved["path"] = path
+                moved["original_path"] = (
+                    str(layer.get("visual_original_path") or "").strip() or path
+                )
+                moved["used"] = False
+                moved["assigned_slide"] = 0
+                moved["assigned_time"] = ""
+                moved["preserved_from_replacement"] = True
+                del group_items[item_index]
+                group["items"] = group_items
+                self._visual_pool.append(moved)
+                return
 
         self._visual_pool.append(
             {
@@ -1631,6 +1654,7 @@ class DashboardWorkflowController(WorkflowController):
                 "status": "previously-selected",
                 "used": False,
                 "assigned_slide": 0,
+                "assigned_time": "",
                 "preserved_from_replacement": True,
             }
         )
