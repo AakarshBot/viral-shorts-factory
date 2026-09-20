@@ -31,12 +31,20 @@ _CTA_RE = re.compile(
 )
 
 _STRUCTURE_HINTS = {
-    "comparison": "headline → establish both sides → give the defining difference → explain why it matters",
-    "timeline": "headline → key starting point → pivotal development → current consequence",
-    "ranking": "headline → identify the subject → strongest evidence/details → why the ranking matters",
-    "how_to": "headline → explain the mechanism/process → key evidence → practical consequence",
-    "explainer": "headline → core facts → useful context → important development → consequence",
+    "comparison": "headline → establish both sides → defining difference → evidence → consequence",
+    "timeline": "headline → starting point → pivotal development → what changed → current consequence",
+    "ranking": "headline → establish subject → strongest evidence → comparison/context → why the ranking matters",
+    "how_to": "headline → explain mechanism/process → evidence → practical consequence",
+    "explainer": "headline → core facts → useful context → important development → what it means",
 }
+
+# Shared contract across the primary writer, free fallbacks, structural repair and
+# integrity guards. These are quality floors, not a target to pad with filler.
+SCRIPT_MIN_SCENES = 6
+SCRIPT_MAX_SCENES = 8
+SCENE_MIN_WORDS = 12
+SCENE_MAX_WORDS = 36
+SCRIPT_MIN_TOTAL_WORDS = 100
 
 
 def _originality_words(text):
@@ -100,14 +108,18 @@ def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
 def _script_scene_bounds(format_mode):
-    return (7, 7) if str(format_mode or "").lower() == "top5" else (5, 8)
+    return (
+        (7, 7)
+        if str(format_mode or "").lower() == "top5"
+        else (SCRIPT_MIN_SCENES, SCRIPT_MAX_SCENES)
+    )
 
 
 def _scene_word_count(text):
     return len(str(text or "").split())
 
 
-def _split_scene_text(text, min_words=8, max_words=30):
+def _split_scene_text(text, min_words=SCENE_MIN_WORDS, max_words=SCENE_MAX_WORDS):
     value = re.sub(r"\s+", " ", str(text or "").strip())
     if not value:
         return []
@@ -162,7 +174,7 @@ def _split_scene_text(text, min_words=8, max_words=30):
     return [part.strip() for part in packed if min_words <= _scene_word_count(part) <= max_words]
 
 
-def _split_scene_at_midpoint(text, min_words=8, max_words=30):
+def _split_scene_at_midpoint(text, min_words=SCENE_MIN_WORDS, max_words=SCENE_MAX_WORDS):
     words = str(text or "").split()
     if len(words) < min_words * 2:
         return []
