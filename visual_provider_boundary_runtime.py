@@ -520,7 +520,12 @@ def _commons_search_queries(
         return []
 
     searches: list[tuple[str, str, str]] = []
-    person_seed = _commons_person_seed(exact)
+    visual_l = str(visual_type or "").strip().upper()
+    genre_l = str(visual_genre or "").strip().upper()
+    person_seed = _commons_person_seed(exact) if (
+        visual_l == "PERSON"
+        or genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION", "SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION"}
+    ) else ""
     person_qid = ""
     person_label = ""
     if person_seed:
