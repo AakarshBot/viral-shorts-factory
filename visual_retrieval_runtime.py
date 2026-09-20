@@ -463,8 +463,7 @@ def _provider_search_query(
         if query_index == 1 and identity_qid:
             return f"haswbstatement:P180={identity_qid}"
         if identity:
-            base = identity_label or identity
-            return base if query_index == 1 else f"{base} portrait"
+            return identity_label or identity
 
     if visual_l == "PERSON" and genre_l == "PERSON_PORTRAIT" and identity_label:
         if query_index == 1:
