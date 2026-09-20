@@ -317,7 +317,7 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
                     "image_type": "photo",
                     "safesearch": "true",
                     "category": "sports"
-                    if visual_genre in {"TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH", "PERSON_ACTION"}
+                    if visual_genre in {"TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH"}
                     else None,
                     "order": "latest" if manual_mode else "popular",
                     "page": page,
