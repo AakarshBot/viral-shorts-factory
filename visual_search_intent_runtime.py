@@ -321,6 +321,7 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
             portrait_query = _compose_query(subject, "portrait")
             if portrait_query and portrait_query.casefold() not in {item.casefold() for item in queries}:
                 queries.append(portrait_query)
+            query = queries[0] if queries else ""
         else:
             if visual_genre in {"ORG_BRANDING", "TEAM_BRANDING"}:
                 anchor = _genre_hint_anchor(visual_genre, scene_terms)
