@@ -859,12 +859,13 @@ def test_manual_queries_build_one_shared_twenty_image_pool(monkeypatch):
         def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
             return fetcher(*args)
 
+    def fetcher(*args):
+        return image_candidates.get(args[0], [])
+
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
-        lambda bot, visual_type, visual_genre="": [
-            ("Commons", lambda *args, query=image_candidates.get(args[0], []): query)
-        ],
+        lambda bot, visual_type, visual_genre="": [("Commons", fetcher)],
     )
     monkeypatch.setattr(
         visual_qa,
