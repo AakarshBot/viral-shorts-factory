@@ -1330,10 +1330,7 @@ def _candidate_quality_pass(story):
 
 
 def _discovery_portfolio_pass(story):
-    """Require a story that is genuinely useful for the human Shorts selector."""
-    if not _story_intake_quality_pass(story):
-        return False
-
+    """Apply portfolio scoring after the upstream intake-quality gate."""
     dimensions = story.get("discovery_dimensions") or {}
     freshness = _safe_float(dimensions.get("freshness")) or 0.0
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
