@@ -541,6 +541,8 @@ def materialize_visual_bank(bot, seg: dict, scene_index: int = 0) -> list[dict]:
         image_hash = str(asset.get("hash") or "").strip()
         if not image_hash:
             continue
+        if image_hash == str(seg.get("visual_selected_hash") or "").strip():
+            continue
         path = os.path.join(root, f"visual_bank_scene_{int(scene_index)}_{image_hash[:12]}.jpg")
         try:
             image = Image.open(io.BytesIO(asset["bytes"])).convert("RGB")
