@@ -79,6 +79,8 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [bad, good])],
     )
 
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -99,7 +101,7 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
     assert image.size == (900, 1200)
     assert used_ai is False
     assert source == "Commons"
-    assert FakeRuntime.qa_calls == 1
+    assert FakeRuntime.qa_calls == 0
 
 
 def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
