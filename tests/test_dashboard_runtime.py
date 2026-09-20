@@ -22,6 +22,73 @@ class _Bot:
 
 
 
+def test_live_monitor_polling_pauses_for_user_checkpoints():
+    from dashboard_runtime import live_monitor_should_poll
+
+    assert live_monitor_should_poll({"thread_alive": True, "stage": "research"}) is True
+    assert live_monitor_should_poll({"thread_alive": True, "stage": "audio"}) is True
+    assert live_monitor_should_poll({"thread_alive": True, "stage": "script_review"}) is False
+    assert live_monitor_should_poll({"thread_alive": True, "stage": "visual_approval"}) is False
+    assert live_monitor_should_poll({"thread_alive": False, "stage": "qc"}) is False
+
+
+def test_dashboard_worker_console_capture(monkeypatch):
+    import dashboard_runtime
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._worker_started()
+    try:
+        dashboard_runtime._DASHBOARD_STDOUT.write("synthetic dashboard console line\n")
+    finally:
+        controller._worker_finished()
+
+    assert "synthetic dashboard console line" in controller.console_lines()
+
+
+def test_live_qc_uses_active_format_from_snapshot():
+    from dashboard_runtime import evaluate_live_qc_gates
+
+    snapshot = {
+        "format_mode": "top5",
+        "selected_story": {
+            "title": "Selected story",
+            "story_key": "selected-story",
+            "discovery_rank": 1,
+        },
+        "script_data": {
+            "title": "Selected story",
+            "titles": ["One", "Two", "Three"],
+            "recommended_title_index": 0,
+            "seo_description": "This is a sufficiently long description for the release metadata check.",
+            "script": [
+                {
+                    "voiceover": "A valid scene with enough words.",
+                    "primary_entity": "Subject",
+                    "specific_search_prompt": "Subject event",
+                }
+                for _ in range(8)
+            ],
+        },
+    }
+
+    gates = evaluate_live_qc_gates(
+        snapshot,
+        {
+            "title": "Selected story",
+            "description": "A sufficiently long description for the release metadata check.",
+        },
+    )
+    assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is False
+
+
+def test_dashboard_live_monitor_uses_controlled_polling():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert '@st.fragment(run_every="2s")' in app_source
+    assert 'run_every="1s"' not in app_source
+    assert "live_monitor_should_poll(snapshot)" in app_source
+
+
 def test_dashboard_script_review_preserves_research_layer_marker(monkeypatch):
     def fake_write_script(*_args, **_kwargs):
         return {
