@@ -973,7 +973,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     source_quality = _safe_float(story.get("source_quality_score")) or 0.0
     event_text = story.get("event_search_text") or story.get("title", "")
     social = _social_signal(event_text, social_titles)
-    google_trend = _trend_signal(event_text)
+    google_trend = trend
     history, history_matches = _historical_context_score(
         story,
         rows,
