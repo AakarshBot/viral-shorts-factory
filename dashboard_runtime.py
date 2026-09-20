@@ -1062,7 +1062,9 @@ class DashboardWorkflowController(WorkflowController):
         origin, position, asset = self._locate_visual_pool_asset(asset_hash)
         if asset is None:
             return False, "That image is no longer available."
-        source_path = str(asset.get("path") or "").strip()
+        source_path = str(asset.get("original_path") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            source_path = str(asset.get("path") or "").strip()
         if not source_path or not os.path.isfile(source_path):
             return False, "That image is no longer available on the dashboard host."
 
@@ -1490,9 +1492,16 @@ class DashboardWorkflowController(WorkflowController):
             old_layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
             old_path = str(old_layer.get("image") or "").strip() if isinstance(old_layer, dict) else ""
             old_query = str(old_layer.get("manual_visual_query") or "").strip() if isinstance(old_layer, dict) else ""
+            old_source_path = (
+                str(old_layer.get("visual_original_path") or "").strip()
+                if isinstance(old_layer, dict)
+                else ""
+            )
+            if not old_source_path or not os.path.isfile(old_source_path):
+                old_source_path = old_path
 
             if isinstance(old_layer, dict):
-                self._preserve_replaced_visual_in_pool(old_layer, old_path)
+                self._preserve_replaced_visual_in_pool(old_layer, old_source_path)
 
             if format_mode == "top5" and index == 1:
                 rendered = visual_runtime._render_image_slide(
@@ -1575,7 +1584,7 @@ class DashboardWorkflowController(WorkflowController):
             return False, f"Replacement search failed: {type(exc).__name__}: {exc}"
 
     def _preserve_replaced_visual_in_pool(self, layer: dict[str, Any], old_path: str) -> None:
-        """Keep the exact previously-chosen visual visible in the shared review pool."""
+        """Keep the exact previously-chosen visual source visible in the shared review pool."""
         path = str(old_path or "").strip()
         if not path or not os.path.isfile(path):
             return
@@ -1721,8 +1730,10 @@ class DashboardWorkflowController(WorkflowController):
                 item for item in bank
                 if str(item.get("path") or "").strip() != selected_path
             ]
-            old_original_path = str(layer.get("visual_original_path") or "").strip() or old_path
-            self._preserve_replaced_visual_in_pool(layer, old_path)
+            old_original_path = str(layer.get("visual_original_path") or "").strip()
+            if not old_original_path or not os.path.isfile(old_original_path):
+                old_original_path = old_path
+            self._preserve_replaced_visual_in_pool(layer, old_original_path)
             if (
                 old_original_path
                 and os.path.isfile(old_original_path)
