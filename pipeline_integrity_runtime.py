@@ -267,6 +267,8 @@ def _clean_script_result(script_data: dict, story_data: dict, format_mode: str =
             f"Script contains only {total_words} narration words; "
             f"minimum is {SCRIPT_MIN_TOTAL_WORDS}."
         )
+    if len(clean_text(result.get("editorial_angle", "")).split()) < 8:
+        raise ValueError("Script is missing a substantive editorial angle.")
 
     result["script"] = cleaned
     result["integrity_version"] = VERSION
