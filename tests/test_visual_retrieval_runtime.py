@@ -380,8 +380,10 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
     assert used_ai is False
     assert batch_payloads
     assert len(batch_payloads[0]) == 8
-    assert any(candidate == candidates_one[0] for candidate in batch_payloads[0])
-    assert any(candidate == candidates_two[0] for candidate in batch_payloads[0])
+    provider_one_bytes = candidates_one[0]["bytes"]
+    provider_two_bytes = candidates_two[0]["bytes"]
+    assert any(candidate == provider_one_bytes for candidate in batch_payloads[0])
+    assert any(candidate == provider_two_bytes for candidate in batch_payloads[0])
     assert source == "visual-rescue"
 
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
