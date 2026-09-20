@@ -882,7 +882,8 @@ def test_dashboard_visual_review_uses_simple_popover_crop_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     assert "Review the images" in source
-    assert 'with st.popover("Crop")' in source
+    assert 'popover = st.popover("Crop"' in source
+    assert "if not popover.open" in source
     assert "controller.crop_visual(" in source
     assert "controller.crop_visual_pool_asset(" in source
     assert 'aspect_ratio=(9, 16)' in source
@@ -1100,6 +1101,7 @@ def test_dashboard_crop_keeps_cropped_version_in_shared_pool(tmp_path):
     assert len(controller._visual_pool) == 1
     assert controller._visual_pool[0]["path"].endswith(".jpg")
     assert controller._visual_pool[0]["preserved_from_replacement"] is True
+    assert controller._visual_pool[0]["original_path"] == str(source)
     assert os.path.isfile(controller._visual_pool[0]["path"])
 
 def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_path):
