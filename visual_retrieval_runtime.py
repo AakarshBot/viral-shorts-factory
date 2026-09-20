@@ -43,12 +43,12 @@ REAL_SOURCE_SCORES = {
 }
 MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "10"))))
 MAX_ENTITY_BANK_PER_QUERY = max(3, min(10, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "10"))))
-INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
-MANUAL_POOL_MAX = max(10, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))))
-MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "20"))))
-AUTO_POOL_QUERY_LIMIT = max(1, min(8, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "6"))))
+INITIAL_CANDIDATE_POOL = max(10, min(10, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "10"))))
+MANUAL_POOL_MAX = max(10, min(10, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "10"))))
+MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "10"))))
+AUTO_POOL_QUERY_LIMIT = max(1, min(4, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "4"))))
 MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
-MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
+MANUAL_QUERY_RAW_POOL = max(10, min(10, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "10"))))
 HARD_MIN_IMAGE_SIDE = max(240, min(540, int(os.getenv("VISUAL_HARD_MIN_IMAGE_SIDE", "360"))))
 SOFT_MIN_IMAGE_SIDE = max(HARD_MIN_IMAGE_SIDE, min(900, int(os.getenv("VISUAL_SOFT_MIN_IMAGE_SIDE", "540"))))
 ENTITY_CHECK_PRIMARY_POOL = 10
@@ -892,8 +892,9 @@ def collect_manual_visual_pool(
         candidates = []
         local_seen = set()
         attempted_sources = set()
-        for source, fetcher in source_plan:
-            if len(candidates) >= MANUAL_QUERY_RAW_POOL:
+        manual_source_limit = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SOURCE_LIMIT", "3"))))
+        for source_index, (source, fetcher) in enumerate(source_plan):
+            if source_index >= manual_source_limit or len(candidates) >= MANUAL_QUERY_RAW_POOL:
                 break
             source_name = str(source or "").strip()
             source_key = source_name.casefold()
@@ -1022,8 +1023,9 @@ def collect_manual_visual_pool(
                 local_seen = set()
                 attempted_sources = set()
 
-                for source, fetcher in source_plan:
-                    if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
+                auto_source_limit = max(1, min(2, int(os.getenv("VISUAL_AUTO_SOURCE_LIMIT", "2"))))
+                for source_index, (source, fetcher) in enumerate(source_plan):
+                    if source_index >= auto_source_limit or len(candidates) >= REFINEMENT_CANDIDATE_POOL:
                         break
                     source_name = str(source or "").strip()
                     source_key = source_name.casefold()
