@@ -127,13 +127,13 @@ def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(claim, dict) or str(claim.get("status") or "").lower() == "conflicted":
                 continue
             text = re.sub(r"\s+", " ", str(claim.get("text") or "")).strip()
-            if len(text.split()) >= 8:
+            if text:
                 snippets.append(text)
         for source in pack.get("sources") or []:
             if not isinstance(source, dict):
                 continue
             text = re.sub(r"\s+", " ", str(source.get("clean_text_preview") or "")).strip()
-            if len(text.split()) >= 8:
+            if text:
                 snippets.append(text)
 
     if snippets:
