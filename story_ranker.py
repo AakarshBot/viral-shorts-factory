@@ -4,17 +4,15 @@ from __future__ import annotations
 import math
 import os
 import re
-import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import requests
 
-from event_discovery_runtime import discover_event_pool, cluster_news_events, _event_actions
+from event_discovery_runtime import fetch_gdelt_articles, cluster_news_events, _event_actions
 
 
 SAFETY_BLOCKLIST = {
@@ -53,12 +51,6 @@ SPORTS_NICHE_TERMS = {
 
 CRICKET_TERMS = {"cricket", "icc", "bcci", "pcb", "test cricket", "t20", "odi", "ipl", "psl"}
 
-# A temporary network problem should not make every GNews query wait for the
-# full timeout. After one connection-level failure, discovery skips additional
-# GNews attempts for a short cooldown and relies on RSS/social intake instead.
-_GNEWS_COOLDOWN_SECONDS = 90.0
-_GNEWS_FAILURE_UNTIL = 0.0
-_GNEWS_FAILURE_LOGGED = False
 
 
 def _clean(value):
@@ -486,116 +478,154 @@ def _cricket_relevance_pass(story, genre_key):
 
 
 @lru_cache(maxsize=1)
-def _india_trend_terms():
-    try:
-        from pytrends.request import TrendReq
-        pytrends = TrendReq(hl="en-IN", tz=330)
-        values = pytrends.trending_searches(pn="india")
-        return tuple(_clean(item) for item in values[0].tolist()[:30] if item)
-    except Exception:
-        return tuple()
+GOOGLE_NEWS_RADAR_QUERIES = (
+    "(India OR Indian) (news OR update OR announced)",
+    "(world OR global) (news OR update OR announced)",
+    '("breaking news" OR "latest news" OR "just in")',
+    "(technology OR AI OR science) (news OR launch OR research)",
+    "(business OR economy OR markets OR company) (news OR deal OR earnings)",
+    "(sports OR cricket OR football OR tennis) (news OR match OR tournament)",
+    "(entertainment OR movies OR music OR celebrity) (news OR release OR announcement)",
+    "(health OR medicine OR wellness) (news OR study OR approval)",
+)
+GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
+REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
 
 
-def _trend_signal(title):
-    title_text = _clean(title)
-    if not title_text:
-        return 0.0
-    terms = _india_trend_terms()
-    return min(4.0, sum(1.0 for term in terms if term and term in title_text))
+def _trend_traffic_score(value, rank=0):
+    text = str(value or "").strip().upper().replace(",", "")
+    match = re.search(r"(\d+(?:\.\d+)?)\s*([KMB])?", text)
+    if match:
+        number = float(match.group(1))
+        multiplier = {"K": 1e3, "M": 1e6, "B": 1e9}.get(match.group(2) or "", 1.0)
+        traffic = number * multiplier
+        if traffic >= 500_000:
+            return 4.0
+        if traffic >= 200_000:
+            return 3.5
+        if traffic >= 100_000:
+            return 3.0
+        if traffic >= 50_000:
+            return 2.5
+        if traffic >= 20_000:
+            return 2.0
+        if traffic > 0:
+            return 1.5
+    return max(1.0, min(3.0, 3.0 - max(0, int(rank) - 1) * 0.2))
 
 
-def _discovery_query_lanes(base_query, genre_key="", ai_cricket=False, broad=False):
-    """Create bounded category lenses; broad mode adds independent topical lenses."""
-    base = str(base_query or "").strip()
-    if not base:
+def _google_trends_items(geo="IN", max_items=10):
+    geo = str(geo or "").strip().upper()
+    if not geo:
         return []
-    key = _clean(genre_key)
-    if broad:
-        global_lenses = [
-            f"({base}) AND (breaking OR latest OR announced OR decision)",
-            f"({base}) AND (deal OR agreement OR conflict OR crisis OR court OR government)",
-            f"({base}) AND (launch OR discovery OR research OR science OR technology)",
-            f"({base}) AND (business OR economy OR market OR company OR funding)",
-            f"({base}) AND (incident OR disaster OR weather OR climate OR emergency)",
-            f"({base}) AND (sport OR match OR tournament OR player OR team)",
-            f"({base}) AND (film OR music OR entertainment OR celebrity OR culture)",
-            f"({base}) AND (viral OR internet OR social media OR unusual)",
-        ]
-        return [base] + [query for query in global_lenses if query != base][:8]
-    if ai_cricket or key in {"sports", "sports_stories_of_day"}:
-        lenses = [
-            f"({base}) AND (latest OR today OR breaking)",
-            f"({base}) AND (record OR result OR squad OR selection OR injury OR announcement)",
-            f"({base}) AND (match OR series OR tournament OR player)",
-        ]
-    elif key in {"technology", "tech_reviews"}:
-        lenses = [
-            f"({base}) AND (latest OR today OR breaking)",
-            f"({base}) AND (launch OR release OR update OR reveal)",
-            f"({base}) AND (AI OR chip OR smartphone OR startup OR gadget)",
-        ]
-    elif key == "business_finance":
-        lenses = [
-            f"({base}) AND (latest OR today OR breaking)",
-            f"({base}) AND (earnings OR deal OR funding OR market OR acquisition)",
-            f"({base}) AND (India OR global)",
-        ]
-    elif key == "entertainment":
-        lenses = [
-            f"({base}) AND (latest OR today OR breaking)",
-            f"({base}) AND (release OR trailer OR box office OR casting OR announcement)",
-            f"({base}) AND (film OR series OR celebrity OR music)",
-        ]
-    elif key == "health_lifestyle":
-        lenses = [
-            f"({base}) AND (latest OR today OR breaking)",
-            f"({base}) AND (study OR research OR approval OR warning OR discovery)",
-            f"({base}) AND (health OR fitness OR nutrition OR wellness)",
-        ]
-    elif key == "viral_phenomenon":
-        lenses = [
-            f"({base}) AND (latest OR today OR trending)",
-            f"({base}) AND (viral OR internet OR social media OR video)",
-            f"({base}) AND (explained OR reaction OR controversy)",
-        ]
-    else:
-        lenses = [
-            f"({base}) AND (latest OR today OR breaking)",
-            f"({base}) AND (announcement OR decision OR result OR update)",
-            f"({base}) AND (India OR world OR global)",
-        ]
-    output = [base]
-    for query in lenses:
-        if query not in output:
-            output.append(query)
-    return output[:4]
+    try:
+        response = requests.get(
+            "https://trends.google.com/trending/rss",
+            params={"geo": geo},
+            headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
+            timeout=8,
+        )
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+    except Exception as exc:
+        print(f"   [Discovery] Google Trends RSS unavailable for {geo}: {type(exc).__name__}", flush=True)
+        return []
 
-
-def _adaptive_discovery_query(base_query, social_titles):
-    """Build at most one supplemental query from public-interest novelty."""
-    base_tokens = _tokens(base_query)
-    if not social_titles:
-        return ""
-
-    frequency = {}
-    for title in social_titles[:50]:
-        for token in _tokens(title):
-            if token in base_tokens or token in {"india", "indian", "world", "news", "reddit"}:
+    output = []
+    for rank, item in enumerate(root.findall("./channel/item")[:max_items], 1):
+        trend_query = str(item.findtext("title") or "").strip()
+        if not trend_query:
+            continue
+        traffic = str(item.findtext("{*}approx_traffic") or "").strip()
+        trend_score = _trend_traffic_score(traffic, rank)
+        for news_item in item.findall("{*}news_item"):
+            title = str(news_item.findtext("{*}news_item_title") or "").strip()
+            url_value = str(news_item.findtext("{*}news_item_url") or "").strip()
+            publisher = str(news_item.findtext("{*}news_item_source") or "").strip()
+            snippet = str(news_item.findtext("{*}news_item_snippet") or "").strip()
+            if not title or not url_value:
                 continue
-            frequency[token] = frequency.get(token, 0) + 1
+            output.append({
+                "title": title,
+                "text": snippet or title,
+                "description": snippet,
+                "source": publisher or "Google Trends",
+                "source_name": publisher or "Google Trends",
+                "publisher": publisher or "Google Trends",
+                "url": url_value,
+                "publishedAt": str(item.findtext("pubDate") or "").strip(),
+                "genre": "",
+                "collection_source": "google_trends",
+                "trend_query": trend_query,
+                "trend_traffic": traffic,
+                "trend_geo": geo,
+                "trend_rank": rank,
+                "trend_bonus": trend_score,
+            })
+    return output
 
-    candidates = sorted(
-        frequency.items(),
-        key=lambda item: (-item[1], -len(item[0]), item[0]),
+
+def fetch_google_trending_topics(geos=("IN",), max_terms=15):
+    terms = []
+    seen = set()
+    for geo in geos or ("IN",):
+        geo = str(geo or "").strip().upper()
+        if not geo:
+            continue
+        try:
+            response = requests.get(
+                "https://trends.google.com/trending/rss",
+                params={"geo": geo},
+                headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
+                timeout=8,
+            )
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+        except Exception:
+            continue
+        for item in root.findall("./channel/item")[:max(1, int(max_terms))]:
+            trend = str(item.findtext("title") or "").strip()
+            if trend and trend.casefold() not in seen:
+                seen.add(trend.casefold())
+                terms.append(trend)
+                if len(terms) >= max(1, int(max_terms)):
+                    return terms
+    return terms
+
+
+def _google_news_search_items(query, genre_key="", max_items=60):
+    query = str(query or "").strip()
+    if not query:
+        return []
+    url = (
+        "https://news.google.com/rss/search"
+        f"?q={quote_plus(query)}&hl=en-IN&gl=IN&ceid=IN:en"
     )
-    selected = [token for token, count in candidates if count >= 2][:3]
-    if not selected:
-        return ""
+    return _rss_items(url, genre_key, collection_source="google_news_rss", max_items=max_items)
 
-    query = " ".join(selected)
-    if _topic_overlap(query, base_query) >= 0.50:
-        return ""
-    return query
+
+def _infer_discovery_category(story):
+    text = _clean(" ".join(
+        str(story.get(key, "") or "")
+        for key in ("title", "text", "description", "event_search_text", "trend_query")
+    ))
+    weighted = {
+        "sports": {"cricket": 5, "icc": 5, "ipl": 5, "football": 4, "soccer": 4, "tennis": 4, "match": 2, "tournament": 3, "athlete": 3, "olympic": 4},
+        "technology": {"artificial intelligence": 5, "ai": 4, "chip": 3, "software": 3, "robot": 3, "smartphone": 4, "gadget": 3, "startup": 3, "nvidia": 3},
+        "business_finance": {"stock": 4, "market": 3, "economy": 4, "earnings": 4, "funding": 3, "acquisition": 4, "ipo": 4, "bank": 2, "finance": 3},
+        "entertainment": {"movie": 4, "film": 4, "bollywood": 5, "tollywood": 5, "celebrity": 4, "trailer": 3, "actor": 3, "music": 3, "album": 3},
+        "health_lifestyle": {"health": 3, "medical": 4, "medicine": 4, "disease": 4, "study": 2, "nutrition": 3, "fitness": 3, "wellness": 3},
+        "regional_state_news": {"telangana": 5, "hyderabad": 5, "andhra pradesh": 5, "amaravati": 5},
+        "viral_phenomenon": {"viral": 4, "trending": 3, "internet": 3, "social media": 3, "tiktok": 3, "instagram": 3, "youtube": 2},
+    }
+    scores = {key: 0 for key in weighted}
+    for category, terms in weighted.items():
+        for term, points in terms.items():
+            matched = bool(re.search(r"\bai\b", text)) if term == "ai" else term in text
+            if matched:
+                scores[category] += points
+    winner = max(scores.items(), key=lambda item: item[1])
+    return winner[0] if winner[1] > 0 else "national_global_affairs"
 
 
 def _social_signal(title, social_titles):
@@ -616,73 +646,46 @@ def _source_url_from_item(item):
     return str(item.get("url") or item.get("link") or "").strip()
 
 
-def _gnews_items(query, api_key, genre_key, global_scope=False):
-    global _GNEWS_FAILURE_UNTIL, _GNEWS_FAILURE_LOGGED
-
-    if not api_key:
+def _rss_items(url, genre_key, collection_source="rss", max_items=60):
+    if not url:
         return []
-    now = time.time()
-    if now < _GNEWS_FAILURE_UNTIL:
-        return []
-
     try:
         response = requests.get(
-            "https://api.gnews.io/api/v4/search",
-            params={
-                "q": query,
-                "lang": "en",
-                **({"country": "in"} if not global_scope else {}),
-                "max": 20,
-                "apikey": api_key,
-            },
+            url,
+            headers={"User-Agent": "Mozilla/5.0 ViralShortsFactory/2026"},
             timeout=8,
         )
         if response.status_code != 200:
-            if response.status_code in {401, 403, 429, 500, 502, 503, 504}:
-                _GNEWS_FAILURE_UNTIL = time.time() + _GNEWS_COOLDOWN_SECONDS
-                if not _GNEWS_FAILURE_LOGGED:
-                    print(
-                        f"   [Discovery] GNews intake unavailable (HTTP {response.status_code}); using RSS/social fallback for this run.",
-                        flush=True,
-                    )
-                    _GNEWS_FAILURE_LOGGED = True
             return []
-        _GNEWS_FAILURE_UNTIL = 0.0
-        _GNEWS_FAILURE_LOGGED = False
-        output = []
-        for article in response.json().get("articles", []):
-            title = str(article.get("title") or "").strip()
-            url = str(article.get("url") or "").strip()
-            if not title or not url:
-                continue
-            source = article.get("source") or {}
-            output.append({
-                "title": title,
-                "text": article.get("description") or article.get("content") or "",
-                "description": article.get("description") or "",
-                "source": source.get("name") or "GNews",
-                "source_name": source.get("name") or "GNews",
-                "url": url,
-                "publishedAt": article.get("publishedAt"),
-                "genre": genre_key,
-                "collection_source": "gnews",
-            })
-        return output
-    except (requests.ConnectionError, requests.Timeout) as exc:
-        _GNEWS_FAILURE_UNTIL = time.time() + _GNEWS_COOLDOWN_SECONDS
-        if not _GNEWS_FAILURE_LOGGED:
-            print(
-                f"   [Discovery] GNews network intake unavailable ({type(exc).__name__}); using RSS/social fallback for this run.",
-                flush=True,
+        root = ET.fromstring(response.content)
+        items = []
+        for item in root.findall(".//item")[:max_items]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            description = (item.findtext("description") or "").strip()
+            published = (item.findtext("pubDate") or "").strip()
+            source_node = item.find("source")
+            publisher = (
+                (source_node.text or "").strip()
+                if source_node is not None and source_node.text
+                else _source_domain({"url": link}) or "RSS"
             )
-            _GNEWS_FAILURE_LOGGED = True
-        return []
-    except Exception as exc:
-        print(f"   [Discovery] GNews intake failed for query '{query[:60]}': {type(exc).__name__}", flush=True)
+            if title and link:
+                items.append({
+                    "title": title,
+                    "text": description,
+                    "description": description,
+                    "source": publisher,
+                    "source_name": publisher,
+                    "url": link,
+                    "publishedAt": published,
+                    "genre": genre_key,
+                    "collection_source": collection_source,
+                })
+        return items
+    except Exception:
         return []
 
-
-def _rss_items(url, genre_key, collection_source="rss"):
     if not url:
         return []
     try:
@@ -749,8 +752,8 @@ def _official_feed_items(genre_key, genre_cfg):
     return items
 
 
-def _reddit_items(genre_key):
-    subreddits = {
+def _reddit_items(genre_key="", subreddit="", limit=50):
+    subreddit = str(subreddit or "").strip() or {
         "sports": "sports",
         "sports_stories_of_day": "sports",
         "technology": "technology",
@@ -758,9 +761,8 @@ def _reddit_items(genre_key):
         "entertainment": "movies",
         "viral_phenomenon": "popular",
         "national_global_affairs": "worldnews",
-    }
-    subreddit = subreddits.get(genre_key, "popular")
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit=50"
+    }.get(genre_key, "popular")
+    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={max(10, min(50, int(limit)))}"
     try:
         response = requests.get(
             url,
@@ -1311,132 +1313,109 @@ def diversity_rerank(stories, max_items=28):
 
 
 
-def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None, ai_cricket=False, discover_lanes=None, broad_discovery=False):
-    """Collect a broad article pool, then collapse it into distinct event candidates.\n\n    ``discover_lanes`` is a legacy compatibility keyword. The current\n    collector uses one canonical intake path, so the value is intentionally\n    ignored; accepting it prevents stale dashboard runtimes from crashing\n    during rolling deployments.\n    """
-    api_key = str(os.getenv("GNEWS_API_KEY") or getattr(bot, "GNEWS_API_KEY", "") or "").strip()
-    base_query = trend_keyword or custom_gnews_q or genre_cfg.get("gnews_q", "")
+def collect_high_recall_stories(
+    bot,
+    genre_key,
+    genre_cfg,
+    trend_keyword=None,
+    custom_gnews_q=None,
+    custom_rss_url=None,
+    ai_cricket=False,
+    discover_lanes=None,
+    broad_discovery=False,
+):
+    """Collect broad free discovery signals and collapse them into distinct events."""
+    genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
     raw = []
+    google_queries = list(GOOGLE_NEWS_RADAR_QUERIES)
+    for query in (trend_keyword, custom_gnews_q):
+        text_value = str(query or "").strip()
+        if text_value and text_value not in google_queries:
+            google_queries.insert(0, text_value)
+    if not broad_discovery:
+        google_queries = google_queries[:4]
 
-    # These providers are independent. Fetch them concurrently so one slow
-    # source does not make the entire intake run serially.
-    rss_url = custom_rss_url or genre_cfg.get("rss_url", "")
-    query_lanes = _discovery_query_lanes(
-        base_query,
-        genre_key=genre_key,
-        ai_cricket=ai_cricket,
-        broad=broad_discovery,
-    )
-    with ThreadPoolExecutor(max_workers=8 if broad_discovery else 4, thread_name_prefix="discovery-intake") as pool:
-        gnews_futures = [
-            pool.submit(
-                _gnews_items,
-                query,
-                api_key,
-                genre_key,
-                global_scope=broad_discovery,
-            )
-            for query in query_lanes
+    selected_rss = str(custom_rss_url or genre_cfg.get("rss_url") or "").strip()
+    trend_geos = GOOGLE_TRENDS_GEOS if broad_discovery else ("IN",)
+    reddit_subreddits = REDDIT_RADAR_SUBREDDITS if broad_discovery else ("",)
+
+    gdelt_queries = [
+        "sourcecountry:india",
+        "(breaking OR announced OR decision OR deal OR launch OR crisis OR court OR record OR discovery OR incident)",
+    ]
+    if trend_keyword:
+        gdelt_queries.insert(0, str(trend_keyword).strip())
+    elif custom_gnews_q:
+        gdelt_queries.insert(0, str(custom_gnews_q).strip())
+    if not broad_discovery:
+        gdelt_queries = gdelt_queries[:2]
+
+    with ThreadPoolExecutor(max_workers=16 if broad_discovery else 8, thread_name_prefix="discovery-radar") as pool:
+        google_futures = [
+            pool.submit(_google_news_search_items, query, genre_key, 60)
+            for query in google_queries if query
         ]
-        rss_future = pool.submit(_rss_items, rss_url, genre_key)
-        official_future = pool.submit(_official_feed_items, genre_key, genre_cfg)
-        reddit_future = pool.submit(_reddit_items, genre_key)
+        rss_futures = (
+            [pool.submit(_rss_items, selected_rss, genre_key, "rss", 60)]
+            if selected_rss else []
+        )
+        official_futures = (
+            [pool.submit(_official_feed_items, genre_key, genre_cfg)]
+            if _official_feed_urls(genre_key, genre_cfg) else []
+        )
+        trend_futures = [
+            pool.submit(_google_trends_items, geo, 10)
+            for geo in trend_geos
+        ]
+        reddit_futures = [
+            pool.submit(_reddit_items, genre_key, subreddit, 50)
+            for subreddit in reddit_subreddits
+        ]
+        gdelt_futures = [
+            pool.submit(fetch_gdelt_articles, query, timespan="48h", max_records=250)
+            for query in gdelt_queries if query
+        ]
 
-        for future in gnews_futures:
+        for future in google_futures:
             raw.extend(future.result())
-        raw.extend(rss_future.result())
-        raw.extend(official_future.result())
-        social_rows = reddit_future.result()
+        for future in rss_futures:
+            raw.extend(future.result())
+        for future in official_futures:
+            raw.extend(future.result())
+        for future in trend_futures:
+            raw.extend(future.result())
+        social_rows = []
+        for future in reddit_futures:
+            social_rows.extend(future.result())
+        raw.extend(social_rows)
+        for future in gdelt_futures:
+            raw.extend(future.result())
 
     social_titles = [row.get("title", "") for row in social_rows]
-    raw.extend(social_rows)
-
-    # One bounded adaptive lane: if public-interest signals surface a
-    # genuinely new vocabulary not covered by the base query, let GNews
-    # explore that vocabulary once. This improves recall without restoring
-    # blind multi-query fanout.
-    adaptive_query = _adaptive_discovery_query(base_query, social_titles)
-    if adaptive_query and api_key and adaptive_query != _clean(base_query):
-        adaptive_rows = _gnews_items(adaptive_query, api_key, genre_key)
-        if adaptive_rows:
-            raw.extend(adaptive_rows)
-            social_titles.extend(
-                row.get("title", "")
-                for row in adaptive_rows[:8]
-                if row.get("title")
-            )
-
     for story in raw:
         story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
+        story["trend_bonus"] = min(4.0, _safe_float(story.get("trend_bonus")) or 0.0)
 
-    def compact_items(items):
-        compacted = []
-        seen = set()
-        for story in items:
-            if not isinstance(story, dict):
-                continue
-            key = _canonical_url(_source_url_from_item(story)) or "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            compacted.append(story)
-        return compacted
+    compacted = []
+    seen = set()
+    for story in raw:
+        if not isinstance(story, dict):
+            continue
+        key = _canonical_url(_source_url_from_item(story))
+        if not key:
+            key = "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
+        if key in seen:
+            continue
+        seen.add(key)
+        compacted.append(story)
 
-    compact = compact_items(raw)
-    event_pool = discover_event_pool(
-        query=(
-            "breaking OR latest OR announced OR decision OR deal OR launch OR "
-            "discovery OR incident OR crisis OR court OR business OR technology OR "
-            "sports OR entertainment OR culture OR viral"
-            if broad_discovery
-            else base_query
-        ),
-        existing_articles=compact,
-        timespan="48h",
-        max_gdelt_records=150 if broad_discovery else 75,
-    )
-    events = event_pool["events"]
-
-    # GDELT remains a bounded supplemental radar. In dashboard mode it
-    # receives an independent global lens so it can surface events missed by
-    # category queries; production selection keeps the narrower legacy query.
-    raw = list(event_pool.get("articles") or raw)
-    initial_gdelt_count = int(event_pool.get("gdelt_article_count") or 0)
-
-    # Coverage-gap radar: if GDELT finds an event absent from our normal
-    # intake, spend at most three targeted global searches to try to obtain
-    # an independent article. This is evidence-seeking, not blind query fanout.
-    if broad_discovery and api_key and events:
-        gap_titles = [
-            str(item.get("title") or item.get("event_search_text") or "").strip()
-            for item in events
-            if item.get("event_discovery_gap")
-        ][:3]
-        for gap_title in gap_titles:
-            if not gap_title:
-                continue
-            gap_rows = _gnews_items(
-                gap_title,
-                api_key,
-                genre_key,
-                global_scope=True,
-            )
-            if gap_rows:
-                raw.extend(gap_rows)
-        if gap_titles:
-            event_pool = discover_event_pool(
-                query="",
-                existing_articles=compact_items(raw),
-                timespan="48h",
-                max_gdelt_records=0,
-            )
-            events = event_pool["events"]
-            raw = list(event_pool.get("articles") or raw)
+    events = cluster_news_events(compacted)
+    for event in events:
+        event["recommended_category"] = _infer_discovery_category(event)
 
     print(
-        f"   [Discovery Funnel] article intake={event_pool['article_count']} "
-        f"(GDELT={initial_gdelt_count}) -> "
-        f"distinct events={event_pool['event_count']}; "
-        f"bounded adaptive intake complete.",
+        f"   [Discovery Funnel] article intake={len(compacted)} -> "
+        f"distinct events={len(events)}; free-source radar complete.",
         flush=True,
     )
     return events, social_titles
