@@ -4,7 +4,7 @@ import re
 
 
 def _words(text):
-    return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
+    return re.findall(r"\b\w+\b", str(text or "").lower(), flags=re.UNICODE)
 
 
 def _overlap(a, b):
