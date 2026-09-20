@@ -2,6 +2,8 @@
 
 import io
 
+import visual_qa_runtime as visual_qa
+
 import visual_provider_boundary_runtime as provider_boundary
 
 from PIL import Image
@@ -79,7 +81,7 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [bad, good])],
     )
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -160,7 +162,7 @@ def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
         ],
     )
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
 
     scene = {
         "primary_entity": "Sanju Samson",
@@ -252,7 +254,7 @@ def test_real_visual_candidate_reaches_verified_source(monkeypatch):
         lambda bot, visual_type: [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -356,7 +358,7 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
     def fake_batch(images, *args, **kwargs):
         batch_payloads.append(list(images))
         return {index: False for index in range(len(images))}
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", fake_batch)
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -419,7 +421,7 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Wikipedia", lambda *args: [_licensed_candidate(image_bytes, "by")])],
     )
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -550,7 +552,7 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
         lambda bot, visual_type, visual_genre="": [("Commons", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
@@ -613,7 +615,7 @@ def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
         lambda bot, visual_type: [("DDG", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
 
     scene = {
         "primary_entity": "Sanju Samson",
