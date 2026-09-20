@@ -1087,39 +1087,14 @@ def collect_manual_visual_pool(
         except TypeError:
             source_plan = _source_plan(bot, visual_type)
 
-        team_context = bool(
-            re.search(r"\bnational\s+team\b", exact_query, flags=re.IGNORECASE)
-            or re.search(r"\b(?:xi|squad)\b", exact_query, flags=re.IGNORECASE)
-        )
-        query_tokens = {
-            token.casefold()
-            for token in re.findall(r"[\w-]+", exact_query, flags=re.UNICODE)
-        }
-        sports_context = bool(query_tokens & _SPORTS_CONTEXT_TERMS)
-        branding_or_portrait = visual_genre in {"TEAM_BRANDING", "ORG_BRANDING", "PERSON_PORTRAIT"}
-        action_search = (
-            visual_genre in ACTION_VISUAL_GENRES
-            or ((sports_context or team_context) and not branding_or_portrait)
+        source_plan, action_search = _prepare_action_source_plan(
+            source_plan,
+            exact_query,
+            visual_genre,
+            allow_recent_discovery=True,
         )
 
-        if action_search:
-            action_provider_order = {
-                "serpapi": -1,
-                "openverse": 0,
-                "pexels": 1,
-                "pixabay": 2,
-                "commons": 3,
-                "unsplash": 4,
-            }
-            source_plan = sorted(
-                source_plan,
-                key=lambda item: (
-                    action_provider_order.get(str(item[0] or "").strip().casefold(), 99),
-                    str(item[0] or "").casefold(),
-                ),
-            )
-
-        search_variants = [exact_query]
+        search_variants = []
         if action_search:
             for suffix in _ACTION_SEARCH_SUFFIXES.get(
                 visual_genre,
@@ -1128,6 +1103,7 @@ def collect_manual_visual_pool(
                 variant = f"{exact_query} {suffix}".strip()
                 if variant.casefold() != exact_query.casefold():
                     search_variants.append(variant)
+        search_variants.append(exact_query)
 
         target = _manual_query_target(query_index)
         query_candidates: list[dict] = []
@@ -1644,15 +1620,33 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     except TypeError:
         source_plan = _source_plan(bot, visual_type)
 
+    source_plan, action_search = _prepare_action_source_plan(
+        source_plan,
+        base_query,
+        visual_genre,
+        category=category,
+        allow_recent_discovery=False,
+    )
+
     verified_assets = []
     verified_hashes = set()
     verification_attempts = 0
     last_round = ""
 
-    query_rounds = [base_query]
-    refinement = _scene_refinement_query(seg, visual_anchor)
-    if refinement and refinement.casefold() != base_query.casefold():
-        query_rounds.append(refinement)
+    query_rounds = []
+    if action_search:
+        for suffix in _ACTION_SEARCH_SUFFIXES.get(
+            visual_genre,
+            ("action", "match action", "celebration"),
+        )[:2]:
+            variant = f"{base_query} {suffix}".strip()
+            if variant.casefold() != base_query.casefold():
+                query_rounds.append(variant)
+    else:
+        query_rounds.append(base_query)
+        refinement = _scene_refinement_query(seg, visual_anchor)
+        if refinement and refinement.casefold() != base_query.casefold():
+            query_rounds.append(refinement)
 
     for round_index, query in enumerate(query_rounds[:2], 1):
         raw_target = INITIAL_CANDIDATE_POOL if round_index == 1 else REFINEMENT_CANDIDATE_POOL
