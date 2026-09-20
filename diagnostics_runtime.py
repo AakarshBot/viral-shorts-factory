@@ -147,6 +147,29 @@ def _test_visual_strategy():
     return "Identity-first semantic visual strategy, multilingual identity, manual query routing and context-aware cache checks passed"
 
 
+def _test_visual_queries():
+    """Show the bounded automatic visual-query fallback ladder used by retrieval."""
+    from visual_strategy_runtime import build_deep_queries
+
+    scene = {
+        "primary_entity": "Shubman Gill",
+        "voiceover": "Shubman Gill leads India's batting in the final match.",
+        "visual_intent": "person action batting",
+        "visual_context": "batting match cricket stadium",
+        "specific_search_prompt": "Shubman Gill batting match",
+    }
+    queries, visual_type = build_deep_queries(scene, "India Afghanistan final")
+    if not queries:
+        raise AssertionError("no visual queries were generated")
+    if len(queries) > 6:
+        raise AssertionError(f"visual query budget exceeded: {queries}")
+    if queries[-1].casefold() != "shubman gill":
+        raise AssertionError(f"identity fallback missing: {queries}")
+    return "Visual query fallback ladder (up to 6):\n" + "\n".join(
+        f"{index}. {query}" for index, query in enumerate(queries, 1)
+    ) + f"\nVisual type: {visual_type}"
+
+
 def _test_scene_branding():
     from PIL import Image
 
