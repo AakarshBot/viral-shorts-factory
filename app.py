@@ -949,11 +949,18 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     )
 
     def crop_popover(asset: dict, key_suffix: str, apply_crop) -> None:
-        with st.popover("Crop"):
-            path = str(asset.get("path") or "").strip()
+        popover = st.popover("Crop", width="content", key=f"{key_suffix}_popover")
+        if not popover.open:
+            return
+
+        with popover:
+            path = str(asset.get("original_path") or "").strip()
+            if not path or not os.path.isfile(path):
+                path = str(asset.get("path") or "").strip()
             if not path or not os.path.isfile(path):
                 st.error("This image is no longer available.")
                 return
+
             from PIL import Image
             image = Image.open(path).convert("RGB")
             stored_box = asset.get("crop_box") or asset.get("visual_crop_box") or {}
@@ -1008,28 +1015,33 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if bool(asset.get("used")):
             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
             return
-        choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
-        target = st.selectbox(
-            "Use on slide",
-            choices,
-            index=0,
-            key=f"{key_suffix}_target",
-            label_visibility="collapsed",
-        )
-        if st.button(
-            "Use on slide",
-            type="primary",
-            width="stretch",
-            disabled=target == "Choose slide",
-            key=f"{key_suffix}_use",
-        ):
-            ok, message = controller.assign_visual_pool_asset(
-                str(asset.get("hash") or ""),
-                int(target.split()[-1]),
+
+        popover = st.popover("Use", width="content", key=f"{key_suffix}_popover")
+        if not popover.open:
+            return
+
+        with popover:
+            choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
+            target = st.selectbox(
+                "Slide",
+                choices,
+                index=0,
+                key=f"{key_suffix}_target",
             )
-            if ok:
-                st.rerun()
-            st.error(message)
+            if st.button(
+                "Use on slide",
+                type="primary",
+                width="stretch",
+                disabled=target == "Choose slide",
+                key=f"{key_suffix}_use",
+            ):
+                ok, message = controller.assign_visual_pool_asset(
+                    str(asset.get("hash") or ""),
+                    int(target.split()[-1]),
+                )
+                if ok:
+                    st.rerun()
+                st.error(message)
 
     st.markdown("### Current slide images")
     for row_start in range(0, len(items), 3):
