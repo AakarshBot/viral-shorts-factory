@@ -13,7 +13,6 @@ import threading
 
 from PIL import Image
 
-from visual_taxonomy_runtime import genre_acceptance_rule
 
 GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "16")))
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "4")))
@@ -53,14 +52,6 @@ def get_visual_qa_calls_used():
 def _cache_key(img_bytes, entity, tier, visual_type="", visual_genre=""):
     h = hashlib.sha256(img_bytes).hexdigest()
     return (h, str(entity).strip().lower(), str(tier).strip().upper(), str(visual_type).strip().upper(), str(visual_genre).strip().upper())
-
-
-def _tier_for(intent, visual_type, source):
-    return "IDENTITY"
-
-
-def _is_conceptual(intent):
-    return False
 
 
 def _identity_prompt(entity, visual_type="", intent="", search_prompt="", visual_genre=""):
