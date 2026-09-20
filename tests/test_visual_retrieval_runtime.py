@@ -1721,6 +1721,39 @@ def test_action_metadata_boosts_candidate_priority():
     assert action_score > static_score
 
 
+def test_action_source_policy_uses_recent_discovery_and_action_sources(monkeypatch):
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-key")
+    plan = [
+        ("Commons", lambda *_args: []),
+        ("Pexels", lambda *_args: []),
+        ("Openverse", lambda *_args: []),
+    ]
+    prepared, action = retrieval._prepare_action_source_plan(
+        plan,
+        "India women's national team",
+        "TEAM_ACTION",
+        allow_recent_discovery=True,
+    )
+    assert action is True
+    assert [name for name, _fetcher in prepared][:3] == ["SerpApi", "Pexels", "Openverse"]
+
+
+def test_sports_query_planner_makes_first_query_action_oriented(monkeypatch):
+    import manual_visual_query_runtime as planner
+
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    result = planner.generate_visual_query_suggestions(
+        "India women's national team reaches final",
+        "India women's national team reaches the final after a strong cricket campaign.",
+        category="sports",
+        max_queries=5,
+    )
+    assert result
+    assert "action" in str(result[0]["query"]).casefold()
+    assert "final" in str(result[0]["query"]).casefold()
+
+
 def test_pixabay_manual_search_requests_latest_page(monkeypatch, tmp_path):
     import image_sources_runtime as sources
 
