@@ -395,12 +395,21 @@ def safe_text(val, fallback=""):
         return fallback
     if isinstance(val, str):
         return val.strip()
+    # Prevent NumPy/array-like containers from leaking their repr into UI/video text.
+    # Extract their actual values first; ordinary lists/dicts retain their existing behaviour.
+    if hasattr(val, "tolist") and not isinstance(val, (bytes, bytearray)):
+        try:
+            return safe_text(val.tolist(), fallback)
+        except Exception:
+            pass
     if isinstance(val, dict):
         for key in ("text", "voiceover", "value", "content"):
             if key in val:
                 return safe_text(val[key], fallback)
         return " ".join(safe_text(v) for v in val.values()).strip()
     if isinstance(val, list):
+        return " ".join(safe_text(v) for v in val).strip()
+    if isinstance(val, tuple):
         return " ".join(safe_text(v) for v in val).strip()
     return str(val).strip()
 
