@@ -730,7 +730,7 @@ def test_live_qc_gates_are_real_blocking_checks(tmp_path):
 def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
     source = Path("app.py").read_text(encoding="utf-8")
     assert '"missing": missing' in source
-    assert '"qc_passed": verified and not missing' in source
+    assert '"qc_passed": verified and not missing and not bool(layer.get("visual_qc_blocked", False))' in source
     assert 'if item.get("missing"):' in source
 
 def test_dashboard_primary_menu_and_generated_outputs_contract():
