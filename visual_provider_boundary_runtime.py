@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import re
+import time
+from urllib.parse import urlparse
 from typing import Any
 
 import requests
@@ -25,10 +27,44 @@ from visual_licensing_runtime import (
 
 DEFAULT_TIMEOUT = max(3, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "8")))
 MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "6"))))
+_PROVIDER_429_COOLDOWN_SECONDS = max(10, min(120, int(os.getenv("VISUAL_PROVIDER_429_COOLDOWN_SECONDS", "45"))))
+_PROVIDER_429_UNTIL: dict[str, float] = {}
 
 
 def _clean_query(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:240]
+
+
+
+def _provider_host(url: str) -> str:
+    try:
+        return str(urlparse(str(url or "")).netloc or "").casefold()
+    except Exception:
+        return ""
+
+
+def _provider_429_available(url: str) -> bool:
+    host = _provider_host(url)
+    if not host:
+        return True
+    until = float(_PROVIDER_429_UNTIL.get(host, 0.0) or 0.0)
+    if until <= time.monotonic():
+        _PROVIDER_429_UNTIL.pop(host, None)
+        return True
+    return False
+
+
+def _mark_provider_429(url: str, retry_after: str = "") -> None:
+    host = _provider_host(url)
+    if not host:
+        return
+    delay = float(_PROVIDER_429_COOLDOWN_SECONDS)
+    try:
+        if retry_after:
+            delay = max(delay, min(120.0, float(retry_after)))
+    except (TypeError, ValueError):
+        pass
+    _PROVIDER_429_UNTIL[host] = time.monotonic() + delay
 
 
 def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> bytes | None:
@@ -47,6 +83,8 @@ def _download_image(url: str, used_urls: set[str] | None = None, metadata: dict[
         return None
     if used_urls is not None and url in used_urls:
         return None
+    if not _provider_429_available(url):
+        return None
     try:
         response = requests.get(
             url,
@@ -54,6 +92,9 @@ def _download_image(url: str, used_urls: set[str] | None = None, metadata: dict[
             headers={"User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
             allow_redirects=True,
         )
+        if response.status_code == 429:
+            _mark_provider_429(url, response.headers.get("Retry-After", ""))
+            return None
         response.raise_for_status()
         data = response.content
         content_type = str(response.headers.get("content-type", "")).lower()
@@ -77,6 +118,8 @@ def _api_json(
     params: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
+    if not _provider_429_available(url):
+        return None
     try:
         response = requests.get(
             url,
@@ -84,6 +127,13 @@ def _api_json(
             headers=headers or {"User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
             timeout=DEFAULT_TIMEOUT,
         )
+        if response.status_code == 429:
+            _mark_provider_429(url, response.headers.get("Retry-After", ""))
+            print(
+                f"   [Visual Source] 429 rate limit; cooling down host={_provider_host(url)}.",
+                flush=True,
+            )
+            return None
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, dict) else None
@@ -438,6 +488,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
                 {
                     "provider": "Wikipedia",
                     "url": str(info.get("descriptionurl") or ("https://en.wikipedia.org/wiki/File:" + file_name)),
+                    "source_page_url": str(info.get("descriptionurl") or ("https://en.wikipedia.org/wiki/File:" + file_name)),
                     "author": _meta_value("Artist"),
                     "license": license_code,
                     "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
@@ -566,7 +617,7 @@ def _commons_search_queries(
 
     person_qid = ""
     person_label = ""
-    if person_seed:
+    if person_seed and genre_l != "PERSON_ACTION":
         resolved_person = resolve_person_identity(person_seed)
         person_qid = str((resolved_person or {}).get("qid") or "").strip()
         person_label = str((resolved_person or {}).get("label") or "").strip()
@@ -580,7 +631,7 @@ def _commons_search_queries(
             )
 
     structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
-    if visual_l in structured_types and not person_qid:
+    if visual_l in structured_types and not person_qid and genre_l != "PERSON_ACTION":
         structured_query = team_core or exact
         resolved_entity = resolve_wikidata_entity(structured_query)
         entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
@@ -610,6 +661,22 @@ def _commons_search_queries(
 
     for variant in team_variants:
         searches.append((variant, "normalized-team", team_core))
+
+    if person_seed and genre_l == "PERSON_ACTION":
+        action_terms = [
+            token
+            for token in re.findall(r"[A-Za-z][A-Za-z'’.-]*", exact)
+            if token.casefold() in _COMMONS_PERSON_NOISE
+        ]
+        if action_terms:
+            action_phrase = " ".join(dict.fromkeys(action_terms[:2]))
+            searches.append(
+                (
+                    f"{person_seed} {action_phrase} cricket".strip(),
+                    "person-action-text",
+                    person_seed,
+                )
+            )
 
     # Manual queries are never silently replaced: the exact literal always stays in the ladder.
     searches.append((exact, "text", ""))
@@ -692,6 +759,10 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
                     info.get("descriptionurl")
                     or ("https://commons.wikimedia.org/wiki/" + str(page.get("title", "")))
                 ),
+                "source_page_url": str(
+                    info.get("descriptionurl")
+                    or ("https://commons.wikimedia.org/wiki/" + str(page.get("title", "")))
+                ),
                 "author": _meta_value("Artist"),
                 "license": license_code,
                 "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
@@ -738,6 +809,7 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
                 urls.append((str(url), {
                         "provider": "Pexels",
                         "url": str(photo.get("url") or url),
+                        "source_page_url": str(photo.get("url") or ""),
                         "author": author,
                         "license": "Pexels License",
                         "license_url": "https://www.pexels.com/license/",
@@ -771,6 +843,7 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
                 urls.append((str(url), {
                         "provider": "Unsplash",
                         "url": str((item.get("links") or {}).get("html") or url),
+                        "source_page_url": str((item.get("links") or {}).get("html") or ""),
                         "author": author,
                         "license": "Unsplash License",
                         "license_url": "https://unsplash.com/license",
@@ -794,7 +867,7 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
         genre = "PERSON_PORTRAIT" if kind == "PERSON" else "GENERAL_CONTEXT"
 
     plan = []
-    if kind == "PERSON":
+    if kind == "PERSON" and genre != "PERSON_ACTION":
         plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
 
     commons_kinds = {
@@ -818,13 +891,23 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
     except Exception:
         fetch_openverse_candidates = fetch_pixabay_candidates = None
 
-    plan.append(("Openverse", fetch_openverse_candidates))
-    if str(os.getenv("PIXABAY_API_KEY", "")).strip():
-        plan.append(("Pixabay", fetch_pixabay_candidates))
-    if str(os.getenv("PEXELS_API_KEY", "")).strip():
-        plan.append(("Pexels", fetch_pexels_candidates))
-    if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
-        plan.append(("Unsplash", fetch_unsplash_candidates))
+    if genre == "PERSON_ACTION":
+        plan.append(("Openverse", fetch_openverse_candidates))
+        if str(os.getenv("PEXELS_API_KEY", "")).strip():
+            plan.append(("Pexels", fetch_pexels_candidates))
+        if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
+            plan.append(("Unsplash", fetch_unsplash_candidates))
+        if str(os.getenv("PIXABAY_API_KEY", "")).strip():
+            plan.append(("Pixabay", fetch_pixabay_candidates))
+        plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
+    else:
+        plan.append(("Openverse", fetch_openverse_candidates))
+        if str(os.getenv("PIXABAY_API_KEY", "")).strip():
+            plan.append(("Pixabay", fetch_pixabay_candidates))
+        if str(os.getenv("PEXELS_API_KEY", "")).strip():
+            plan.append(("Pexels", fetch_pexels_candidates))
+        if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
+            plan.append(("Unsplash", fetch_unsplash_candidates))
 
     plan = [(name, fn) for name, fn in plan if callable(fn)]
     preferred = preferred_sources(genre)

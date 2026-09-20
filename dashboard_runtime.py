@@ -945,10 +945,41 @@ class DashboardWorkflowController(WorkflowController):
             import visual_runtime
 
             used_hashes: set[str] = set()
+            used_source_pages: set[str] = set()
             for package in packages:
                 layer = package[0] if isinstance(package, list) and package else package
                 if not isinstance(layer, dict):
                     continue
+
+                source_page = str(layer.get("source_page_url") or "").strip().casefold()
+                if source_page:
+                    used_source_pages.add(source_page.rstrip("/"))
+                provenance_url = str(
+                    (layer.get("asset_provenance") or {}).get("url") or ""
+                ).strip().casefold()
+                if provenance_url.startswith(("http://", "https://")):
+                    used_source_pages.add(provenance_url.rstrip("/"))
+
+                for prior_option in (layer.get("visual_search_options") or []):
+                    if not isinstance(prior_option, dict):
+                        continue
+                    prior_hash = str(prior_option.get("hash") or "").strip()
+                    if prior_hash:
+                        used_hashes.add(prior_hash)
+                    prior_page = str(prior_option.get("source_page_url") or "").strip().casefold()
+                    if prior_page:
+                        used_source_pages.add(prior_page.rstrip("/"))
+
+                for bank_item in (layer.get("visual_asset_bank") or []):
+                    if not isinstance(bank_item, dict):
+                        continue
+                    bank_hash = str(bank_item.get("hash") or "").strip()
+                    if bank_hash:
+                        used_hashes.add(bank_hash)
+                    bank_page = str(bank_item.get("source_page_url") or "").strip().casefold()
+                    if bank_page:
+                        used_source_pages.add(bank_page.rstrip("/"))
+
                 image_path = str(layer.get("image") or "").strip()
                 if image_path and os.path.isfile(image_path):
                     try:
@@ -972,6 +1003,7 @@ class DashboardWorkflowController(WorkflowController):
                 query,
                 video_title=video_title,
                 used_hashes=used_hashes,
+                used_source_pages=used_source_pages,
                 min_options=3,
                 max_options=3,
             )
