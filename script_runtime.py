@@ -735,7 +735,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         {
             "voiceover": chunk,
             "primary_entity": entity,
-            "visual_intent": "news_event" if index > 1 else "editorial_person",
+            "visual_intent": "news_event",
             "specific_search_prompt": search_prompt,
             "sport_or_topic_category": category_label,
             "scene_id": index,
