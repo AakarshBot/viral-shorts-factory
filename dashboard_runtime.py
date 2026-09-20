@@ -13,7 +13,6 @@ import sqlite3
 import sys
 import tempfile
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -75,6 +74,17 @@ def _manual_crop_to_shorts(img: Image.Image, zoom: float = 1.0, x_center: float 
     return cropped.resize((1080, 1920), Image.Resampling.LANCZOS)
 
 
+LIVE_MONITOR_INTERACTIVE_STAGES = frozenset({"script_review", "visual_approval"})
+
+
+def live_monitor_should_poll(snapshot: dict[str, Any]) -> bool:
+    """Poll only while the worker is running outside a user-input checkpoint."""
+    snapshot = snapshot or {}
+    if not bool(snapshot.get("thread_alive")):
+        return False
+    return str(snapshot.get("stage") or "").strip() not in LIVE_MONITOR_INTERACTIVE_STAGES
+
+
 def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
     """Return True only when a completed, idle render is ready for upload visibility selection."""
     video_path = str(snapshot.get("video_path") or "").strip()
@@ -93,7 +103,11 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
     script = snapshot.get("script_data") or {}
     scenes = script.get("script") if isinstance(script, dict) else None
     scenes = scenes if isinstance(scenes, list) else []
-    format_mode = str((snapshot.get("selected_story") or {}).get("format_mode") or "regular").lower()
+    format_mode = str(
+        snapshot.get("format_mode")
+        or (snapshot.get("selected_story") or {}).get("format_mode")
+        or "regular"
+    ).lower()
     minimum = 7 if format_mode == "top5" else 5
     maximum = 7 if format_mode == "top5" else 8
     selected = snapshot.get("selected_story") or {}
@@ -543,9 +557,6 @@ class DashboardWorkflowController(WorkflowController):
 
     def __init__(self, bot):
         super().__init__(bot)
-        self._visual_approval_event = threading.Event()
-        self._script_review_event = threading.Event()
-        self._script_review_submitted = False
         self._script_visual_queries: list[str] = []
         self._visual_approved = False
         self._visual_rejected = False
@@ -562,6 +573,7 @@ class DashboardWorkflowController(WorkflowController):
         self._audio_paths: list[str] = []
         self._console_lines: list[str] = []
         self._console_partial: str = ""
+        self._console_capture_thread_id: int | None = None
         self._last_dashboard_message = ""
         _install_dashboard_stream_capture()
 
@@ -571,9 +583,6 @@ class DashboardWorkflowController(WorkflowController):
         # at visual review; Reset is safe only after the worker has exited.
         if getattr(self, "state", None) is not None and self.state.thread_alive:
             return
-        self._visual_approval_event.clear()
-        self._script_review_event.clear()
-        self._script_review_submitted = False
         self._script_visual_queries = []
         self._visual_approved = False
         self._visual_rejected = False
@@ -592,9 +601,6 @@ class DashboardWorkflowController(WorkflowController):
         # The base controller deliberately reinstalls production wrappers for
         # each new run. Dashboard-specific wrappers must be eligible for the
         # same fresh binding rather than remaining marked as already installed.
-        self._dashboard_visual_gate_bound = False
-        self._dashboard_audio_capture_wrapper = None
-        self._dashboard_visual_gate_wrapper = None
         self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
         super().reset()
@@ -622,6 +628,20 @@ class DashboardWorkflowController(WorkflowController):
             if needle.lower() in text.lower():
                 return friendly
         return text.replace("…", "...")
+
+    def _worker_started(self) -> None:
+        thread_id = threading.get_ident()
+        self._console_capture_thread_id = thread_id
+        _DASHBOARD_STDOUT.register(thread_id, self._capture_console)
+        _DASHBOARD_STDERR.register(thread_id, self._capture_console)
+
+    def _worker_finished(self) -> None:
+        thread_id = self._console_capture_thread_id
+        if thread_id is None:
+            return
+        _DASHBOARD_STDOUT.unregister(thread_id)
+        _DASHBOARD_STDERR.unregister(thread_id)
+        self._console_capture_thread_id = None
 
     def update(self, stage: str, percent: int, message: str):
         friendly = self._friendly_message(stage, message)
@@ -772,7 +792,6 @@ class DashboardWorkflowController(WorkflowController):
         ]
         self._visual_search_groups = []
         self._visual_pool_crop_target = ""
-        self._visual_approval_event = gate["visual_event"]
         gate["visual_event"].clear()
         gate["visual_approved"] = False
         gate["visual_rejected"] = False
@@ -1130,8 +1149,6 @@ class DashboardWorkflowController(WorkflowController):
                         scene.pop("manual_visual_query_score", None)
                         scene.pop("manual_visual_query_index", None)
                         scene.pop("manual_visual_query_source", None)
-            self._script_review_submitted = True
-
         self.update(
             "audio",
             42,
@@ -1140,8 +1157,6 @@ class DashboardWorkflowController(WorkflowController):
         gate = self._manual_gate_state
         if isinstance(gate, dict):
             gate["script_event"].set()
-        else:
-            self._script_review_event.set()
         return True
 
     def approve_visuals(self) -> bool:
@@ -1153,8 +1168,6 @@ class DashboardWorkflowController(WorkflowController):
         if isinstance(gate, dict):
             gate["visual_approved"] = True
             gate["visual_event"].set()
-        else:
-            self._visual_approval_event.set()
         return True
 
 
@@ -1916,8 +1929,6 @@ class DashboardWorkflowController(WorkflowController):
         if isinstance(gate, dict):
             gate["visual_rejected"] = True
             gate["visual_event"].set()
-        else:
-            self._visual_approval_event.set()
         self.update("error", 100, "Visual review rejected. Stopping this production run.")
         return True
 
@@ -1925,8 +1936,14 @@ class DashboardWorkflowController(WorkflowController):
         data = super().snapshot()
         console_lines = self.console_lines()
         with self._lock:
-            data.update(
+            active_config = getattr(self.bot, "_active_web_config", {}) or {}
+        data.update(
                 {
+                    "format_mode": str(
+                        active_config.get("format_mode")
+                        or (data.get("selected_story") or {}).get("format_mode")
+                        or "regular"
+                    ).strip().lower(),
                     "script_review_required": data.get("stage") == "script_review",
                     "script_visual_queries": list(self._script_visual_queries),
                     "visual_packages": list(self._visual_packages),
