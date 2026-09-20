@@ -372,6 +372,101 @@ def test_dashboard_controller_replaces_only_requested_visual(monkeypatch, tmp_pa
     assert Path(snapshot["visual_packages"][0][0]["image"]) != old_one
 
 
+
+def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choices(monkeypatch, tmp_path):
+    from PIL import Image
+    import visual_retrieval_runtime
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    current = tmp_path / "current.jpg"
+    Image.new("RGB", (1080, 1920), "white").save(current, "JPEG")
+
+    option_paths = []
+    options = []
+    for index in range(3):
+        path = tmp_path / f"option_{index + 1}.jpg"
+        Image.new("RGB", (900, 1200), (40 + index * 20, 60, 90)).save(path, "JPEG")
+        option_paths.append(path)
+        options.append({
+            "path": str(path),
+            "hash": f"hash-{index + 1}",
+            "source": "Commons",
+            "query": "Shafali Verma batting",
+            "visual_type": "PERSON",
+            "visual_genre": "PERSON_ACTION",
+            "provenance": {"url": f"https://example.com/{index + 1}"},
+            "status": "entity-verified",
+            "used": False,
+        })
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "QC search test",
+        "script": [
+            {
+                "primary_entity": "Shafali Verma",
+                "factual_primary_entity": "Shafali Verma",
+                "voiceover": "Shafali Verma is batting.",
+                "sport_or_topic_category": "cricket",
+                "visual_genre": "PERSON_ACTION",
+            }
+        ],
+    }
+    controller._visual_packages = [[{
+        "image": str(current),
+        "source_type": "Commons",
+        "visual_verified": True,
+    }]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "collect_manual_visual_options",
+        lambda *args, **kwargs: {
+            "assets": [
+                {
+                    "bytes": b"image-bytes",
+                    "hash": item["hash"],
+                    "source": item["source"],
+                    "query": item["query"],
+                    "visual_type": item["visual_type"],
+                    "visual_genre": item["visual_genre"],
+                    "provenance": item["provenance"],
+                    "status": item["status"],
+                }
+                for item in options
+            ],
+            "target": 3,
+            "hard_max": 3,
+            "minimum_options": 3,
+            "available_options": 3,
+            "enough_options": True,
+        },
+    )
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "materialize_manual_visual_pool",
+        lambda *args, **kwargs: [dict(item) for item in options],
+    )
+
+    ok, message = controller.search_visual_options(1, "Shafali Verma batting")
+
+    assert ok is True
+    assert "3 verified" in message
+    snapshot = controller.snapshot()
+    stored = snapshot["visual_packages"][0][0]
+    assert stored["image"] == str(current)
+    assert len(stored["visual_search_options"]) == 3
+    assert [item["hash"] for item in stored["visual_search_options"]] == [
+        "hash-1",
+        "hash-2",
+        "hash-3",
+    ]
+
 def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
     async def fake_visuals(*_args, **_kwargs):
         return [[{"image": "/tmp/scene_1.jpg"}]]
