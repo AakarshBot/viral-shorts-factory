@@ -852,8 +852,9 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": verified and not missing' in app_source
-    assert 'disabled=bool(sum(1 for item in items if not item.get("qc_passed")))' in app_source
-    assert 'Choose from the visual pool' in app_source
+    assert 'disabled=bool(unresolved)' in app_source
+    assert 'Review the images' in app_source
+    assert 'with st.popover("Crop"' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
 
