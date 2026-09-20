@@ -1678,56 +1678,58 @@ def _perform_upload(
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
-    def _render(snapshot: Dict[str, Any]) -> None:
-        render_stage_progress(snapshot)
+    snapshot = controller.snapshot()
 
-        selected = snapshot.get("selected_story") or {}
+    def _render_content(current_snapshot: Dict[str, Any]) -> None:
+        selected = current_snapshot.get("selected_story") or {}
         if selected:
             st.markdown(
                 f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
                 unsafe_allow_html=True,
             )
 
-        render_research_summary(snapshot)
-        if snapshot.get("script_review_required"):
-            render_script_visual_query_review(controller, snapshot)
+        render_research_summary(current_snapshot)
+        if current_snapshot.get("script_review_required"):
+            render_script_visual_query_review(controller, current_snapshot)
         else:
-            render_script(snapshot)
-        render_audio_preview(snapshot)
-        render_generated_outputs(snapshot)
+            render_script(current_snapshot)
+        render_audio_preview(current_snapshot)
+        render_generated_outputs(current_snapshot)
 
-        if snapshot.get("visual_review_required"):
-            render_visual_review(controller, snapshot)
-        render_visual_details(snapshot)
+        if current_snapshot.get("visual_review_required"):
+            render_visual_review(controller, current_snapshot)
+        render_visual_details(current_snapshot)
 
-        render_activity_timeline(snapshot)
-        render_console(snapshot)
-        render_logs(snapshot)
+        render_activity_timeline(current_snapshot)
+        render_console(current_snapshot)
+        render_logs(current_snapshot)
 
-        if snapshot.get("stage") == "error":
-            st.error(snapshot.get("error") or "The factory stopped with an error.")
+        if current_snapshot.get("stage") == "error":
+            st.error(current_snapshot.get("error") or "The factory stopped with an error.")
 
-        render_upload_panel(controller, snapshot)
+        render_upload_panel(controller, current_snapshot)
 
-    snapshot = controller.snapshot()
     if live_monitor_should_poll(snapshot):
+        poll_stage = str(snapshot.get("stage") or "").strip()
+
         @st.fragment(run_every="2s")
         def _polling_fragment():
             live_snapshot = controller.snapshot()
+            live_stage = str(live_snapshot.get("stage") or "").strip()
             if (
                 not live_snapshot.get("thread_alive")
-                or str(live_snapshot.get("stage") or "").strip() in {"script_review", "visual_approval"}
+                or live_stage != poll_stage
+                or not live_monitor_should_poll(live_snapshot)
             ):
                 st.rerun()
                 return
-            st.caption("Live status refreshes every 2 seconds while the factory is working. Auto-refresh pauses during QC.")
-            _render(live_snapshot)
+            render_stage_progress(live_snapshot)
 
         _polling_fragment()
-        return
+    else:
+        render_stage_progress(snapshot)
 
-    _render(snapshot)
-
+    _render_content(snapshot)
 
 def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowController) -> None:
     problems = check_required_local_assets()
