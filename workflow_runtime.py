@@ -324,6 +324,12 @@ class WorkflowController:
         finally:
             conn.close()
 
+    def _worker_started(self) -> None:
+        """Hook for host controllers that need worker-thread setup."""
+
+    def _worker_finished(self) -> None:
+        """Hook for host controllers that need worker-thread cleanup."""
+
     def start_production(self, web_config: Dict[str, Any], selected_story: Dict[str, Any]):
         selected_story = _validate_selected_story(selected_story)
         if self.state.thread_alive:
@@ -351,6 +357,7 @@ class WorkflowController:
 
         def worker():
             try:
+                self._worker_started()
                 run_robot = self.bot.run_robot
                 globals_dict = getattr(run_robot, "__globals__", {})
                 original_gather = globals_dict.get("gather_and_filter_stories")
@@ -412,6 +419,10 @@ class WorkflowController:
                     self.state.percent = 100
                     self.state.message = "Factory stopped with an error."
             finally:
+                try:
+                    self._worker_finished()
+                except Exception:
+                    pass
                 with self._lock:
                     self.state.thread_alive = False
 
