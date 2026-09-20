@@ -29,6 +29,7 @@ OPENVERSE_API = "https://api.openverse.org/v1/images/"
 PIXABAY_API = "https://pixabay.com/api/"
 CACHE_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_TIMEOUT = 10
+MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "6"))))
 
 
 def _clean_query(query: Any) -> str:
@@ -100,7 +101,7 @@ def _download(url: str, used_urls: set[str] | None = None, metadata: dict[str, A
         return None
 
 
-def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Search Openverse and return a bounded set of downloadable candidates."""
     q = _clean_query(query)
     if not q:
@@ -129,26 +130,38 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
             print(f"   [Visual Source] Openverse | failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
             return []
 
-    candidates: list[bytes] = []
-    for item in payload.get("results", []) if isinstance(payload, dict) else []:
+    candidates: list[dict[str, Any]] = []
+    for position, item in enumerate(payload.get("results", []) if isinstance(payload, dict) else [], 1):
         if not isinstance(item, dict):
             continue
         license_code = normalize_license_code(item.get("license"))
         if not is_allowed_license(license_code):
             continue
+        raw_tags = item.get("tags") or []
+        if isinstance(raw_tags, str):
+            search_tags = raw_tags
+        else:
+            search_tags = " ".join(
+                str(tag.get("name") if isinstance(tag, dict) else tag)
+                for tag in raw_tags
+            )
         metadata = {
             "provider": "Openverse",
             "url": str(item.get("url") or ""),
             "author": str(item.get("creator") or ""),
             "license": license_code,
             "license_url": str(item.get("license_url") or LICENSE_URLS.get(license_code, "")),
+            "search_title": str(item.get("title") or ""),
+            "search_description": str(item.get("description") or ""),
+            "search_tags": search_tags,
+            "search_position": position,
         }
         for candidate in (item.get("url"), item.get("thumbnail")):
             data = _download(candidate, used_urls, metadata)
             if data:
                 candidates.append(data)
                 break
-        if len(candidates) >= 4:
+        if len(candidates) >= MAX_PROVIDER_CANDIDATES:
             break
     return candidates
 
@@ -158,7 +171,7 @@ def fetch_openverse(query: str, used_urls: set[str] | None = None, *_args) -> by
     return candidates[0] if candidates else None
 
 
-def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Search Pixabay and return a bounded set of downloadable candidates."""
     key = str(os.getenv("PIXABAY_API_KEY", "")).strip()
     q = _clean_query(query)
@@ -192,15 +205,19 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
             return []
 
     candidates: list[bytes] = []
-    for item in payload.get("hits", []) if isinstance(payload, dict) else []:
+    for position, item in enumerate(payload.get("hits", []) if isinstance(payload, dict) else [], 1):
         if not isinstance(item, dict):
             continue
         metadata = {
             "provider": "Pixabay",
-            "url": str(item.get("largeImageURL") or item.get("webformatURL") or ""),
+            "url": str(item.get("pageURL") or item.get("largeImageURL") or item.get("webformatURL") or ""),
             "author": str(item.get("user") or ""),
             "license": "Pixabay Content License",
             "license_url": "https://pixabay.com/service/license-summary/",
+            "search_title": str(item.get("tags") or ""),
+            "search_description": str(item.get("pageURL") or ""),
+            "search_tags": str(item.get("tags") or ""),
+            "search_position": position,
         }
         for candidate in (item.get("largeImageURL"), item.get("webformatURL")):
             data = _download(candidate, used_urls, metadata)

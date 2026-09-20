@@ -26,14 +26,14 @@ from visual_licensing_runtime import (
 )
 
 DEFAULT_TIMEOUT = max(3, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "8")))
-MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "4"))))
+MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "6"))))
 
 
 def _clean_query(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:240]
 
 
-def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> dict[str, Any] | None:
+def _remember_success(used_urls: set[str] | None, url: str, data: bytes | None) -> bytes | None:
     if not data:
         return None
     if used_urls is not None and url in used_urls:
@@ -95,7 +95,7 @@ def _api_json(
 
 
 def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[dict[str, Any]]:
-    candidates: list[bytes] = []
+    candidates: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     for item in urls:
         metadata = {}
@@ -148,7 +148,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
     )
     pages = payload.get("query", {}).get("pages", {}) if payload else {}
     urls: list[Any] = []
-    for page in pages.values() if isinstance(pages, dict) else []:
+    for page_position, page in enumerate(pages.values() if isinstance(pages, dict) else [], 1):
         if not isinstance(page, dict):
             continue
         title = str(page.get("title", "")).strip()
@@ -165,7 +165,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
                 "titles": "File:" + file_name,
                 "iiprop": "url|mime|extmetadata",
                 "iiurlwidth": 1600,
-                "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl",
+                "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl|ImageDescription",
                 "format": "json",
             },
         )
@@ -195,6 +195,9 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
                     "author": _meta_value("Artist"),
                     "license": license_code,
                     "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
+                    "search_title": title,
+                    "search_description": _meta_value("ImageDescription"),
+                    "search_position": page_position,
                 },
             ))
     return _bounded_downloads(urls, used_urls)
@@ -213,7 +216,7 @@ def _commons_search_query(query: str) -> str:
     return q
 
 
-def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Search Commons in one API request and return several image candidates."""
     q = _commons_search_query(query)
     if not q:
@@ -229,13 +232,13 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
             "prop": "imageinfo",
             "iiprop": "url|mime|extmetadata",
             "iiurlwidth": 1600,
-            "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl",
+            "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl|ImageDescription",
             "format": "json",
         },
     )
     pages = payload.get("query", {}).get("pages", {}) if payload else {}
     urls: list[Any] = []
-    for page in pages.values() if isinstance(pages, dict) else []:
+    for page_position, page in enumerate(pages.values() if isinstance(pages, dict) else [], 1):
         if not isinstance(page, dict):
             continue
         imageinfo = page.get("imageinfo") or []
@@ -258,6 +261,9 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
                         "author": _meta_value("Artist"),
                         "license": license_code,
                         "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
+                        "search_title": str(page.get("title", "")).removeprefix("File:").strip(),
+                        "search_description": _meta_value("ImageDescription"),
+                        "search_position": page_position,
                     },
                 ))
     return _bounded_downloads(urls, used_urls)
@@ -280,13 +286,25 @@ def fetch_duckduckgo_candidates(query: str, used_urls: set[str] | None = None, *
         return []
     try:
         results = DDGS().images(q, safesearch="moderate", max_results=max(8, MAX_PROVIDER_CANDIDATES * 2))
-        urls: list[str] = []
-        for result in results or []:
+        urls: list[Any] = []
+        for position, result in enumerate(results or [], 1):
             if not isinstance(result, dict):
                 continue
             image_url = result.get("image") or result.get("thumbnail") or result.get("url")
             if image_url:
-                urls.append(str(image_url))
+                urls.append((
+                    str(image_url),
+                    {
+                        "provider": "DDG",
+                        "url": str(result.get("url") or image_url),
+                        "author": str(result.get("source") or ""),
+                        "license": "",
+                        "license_url": "",
+                        "search_title": str(result.get("title") or ""),
+                        "search_description": str(result.get("source") or ""),
+                        "search_position": position,
+                    },
+                ))
         return _bounded_downloads(urls, used_urls)
     except Exception as exc:
         print(f"   [Visual Source] DDG raw fetch failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
@@ -298,18 +316,18 @@ def fetch_duckduckgo(query: str, used_urls: set[str] | None = None, *_args) -> d
     return candidates[0] if candidates else None
 
 
-def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("PEXELS_API_KEY", "")).strip()
     q = _clean_query(query)
     if not key or not q:
         return []
     payload = _api_json(
         "https://api.pexels.com/v1/search",
-        params={"query": q, "orientation": "portrait", "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2)},
+        params={"query": q, "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2)},
         headers={"Authorization": key, "User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
     )
     urls: list[str] = []
-    for photo in payload.get("photos", []) if payload else []:
+    for position, photo in enumerate(payload.get("photos", []) if payload else [], 1):
         if not isinstance(photo, dict):
             continue
         src = photo.get("src") or {}
@@ -319,10 +337,13 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
                 if url:
                     urls.append((str(url), {
                         "provider": "Pexels",
-                        "url": str(url),
+                        "url": str(photo.get("url") or url),
                         "author": author,
                         "license": "Pexels License",
                         "license_url": "https://www.pexels.com/license/",
+                        "search_title": str(photo.get("alt") or ""),
+                        "search_description": str(photo.get("alt") or ""),
+                        "search_position": position,
                     }))
     return _bounded_downloads(urls, used_urls)
 
@@ -332,7 +353,7 @@ def fetch_pexels(query: str, used_urls: set[str] | None = None, *_args) -> bytes
     return candidates[0] if candidates else None
 
 
-def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[bytes]:
+def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip()
     q = _clean_query(query)
     if not key or not q:
@@ -343,7 +364,7 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
         headers={"User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
     )
     urls: list[str] = []
-    for item in payload.get("results", []) if payload else []:
+    for position, item in enumerate(payload.get("results", []) if payload else [], 1):
         if not isinstance(item, dict):
             continue
         urls_meta = item.get("urls") or {}
@@ -354,10 +375,13 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
                 if url:
                     urls.append((str(url), {
                         "provider": "Unsplash",
-                        "url": str(url),
+                        "url": str((item.get("links") or {}).get("html") or url),
                         "author": author,
                         "license": "Unsplash License",
                         "license_url": "https://unsplash.com/license",
+                        "search_title": str(item.get("alt_description") or ""),
+                        "search_description": str(item.get("description") or item.get("alt_description") or ""),
+                        "search_position": position,
                     }))
     return _bounded_downloads(urls, used_urls)
 
@@ -411,8 +435,6 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
         plan.append(("Pexels", fetch_pexels_candidates))
     if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
         plan.append(("Unsplash", fetch_unsplash_candidates))
-    if allow_unlicensed_visuals():
-        plan.append(("DDG", fetch_duckduckgo_candidates))
 
     plan = [(name, fn) for name, fn in plan if callable(fn)]
     preferred = preferred_sources(genre)

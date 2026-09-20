@@ -18,6 +18,14 @@ def test_quality_gate_rejects_low_resolution():
     assert score == 0.0
 
 
+def test_quality_gate_allows_reasonable_sub_1080_sources():
+    image = Image.new("RGB", (640, 1000), "black")
+    ok, reason, score = quality_gate(_jpeg_bytes(image))
+    assert ok is True
+    assert reason == "quality-ok"
+    assert score > 0
+
+
 def test_cover_crop_centres_standard_source():
     image = Image.new("RGB", (1600, 900), "black")
     pixels = image.load()

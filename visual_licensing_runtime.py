@@ -85,9 +85,21 @@ def provenance(
     }
 
 
+_PROVENANCE_FIELDS = {"provider", "url", "author", "license", "license_url"}
+
+
 def licensed_candidate(data: bytes, metadata: dict[str, Any]) -> dict[str, Any]:
-    """Attach auditable provenance without changing the image bytes contract."""
-    return {"bytes": bytes(data), "provenance": provenance(**metadata)}
+    """Attach provenance while preserving provider search metadata for candidate ranking."""
+    raw = dict(metadata or {})
+    provenance_fields = {key: raw.get(key, "") for key in _PROVENANCE_FIELDS}
+    candidate = {
+        "bytes": bytes(data),
+        "provenance": provenance(**provenance_fields),
+    }
+    for key, value in raw.items():
+        if key not in _PROVENANCE_FIELDS:
+            candidate[str(key)] = value
+    return candidate
 
 
 def candidate_bytes(value: Any) -> bytes | None:

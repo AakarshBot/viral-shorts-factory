@@ -105,10 +105,10 @@ def _entity_context(seg, video_title=""):
 def _local_visual_sanity(img_bytes):
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        if min(img.size) < 300:
+        if min(img.size) < 540:
             return False
         ratio = img.width / max(1, img.height)
-        return 0.4 <= ratio <= 2.5
+        return 0.25 <= ratio <= 4.0
     except Exception:
         return False
 
@@ -169,8 +169,30 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
     tier = _verification_tier(seg, visual_type, source)
     # Source authority determines ordering and evidence, not acceptance.
     # Every automatic candidate still passes the same semantic QC gate.
+    # Verify the same 9:16 frame that will actually be rendered. This
+    # prevents an uncropped source from passing semantic QA and then losing the
+    # requested subject during the final crop.
+    qa_bytes = img_bytes
+    try:
+        from visual_quality_runtime import fit_visual_image
+        source_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        qa_image = fit_visual_image(
+            source_image,
+            (1080, 1920),
+            visual_genre,
+        )
+        qa_buffer = io.BytesIO()
+        qa_image.save(qa_buffer, format="JPEG", quality=92)
+        qa_bytes = qa_buffer.getvalue()
+    except Exception as exc:
+        print(
+            f"   [Visual QA] Could not prepare final-frame crop; using source image: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+
     result = _strict_gemini_check(
-        img_bytes,
+        qa_bytes,
         entity,
         intent,
         prompt,
