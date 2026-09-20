@@ -128,13 +128,37 @@ h1, h2, h3, h4, p, label, span, div { color: var(--vsf-ink); }
 .stSelectbox [data-baseweb="select"] input,
 .stSelectbox [data-baseweb="select"] div { color: var(--vsf-ink) !important; }
 [data-baseweb="popover"] {
-  border: 1px solid rgba(23,33,43,.09) !important;
+  position: relative !important;
+  z-index: 1000000 !important;
+  border: 1px solid rgba(23,33,43,.10) !important;
   border-radius: 15px !important;
-  box-shadow: 0 18px 50px rgba(30,45,60,.15) !important;
-  background: rgba(255,255,255,.98) !important;
+  box-shadow: 0 20px 55px rgba(30,45,60,.18) !important;
+  background: #ffffff !important;
+  opacity: 1 !important;
   overflow: hidden !important;
+  isolation: isolate !important;
 }
-[data-baseweb="menu"] [role="option"] { min-height: 42px !important; padding: 9px 12px !important; }
+[data-baseweb="popover"] [data-baseweb="menu"],
+[data-baseweb="popover"] [role="listbox"] {
+  background: #ffffff !important;
+  opacity: 1 !important;
+  color: var(--vsf-ink) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+[data-baseweb="popover"] [role="option"] {
+  min-height: 42px !important;
+  padding: 9px 12px !important;
+  border-radius: 9px !important;
+  color: var(--vsf-ink) !important;
+  background: transparent !important;
+}
+[data-baseweb="popover"] [role="option"] span,
+[data-baseweb="popover"] [role="option"] div {
+  color: var(--vsf-ink) !important;
+  opacity: 1 !important;
+}
+[data-baseweb="popover"] [role="option"]:hover { background: var(--vsf-blue-soft) !important; }
 [data-baseweb="menu"] [role="option"]:hover { background: var(--vsf-blue-soft) !important; }
 [data-baseweb="menu"] [aria-selected="true"] {
   background: #f3f8fc !important;

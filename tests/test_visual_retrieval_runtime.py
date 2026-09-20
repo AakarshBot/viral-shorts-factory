@@ -1002,7 +1002,7 @@ def test_strict_gemini_bridge_accepts_visual_genre_argument():
     params = inspect.signature(visual_runtime._strict_gemini_check).parameters
     assert "visual_genre" in params
 
-def test_manual_queries_build_one_shared_twenty_image_pool(monkeypatch):
+def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monkeypatch):
     query_values = ["Rishabh Pant", "BCCI logo", "India cricket team", "New Delhi stadium"]
     image_candidates = {}
     for query_index, query in enumerate(query_values):
@@ -1055,8 +1055,11 @@ def test_manual_queries_build_one_shared_twenty_image_pool(monkeypatch):
         "Test story",
     )
 
-    assert len(result["assets"]) == 20
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
+    assert len(result["assets"]) == 10
+    assert len({item["hash"] for item in result["assets"]}) == 10
+    assert result["hard_max"] == 10
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5]
+    assert len(result["query_stats"]) == 2
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
 
