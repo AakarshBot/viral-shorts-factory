@@ -721,6 +721,7 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
         output.append(
             {
                 "path": path,
+                "original_path": path,
                 "subject": str(asset.get("subject") or "").strip(),
                 "hash": image_hash,
                 "source": str(asset.get("source") or "").strip(),
