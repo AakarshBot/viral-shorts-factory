@@ -546,6 +546,7 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
             "genre": "technology",
             "event_actions": ["launch"],
             "event_article_count": 3,
+            "event_non_gdelt_count": 3,
             "event_source_count": 2,
             "event_source_domains": ["reuters.com", "bbc.com"],
             "event_evidence_publishers": ["Reuters", "BBC"],
