@@ -1976,10 +1976,17 @@ class DashboardWorkflowController(WorkflowController):
             )
             rendered.convert("RGBA").convert("RGB").save(output_path, "JPEG", quality=95)
 
+            # The dashboard pool must retain the actual cropped visual, not a
+            # Top-5/text-rendered card built from that crop.
+            pool_crop_path = os.path.join(
+                bot.ASSETS_DIR,
+                f"visual_pool_scene_{index}_crop_{attempt}.jpg",
+            )
+            cropped.convert("RGBA").convert("RGB").save(pool_crop_path, "JPEG", quality=95)
             cropped_pool_layer = dict(layer)
             cropped_pool_layer["visual_query_used"] = "manual-crop"
             cropped_pool_layer["visual_original_path"] = source_path
-            self._preserve_replaced_visual_in_pool(cropped_pool_layer, output_path)
+            self._preserve_replaced_visual_in_pool(cropped_pool_layer, pool_crop_path)
 
             new_layer = dict(layer)
             new_layer.update(
