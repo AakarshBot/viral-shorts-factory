@@ -590,10 +590,40 @@ def render_script(snapshot: Dict[str, Any]) -> None:
     text = _script_text(script_data)
     if not text:
         return
-    st.markdown("### Script")
-    st.caption("Written automatically from the selected story.")
-    st.text_area("Generated narration", value=text, height=320, disabled=True, key="dashboard_script_preview")
 
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    scene_count = len(scenes) if isinstance(scenes, list) else 0
+    word_count = len(re.findall(r"\b[\w’'-]+\b", text))
+    _render_section_header(
+        "Story output",
+        "Script",
+        "The narration generated from the selected story.",
+    )
+
+    with st.container(border=True):
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("Scenes", scene_count)
+        metric_cols[1].metric("Words", word_count)
+        metric_cols[2].metric("Status", "Ready")
+
+        previews = [scene for scene in scenes if isinstance(scene, dict)][:2] if isinstance(scenes, list) else []
+        for index, scene in enumerate(previews, 1):
+            voiceover = str(scene.get("voiceover") or "").strip()
+            if voiceover:
+                st.markdown(
+                    f"<div class='output-card'><div class='small-muted'>SCENE {index}</div>"
+                    f"<div style='margin-top:5px;line-height:1.5'>{voiceover}</div></div>",
+                    unsafe_allow_html=True,
+                )
+        with st.expander("Open full narration", expanded=False):
+            st.text_area(
+                "Generated narration",
+                value=text,
+                height=300,
+                disabled=True,
+                label_visibility="collapsed",
+                key="dashboard_script_preview",
+            )
 
 def render_script_visual_query_review(
     controller: DashboardWorkflowController,
@@ -606,13 +636,10 @@ def render_script_visual_query_review(
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
-    st.markdown(
-        "<div class='section-kicker'>Step 04 · Visual planning</div>"
-        "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "This is a lightweight visual-query check. Add a manual search only where you think the automatic subject/query could miss the important image."
+    _render_section_header(
+        "Step 04 · Visual planning",
+        "Guide the image search",
+        "Only add a manual query where the automatic subject would miss the image you need.",
     )
 
     with st.form(key=f"script_visual_query_review_{run_id}"):
@@ -627,39 +654,30 @@ def render_script_visual_query_review(
                 or ""
             ).strip()
 
-            st.markdown(f"### Slide {index}")
-            if voiceover:
-                st.markdown(
-                    f"<div class='panel'><div class='small-muted'>SCRIPT</div>{voiceover}</div>",
-                    unsafe_allow_html=True,
+            with st.container(border=True):
+                st.markdown(f"<div class='story-rank'>SLIDE {index:02d}</div>", unsafe_allow_html=True)
+                if voiceover:
+                    st.markdown(
+                        f"<div style='font-size:.9rem;line-height:1.55;margin:7px 0 9px'>{voiceover}</div>",
+                        unsafe_allow_html=True,
+                    )
+                if automatic_subject:
+                    st.caption(f"Automatic visual subject · {automatic_subject}")
+                st.text_input(
+                    "Manual image search query (optional)",
+                    placeholder="e.g. Rishabh Pant press conference",
+                    key=f"script_visual_query_{run_id}_{index}",
                 )
-            if automatic_subject:
-                st.caption(f"Automatic visual subject: {automatic_subject}")
 
-            st.text_input(
-                "Manual image search query (optional)",
-                placeholder="e.g. Rishabh Pant press conference",
-                key=f"script_visual_query_{run_id}_{index}",
-            )
-
-        st.caption(
-            "Only the slides where you enter a query are overridden. Blank slides keep the automatic visual-search logic."
-        )
         submitted = st.form_submit_button(
-            "✅ Save slide queries & continue",
+            "Save slide queries & continue",
             type="primary",
             width="stretch",
         )
 
     if submitted:
         queries = [
-            str(
-                st.session_state.get(
-                    f"script_visual_query_{run_id}_{index}",
-                    "",
-                )
-                or ""
-            ).strip()
+            str(st.session_state.get(f"script_visual_query_{run_id}_{index}", "") or "").strip()
             for index in range(1, len(scenes) + 1)
         ]
         if controller.submit_script_visual_queries(queries):
@@ -667,7 +685,6 @@ def render_script_visual_query_review(
         else:
             st.error("The script review is no longer active. Refreshing the dashboard.")
             st.rerun()
-
 
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
     items = []
@@ -1099,18 +1116,31 @@ def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
     events = snapshot.get("activity_events") or []
     if not events:
         return
-    st.markdown("### Live activity")
-    st.caption("Plain-language progress from the actual factory stages.")
-    for index, event in enumerate(events):
-        icon = "⚙️" if index == len(events) - 1 and snapshot.get("thread_alive") else "✅"
-        st.markdown(
-            f"<div class='panel' style='padding:12px 16px;margin-bottom:8px'>"
-            f"<b>{icon} {event.get('stage', 'Factory')}</b> "
-            f"<span class='small-muted'>{event.get('time', '')}</span><br>"
-            f"<span>{event.get('message', '')}</span></div>",
-            unsafe_allow_html=True,
-        )
 
+    _render_section_header(
+        "Run activity",
+        "What the factory is doing",
+        "Recent milestones from the active production run.",
+    )
+    recent = events[-8:]
+    rows = []
+    for index, event in enumerate(recent):
+        active = index == len(recent) - 1 and snapshot.get("thread_alive")
+        icon = "●" if active else "✓"
+        rows.append(
+            f"<div class='timeline-row'><div class='timeline-dot'>{icon}</div>"
+            f"<div class='timeline-main'><div class='timeline-head'>{event.get('stage', 'Factory')}"
+            f"<span class='timeline-time'>{event.get('time', '')}</span></div>"
+            f"<div class='timeline-message'>{event.get('message', '')}</div></div></div>"
+        )
+    st.markdown("<div class='timeline'>" + "".join(rows) + "</div>", unsafe_allow_html=True)
+
+    if len(events) > len(recent):
+        with st.expander(f"Earlier activity · {len(events) - len(recent)} events", expanded=False):
+            for event in events[:-len(recent)]:
+                st.caption(
+                    f"{event.get('stage', 'Factory')} · {event.get('time', '')} · {event.get('message', '')}"
+                )
 
 def render_research_summary(snapshot: Dict[str, Any]) -> None:
     story = snapshot.get("selected_story") or {}
@@ -1121,26 +1151,39 @@ def render_research_summary(snapshot: Dict[str, Any]) -> None:
     url = str(story.get("story_url") or story.get("url") or story.get("link") or "").strip()
     if not any((headline, source, url)):
         return
-    st.markdown("### Story & research")
-    if headline:
-        st.markdown(f"**Headline:** {headline}")
-    if source:
-        st.markdown(f"**Source:** {source}")
-    if url.startswith(("http://", "https://")):
-        st.link_button("Open source article", url, width="stretch")
 
+    _render_section_header("Research", "Selected story")
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='font-size:1.08rem;font-weight:780;line-height:1.4'>{headline}</div>",
+            unsafe_allow_html=True,
+        )
+        if source:
+            st.caption(f"Source · {source}")
+        if url.startswith(("http://", "https://")):
+            st.link_button("Open source article", url, width="content")
 
 def render_audio_preview(snapshot: Dict[str, Any]) -> None:
-    paths = [str(path).strip() for path in (snapshot.get("audio_paths") or []) if str(path or "").strip()]
+    paths = [
+        str(path).strip()
+        for path in (snapshot.get("audio_paths") or [])
+        if str(path or "").strip()
+    ]
     existing = [path for path in paths if os.path.isfile(path)]
     if not existing:
         return
-    st.markdown("### Voiceover")
-    st.caption(f"{len(existing)} narration track(s) generated with word-level timing.")
-    for index, path in enumerate(existing, 1):
-        st.audio(path, format="audio/mpeg")
-        st.caption(f"Scene {index}")
 
+    _render_section_header(
+        "Audio output",
+        "Voiceover",
+        f"{len(existing)} narration track(s) are ready to listen to.",
+    )
+    cols = st.columns(min(2, len(existing)))
+    for index, path in enumerate(existing, 1):
+        with cols[(index - 1) % len(cols)]:
+            with st.container(border=True):
+                st.caption(f"SCENE {index}")
+                st.audio(path, format="audio/mpeg")
 
 def render_visual_details(snapshot: Dict[str, Any]) -> None:
     items = _visual_items(snapshot)
@@ -1205,7 +1248,7 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
 
 
 def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
-    """Keep the generated title, script, audio, visuals and final video visible."""
+    """Show a compact output dashboard without duplicating dedicated review sections."""
     script_data = snapshot.get("script_data") or {}
     metadata = snapshot.get("final_metadata") or {}
     story = snapshot.get("selected_story") or {}
@@ -1214,54 +1257,52 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
     comment = str(metadata.get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
     visuals = _visual_items(snapshot)
     audio = [
-        str(path).strip() for path in (snapshot.get("audio_paths") or [])
+        str(path).strip()
+        for path in (snapshot.get("audio_paths") or [])
         if str(path or "").strip() and os.path.isfile(str(path).strip())
     ]
     video_path = str(snapshot.get("video_path") or "").strip()
+
     if not any((title, script_data, description, comment, visuals, audio, video_path)):
         return
 
-    st.markdown("---")
-    st.markdown("<div class='section-kicker'>Generated outputs</div><h2 style='margin-top:0'>Your Short</h2>", unsafe_allow_html=True)
-    if title:
-        st.markdown(f"### Title\n**{title}**")
-
-    cols = st.columns(3)
+    _render_section_header(
+        "Output summary",
+        "Your Short",
+        "A compact view of what is ready without repeating the review panels above.",
+    )
+    cols = st.columns(4)
     cols[0].metric("Script", "Ready" if script_data else "Waiting")
-    cols[1].metric("Voiceover", f"{len(audio)} track(s)" if audio else "Waiting")
+    cols[1].metric("Voiceover", f"{len(audio)} tracks" if audio else "Waiting")
     cols[2].metric("Visuals", f"{len(visuals)} ready" if visuals else "Waiting")
+    cols[3].metric("Final video", "Ready" if video_path and os.path.isfile(video_path) else "Waiting")
 
-    if script_data:
-        with st.expander("Generated script", expanded=True):
-            st.text_area("Narration", value=_script_text(script_data), height=280, disabled=True, key="generated_output_script")
-    if description or comment:
-        with st.expander("Generated YouTube metadata", expanded=False):
+    if title or description or comment:
+        with st.expander("YouTube metadata", expanded=False):
+            if title:
+                st.markdown(f"**Title**  \n{title}")
             if description:
-                st.text_area("Description", value=description, height=130, disabled=True, key="generated_output_description")
+                st.text_area(
+                    "Description",
+                    value=description,
+                    height=120,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="generated_output_description",
+                )
             if comment:
-                st.text_area("Pinned comment", value=comment, height=100, disabled=True, key="generated_output_comment")
-    if audio:
-        with st.expander("Generated voiceover", expanded=False):
-            for index, path in enumerate(audio, 1):
-                st.audio(path, format="audio/mpeg")
-                st.caption(f"Scene {index}")
-    if visuals:
-        with st.expander("Generated visuals", expanded=(snapshot.get("visual_review_required", False))):
-            cols = st.columns(3)
-            for index, item in enumerate(visuals):
-                with cols[index % 3]:
-                    if item.get("missing"):
-                        st.error(
-                            f"Visual {item['index']} has no rendered image file available.",
-                            icon="⛔",
-                        )
-                    else:
-                        st.image(item["path"], width="stretch")
-                    st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
-    if video_path and os.path.isfile(video_path):
-        with st.expander("Final rendered video", expanded=True):
-            st.video(video_path)
+                st.text_area(
+                    "Pinned comment",
+                    value=comment,
+                    height=90,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="generated_output_comment",
+                )
 
+    if video_path and os.path.isfile(video_path):
+        with st.expander("Watch final Short", expanded=False):
+            st.video(video_path)
 
 def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
     video_path = str(snapshot.get("video_path") or "").strip()
