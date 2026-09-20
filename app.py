@@ -89,7 +89,16 @@ html,body,[data-testid="stAppViewContainer"]{background:var(--bg);color:var(--te
 section[data-testid="stSidebar"]{background:#11151d;border-right:1px solid #252b35;color:#eef2f7}
 section[data-testid="stSidebar"]>div{padding-top:1.15rem}
 section[data-testid="stSidebar"] .stMarkdown p,section[data-testid="stSidebar"] label,section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{color:#b9c1cf}
-*{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
+html,body,.stApp{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
+[data-testid="stIconMaterial"],
+[data-testid="stExpanderToggleIcon"],
+span[class*="material"]{
+  font-family:"Material Symbols Rounded","Material Symbols Outlined","Material Icons"!important;
+  font-feature-settings:"liga"!important;
+  -webkit-font-feature-settings:"liga"!important;
+  letter-spacing:normal!important;
+  text-transform:none!important;
+}
 h1,h2,h3,h4{color:var(--text);letter-spacing:-.04em}
 p{color:var(--text)}
 .small-muted{color:var(--muted);font-size:.78rem}
