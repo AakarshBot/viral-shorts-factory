@@ -414,11 +414,11 @@ def _title_is_story_like(title):
 
     action_signal = bool(_event_actions(clean_title))
     story_signal = bool(set(words) & STORY_SIGNAL_TERMS)
-    numeric_signal = bool(re.search(r"d+(?:.d+)?|[$€£₹]|%+", clean_title))
-    question_signal = bool(re.search(r"(?:how|why|what|when|where)", clean_title.casefold()))
+    numeric_signal = bool(re.search(r"\b\d+(?:\.\d+)?\b|[$€£₹]|%", clean_title))
+    question_signal = bool(re.search(r"\b(?:how|why|what|when|where)\b", clean_title.casefold()))
     navigation_shape = bool(
         re.search(
-            r"^(?:latest|top|breaking|today'?s|all)s+(?:news|stories|headlines|updates)",
+            r"^(?:latest|top|breaking|today'?s|all)\s+(?:news|stories|headlines|updates)\b",
             normalized,
         )
     )
