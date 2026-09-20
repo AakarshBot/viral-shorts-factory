@@ -6,6 +6,7 @@ the user-facing visual approval/upload decisions.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sqlite3
@@ -702,6 +703,56 @@ def render_script(snapshot: Dict[str, Any]) -> None:
                 key="dashboard_script_preview",
             )
 
+def _ensure_visual_query_plan(pending_candidate: Dict[str, Any], config: Dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    """Generate the editable ranked query list once per selected story."""
+    title = str(pending_candidate.get("title") or "").strip()
+    story_text = str(
+        pending_candidate.get("text")
+        or pending_candidate.get("summary")
+        or pending_candidate.get("description")
+        or ""
+    ).strip()
+    story_key = hashlib.sha1(
+        f"{title}|{pending_candidate.get('story_url','')}|{story_text[:1200]}".encode("utf-8")
+    ).hexdigest()[:16]
+
+    if st.session_state.get("visual_query_story_key") != story_key:
+        try:
+            from manual_visual_query_runtime import generate_visual_query_suggestions
+            suggestions = generate_visual_query_suggestions(
+                title,
+                story_text,
+                category=str(config.get("category") or pending_candidate.get("recommended_category") or ""),
+                max_queries=5,
+            )
+        except Exception:
+            suggestions = []
+        suggestions = [dict(item) for item in (suggestions or []) if str(item.get("query") or "").strip()]
+        if not suggestions:
+            suggestions = [{
+                "query": title,
+                "source_hint": "Configured image source",
+                "reason": "Fallback search term from the selected story headline.",
+            }]
+        st.session_state.visual_query_story_key = story_key
+        st.session_state.visual_query_suggestions = suggestions
+        st.session_state.visual_query_field_count = len(suggestions)
+        for index, suggestion in enumerate(suggestions):
+            st.session_state[f"visual_query_field_{story_key}_{index}"] = str(
+                suggestion.get("query") or ""
+            ).strip()
+    else:
+        suggestions = list(st.session_state.get("visual_query_suggestions") or [])
+        count = int(st.session_state.get("visual_query_field_count") or len(suggestions) or 1)
+        for index in range(count):
+            key = f"visual_query_field_{story_key}_{index}"
+            if key not in st.session_state:
+                value = suggestions[index].get("query", "") if index < len(suggestions) else ""
+                st.session_state[key] = value
+
+    return story_key, list(st.session_state.get("visual_query_suggestions") or [])
+
+
 def render_script_visual_query_review(
     controller: DashboardWorkflowController,
     snapshot: Dict[str, Any],
@@ -709,59 +760,41 @@ def render_script_visual_query_review(
     script_data = snapshot.get("script_data") or {}
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not isinstance(scenes, list) or not scenes:
-        st.warning("The script is not available for visual-query review yet.")
+        st.warning("The script is not available for review yet.")
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
     _render_section_header(
-        "Step 04 · Visual planning",
-        "Guide the image search",
-        "Only add a manual query where the automatic subject would miss the image you need.",
+        "Step 04 · Script review",
+        "Review the narration",
+        "Visual search terms were finalized before production. This checkpoint no longer searches or assigns images by slide.",
     )
 
-    with st.form(key=f"script_visual_query_review_{run_id}"):
+    with st.form(key=f"script_review_{run_id}"):
         for index, scene in enumerate(scenes, 1):
             if not isinstance(scene, dict):
                 continue
             voiceover = str(scene.get("voiceover") or "").strip()
-            automatic_subject = str(
-                scene.get("factual_primary_entity")
-                or scene.get("primary_entity")
-                or scene.get("visual_search_subject")
-                or ""
-            ).strip()
-
             with st.container(border=True):
                 st.markdown(f"<div class='story-rank'>SLIDE {index:02d}</div>", unsafe_allow_html=True)
                 if voiceover:
                     st.markdown(
-                        f"<div style='font-size:.9rem;line-height:1.55;margin:7px 0 9px'>{voiceover}</div>",
+                        f"<div style='font-size:.92rem;line-height:1.6;margin:7px 0 4px'>{voiceover}</div>",
                         unsafe_allow_html=True,
                     )
-                if automatic_subject:
-                    st.caption(f"Automatic visual subject · {automatic_subject}")
-                st.text_input(
-                    "Manual image search query (optional)",
-                    placeholder="e.g. Rishabh Pant press conference",
-                    key=f"script_visual_query_{run_id}_{index}",
-                )
-
         submitted = st.form_submit_button(
-            "Save slide queries & continue",
+            "Approve script & continue",
             type="primary",
             width="stretch",
         )
 
     if submitted:
-        queries = [
-            str(st.session_state.get(f"script_visual_query_{run_id}_{index}", "") or "").strip()
-            for index in range(1, len(scenes) + 1)
-        ]
-        if controller.submit_script_visual_queries(queries):
+        if controller.submit_script_visual_queries([]):
             st.rerun()
         else:
             st.error("The script review is no longer active. Refreshing the dashboard.")
             st.rerun()
+
 
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
     items = []
@@ -888,253 +921,160 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
     run_id = str(snapshot.get("run_id") or "active")
     history = snapshot.get("visual_replacement_history") or {}
+    pool = [
+        dict(item) for item in (snapshot.get("visual_pool") or [])
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ]
+    search_groups = [
+        dict(group) for group in (snapshot.get("visual_search_groups") or [])
+        if isinstance(group, dict)
+    ]
+    available = [item for item in pool if not bool(item.get("used")) and str(item.get("status") or "") != "factory-rejected-resolution"]
+    rejected = [item for item in pool if not bool(item.get("used")) and str(item.get("status") or "") == "factory-rejected-resolution"]
 
-    passed_count = sum(1 for item in items if item.get("qc_passed"))
-    attention_count = len(items) - passed_count
-    replacement_count = sum(
-        len(history.get(str(item["index"])) or history.get(item["index"]) or [])
-        for item in items
+    ready_count = sum(1 for item in items if item.get("qc_passed"))
+    active_search_count = sum(
+        1 for group in search_groups
+        for item in (group.get("items") or [])
+        if isinstance(item, dict) and not bool(item.get("used"))
     )
 
     st.markdown(
-        "<div class='section-kicker'>Visual gate</div>"
-        "<h2 style='margin-top:0'>Pick the pictures for your Short</h2>",
+        "<div class='section-kicker'>Visual QC</div>"
+        "<h2 style='margin-top:0'>Choose from the visual pool</h2>",
         unsafe_allow_html=True,
     )
     st.caption(
-        "The factory has already checked that each image shows the requested subject. "
-        "Your job is simply to make sure every picture looks right for its slide."
+        "Every slide already has an image. The shared pools below contain additional choices; "
+        "assign any unused image to one slide, then reframe it with the drag cropper when needed."
     )
 
-    summary_cols = st.columns(3, gap="small")
-    summary_cols[0].metric("Slides", len(items))
-    summary_cols[1].metric("Verified", passed_count)
-    summary_cols[2].metric("Needs attention", attention_count)
+    metric_cols = st.columns(4, gap="small")
+    metric_cols[0].metric("Slides", len(items))
+    metric_cols[1].metric("Ready", ready_count)
+    metric_cols[2].metric("Pool images", len(available) + len(rejected))
+    metric_cols[3].metric("New search", active_search_count)
 
-    st.markdown(
-        "<div class='qc-guide'>"
-        "<div class='qc-guide-step'><b>1 · Look</b><span>Check the large image against the slide's story.</span></div>"
-        "<div class='qc-guide-step'><b>2 · Swap</b><span>Open alternatives only when the chosen picture is wrong or weak.</span></div>"
-        "<div class='qc-guide-step'><b>3 · Approve</b><span>When every slide is ready, send the visuals to the next stage.</span></div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    crop_target = str(st.session_state.get("visual_pool_crop_target") or "").strip()
+    crop_asset = None
+    if crop_target:
+        for candidate in pool:
+            if str(candidate.get("hash") or "").strip() == crop_target:
+                crop_asset = candidate
+                break
+        if crop_asset is None:
+            for group in search_groups:
+                for candidate in group.get("items") or []:
+                    if isinstance(candidate, dict) and str(candidate.get("hash") or "").strip() == crop_target:
+                        crop_asset = candidate
+                        break
+                if crop_asset is not None:
+                    break
 
-    for item in items:
+    if crop_asset is not None:
         with st.container(border=True):
-            left, right = st.columns([1.2, 0.8], gap="large")
-
-            with left:
-                st.markdown(
-                    f"<div class='qc-card-title'>Slide {item['index']}</div>",
-                    unsafe_allow_html=True,
-                )
-                if item.get("missing"):
-                    st.error("No image file is available for this slide.", icon="⛔")
+            st.markdown("<div class='qc-card-title'>Crop / reframe selected image</div>", unsafe_allow_html=True)
+            crop_path = str(crop_asset.get("path") or "").strip()
+            if crop_path and os.path.isfile(crop_path):
+                from PIL import Image
+                crop_image = Image.open(crop_path).convert("RGB")
+                stored_box = crop_asset.get("crop_box") or {}
+                default_coords = None
+                try:
+                    if all(key in stored_box for key in ("left", "top", "width", "height")):
+                        left = int(stored_box["left"])
+                        top = int(stored_box["top"])
+                        width = int(stored_box["width"])
+                        height = int(stored_box["height"])
+                        default_coords = (left, left + width, top, top + height)
+                except (TypeError, ValueError):
+                    default_coords = None
+                if st_cropper is None:
+                    st.warning("Interactive cropping is unavailable in this Python environment.")
                 else:
-                    st.image(item["path"], width="stretch")
-
-            with right:
-                if item["qc_passed"]:
-                    st.markdown(
-                        "<span class='qc-status ready'>✓ VERIFIED</span>",
-                        unsafe_allow_html=True,
-                    )
-                    st.caption("Subject verified. This image can move forward.")
-                else:
-                    st.markdown(
-                        "<span class='qc-status attention'>! NEEDS ATTENTION</span>",
-                        unsafe_allow_html=True,
-                    )
-                    reason = item.get("qc_reason") or "This slide needs an image decision."
-                    st.caption(reason)
-
-                query = item["manual_query"] or item["query_used"] or ""
-                if query:
-                    st.markdown(
-                        f"<div class='qc-meta'><b>Search</b> · {query}</div>",
-                        unsafe_allow_html=True,
-                    )
-                if item.get("manual_pool_mode"):
-                    pool_size = item.get("manual_pool_size", 0)
-                    st.markdown(
-                        f"<div class='qc-meta'><b>Shared pool</b> · {pool_size} verified image(s)</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                good = item.get("bank") or []
-                if good:
-                    with st.expander(
-                        f"✅ Good alternatives · {len(good)}",
-                        expanded=False,
-                    ):
-                        alt_cols = st.columns(3, gap="small")
-                        for bank_index, bank_item in enumerate(good[:19], 1):
-                            with alt_cols[(bank_index - 1) % 3]:
-                                bank_path = str(bank_item.get("path") or "").strip()
-                                if bank_path and os.path.isfile(bank_path):
-                                    st.image(bank_path, width="stretch")
-                                source = str(bank_item.get("source") or "verified").strip()
-                                bank_query = str(bank_item.get("query") or "").strip()
-                                caption = source
-                                if bank_query:
-                                    caption += f" · {bank_query}"
-                                st.caption(caption)
-                                if st.button(
-                                    "Use this",
-                                    width="stretch",
-                                    key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
-                                ):
-                                    live_bank = item.get("all_bank") or []
-                                    live_bank_index = next(
-                                        (
-                                            pos
-                                            for pos, entry in enumerate(live_bank, 1)
-                                            if isinstance(entry, dict)
-                                            and str(entry.get("path") or "") == bank_path
-                                        ),
-                                        None,
-                                    )
-                                    if live_bank_index is None:
-                                        st.error("That image is no longer available.")
-                                    else:
-                                        ok, message = controller.replace_visual_from_bank(
-                                            item["index"],
-                                            live_bank_index,
-                                        )
-                                        if ok:
-                                            st.success(message)
-                                            st.rerun()
-                                        else:
-                                            st.error(message)
-
-                scene_rejected = item.get("scene_rejected") or []
-                if scene_rejected:
-                    with st.expander(
-                        f"↔ Scene-mismatch backups · {len(scene_rejected)}",
-                        expanded=False,
-                    ):
-                        reject_cols = st.columns(3, gap="small")
-                        for rejected_index, rejected_item in enumerate(scene_rejected[:19], 1):
-                            with reject_cols[(rejected_index - 1) % 3]:
-                                rejected_path = str(rejected_item.get("path") or "").strip()
-                                if rejected_path and os.path.isfile(rejected_path):
-                                    st.image(rejected_path, width="stretch")
-                                rejected_query = str(rejected_item.get("query") or "").strip()
-                                st.caption(
-                                    "Scene mismatch"
-                                    + (f" · {rejected_query}" if rejected_query else "")
-                                )
-                                if st.button(
-                                    "Use this",
-                                    width="stretch",
-                                    key=f"use_scene_rejected_{run_id}_{item['index']}_{rejected_index}",
-                                ):
-                                    live_bank = item.get("all_bank") or []
-                                    bank_position = next(
-                                        (
-                                            pos
-                                            for pos, entry in enumerate(live_bank, 1)
-                                            if isinstance(entry, dict)
-                                            and str(entry.get("path") or "") == rejected_path
-                                        ),
-                                        None,
-                                    )
-                                    if bank_position is None:
-                                        st.error("That image is no longer available.")
-                                    else:
-                                        ok, message = controller.replace_visual_from_bank(
-                                            item["index"],
-                                            bank_position,
-                                        )
-                                        if ok:
-                                            st.success(message)
-                                            st.rerun()
-                                        else:
-                                            st.error(message)
-
-                resolution_rejected = item.get("factory_rejected") or []
-                if resolution_rejected:
-                    with st.expander(
-                        f"⚠️ Low-resolution backups · {len(resolution_rejected)}",
-                        expanded=False,
-                    ):
-                        st.caption("Subject verified, but the image is below the normal resolution target.")
-                        lowres_cols = st.columns(3, gap="small")
-                        for rejected_index, rejected_item in enumerate(resolution_rejected[:19], 1):
-                            with lowres_cols[(rejected_index - 1) % 3]:
-                                rejected_path = str(rejected_item.get("path") or "").strip()
-                                if rejected_path and os.path.isfile(rejected_path):
-                                    st.image(rejected_path, width="stretch")
-                                rejected_query = str(rejected_item.get("query") or "").strip()
-                                st.caption(
-                                    "Low resolution"
-                                    + (f" · {rejected_query}" if rejected_query else "")
-                                )
-                                if st.button(
-                                    "Use anyway",
-                                    width="stretch",
-                                    key=f"use_resolution_rejected_{run_id}_{item['index']}_{rejected_index}",
-                                ):
-                                    packages = snapshot.get("visual_packages") or []
-                                    package = packages[item["index"] - 1] if item["index"] - 1 < len(packages) else None
-                                    layer = package[0] if isinstance(package, list) and package else package
-                                    live_bank = layer.get("visual_asset_bank") if isinstance(layer, dict) else []
-                                    bank_position = next(
-                                        (
-                                            pos
-                                            for pos, entry in enumerate(live_bank or [], 1)
-                                            if isinstance(entry, dict)
-                                            and str(entry.get("path") or "") == rejected_path
-                                        ),
-                                        None,
-                                    )
-                                    if bank_position is None:
-                                        st.error("That image is no longer available.")
-                                    else:
-                                        ok, message = controller.replace_visual_from_bank(
-                                            item["index"],
-                                            bank_position,
-                                        )
-                                        if ok:
-                                            st.success(message)
-                                            st.rerun()
-                                        else:
-                                            st.error(message)
-
-                with st.expander("✂️ Reframe image", expanded=False):
-                    original_path = str(item.get("original_path") or "").strip()
-                    st.markdown(
-                        "<div class='crop-caption'>Full source image · fixed 9:16 frame. "
-                        "Drag the highlighted frame anywhere on the image, then use its corner or edge handles to "
-                        "zoom and reframe. The pixel coordinates below are the exact area that will become the Short.</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                    if original_path and os.path.isfile(original_path):
-                        from PIL import Image
-
-                        original_image = Image.open(original_path).convert("RGB")
-                        stored_box = item.get("crop_box") or {}
-                        default_coords = None
-                        try:
-                            if all(key in stored_box for key in ("left", "top", "width", "height")):
-                                left = int(stored_box["left"])
-                                top = int(stored_box["top"])
-                                width = int(stored_box["width"])
-                                height = int(stored_box["height"])
-                                default_coords = (left, left + width, top, top + height)
-                        except (TypeError, ValueError):
-                            default_coords = None
-
-                        if st_cropper is None:
-                            st.warning(
-                                "Interactive cropping is unavailable in this Python environment. "
-                                "Run `python -m pip install -r requirements.txt` and restart Streamlit."
-                            )
+                    crop_left, crop_right = st.columns([1.2, 0.8], gap="medium")
+                    with crop_left:
+                        crop_result = st_cropper(
+                            img_file=crop_image,
+                            realtime_update=True,
+                            default_coords=default_coords,
+                            box_color="#177fd1",
+                            aspect_ratio=(9, 16),
+                            box_algorithm=_recommended_shorts_crop_box,
+                            return_type="both",
+                            key=f"visual_pool_cropper_{run_id}_{crop_target[:12]}",
+                            should_resize_image=False,
+                            stroke_width=3,
+                        )
+                        if isinstance(crop_result, tuple) and len(crop_result) == 2:
+                            crop_preview, crop_box = crop_result
                         else:
-                            crop_left, crop_right = st.columns([1.18, 0.82], gap="medium")
-                            with crop_left:
+                            crop_preview, crop_box = crop_result, {}
+                    with crop_right:
+                        st.markdown("**Shorts preview**")
+                        if crop_preview is not None:
+                            st.image(crop_preview, width=240)
+                        st.caption("Drag and resize the 9:16 frame. No AI or provider call.")
+                    action_cols = st.columns([1, 1])
+                    with action_cols[0]:
+                        if isinstance(crop_box, dict) and crop_box and st.button(
+                            "Apply crop",
+                            type="primary",
+                            width="stretch",
+                            key=f"apply_pool_crop_{run_id}_{crop_target[:12]}",
+                        ):
+                            ok, message = controller.crop_visual_pool_asset(crop_target, crop_box)
+                            if ok:
+                                st.session_state.visual_pool_crop_target = ""
+                                st.rerun()
+                            st.error(message)
+                    with action_cols[1]:
+                        if st.button(
+                            "Close crop editor",
+                            width="stretch",
+                            key=f"close_pool_crop_{run_id}_{crop_target[:12]}",
+                        ):
+                            st.session_state.visual_pool_crop_target = ""
+                            st.rerun()
+
+    st.markdown("### Current slide images")
+    for row_start in range(0, len(items), 3):
+        row = items[row_start:row_start + 3]
+        cols = st.columns(len(row), gap="medium")
+        for local_index, item in enumerate(row):
+            with cols[local_index]:
+                with st.container(border=True):
+                    st.markdown(f"<div class='story-rank'>SLIDE {item['index']:02d}</div>", unsafe_allow_html=True)
+                    if item.get("missing"):
+                        st.error("No image file is available for this slide.", icon="⛔")
+                    else:
+                        st.image(item["path"], width=280)
+                    query = str(item.get("query_used") or item.get("manual_query") or "").strip()
+                    source = str(item.get("source") or "").strip()
+                    if source or query:
+                        caption = source or "visual"
+                        if query:
+                            caption += f" · {query}"
+                        st.caption(caption)
+                    if not item.get("qc_passed"):
+                        st.caption(item.get("qc_reason") or "This slide still needs a usable image.")
+                    original_path = str(item.get("original_path") or "").strip()
+                    if original_path and os.path.isfile(original_path):
+                        with st.expander("Crop / reframe", expanded=False):
+                            from PIL import Image
+                            original_image = Image.open(original_path).convert("RGB")
+                            stored_box = item.get("crop_box") or {}
+                            default_coords = None
+                            try:
+                                if all(key in stored_box for key in ("left", "top", "width", "height")):
+                                    left = int(stored_box["left"])
+                                    top = int(stored_box["top"])
+                                    width = int(stored_box["width"])
+                                    height = int(stored_box["height"])
+                                    default_coords = (left, left + width, top, top + height)
+                            except (TypeError, ValueError):
+                                default_coords = None
+                            if st_cropper is not None:
                                 crop_result = st_cropper(
                                     img_file=original_image,
                                     realtime_update=True,
@@ -1143,7 +1083,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                     aspect_ratio=(9, 16),
                                     box_algorithm=_recommended_shorts_crop_box,
                                     return_type="both",
-                                    key=f"visual_cropper_{run_id}_{item['index']}",
+                                    key=f"chosen_cropper_{run_id}_{item['index']}",
                                     should_resize_image=False,
                                     stroke_width=3,
                                 )
@@ -1151,109 +1091,172 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                     crop_preview, crop_box = crop_result
                                 else:
                                     crop_preview, crop_box = crop_result, {}
-    
-                            with crop_right:
-                                st.markdown("**Shorts preview**")
                                 if crop_preview is not None:
-                                    st.image(crop_preview, width="stretch")
-                                st.caption("9:16 frame · no provider or AI call")
-    
-                            if isinstance(crop_box, dict) and crop_box:
-                                x = int(crop_box.get("left", 0) or 0)
-                                y = int(crop_box.get("top", 0) or 0)
-                                width = int(crop_box.get("width", 0) or 0)
-                                height = int(crop_box.get("height", 0) or 0)
-                                st.caption(
-                                    f"Selected frame · x {x}px · y {y}px · width {width}px · height {height}px"
-                                )
-                                if st.button(
+                                    st.image(crop_preview, width=180)
+                                if isinstance(crop_box, dict) and crop_box and st.button(
                                     "Apply crop",
                                     type="primary",
                                     width="stretch",
-                                    key=f"apply_crop_{run_id}_{item['index']}",
+                                    key=f"apply_chosen_crop_{run_id}_{item['index']}",
                                 ):
-                                    ok, message = controller.crop_visual(
-                                        item["index"],
-                                        crop_box=crop_box,
-                                    )
+                                    ok, message = controller.crop_visual(item["index"], crop_box=crop_box)
                                     if ok:
-                                        st.success(message)
                                         st.rerun()
-                                    else:
-                                        st.error(message)
-                    else:
-                        st.info("The preserved original image is not available for cropping.")
+                                    st.error(message)
+                            else:
+                                st.warning("Interactive cropping is unavailable in this Python environment.")
 
-                    search_options = item.get("search_options") or []
-                    if search_options:
-                        with st.expander(
-                            f"🔎 Search results · {len(search_options)} verified",
-                            expanded=True,
-                        ):
-                            st.caption(
-                                "Three verified choices are shown below. The current image stays unchanged "
-                                "until you choose one."
-                            )
-                            option_cols = st.columns(3, gap="small")
-                            for option_index, option in enumerate(search_options[:3], 1):
-                                with option_cols[(option_index - 1) % 3]:
-                                    option_path = str(option.get("path") or "").strip()
-                                    if option_path and os.path.isfile(option_path):
-                                        st.image(option_path, width="stretch")
-                                    option_source = str(option.get("source") or "verified").strip()
-                                    option_query = str(option.get("query") or "").strip()
-                                    option_caption = option_source
-                                    if option_query:
-                                        option_caption += f" · {option_query}"
-                                    st.caption(option_caption)
-                                    if st.button(
-                                        f"Use option {option_index}",
-                                        type="primary" if option_index == 1 else "secondary",
-                                        width="stretch",
-                                        key=f"use_search_option_{run_id}_{item['index']}_{option_index}",
-                                    ):
-                                        ok, message = controller.replace_visual_from_search_option(
-                                            item["index"],
-                                            option_index,
-                                        )
-                                        if ok:
-                                            st.success(message)
-                                            st.rerun()
-                                        else:
-                                            st.error(message)
-
-                    query_key = f"replace_visual_{run_id}_{item['index']}_query"
-                    replacement_query = st.text_input(
-                        "Search for 3 replacement choices",
-                        placeholder="e.g. Shafali Verma batting",
-                        key=query_key,
-                    )
-                    if st.button(
-                        "Find 3 verified choices",
-                        type="secondary",
-                        width="stretch",
-                        key=f"replace_visual_{run_id}_{item['index']}_search",
-                    ):
-                        ok, message = controller.search_visual_options(
-                            item["index"],
-                            replacement_query,
+    def render_pool_section(title: str, description: str, assets: list[dict], section_key: str, rejected_section: bool = False) -> None:
+        st.markdown(
+            f"<div class='qc-pool-heading'><b>{title}</b><span>{description}</span></div>",
+            unsafe_allow_html=True,
+        )
+        if not assets:
+            st.caption("No images in this group.")
+            return
+        for row_start in range(0, len(assets), 3):
+            row = assets[row_start:row_start + 3]
+            cols = st.columns(len(row), gap="medium")
+            for local_index, asset in enumerate(row):
+                with cols[local_index]:
+                    asset_hash = str(asset.get("hash") or "").strip()
+                    path = str(asset.get("path") or "").strip()
+                    with st.container(border=True):
+                        if path and os.path.isfile(path):
+                            st.image(path, width=260)
+                        query = str(asset.get("query") or "").strip()
+                        source = str(asset.get("source") or "").strip()
+                        caption = source or "visual source"
+                        if query:
+                            caption += f" · {query}"
+                        st.caption(caption)
+                        if rejected_section:
+                            st.caption("Identity confirmed · low resolution")
+                        choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
+                        target_key = f"pool_target_{run_id}_{section_key}_{asset_hash[:12]}"
+                        target = st.selectbox(
+                            "Use on slide",
+                            choices,
+                            index=0,
+                            disabled=bool(asset.get("used")),
+                            key=target_key,
+                            label_visibility="collapsed",
                         )
-                        if ok:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
+                        assign_cols = st.columns([1.1, 0.9], gap="small")
+                        with assign_cols[0]:
+                            if st.button(
+                                "Use image",
+                                type="primary",
+                                width="stretch",
+                                disabled=bool(asset.get("used")) or target == "Choose slide",
+                                key=f"assign_pool_{run_id}_{section_key}_{asset_hash[:12]}",
+                            ):
+                                slide_index = int(target.split()[-1])
+                                ok, message = controller.assign_visual_pool_asset(asset_hash, slide_index)
+                                if ok:
+                                    st.rerun()
+                                st.error(message)
+                        with assign_cols[1]:
+                            if st.button(
+                                "Crop",
+                                width="stretch",
+                                key=f"crop_pool_{run_id}_{section_key}_{asset_hash[:12]}",
+                            ):
+                                st.session_state.visual_pool_crop_target = asset_hash
+                                st.rerun()
+                        if bool(asset.get("used")):
+                            st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
 
-                item_replacements = len(
-                    history.get(str(item["index"]))
-                    or history.get(item["index"])
-                    or []
-                )
-                if item_replacements:
-                    st.caption(
-                        f"↻ {item_replacements} previous replacement"
-                        + ("s" if item_replacements != 1 else "")
-                    )
+    st.markdown("### Available verified images")
+    render_pool_section(
+        "Unused verified pool",
+        "Images that passed monetization and identity checks but are not currently assigned to a slide.",
+        available,
+        "verified",
+    )
+
+    st.markdown("### Identity-verified, lower-resolution images")
+    render_pool_section(
+        "Resolution review",
+        "These passed the identity test but fell below the normal resolution target; you can still use them manually.",
+        rejected,
+        "rejected",
+        rejected_section=True,
+    )
+
+    st.markdown("### New manual searches")
+    st.caption("Each search returns up to five NEW monetization-safe images. Identity is intentionally left to your manual QC for these one-off searches.")
+    for group in search_groups:
+        group_id = str(group.get("id") or "search")
+        group_items = [dict(item) for item in (group.get("items") or []) if isinstance(item, dict)]
+        st.markdown(
+            f"<div class='qc-pool-heading'><b>Search · {group.get('query','')}</b><span>{len(group_items)} result(s)</span></div>",
+            unsafe_allow_html=True,
+        )
+        for row_start in range(0, len(group_items), 3):
+            row = group_items[row_start:row_start + 3]
+            cols = st.columns(len(row), gap="medium")
+            for local_index, asset in enumerate(row):
+                with cols[local_index]:
+                    asset_hash = str(asset.get("hash") or "").strip()
+                    path = str(asset.get("path") or "").strip()
+                    with st.container(border=True):
+                        if path and os.path.isfile(path):
+                            st.image(path, width=260)
+                        caption = str(asset.get("source") or "monetization-safe source").strip()
+                        st.caption(caption)
+                        used = bool(asset.get("used"))
+                        if used:
+                            st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
+                        else:
+                            choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
+                            target = st.selectbox(
+                                "Use on slide",
+                                choices,
+                                index=0,
+                                key=f"search_target_{run_id}_{group_id}_{asset_hash[:12]}",
+                                label_visibility="collapsed",
+                            )
+                            action_cols = st.columns([1.1, 0.9], gap="small")
+                            with action_cols[0]:
+                                if st.button(
+                                    "Use image",
+                                    type="primary",
+                                    width="stretch",
+                                    disabled=target == "Choose slide",
+                                    key=f"assign_search_{run_id}_{group_id}_{asset_hash[:12]}",
+                                ):
+                                    slide_index = int(target.split()[-1])
+                                    ok, message = controller.assign_visual_pool_asset(asset_hash, slide_index)
+                                    if ok:
+                                        st.rerun()
+                                    st.error(message)
+                            with action_cols[1]:
+                                if st.button(
+                                    "Crop",
+                                    width="stretch",
+                                    key=f"crop_search_{run_id}_{group_id}_{asset_hash[:12]}",
+                                ):
+                                    st.session_state.visual_pool_crop_target = asset_hash
+                                    st.rerun()
+
+    search_query = st.text_input(
+        "Search for five new images",
+        placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
+        key=f"global_visual_search_{run_id}",
+    )
+    if st.button(
+        "Search 5 new images",
+        type="secondary",
+        width="stretch",
+        key=f"global_visual_search_button_{run_id}",
+    ):
+        ok, message = controller.search_visual_pool(search_query)
+        if ok:
+            st.success(message)
+            st.rerun()
+        else:
+            st.error(message)
 
     st.markdown("---")
     approve_col, reject_col = st.columns([1.35, 1], gap="medium")
@@ -1263,31 +1266,28 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             type="primary",
             width="stretch",
             key="approve_visuals",
-            disabled=bool(attention_count),
+            disabled=bool(sum(1 for item in items if not item.get("qc_passed"))),
         ):
             controller.approve_visuals()
             st.rerun()
-        if attention_count:
-            st.caption(
-                f"{attention_count} slide(s) still need attention. Open those cards and choose an image."
-            )
+        unresolved = sum(1 for item in items if not item.get("qc_passed"))
+        if unresolved:
+            st.caption(f"{unresolved} slide(s) still need a usable image.")
         else:
-            st.caption("Everything is ready. This sends the visuals to the next production stage.")
+            st.caption("All slides have an image. Continue to final rendering when ready.")
     with reject_col:
-        if st.button(
-            "Stop production",
-            width="stretch",
-            key="reject_visuals",
-        ):
+        if st.button("Stop production", width="stretch", key="reject_visuals"):
             controller.reject_visuals()
             st.rerun()
-        st.caption("Stops the run at the visual approval gate.")
 
+    replacement_count = sum(
+        len(history.get(str(item["index"])) or history.get(item["index"]) or [])
+        for item in items
+    )
     if replacement_count:
         st.caption(
             f"Session activity: {replacement_count} replacement change"
             + ("s" if replacement_count != 1 else "")
-            + " made during this visual review."
         )
 
 
