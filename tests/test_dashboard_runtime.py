@@ -1120,3 +1120,16 @@ def test_dashboard_has_collapsible_live_powershell_widget():
     assert 'st.code("\\n".join(visible), language="powershell")' in source
     assert 'render_powershell_widget(live_snapshot)' in source
     assert 'render_powershell_output(' not in source
+
+
+def test_dashboard_contains_generated_text_safety_and_overflow_guards():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert 'def _ui_text(value: Any, fallback: str = "") -> str:' in source
+    assert 'def _ui_html(value: Any, fallback: str = "") -> str:' in source
+    assert '_arrow(?:_(?:right|left|up|down))?' in source
+    assert 'overflow-wrap:anywhere' in source
+    assert 'word-break:break-word' in source
+    assert "f\"<div class='story-title'>{_ui_html(title)}</div>\"" in source
+    assert "with st.expander(\"Why this story\", expanded=False)" in source
+    assert "section[data-testid=\"stSidebar\"]{" in source
