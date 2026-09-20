@@ -94,6 +94,8 @@ def _api_json(
 
 _PERSON_IDENTITY_CACHE: dict[str, dict[str, str]] = {}
 _PERSON_IDENTITY_CACHE_MAX = 128
+_WIKIDATA_ENTITY_CACHE: dict[str, dict[str, str]] = {}
+_WIKIDATA_ENTITY_CACHE_MAX = 256
 
 
 def _verify_wikidata_human(candidate_ids: list[str], labels: dict[str, str]) -> tuple[str, str, bool]:
@@ -256,6 +258,70 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
     canonical_label = str(resolved.get("label") or "").strip()
     if canonical_label:
         _cache_person_identity(canonical_label, resolved)
+    return dict(resolved)
+
+
+def _normalize_identity_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", _clean_query(value).casefold()).strip()
+
+
+def resolve_wikidata_entity(entity: str) -> dict[str, str]:
+    """Resolve a named Wikidata item for structured Commons discovery."""
+    normalized = _clean_query(entity)
+    if not normalized:
+        return {}
+    cache_key = normalized.casefold()
+    cached = _WIKIDATA_ENTITY_CACHE.get(cache_key)
+    if cached:
+        return dict(cached)
+
+    payload = _api_json(
+        "https://www.wikidata.org/w/api.php",
+        params={
+            "action": "wbsearchentities",
+            "search": normalized,
+            "language": "en",
+            "uselang": "en",
+            "type": "item",
+            "limit": 5,
+            "format": "json",
+        },
+    )
+    results = payload.get("search", []) if payload else []
+    if not isinstance(results, list):
+        return {}
+
+    query_norm = _normalize_identity_text(normalized)
+    query_tokens = set(query_norm.split())
+    ranked: list[tuple[float, dict[str, str]]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        qid = str(item.get("id") or "").strip()
+        label = str(item.get("label") or "").strip()
+        description = str(item.get("description") or "").strip()
+        if not re.fullmatch(r"Q\d+", qid) or not label:
+            continue
+        label_norm = _normalize_identity_text(label)
+        label_tokens = set(label_norm.split())
+        score = 0.0
+        if label_norm == query_norm:
+            score += 100.0
+        if query_norm and query_norm in label_norm:
+            score += 35.0
+        score += 20.0 * len(query_tokens & label_tokens) / max(1, len(query_tokens))
+        ranked.append((score, {"qid": qid, "label": label, "description": description}))
+
+    if not ranked:
+        return {}
+    ranked.sort(key=lambda item: (-item[0], item[1]["label"].casefold()))
+    resolved = dict(ranked[0][1])
+    if len(_WIKIDATA_ENTITY_CACHE) >= _WIKIDATA_ENTITY_CACHE_MAX:
+        oldest_key = next(iter(_WIKIDATA_ENTITY_CACHE), "")
+        if oldest_key:
+            _WIKIDATA_ENTITY_CACHE.pop(oldest_key, None)
+    _WIKIDATA_ENTITY_CACHE[cache_key] = resolved
+    _WIKIDATA_ENTITY_CACHE[resolved["label"].casefold()] = resolved
     return dict(resolved)
 
 
@@ -422,8 +488,12 @@ def _commons_person_seed(query: str) -> str:
     return " ".join(kept[:4]).strip()
 
 
-def _commons_search_queries(query: str) -> list[tuple[str, str, str]]:
-    """Return one literal search plus one structured person search when justified."""
+def _commons_search_queries(
+    query: str,
+    visual_type: str = "",
+    visual_genre: str = "",
+) -> list[tuple[str, str, str]]:
+    """Return a small, topic-aware Commons search ladder without weakening QC."""
     exact = _commons_search_query(query)
     if not exact:
         return []
@@ -431,25 +501,58 @@ def _commons_search_queries(query: str) -> list[tuple[str, str, str]]:
     searches: list[tuple[str, str, str]] = []
     person_seed = _commons_person_seed(exact)
     if person_seed:
-        resolved = resolve_person_identity(person_seed)
-        qid = str((resolved or {}).get("qid") or "").strip()
-        label = str((resolved or {}).get("label") or "").strip()
-        if re.fullmatch(r"Q\\d+", qid):
+        resolved_person = resolve_person_identity(person_seed)
+        person_qid = str((resolved_person or {}).get("qid") or "").strip()
+        person_label = str((resolved_person or {}).get("label") or "").strip()
+        if re.fullmatch(r"Q\d+", person_qid):
             searches.append(
                 (
-                    f"haswbstatement:P180={qid}",
-                    "structured-depicts",
-                    label or person_seed,
+                    f"haswbstatement:P180={person_qid}",
+                    "structured-depicts-person",
+                    person_label or person_seed,
                 )
             )
 
+    structured_types = {"ORGANIZATION", "LOCATION", "PRODUCT"}
+    if str(visual_type or "").strip().upper() in structured_types and not person_seed:
+        resolved_entity = resolve_wikidata_entity(exact)
+        entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
+        entity_label = str((resolved_entity or {}).get("label") or "").strip()
+        if re.fullmatch(r"Q\d+", entity_qid):
+            searches.append(
+                (
+                    f"haswbstatement:P180={entity_qid}",
+                    "structured-depicts-entity",
+                    entity_label or exact,
+                )
+            )
+
+    genre = str(visual_genre or "").strip().upper()
+    if genre in {"SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION", "PERSON_ACTION"}:
+        if person_seed:
+            action_query = f"{person_seed} action"
+            if action_query.casefold() != exact.casefold():
+                searches.append((action_query, "text-action", person_seed))
+        elif genre in {"SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION"}:
+            searches.append((f"{exact} match", "text-match", exact))
+
+    if genre in {"HISTORICAL_PHOTO", "EVENT_SCENE"}:
+        searches.append((f"{exact} photo", "text-photo", exact))
+
+    if genre in {"ORG_BRANDING", "TEAM_BRANDING"}:
+        searches.append((f"{exact} logo", "text-branding", exact))
+
+    # Always retain the literal query so structured discovery cannot suppress
+    # older/unstructured Commons files.
     searches.append((exact, "text", ""))
     return searches
 
 
 def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
-    """Search Commons text plus structured depicts data for people, with open-license filtering."""
-    searches = _commons_search_queries(query)
+    """Search Commons with topic-aware structured/text discovery and open-license filtering."""
+    visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
+    visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
+    searches = _commons_search_queries(query, visual_type, visual_genre)
     if not searches:
         return []
 
