@@ -55,6 +55,20 @@ st.markdown("""<style>
 .stButton>button{background:linear-gradient(180deg,#7b3fe6,#5a2fc0);border:1px solid rgba(255,255,255,.25);box-shadow:0 6px 18px rgba(123,63,230,.45),inset 0 1px 0 rgba(255,255,255,.2)}
 </style>""", unsafe_allow_html=True)
 
+
+<style>
+.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 22px}
+.qc-guide-step{border:1px solid rgba(190,140,255,.14);background:rgba(255,255,255,.025);border-radius:14px;padding:13px 14px}
+.qc-guide-step b{display:block;font-size:.9rem;margin-bottom:4px}
+.qc-guide-step span{color:#9da9bf;font-size:.8rem;line-height:1.4}
+.qc-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:.72rem;font-weight:800;letter-spacing:.06em}
+.qc-status.ready{color:#b7f7df;background:rgba(45,212,191,.11);border:1px solid rgba(45,212,191,.24)}
+.qc-status.attention{color:#ffd7ad;background:rgba(251,146,60,.11);border:1px solid rgba(251,146,60,.24)}
+.qc-meta{color:#9da9bf;font-size:.8rem;line-height:1.45}
+.qc-card-title{font-size:1.05rem;font-weight:800;margin-bottom:8px}
+@media(max-width:900px){.qc-guide{grid-template-columns:1fr}}
+</style>
+
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
     "GROQ_API_KEY",
@@ -646,290 +660,344 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     run_id = str(snapshot.get("run_id") or "active")
     history = snapshot.get("visual_replacement_history") or {}
 
+    passed_count = sum(1 for item in items if item.get("qc_passed"))
+    attention_count = len(items) - passed_count
+    replacement_count = sum(
+        len(history.get(str(item["index"])) or history.get(item["index"]) or [])
+        for item in items
+    )
+
     st.markdown(
-        "<div class='section-kicker'>Approval gate</div>"
-        "<h2 style='margin-top:0'>Visual review</h2>",
+        "<div class='section-kicker'>Visual gate</div>"
+        "<h2 style='margin-top:0'>Pick the pictures for your Short</h2>",
         unsafe_allow_html=True,
     )
     st.caption(
-        f"{len(items)} visuals are ready. Entity verification is completed before scene selection. "
-        "The current image is the scene-selected candidate; other entity-verified images remain available for manual swaps."
+        "The factory has already checked that each image shows the requested subject. "
+        "Your job is simply to make sure every picture looks right for its slide."
     )
 
-    columns = st.columns(3, gap="medium")
-    for offset, item in enumerate(items):
-        with columns[offset % 3]:
-            st.markdown(f"### Visual {item['index']}")
-            st.markdown("**Chosen for this slide**")
-            if item.get("missing"):
-                st.error("No rendered image file is available for this slide.", icon="⛔")
-            else:
-                st.image(item["path"], width=320)
+    summary_cols = st.columns(3, gap="small")
+    summary_cols[0].metric("Slides", len(items))
+    summary_cols[1].metric("Verified", passed_count)
+    summary_cols[2].metric("Needs attention", attention_count)
 
-            status = "ENTITY QC PASS" if item["qc_passed"] else "ENTITY QC BLOCKED"
-            st.markdown(
-                f"<span class='small-muted'>{item['source']} · {status}</span>",
-                unsafe_allow_html=True,
-            )
-            if item["qc_passed"]:
-                attempts = item.get("qc_attempts", 0)
-                st.success(
-                    f"Entity verification passed{f' after {attempts} batched QA request(s)' if attempts else ''}.",
-                    icon="✅",
+    st.markdown(
+        "<div class='qc-guide'>"
+        "<div class='qc-guide-step'><b>1 · Look</b><span>Check the large image against the slide's story.</span></div>"
+        "<div class='qc-guide-step'><b>2 · Swap</b><span>Open alternatives only when the chosen picture is wrong or weak.</span></div>"
+        "<div class='qc-guide-step'><b>3 · Approve</b><span>When every slide is ready, send the visuals to the next stage.</span></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    for item in items:
+        with st.container(border=True):
+            left, right = st.columns([1.2, 0.8], gap="large")
+
+            with left:
+                st.markdown(
+                    f"<div class='qc-card-title'>Slide {item['index']}</div>",
+                    unsafe_allow_html=True,
                 )
-            else:
-                reason = item.get("qc_reason") or "Visual has no verified entity QC verdict."
-                st.error(f"Visual QC blocked: {reason}", icon="⛔")
+                if item.get("missing"):
+                    st.error("No image file is available for this slide.", icon="⛔")
+                else:
+                    st.image(item["path"], width="stretch")
 
-            query = item["manual_query"] or item["query_used"] or "automatic entity search"
-            st.caption(f"Retrieval: {query}")
-            if item.get("manual_pool_mode"):
-                st.caption(f"Shared manual pool: {item.get('manual_pool_size', 0)} entity-verified images.")
+            with right:
+                if item["qc_passed"]:
+                    st.markdown(
+                        "<span class='qc-status ready'>✓ VERIFIED</span>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Subject verified. This image can move forward.")
+                else:
+                    st.markdown(
+                        "<span class='qc-status attention'>! NEEDS ATTENTION</span>",
+                        unsafe_allow_html=True,
+                    )
+                    reason = item.get("qc_reason") or "This slide needs an image decision."
+                    st.caption(reason)
 
-            bank = item.get("bank") or []
-            if bank:
-                st.markdown(f"**Not chosen but all good · {len(bank)}**")
-                bank_cols = st.columns(2, gap="small")
-                for bank_index, bank_item in enumerate(bank[:19], 1):
-                    with bank_cols[(bank_index - 1) % 2]:
-                        bank_path = str(bank_item.get("path") or "").strip()
-                        if bank_path and os.path.isfile(bank_path):
-                            st.image(bank_path, width=190)
-                        source = str(bank_item.get("source") or "verified").strip()
-                        bank_query = str(bank_item.get("query") or "").strip()
-                        st.caption(
-                            f"{source}" + (f" · {bank_query}" if bank_query else "")
-                        )
-                        if st.button(
-                            "Use this image",
-                            width="stretch",
-                            key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
-                        ):
-                            live_bank = item.get("all_bank") or []
-                            live_bank_index = next(
-                                (
-                                    pos
-                                    for pos, entry in enumerate(live_bank, 1)
-                                    if isinstance(entry, dict)
-                                    and str(entry.get("path") or "") == bank_path
-                                ),
-                                None,
-                            )
-                            if live_bank_index is None:
-                                st.error("That bank image is no longer available.")
-                                continue
-                            ok, message = controller.replace_visual_from_bank(
-                                item["index"],
-                                live_bank_index,
-                            )
-                            if ok:
-                                st.success(message)
-                                st.rerun()
-                            else:
-                                st.error(message)
-            else:
-                st.caption("No additional pool images were both scene-compatible and above the normal resolution threshold.")
+                query = item["manual_query"] or item["query_used"] or ""
+                if query:
+                    st.markdown(
+                        f"<div class='qc-meta'><b>Search</b> · {query}</div>",
+                        unsafe_allow_html=True,
+                    )
+                if item.get("manual_pool_mode"):
+                    pool_size = item.get("manual_pool_size", 0)
+                    st.markdown(
+                        f"<div class='qc-meta'><b>Shared pool</b> · {pool_size} verified image(s)</div>",
+                        unsafe_allow_html=True,
+                    )
 
-            scene_rejected = item.get("scene_rejected") or []
-            if scene_rejected:
-                st.markdown(f"**Rejected by scene context · retained for replacement · {len(scene_rejected)}**")
-                reject_cols = st.columns(2, gap="small")
-                for rejected_index, rejected_item in enumerate(scene_rejected[:19], 1):
-                    with reject_cols[(rejected_index - 1) % 2]:
-                        rejected_path = str(rejected_item.get("path") or "").strip()
-                        if rejected_path and os.path.isfile(rejected_path):
-                            st.image(rejected_path, width=190)
-                        rejected_query = str(rejected_item.get("query") or "").strip()
-                        rejected_score = float(rejected_item.get("scene_score") or 0.0)
-                        st.caption(
-                            f"Scene mismatch · score {rejected_score:.1f}"
-                            + (f" · {rejected_query}" if rejected_query else "")
-                        )
-                        if st.button(
-                            "Use this image",
-                            width="stretch",
-                            key=f"use_scene_rejected_{run_id}_{item['index']}_{rejected_index}",
-                        ):
-                            live_bank = item.get("all_bank") or []
-                            bank_position = next(
-                                (
-                                    pos
-                                    for pos, entry in enumerate(live_bank, 1)
-                                    if isinstance(entry, dict)
-                                    and str(entry.get("path") or "") == rejected_path
-                                ),
-                                None,
-                            )
-                            if bank_position is not None:
-                                ok, message = controller.replace_visual_from_bank(
-                                    item["index"],
-                                    bank_position,
+                good = item.get("bank") or []
+                if good:
+                    with st.expander(
+                        f"✅ Good alternatives · {len(good)}",
+                        expanded=False,
+                    ):
+                        alt_cols = st.columns(3, gap="small")
+                        for bank_index, bank_item in enumerate(good[:19], 1):
+                            with alt_cols[(bank_index - 1) % 3]:
+                                bank_path = str(bank_item.get("path") or "").strip()
+                                if bank_path and os.path.isfile(bank_path):
+                                    st.image(bank_path, width="stretch")
+                                source = str(bank_item.get("source") or "verified").strip()
+                                bank_query = str(bank_item.get("query") or "").strip()
+                                caption = source
+                                if bank_query:
+                                    caption += f" · {bank_query}"
+                                st.caption(caption)
+                                if st.button(
+                                    "Use this",
+                                    width="stretch",
+                                    key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
+                                ):
+                                    live_bank = item.get("all_bank") or []
+                                    live_bank_index = next(
+                                        (
+                                            pos
+                                            for pos, entry in enumerate(live_bank, 1)
+                                            if isinstance(entry, dict)
+                                            and str(entry.get("path") or "") == bank_path
+                                        ),
+                                        None,
+                                    )
+                                    if live_bank_index is None:
+                                        st.error("That image is no longer available.")
+                                    else:
+                                        ok, message = controller.replace_visual_from_bank(
+                                            item["index"],
+                                            live_bank_index,
+                                        )
+                                        if ok:
+                                            st.success(message)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
+
+                scene_rejected = item.get("scene_rejected") or []
+                if scene_rejected:
+                    with st.expander(
+                        f"↔ Scene-mismatch backups · {len(scene_rejected)}",
+                        expanded=False,
+                    ):
+                        reject_cols = st.columns(3, gap="small")
+                        for rejected_index, rejected_item in enumerate(scene_rejected[:19], 1):
+                            with reject_cols[(rejected_index - 1) % 3]:
+                                rejected_path = str(rejected_item.get("path") or "").strip()
+                                if rejected_path and os.path.isfile(rejected_path):
+                                    st.image(rejected_path, width="stretch")
+                                rejected_query = str(rejected_item.get("query") or "").strip()
+                                st.caption(
+                                    "Scene mismatch"
+                                    + (f" · {rejected_query}" if rejected_query else "")
                                 )
-                                if ok:
-                                    st.success(message)
-                                    st.rerun()
-                                else:
-                                    st.error(message)
-                            else:
-                                st.error("That scene-review image is no longer available.")
+                                if st.button(
+                                    "Use this",
+                                    width="stretch",
+                                    key=f"use_scene_rejected_{run_id}_{item['index']}_{rejected_index}",
+                                ):
+                                    live_bank = item.get("all_bank") or []
+                                    bank_position = next(
+                                        (
+                                            pos
+                                            for pos, entry in enumerate(live_bank, 1)
+                                            if isinstance(entry, dict)
+                                            and str(entry.get("path") or "") == rejected_path
+                                        ),
+                                        None,
+                                    )
+                                    if bank_position is None:
+                                        st.error("That image is no longer available.")
+                                    else:
+                                        ok, message = controller.replace_visual_from_bank(
+                                            item["index"],
+                                            bank_position,
+                                        )
+                                        if ok:
+                                            st.success(message)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
 
-            rejected = item.get("factory_rejected") or []
-            if rejected:
-                st.markdown(f"**Rejected by resolution · retained for manual QC · {len(rejected)}**")
-                st.caption("Entity verified but factory-rejected for resolution; retained for manual QC.")
-                reject_cols = st.columns(2, gap="small")
-                for rejected_index, rejected_item in enumerate(rejected[:19], 1):
-                    with reject_cols[(rejected_index - 1) % 2]:
-                        rejected_path = str(rejected_item.get("path") or "").strip()
-                        if rejected_path and os.path.isfile(rejected_path):
-                            st.image(rejected_path, width=190)
-                        rejected_query = str(rejected_item.get("query") or "").strip()
-                        st.caption(
-                            "Low resolution — manual QC"
-                            + (f" · {rejected_query}" if rejected_query else "")
-                        )
-                        if st.button(
-                            "Use this image anyway",
-                            width="stretch",
-                            key=f"use_resolution_rejected_{run_id}_{item['index']}_{rejected_index}",
-                        ):
-                            packages = snapshot.get("visual_packages") or []
-                            package = packages[item["index"] - 1] if item["index"] - 1 < len(packages) else None
-                            layer = package[0] if isinstance(package, list) and package else package
-                            live_bank = layer.get("visual_asset_bank") if isinstance(layer, dict) else []
-                            bank_position = next(
-                                (
-                                    pos
-                                    for pos, entry in enumerate(live_bank or [], 1)
-                                    if isinstance(entry, dict)
-                                    and str(entry.get("path") or "") == rejected_path
-                                ),
-                                None,
-                            )
-                            if bank_position is not None:
-                                ok, message = controller.replace_visual_from_bank(
-                                    item["index"],
-                                    bank_position,
+                resolution_rejected = item.get("factory_rejected") or []
+                if resolution_rejected:
+                    with st.expander(
+                        f"⚠️ Low-resolution backups · {len(resolution_rejected)}",
+                        expanded=False,
+                    ):
+                        st.caption("Subject verified, but the image is below the normal resolution target.")
+                        lowres_cols = st.columns(3, gap="small")
+                        for rejected_index, rejected_item in enumerate(resolution_rejected[:19], 1):
+                            with lowres_cols[(rejected_index - 1) % 3]:
+                                rejected_path = str(rejected_item.get("path") or "").strip()
+                                if rejected_path and os.path.isfile(rejected_path):
+                                    st.image(rejected_path, width="stretch")
+                                rejected_query = str(rejected_item.get("query") or "").strip()
+                                st.caption(
+                                    "Low resolution"
+                                    + (f" · {rejected_query}" if rejected_query else "")
                                 )
-                                if ok:
-                                    st.success(message)
-                                    st.rerun()
-                                else:
-                                    st.error(message)
-                            else:
-                                st.error("That resolution-review image is no longer available.")
+                                if st.button(
+                                    "Use anyway",
+                                    width="stretch",
+                                    key=f"use_resolution_rejected_{run_id}_{item['index']}_{rejected_index}",
+                                ):
+                                    packages = snapshot.get("visual_packages") or []
+                                    package = packages[item["index"] - 1] if item["index"] - 1 < len(packages) else None
+                                    layer = package[0] if isinstance(package, list) and package else package
+                                    live_bank = layer.get("visual_asset_bank") if isinstance(layer, dict) else []
+                                    bank_position = next(
+                                        (
+                                            pos
+                                            for pos, entry in enumerate(live_bank or [], 1)
+                                            if isinstance(entry, dict)
+                                            and str(entry.get("path") or "") == rejected_path
+                                        ),
+                                        None,
+                                    )
+                                    if bank_position is None:
+                                        st.error("That image is no longer available.")
+                                    else:
+                                        ok, message = controller.replace_visual_from_bank(
+                                            item["index"],
+                                            bank_position,
+                                        )
+                                        if ok:
+                                            st.success(message)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
 
-            with st.expander("Manual crop", expanded=False):
-                st.caption(
-                    "Crop from the preserved original source. This does not make another provider or AI call."
+                with st.expander("✂️ Fine-tune / find another", expanded=False):
+                    original_path = str(item.get("original_path") or "").strip()
+                    st.caption("Manual crop uses the preserved original and does not make another provider or AI call.")
+                    if original_path and os.path.isfile(original_path):
+                        st.image(
+                            original_path,
+                            caption="Original source",
+                            width="stretch",
+                        )
+
+                    crop_cols = st.columns(3, gap="small")
+                    with crop_cols[0]:
+                        crop_zoom = st.slider(
+                            "Zoom",
+                            min_value=1.0,
+                            max_value=4.0,
+                            value=float(item.get("crop_zoom") or 1.0),
+                            step=0.1,
+                            key=f"crop_zoom_{run_id}_{item['index']}",
+                        )
+                    with crop_cols[1]:
+                        crop_x = st.slider(
+                            "Horizontal",
+                            min_value=0,
+                            max_value=100,
+                            value=int(float(item.get("crop_x") or 0.5) * 100),
+                            step=1,
+                            key=f"crop_x_{run_id}_{item['index']}",
+                        )
+                    with crop_cols[2]:
+                        crop_y = st.slider(
+                            "Vertical",
+                            min_value=0,
+                            max_value=100,
+                            value=int(float(item.get("crop_y") or 0.5) * 100),
+                            step=1,
+                            key=f"crop_y_{run_id}_{item['index']}",
+                        )
+
+                    if st.button(
+                        "Apply crop",
+                        type="secondary",
+                        width="stretch",
+                        key=f"apply_crop_{run_id}_{item['index']}",
+                    ):
+                        ok, message = controller.crop_visual(
+                            item["index"],
+                            zoom=float(crop_zoom),
+                            x_center=float(crop_x) / 100.0,
+                            y_center=float(crop_y) / 100.0,
+                        )
+                        if ok:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+                    query_key = f"replace_visual_{run_id}_{item['index']}_query"
+                    replacement_query = st.text_input(
+                        "New image search",
+                        placeholder="e.g. Rishabh Pant press conference",
+                        key=query_key,
+                    )
+                    if st.button(
+                        "Search another image",
+                        type="secondary",
+                        width="stretch",
+                        key=f"replace_visual_{run_id}_{item['index']}_search",
+                    ):
+                        ok, message = controller.replace_visual(
+                            item["index"],
+                            replacement_query,
+                        )
+                        if ok:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+                item_replacements = len(
+                    history.get(str(item["index"]))
+                    or history.get(item["index"])
+                    or []
                 )
-                original_path = str(item.get("original_path") or "").strip()
-                if original_path and os.path.isfile(original_path):
-                    st.image(
-                        original_path,
-                        caption="Original source used for the crop",
-                        width=320,
+                if item_replacements:
+                    st.caption(
+                        f"↻ {item_replacements} previous replacement"
+                        + ("s" if item_replacements != 1 else "")
                     )
-                crop_cols = st.columns(3, gap="small")
-                with crop_cols[0]:
-                    crop_zoom = st.slider(
-                        "Zoom",
-                        min_value=1.0,
-                        max_value=4.0,
-                        value=float(item.get("crop_zoom") or 1.0),
-                        step=0.1,
-                        key=f"crop_zoom_{run_id}_{item['index']}",
-                    )
-                with crop_cols[1]:
-                    crop_x = st.slider(
-                        "Horizontal",
-                        min_value=0,
-                        max_value=100,
-                        value=int(float(item.get("crop_x") or 0.5) * 100),
-                        step=1,
-                        key=f"crop_x_{run_id}_{item['index']}",
-                    )
-                with crop_cols[2]:
-                    crop_y = st.slider(
-                        "Vertical",
-                        min_value=0,
-                        max_value=100,
-                        value=int(float(item.get("crop_y") or 0.5) * 100),
-                        step=1,
-                        key=f"crop_y_{run_id}_{item['index']}",
-                    )
-                if st.button(
-                    "Apply manual crop",
-                    type="secondary",
-                    width="stretch",
-                    key=f"apply_crop_{run_id}_{item['index']}",
-                ):
-                    ok, message = controller.crop_visual(
-                        item["index"],
-                        zoom=float(crop_zoom),
-                        x_center=float(crop_x) / 100.0,
-                        y_center=float(crop_y) / 100.0,
-                    )
-                    if ok:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-
-            replacement_count = len(
-                history.get(str(item["index"]))
-                or history.get(item["index"])
-                or []
-            )
-            if replacement_count:
-                st.caption(f"Replacement changes: {replacement_count}")
-
-            with st.expander("Need another image? Search", expanded=False):
-                query_key = f"replace_visual_{run_id}_{item['index']}_query"
-                replacement_query = st.text_input(
-                    "New search term",
-                    placeholder="e.g. Rishabh Pant press conference",
-                    key=query_key,
-                )
-                if st.button(
-                    "Search another visual",
-                    type="secondary",
-                    width="stretch",
-                    key=f"replace_visual_{run_id}_{item['index']}_search",
-                ):
-                    ok, message = controller.replace_visual(item["index"], replacement_query)
-                    if ok:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
 
     st.markdown("---")
-    qc_blocked = [item for item in items if not item["qc_passed"]]
-    approve_col, reject_col = st.columns(2)
+    approve_col, reject_col = st.columns([1.35, 1], gap="medium")
     with approve_col:
         if st.button(
             "✅ Approve visuals & continue",
             type="primary",
             width="stretch",
             key="approve_visuals",
-            disabled=bool(qc_blocked),
+            disabled=bool(attention_count),
         ):
             controller.approve_visuals()
             st.rerun()
-        if qc_blocked:
+        if attention_count:
             st.caption(
-                f"Approval is locked until {len(qc_blocked)} visual(s) pass entity QC. "
-                "Use a verified bank image or the optional search fallback on the affected slide."
+                f"{attention_count} slide(s) still need attention. Open those cards and choose an image."
             )
+        else:
+            st.caption("Everything is ready. This sends the visuals to the next production stage.")
     with reject_col:
         if st.button(
-            "⛔ Reject visuals & stop production",
+            "Stop production",
             width="stretch",
             key="reject_visuals",
         ):
             controller.reject_visuals()
             st.rerun()
+        st.caption("Stops the run at the visual approval gate.")
+
+    if replacement_count:
+        st.caption(
+            f"Session activity: {replacement_count} replacement change"
+            + ("s" if replacement_count != 1 else "")
+            + " made during this visual review."
+        )
+
 
 def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
     events = snapshot.get("activity_events") or []
