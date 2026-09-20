@@ -452,6 +452,14 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     assert batch_calls["count"] >= 1
 
 
+def test_cache_eligibility_diagnostic_records_rejection_predicates():
+    for reason in ("manual", "genre_action_bypass", "missing_metadata", "provenance", "duplicate_hash"):
+        scene = {}
+        retrieval._record_cache_eligibility(scene, reason, detail="diagnostic")
+        assert scene["visual_cache_eligibility"]["reason"] == reason
+        assert scene["visual_cache_eligibility"]["eligible"] is False
+
+
 def test_person_action_bypasses_stale_cache_for_fresh_action_retrieval(monkeypatch):
     image_bytes = _jpeg_bytes()
 
@@ -509,6 +517,7 @@ def test_person_action_bypasses_stale_cache_for_fresh_action_retrieval(monkeypat
     )
 
     assert calls["cache"] == 0
+    assert scene["visual_cache_eligibility"]["reason"] == "genre_action_bypass"
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
@@ -601,6 +610,7 @@ def test_verified_non_action_cache_reuses_without_gemini_and_restores_provenance
     assert image.size == (1200, 1600)
     assert used_ai is False
     assert source == "cached"
+    assert scene["visual_cache_eligibility"]["reason"] == "cache_hit"
     assert scene["visual_verification_attempts"] == 0
     assert scene["asset_provenance"]["provider"] == "Pexels"
 
