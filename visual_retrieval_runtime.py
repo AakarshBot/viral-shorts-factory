@@ -625,6 +625,8 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "priority": float(asset.get("priority") or 0.0),
                 "search_text": str(asset.get("search_text") or "").strip(),
                 "source_page_url": str(asset.get("source_page_url") or "").strip(),
+                "source_image_url": str(asset.get("source_image_url") or "").strip(),
+                "signature": str(asset.get("signature") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
                 "used": False,
             }
