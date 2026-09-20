@@ -4,9 +4,8 @@ Provider adapters only search/resolve/download candidate image bytes. The active
 acceptance boundary remains ``visual_retrieval_runtime`` where decode,
 resolution, deduplication and semantic verification are applied consistently.
 
-The adapters expose both legacy single-candidate functions and bounded
-multi-candidate functions. The active retrieval path uses the latter so a
-poor first search result cannot hide a better second or third result.
+The adapters expose bounded multi-candidate functions. The active retrieval
+path can therefore reject a poor first result and evaluate better alternatives.
 """
 from __future__ import annotations
 
