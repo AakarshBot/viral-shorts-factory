@@ -862,6 +862,231 @@ class DashboardWorkflowController(WorkflowController):
 
         self._dashboard_visual_gate_bound = True
 
+    def _locate_visual_pool_asset(self, asset_hash: str):
+        target = str(asset_hash or "").strip()
+        if not target:
+            return None, None, None
+        for position, item in enumerate(self._visual_pool):
+            if isinstance(item, dict) and str(item.get("hash") or "").strip() == target:
+                return "pool", position, item
+        for group_index, group in enumerate(self._visual_search_groups):
+            for item_index, item in enumerate(group.get("items") or []):
+                if isinstance(item, dict) and str(item.get("hash") or "").strip() == target:
+                    return f"search:{group_index}", item_index, item
+        return None, None, None
+
+    def search_visual_pool(self, replacement_query: str) -> tuple[bool, str]:
+        """Fetch five new monetization-safe images for the global QC pool."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+        query = str(replacement_query or "").strip()
+        if not query:
+            return False, "Enter a search term."
+        try:
+            from visual_retrieval_runtime import collect_manual_visual_search, materialize_manual_visual_pool
+            script_data = snapshot.get("script_data") or {}
+            video_title = str(
+                script_data.get("title")
+                or (script_data.get("titles") or [""])[0]
+                or ""
+            ).strip()
+            used_hashes: set[str] = set()
+            packages = snapshot.get("visual_packages") or []
+            for package in packages:
+                layer = package[0] if isinstance(package, list) and package else package
+                if not isinstance(layer, dict):
+                    continue
+                for candidate in (
+                    layer.get("visual_selected_hash"),
+                    layer.get("bank_selected_hash"),
+                ):
+                    if str(candidate or "").strip():
+                        used_hashes.add(str(candidate).strip())
+                image_path = str(layer.get("visual_original_path") or layer.get("image") or "").strip()
+                if image_path and os.path.isfile(image_path):
+                    try:
+                        from visual_retrieval_runtime import _hash_image
+                        with open(image_path, "rb") as fh:
+                            image_hash = _hash_image(self.bot, fh.read())
+                        if image_hash:
+                            used_hashes.add(image_hash)
+                    except Exception:
+                        pass
+            for item in self._visual_pool:
+                if isinstance(item, dict) and str(item.get("hash") or "").strip():
+                    used_hashes.add(str(item.get("hash")).strip())
+            for group in self._visual_search_groups:
+                for item in group.get("items") or []:
+                    if isinstance(item, dict) and str(item.get("hash") or "").strip():
+                        used_hashes.add(str(item.get("hash")).strip())
+
+            result = collect_manual_visual_search(
+                self.bot,
+                self.bot,
+                query,
+                video_title=video_title,
+                used_hashes=used_hashes,
+            )
+            assets = list(result.get("assets") or [])
+            materialized = materialize_manual_visual_pool(
+                self.bot,
+                assets,
+                pool_id=f"search_{len(self._visual_search_groups) + 1}_{abs(hash(query)) & 0xfffffff}",
+            )
+            group_id = f"search-{len(self._visual_search_groups) + 1}"
+            for item in materialized:
+                item["search_group_id"] = group_id
+                item["used"] = False
+                item["assigned_slide"] = 0
+            group = {
+                "id": group_id,
+                "query": query,
+                "items": materialized,
+                "target": 5,
+            }
+            with self._lock:
+                self._visual_search_groups.append(group)
+                self._visual_approved = False
+                self._visual_rejected = False
+
+            count = len(materialized)
+            if count == 5:
+                message = f"Found 5 new monetization-safe images for '{query}'."
+            elif count:
+                message = f"Found {count} new monetization-safe images for '{query}'; no error was raised because the configured sources were exhausted."
+            else:
+                message = f"No new monetization-safe images were returned for '{query}'. Try a different query."
+            self.update("visual_approval", 76, message)
+            return True, message
+        except Exception as exc:
+            return False, f"New visual search failed safely: {type(exc).__name__}: {exc}"
+
+    def assign_visual_pool_asset(self, asset_hash: str, visual_index: int) -> tuple[bool, str]:
+        """Assign one unused pool image to exactly one slide; it cannot be reused elsewhere."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+        try:
+            index = int(visual_index)
+        except (TypeError, ValueError):
+            return False, "Invalid slide number."
+
+        packages = snapshot.get("visual_packages") or []
+        script_data = snapshot.get("script_data") or {}
+        scenes = script_data.get("script") if isinstance(script_data, dict) else None
+        if index < 1 or index > len(packages) or not isinstance(scenes, list) or index > len(scenes):
+            return False, "That slide is no longer available."
+
+        origin, position, selected = self._locate_visual_pool_asset(asset_hash)
+        if selected is None:
+            return False, "That image is no longer available."
+        if bool(selected.get("used")):
+            assigned = int(selected.get("assigned_slide") or 0)
+            return False, f"That image is already assigned to slide {assigned}."
+
+        if not str(selected.get("path") or "").strip() or not os.path.isfile(str(selected.get("path") or "").strip()):
+            return False, "That image is no longer available on the dashboard host."
+
+        layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+        if not isinstance(layer, dict):
+            return False, "The selected slide is invalid."
+
+        backup_bank = list(layer.get("visual_asset_bank") or [])
+        layer["visual_asset_bank"] = [dict(selected)]
+        try:
+            ok, message = self.replace_visual_from_bank(index, 1)
+        finally:
+            layer["visual_asset_bank"] = backup_bank
+        if not ok:
+            return False, message
+
+        with self._lock:
+            if origin == "pool":
+                live_item = self._visual_pool[position]
+            else:
+                group_index = int(str(origin).split(":", 1)[1])
+                live_item = self._visual_search_groups[group_index]["items"][position]
+            live_item["used"] = True
+            live_item["assigned_slide"] = index
+            live_item["assigned_time"] = datetime.now(timezone.utc).isoformat()
+            if origin == "pool":
+                self._visual_pool[position] = live_item
+            else:
+                self._visual_search_groups[group_index]["items"][position] = live_item
+
+            live_package = self._visual_packages[index - 1]
+            live_layer = live_package[0] if isinstance(live_package, list) and live_package else live_package
+            if isinstance(live_layer, dict):
+                live_layer["visual_asset_bank"] = []
+                live_layer["visual_verification_source"] = (
+                    "manual_qc" if str(live_item.get("status") or "") == "new-search" else "identity_ai"
+                )
+                live_layer["visual_original_path"] = str(live_item.get("path") or "").strip()
+                live_layer["visual_selected_hash"] = str(live_item.get("hash") or "").strip()
+
+            self._visual_approved = False
+            self._visual_rejected = False
+
+        self.update(
+            "visual_approval",
+            76,
+            f"Image assigned to slide {index}. It is now locked from reuse on another slide.",
+        )
+        return True, f"Image assigned to slide {index}."
+
+    def crop_visual_pool_asset(self, asset_hash: str, crop_box: dict[str, Any]) -> tuple[bool, str]:
+        """Apply an exact drag-selected 9:16 crop to a pool image without changing its identity record."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+
+        origin, position, asset = self._locate_visual_pool_asset(asset_hash)
+        if asset is None:
+            return False, "That image is no longer available."
+        source_path = str(asset.get("path") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            return False, "That image is no longer available on the dashboard host."
+
+        try:
+            left = int(crop_box.get("left", 0))
+            top = int(crop_box.get("top", 0))
+            width = int(crop_box.get("width", 0))
+            height = int(crop_box.get("height", 0))
+        except (TypeError, ValueError, AttributeError):
+            return False, "The selected crop area is invalid."
+
+        try:
+            source = Image.open(source_path).convert("RGB")
+            right = left + width
+            bottom = top + height
+            if width < 2 or height < 2 or left < 0 or top < 0 or right > source.width or bottom > source.height:
+                return False, "The selected crop area is outside the image."
+            cropped = source.crop((left, top, right, bottom))
+            cropped = cropped.resize((1080, 1920), Image.Resampling.LANCZOS)
+            crop_key = hashlib.sha1(f"{asset.get('hash','')}:{left}:{top}:{width}:{height}".encode("utf-8")).hexdigest()[:16]
+            target_path = os.path.join(self.bot.ASSETS_DIR, f"visual_pool_crop_{crop_key}.jpg")
+            cropped.save(target_path, "JPEG", quality=95)
+        except Exception as exc:
+            return False, f"Crop could not be applied safely: {type(exc).__name__}: {exc}"
+
+        with self._lock:
+            if origin == "pool":
+                live_item = self._visual_pool[position]
+            else:
+                group_index = int(str(origin).split(":", 1)[1])
+                live_item = self._visual_search_groups[group_index]["items"][position]
+            live_item["path"] = target_path
+            live_item["cropped"] = True
+            live_item["crop_box"] = {
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+            }
+        self.update("visual_approval", 76, "Crop saved for the selected pool image.")
+        return True, "Crop saved."
+
     def submit_script_visual_queries(self, queries: list[str]) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "script_review":
