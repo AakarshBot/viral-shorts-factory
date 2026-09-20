@@ -19,7 +19,6 @@ import requests
 from visual_taxonomy_runtime import preferred_sources
 from visual_licensing_runtime import (
     LICENSE_URLS,
-    allow_unlicensed_visuals,
     is_allowed_license,
     licensed_candidate,
     normalize_license_code,
@@ -203,11 +202,6 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
     return _bounded_downloads(urls, used_urls)
 
 
-def fetch_wikipedia_person(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    candidates = fetch_wikipedia_person_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
-
-
 def _commons_search_query(query: str) -> str:
     """Use the vocabulary Commons actually uses for match/event media."""
     q = _clean_query(query)
@@ -274,48 +268,6 @@ def fetch_commons(query: str, used_urls: set[str] | None = None, *_args) -> byte
     return candidates[0] if candidates else None
 
 
-def fetch_duckduckgo_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
-    if not allow_unlicensed_visuals():
-        return []
-    q = _clean_query(query)
-    if not q:
-        return []
-    try:
-        from ddgs import DDGS
-    except Exception:
-        return []
-    try:
-        results = DDGS().images(q, safesearch="moderate", max_results=max(8, MAX_PROVIDER_CANDIDATES * 2))
-        urls: list[Any] = []
-        for position, result in enumerate(results or [], 1):
-            if not isinstance(result, dict):
-                continue
-            image_url = result.get("image") or result.get("thumbnail") or result.get("url")
-            if image_url:
-                urls.append((
-                    str(image_url),
-                    {
-                        "provider": "DDG",
-                        "url": str(result.get("url") or image_url),
-                        "author": str(result.get("source") or ""),
-                        "license": "",
-                        "license_url": "",
-                        "search_title": str(result.get("title") or ""),
-                        "search_description": str(result.get("source") or ""),
-                        "search_position": position,
-                    },
-                ))
-        return _bounded_downloads(urls, used_urls)
-    except Exception as exc:
-        print(f"   [Visual Source] DDG raw fetch failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
-        return []
-
-
-def fetch_duckduckgo(query: str, used_urls: set[str] | None = None, *_args) -> dict[str, Any] | None:
-    candidates = fetch_duckduckgo_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
-
-
 def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("PEXELS_API_KEY", "")).strip()
     q = _clean_query(query)
@@ -346,11 +298,6 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
                         "search_position": position,
                     }))
     return _bounded_downloads(urls, used_urls)
-
-
-def fetch_pexels(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    candidates = fetch_pexels_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
 
 
 def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
@@ -384,11 +331,6 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
                         "search_position": position,
                     }))
     return _bounded_downloads(urls, used_urls)
-
-
-def fetch_unsplash(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    candidates = fetch_unsplash_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
 
 
 def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
@@ -455,14 +397,8 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
 __all__ = [
     "MAX_PROVIDER_CANDIDATES",
     "build_raw_source_plan",
-    "fetch_commons",
     "fetch_commons_candidates",
-    "fetch_duckduckgo",
-    "fetch_duckduckgo_candidates",
-    "fetch_pexels",
     "fetch_pexels_candidates",
-    "fetch_unsplash",
     "fetch_unsplash_candidates",
-    "fetch_wikipedia_person",
     "fetch_wikipedia_person_candidates",
 ]
