@@ -580,11 +580,17 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             dict(item)
             for item in bank
             if str(item.get("status") or "").strip() == "factory-rejected-resolution"
+            or str(item.get("scene_status") or "").strip() == "resolution-rejected"
+        ]
+        scene_rejected = [
+            dict(item)
+            for item in bank
+            if str(item.get("scene_status") or "").strip() == "scene-rejected"
         ]
         unused_verified = [
             dict(item)
             for item in bank
-            if str(item.get("status") or "").strip() != "factory-rejected-resolution"
+            if str(item.get("scene_status") or "").strip() in {"", "good-unused"}
         ]
         items.append(
             {
@@ -624,6 +630,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
                 "manual_pool_query_stats": list(layer.get("visual_manual_pool_query_stats") or []),
                 "factory_rejected": factory_rejected,
+                "scene_rejected": scene_rejected,
                 "bank": unused_verified,
                 "all_bank": bank,
             }
@@ -680,7 +687,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
             bank = item.get("bank") or []
             if bank:
-                st.markdown(f"**Unused entity-verified images · {len(bank)}**")
+                st.markdown(f"**Not chosen but all good · {len(bank)}**")
                 bank_cols = st.columns(2, gap="small")
                 for bank_index, bank_item in enumerate(bank[:19], 1):
                     with bank_cols[(bank_index - 1) % 2]:
@@ -720,13 +727,56 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             else:
                                 st.error(message)
             else:
-                st.caption("No additional entity-verified images were available for this visual.")
+                st.caption("No additional pool images were both scene-compatible and above the normal resolution threshold.")
+
+            scene_rejected = item.get("scene_rejected") or []
+            if scene_rejected:
+                st.markdown(f"**Rejected by scene context · retained for replacement · {len(scene_rejected)}**")
+                reject_cols = st.columns(2, gap="small")
+                for rejected_index, rejected_item in enumerate(scene_rejected[:19], 1):
+                    with reject_cols[(rejected_index - 1) % 2]:
+                        rejected_path = str(rejected_item.get("path") or "").strip()
+                        if rejected_path and os.path.isfile(rejected_path):
+                            st.image(rejected_path, width=190)
+                        rejected_query = str(rejected_item.get("query") or "").strip()
+                        rejected_score = float(rejected_item.get("scene_score") or 0.0)
+                        st.caption(
+                            f"Scene mismatch · score {rejected_score:.1f}"
+                            + (f" · {rejected_query}" if rejected_query else "")
+                        )
+                        if st.button(
+                            "Use this image",
+                            use_container_width=True,
+                            key=f"use_scene_rejected_{run_id}_{item['index']}_{rejected_index}",
+                        ):
+                            live_bank = item.get("all_bank") or []
+                            bank_position = next(
+                                (
+                                    pos
+                                    for pos, entry in enumerate(live_bank, 1)
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("path") or "") == rejected_path
+                                ),
+                                None,
+                            )
+                            if bank_position is not None:
+                                ok, message = controller.replace_visual_from_bank(
+                                    item["index"],
+                                    bank_position,
+                                )
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("That scene-review image is no longer available.")
 
             rejected = item.get("factory_rejected") or []
             if rejected:
-                st.markdown(f"**Entity verified but factory-rejected for resolution · {len(rejected)}**")
+                st.markdown(f"**Rejected by resolution · retained for manual QC · {len(rejected)}**")
                 reject_cols = st.columns(2, gap="small")
-                for rejected_index, rejected_item in enumerate(rejected[:10], 1):
+                for rejected_index, rejected_item in enumerate(rejected[:19], 1):
                     with reject_cols[(rejected_index - 1) % 2]:
                         rejected_path = str(rejected_item.get("path") or "").strip()
                         if rejected_path and os.path.isfile(rejected_path):
@@ -739,7 +789,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if st.button(
                             "Use this image anyway",
                             use_container_width=True,
-                            key=f"use_rejected_{run_id}_{item['index']}_{rejected_index}",
+                            key=f"use_resolution_rejected_{run_id}_{item['index']}_{rejected_index}",
                         ):
                             packages = snapshot.get("visual_packages") or []
                             package = packages[item["index"] - 1] if item["index"] - 1 < len(packages) else None
