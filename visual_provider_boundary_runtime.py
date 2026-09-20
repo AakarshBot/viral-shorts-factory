@@ -113,17 +113,6 @@ def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int =
     return candidates
 
 
-def _title_is_entity(title: str, entity: str) -> bool:
-    def norm(value: str) -> list[str]:
-        return re.findall(r"[a-z0-9]+", str(value or "").casefold())
-
-    wanted = norm(entity)
-    actual = norm(title)
-    if not wanted or not actual:
-        return False
-    return wanted == actual or all(token in actual for token in wanted)
-
-
 def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Resolve near-exact Wikipedia person pages in one API call."""
     entity = _clean_query(query)
@@ -135,6 +124,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             "action": "query",
             "generator": "search",
             "gsrsearch": entity,
+            "redirects": 1,
             "gsrnamespace": 0,
             "gsrlimit": MAX_PROVIDER_CANDIDATES,
             "prop": "pageimages",
@@ -150,8 +140,11 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
         if not isinstance(page, dict):
             continue
         title = str(page.get("title", "")).strip()
-        if not _title_is_entity(title, entity):
-            continue
+        # Wikipedia's search engine is the relevance filter. Do not impose a
+        # brittle token-level name match here: legitimate pages commonly use
+        # compacted names, punctuation, initials, aliases, transliterations or
+        # redirects. The authoritative identity decision happens later at the
+        # semantic visual-QA boundary.
         file_name = str(page.get("pageimage") or "").strip()
         if not file_name:
             continue
