@@ -604,7 +604,14 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                         or "Visual has no verified entity QC verdict."
                     ).strip()
                 ),
-                "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
+                "qc_attempts": int(
+                    layer.get("visual_verification_attempts")
+                    or sum(
+                        int(stat.get("qa_requests") or 0)
+                        for stat in (layer.get("visual_manual_pool_query_stats") or [])
+                        if isinstance(stat, dict)
+                    )
+                ),
                 "rejection_counts": dict(layer.get("visual_rejection_counts") or {}),
                 "manual_query": str(layer.get("manual_visual_query") or "").strip(),
                 "query_used": str(layer.get("visual_query_used") or "").strip(),
@@ -617,6 +624,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "manual_pool_query_stats": list(layer.get("visual_manual_pool_query_stats") or []),
                 "factory_rejected": factory_rejected,
                 "bank": unused_verified,
+                "all_bank": bank,
             }
         )
     return items
@@ -688,9 +696,22 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             use_container_width=True,
                             key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
                         ):
+                            live_bank = item.get("all_bank") or []
+                            live_bank_index = next(
+                                (
+                                    pos
+                                    for pos, entry in enumerate(live_bank, 1)
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("path") or "") == bank_path
+                                ),
+                                None,
+                            )
+                            if live_bank_index is None:
+                                st.error("That bank image is no longer available.")
+                                continue
                             ok, message = controller.replace_visual_from_bank(
                                 item["index"],
-                                bank_index,
+                                live_bank_index,
                             )
                             if ok:
                                 st.success(message)
