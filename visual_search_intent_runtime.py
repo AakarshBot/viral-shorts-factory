@@ -320,14 +320,25 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         else:
             anchor = _primary_visual_anchor(scene_terms)
 
+        scene_terms = _scene_terms(scene, subject)
         query = _compose_query(subject, anchor)
-        queries = [query] if query else []
+        queries = []
 
-        # Keep the canonical second query as the exact factual identity.
-        # The primary query carries the scene anchor; the fallback protects
-        # identity retrieval without creating a blind query ladder.
-        if query and subject and query.casefold() != subject.casefold():
+        # Build a bounded, evidence-backed fallback ladder. Each fallback is
+        # derived from a real visual anchor in the scene, then the exact
+        # factual identity is retained as the final identity-only fallback.
+        # This allows rejected/failed searches to keep trying without inventing
+        # unrelated search terms or creating an unbounded query fan-out.
+        for candidate_anchor in ([anchor] + scene_terms):
+            candidate = _compose_query(subject, candidate_anchor)
+            if candidate and candidate.casefold() not in {item.casefold() for item in queries}:
+                queries.append(candidate)
+            if len(queries) >= 5:
+                break
+        if subject and subject.casefold() not in {item.casefold() for item in queries}:
             queries.append(subject)
+        queries = queries[:6]
+        query = queries[0] if queries else ""
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))
