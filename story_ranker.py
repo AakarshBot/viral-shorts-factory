@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 
@@ -375,7 +375,7 @@ def _article_url_is_plausible(story):
 
     query_keys = {
         key_name.strip().lower()
-        for key_name, _value in __import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(
+        for key_name, _value in parse_qsl(
             parsed.query,
             keep_blank_values=True,
         )
