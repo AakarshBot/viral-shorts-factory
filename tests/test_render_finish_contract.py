@@ -30,11 +30,41 @@ def test_pipeline_integrity_no_longer_has_endpoint_subtitle_layer():
     assert "_add_endpoint_subtitles" not in source
 
 
-def test_upload_gate_only_opens_for_completed_idle_render():
-    assert upload_ready_for_manual_decision({"completed": True, "thread_alive": False, "video_path": "final_video.mp4"})
-    assert not upload_ready_for_manual_decision({"completed": True, "thread_alive": True, "video_path": "final_video.mp4"})
-    assert not upload_ready_for_manual_decision({"completed": False, "thread_alive": False, "video_path": "final_video.mp4"})
-    assert not upload_ready_for_manual_decision({"completed": True, "thread_alive": False, "video_path": ""})
+def test_upload_gate_only_opens_for_completed_or_recoverable_idle_render(tmp_path):
+    final_video = tmp_path / "final_video.mp4"
+    final_video.write_bytes(b"placeholder")
+
+    assert upload_ready_for_manual_decision({
+        "completed": True,
+        "thread_alive": False,
+        "video_path": str(final_video),
+    })
+    assert not upload_ready_for_manual_decision({
+        "completed": True,
+        "thread_alive": True,
+        "video_path": str(final_video),
+    })
+    assert upload_ready_for_manual_decision({
+        "completed": False,
+        "thread_alive": False,
+        "stage": "error",
+        "percent": 100,
+        "video_path": str(final_video),
+    })
+    assert not upload_ready_for_manual_decision({
+        "completed": False,
+        "thread_alive": False,
+        "stage": "error",
+        "percent": 95,
+        "video_path": str(final_video),
+    })
+    assert not upload_ready_for_manual_decision({
+        "completed": False,
+        "thread_alive": False,
+        "stage": "error",
+        "percent": 100,
+        "video_path": "",
+    })
 
 
 
