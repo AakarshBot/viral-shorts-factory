@@ -1276,8 +1276,6 @@ def collect_high_recall_stories(
     trend_keyword=None,
     custom_gnews_q=None,
     custom_rss_url=None,
-    ai_cricket=False,
-    discover_lanes=None,
     broad_discovery=False,
 ):
     """Collect broad free discovery signals and collapse them into distinct events."""
