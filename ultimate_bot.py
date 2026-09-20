@@ -457,8 +457,6 @@ def infer_genre_from_title(title):
         return "sports"
     if any(k in t_lower for k in ["smartphone", "launch", "review", "gadget", "laptop", "processor", "pixel", "iphone"]):
         return "tech_reviews"
-    if any(k in t_lower for k in ["cricket", "match", "goal", "isl", "premier league", "tennis", "sport", "squad", "debut", "odi", "test", "formula", "f1"]):
-        return "sports_stories_of_day" 
     if any(k in t_lower for k in ["movie", "bollywood", "tollywood", "gossip", "box office", "review", "trailer"]):
         return "entertainment"
     if any(k in t_lower for k in ["ai", "artificial intelligence", "tech", "gadgets", "startup", "launch", "software"]):
