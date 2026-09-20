@@ -851,8 +851,9 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": verified and not missing' in app_source
-    assert 'disabled=bool(attention_count)' in app_source
-    assert 'NEEDS ATTENTION' in app_source
+    assert 'disabled=bool(sum(1 for item in items if not item.get("qc_passed")))' in app_source
+    assert 'Choose from the visual pool' in app_source
+    assert 'NEEDS ATTENTION' not in app_source
 
 
 def test_dashboard_ai_discovery_uses_shared_broad_radar():
@@ -879,14 +880,17 @@ def test_dashboard_manual_crop_returns_shorts_frame():
 def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert "Shared pool</b>" in source
-    assert "Subject verified, but the image is below the normal resolution target." in source
+    assert "Choose from the visual pool" in source
+    assert "Available verified images" in source
+    assert "Identity-verified, lower-resolution images" in source
+    assert "Search 5 new images" in source
     assert "Apply crop" in source
     assert "controller.crop_visual(" in source
     assert 'aspect_ratio=(9, 16)' in source
     assert 'return_type="both"' in source
     assert 'should_resize_image=False' in source
-    assert "Selected frame · x" in source
+    assert "Use on slide" in source
+    assert "Crop / reframe selected image" in source
 
 
 def test_repository_does_not_use_deprecated_streamlit_container_width():
@@ -901,3 +905,139 @@ def test_repository_does_not_use_deprecated_streamlit_container_width():
         if deprecated_arg in source:
             offenders.append(str(path.relative_to(repo_root)))
     assert offenders == []
+
+
+
+def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    current_paths = []
+    for index in (1, 2):
+        path = tmp_path / f"current_{index}.jpg"
+        Image.new("RGB", (1080, 1920), "white").save(path, "JPEG")
+        current_paths.append(path)
+
+    option = tmp_path / "option.jpg"
+    Image.new("RGB", (900, 1200), (80, 100, 120)).save(option, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Pool assignment",
+        "script": [
+            {"primary_entity": "Virat Kohli", "voiceover": "One."},
+            {"primary_entity": "BCCI", "voiceover": "Two."},
+        ],
+    }
+    controller._visual_packages = [
+        [{"image": str(current_paths[0]), "visual_verified": True}],
+        [{"image": str(current_paths[1]), "visual_verified": True}],
+    ]
+    controller._visual_pool = [{
+        "path": str(option),
+        "hash": "pool-hash",
+        "source": "Commons",
+        "query": "Virat Kohli",
+        "visual_type": "PERSON",
+        "visual_genre": "PERSON_PORTRAIT",
+        "provenance": {"url": "https://commons.wikimedia.org/wiki/File:Kohli.jpg"},
+        "status": "entity-verified",
+        "used": False,
+    }]
+
+    monkeypatch.setattr(
+        controller,
+        "replace_visual_from_bank",
+        lambda index, bank_index: (
+            controller._visual_packages[index - 1].__setitem__(
+                0,
+                {
+                    **controller._visual_packages[index - 1][0],
+                    "image": str(option),
+                    "visual_verified": True,
+                },
+            )
+            or (True, "ok")
+        ),
+    )
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, _ = controller.assign_visual_pool_asset("pool-hash", 2)
+    assert ok is True
+    assert controller._visual_pool[0]["used"] is True
+    assert controller._visual_pool[0]["assigned_slide"] == 2
+    assert controller._visual_packages[1][0]["visual_original_path"] == str(option)
+
+    ok, message = controller.assign_visual_pool_asset("pool-hash", 1)
+    assert ok is False
+    assert "already assigned to slide 2" in message
+
+
+def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_path):
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Search test",
+        "script": [{"primary_entity": "BCCI", "voiceover": "One."}],
+    }
+    controller._visual_packages = [[{
+        "image": str(tmp_path / "current.jpg"),
+        "visual_verified": True,
+        "source_image_url": "https://img.example/current.jpg",
+    }]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    import visual_retrieval_runtime
+
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "collect_manual_visual_search",
+        lambda *args, **kwargs: {
+            "assets": [
+                {
+                    "bytes": b"candidate",
+                    "hash": f"h{i}",
+                    "source": "Commons",
+                    "query": "BCCI logo",
+                    "visual_type": "ORGANIZATION",
+                    "visual_genre": "ORG_BRANDING",
+                    "provenance": {"url": f"https://commons.wikimedia.org/wiki/File:BCCI_{i}.jpg"},
+                    "source_image_url": f"https://commons.wikimedia.org/thumb/BCCI_{i}.jpg",
+                    "status": "new-search",
+                }
+                for i in range(1, 6)
+            ],
+            "target": 5,
+        },
+    )
+    materialized = [
+        {
+            "path": str(tmp_path / f"candidate_{i}.jpg"),
+            "hash": f"h{i}",
+            "source": "Commons",
+            "query": "BCCI logo",
+            "visual_type": "ORGANIZATION",
+            "visual_genre": "ORG_BRANDING",
+            "provenance": {"url": f"https://commons.wikimedia.org/wiki/File:BCCI_{i}.jpg"},
+            "source_image_url": f"https://commons.wikimedia.org/thumb/BCCI_{i}.jpg",
+            "status": "new-search",
+            "used": False,
+        }
+        for i in range(1, 6)
+    ]
+    monkeypatch.setattr(visual_retrieval_runtime, "materialize_manual_visual_pool", lambda *args, **kwargs: materialized)
+
+    ok, message = controller.search_visual_pool("BCCI logo")
+    assert ok is True
+    assert "Found 5 new" in message
+    snapshot = controller.snapshot()
+    assert len(snapshot["visual_search_groups"]) == 1
+    assert len(snapshot["visual_search_groups"][0]["items"]) == 5

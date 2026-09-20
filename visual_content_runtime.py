@@ -393,8 +393,7 @@ def patch_content_first_visuals(bot):
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import fit_visual_image, install as install_visual_quality
         from visual_retrieval_runtime import (
-            classify_manual_pool_for_scene,
-            collect_manual_visual_pool,
+                    collect_manual_visual_pool,
             make_visual_rescue,
             materialize_manual_visual_pool,
             materialize_visual_bank,
@@ -420,20 +419,13 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
+        setattr(bot, "_visual_source_search_cache", {})
         reset_visual_qa_video_budget()
 
         # Manual queries form one shared retrieval pool. They are not assigned
         # one-per-slide: scene context is applied only after the pool exists.
         manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
         manual_queries = parse_manual_visual_queries(manual_raw)
-        scene_level_manual_queries = [
-            str(scene.get("manual_visual_query") or "").strip()
-            for scene in scenes
-            if isinstance(scene, dict) and str(scene.get("manual_visual_query") or "").strip()
-        ]
-        for query in scene_level_manual_queries:
-            if query not in manual_queries:
-                manual_queries.append(query)
         if manual_queries:
             print(
                 f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
@@ -511,6 +503,7 @@ def patch_content_first_visuals(bot):
 
         manual_pool_result = None
         manual_pool_materialized = []
+        manual_available_pool = []
         if manual_queries:
             manual_pool_result = collect_manual_visual_pool(
                 visual_runtime,
@@ -519,16 +512,37 @@ def patch_content_first_visuals(bot):
                 manual_queries,
                 video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
                 used_hashes=used_hashes,
+                allow_auto_backfill=False,
             )
+            for asset in manual_pool_result.get("assets") or []:
+                try:
+                    visual_runtime.save_to_cache(
+                        bot,
+                        asset.get("bytes"),
+                        str(asset.get("subject") or "").strip(),
+                        str(asset.get("visual_type") or "GENERAL_CONTEXT"),
+                        str(asset.get("source") or "manual"),
+                        context=f"manual:{str(asset.get('query') or '').strip()}:{str(asset.get('hash') or '').strip()}",
+                    )
+                except Exception as exc:
+                    print(
+                        f"   [Visual Cache] Manual pool cache write skipped: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
             manual_pool_materialized = materialize_manual_visual_pool(
                 bot,
                 manual_pool_result.get("assets") or [],
                 pool_id=hash(";".join(manual_queries)) & 0xffffffff,
             )
+            manual_available_pool = [dict(item) for item in manual_pool_materialized]
             script_data["visual_manual_queries"] = list(manual_queries)
             script_data["visual_manual_pool_size"] = len(manual_pool_materialized)
             script_data["visual_manual_pool_query_stats"] = list(
                 manual_pool_result.get("query_stats") or []
+            )
+            script_data["visual_manual_pool_rejection_counts"] = dict(
+                manual_pool_result.get("rejection_counts") or {}
             )
             print(
                 f"   [Manual Visual Pool] total entity-verified candidates="
@@ -543,23 +557,11 @@ def patch_content_first_visuals(bot):
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
             manual_selected = None
-            manual_classified_pool = []
-            if manual_pool_materialized:
-                manual_classified_pool = classify_manual_pool_for_scene(
-                    manual_pool_materialized,
-                    seg,
-                )
+            if manual_available_pool:
                 manual_selected = select_manual_visual_candidate(
-                    manual_pool_materialized,
+                    manual_available_pool,
                     seg,
                     used_hashes,
-                )
-                manual_classified_pool = classify_manual_pool_for_scene(
-                    manual_pool_materialized,
-                    seg,
-                    selected_hash=str(manual_selected.get("hash") or "").strip()
-                    if manual_selected
-                    else "",
                 )
 
             if manual_selected:
@@ -579,20 +581,13 @@ def patch_content_first_visuals(bot):
                 seg["manual_visual_query_mode"] = True
                 seg["asset_provenance"] = dict(manual_selected.get("provenance") or {})
                 seg["visual_original_path"] = selected_path
-                seg["visual_asset_bank"] = [
+                seg["visual_asset_bank"] = []
+                seg["visual_selected_scene_score"] = 0.0
+                manual_available_pool = [
                     dict(item)
-                    for item in manual_classified_pool
+                    for item in manual_available_pool
                     if str(item.get("hash") or "").strip() != selected_hash
                 ]
-                selected_scene_score = next(
-                    (
-                        float(item.get("scene_score") or 0.0)
-                        for item in manual_classified_pool
-                        if str(item.get("hash") or "").strip() == selected_hash
-                    ),
-                    0.0,
-                )
-                seg["visual_selected_scene_score"] = selected_scene_score
                 seg["visual_manual_pool_mode"] = True
                 seg["visual_rejection_counts"] = dict(
                     (manual_pool_result or {}).get("rejection_counts") or {}
@@ -621,14 +616,16 @@ def patch_content_first_visuals(bot):
                 source_credit = source_credit_for_type(source_type)
                 seg["visual_verified"] = False
                 seg["visual_qc_blocked"] = True
-                seg["visual_qc_block_reason"] = "Manual visual pool produced no entity-verified candidate for this slide."
+                seg["visual_qc_block_reason"] = "Manual visual pool produced no identity-verified candidate for this slide."
                 seg["visual_rescue_reason"] = "manual-pool-exhausted"
                 seg["visual_fallback_reason"] = ""
                 seg["visual_query_used"] = ""
                 seg["visual_original_path"] = ""
-                seg["visual_asset_bank"] = [
-                    dict(item) for item in manual_classified_pool
-                ]
+                seg["visual_asset_bank"] = []
+                seg["visual_manual_pool_mode"] = True
+                seg["visual_rejection_counts"] = dict(
+                    (manual_pool_result or {}).get("rejection_counts") or {}
+                )
             elif idx == news_source_scene_index and isinstance(news_source_candidate, dict):
                 bg_img = news_source_candidate["image"]
                 used_ai = False
@@ -733,7 +730,7 @@ def patch_content_first_visuals(bot):
                 "source_image_url": news_source_candidate.get("image_url", "") if source_type == "news_source" and isinstance(news_source_candidate, dict) else "",
                 "asset_provenance": dict(seg.get("asset_provenance") or {}),
                 "visual_asset_bank": (
-                    list(seg.get("visual_asset_bank") or [])
+                    []
                     if seg.get("visual_manual_pool_mode")
                     else materialize_visual_bank(bot, seg, idx + 1)
                 ),
@@ -741,6 +738,11 @@ def patch_content_first_visuals(bot):
                 "visual_manual_pool_mode": bool(seg.get("visual_manual_pool_mode", False)),
                 "visual_manual_pool_size": len(manual_pool_materialized) if seg.get("visual_manual_pool_mode") else 0,
                 "visual_manual_pool_query_stats": list((manual_pool_result or {}).get("query_stats") or []) if seg.get("visual_manual_pool_mode") else [],
+                "visual_manual_pool": (
+                    [dict(item) for item in manual_available_pool]
+                    if idx == 0 and seg.get("visual_manual_pool_mode")
+                    else []
+                ),
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
@@ -749,6 +751,13 @@ def patch_content_first_visuals(bot):
             # repeated-subject rescue pool. Do not keep raw image bytes in script_data.
             seg.pop("_verified_subject_assets", None)
             seg.pop("visual_asset_bank", None)
+
+        if manual_queries:
+            script_data["visual_manual_pool"] = [
+                dict(item) for item in manual_available_pool
+                if isinstance(item, dict) and not bool(item.get("used"))
+            ]
+            script_data["visual_manual_pool_unused_count"] = len(script_data["visual_manual_pool"])
 
         # Second pass: only unverified/failed scenes may borrow an already-
         # verified alternative for the same factual subject. Successful

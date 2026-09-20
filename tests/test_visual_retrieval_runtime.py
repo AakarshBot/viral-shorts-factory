@@ -291,9 +291,9 @@ def _licensed_candidate(image_bytes, license_name="cc0"):
     }
 
 
-def _jpeg_bytes(size=(900, 1200)):
+def _jpeg_bytes(size=(900, 1200), color=(80, 90, 100)):
     buffer = io.BytesIO()
-    Image.new("RGB", size, (80, 90, 100)).save(buffer, format="JPEG", quality=95)
+    Image.new("RGB", size, color).save(buffer, format="JPEG", quality=95)
     return buffer.getvalue()
 
 
@@ -1057,11 +1057,11 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
         "Test story",
     )
 
-    assert len(result["assets"]) == 10
-    assert len({item["hash"] for item in result["assets"]}) == 10
-    assert result["hard_max"] == 10
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5]
-    assert len(result["query_stats"]) == 2
+    assert len(result["assets"]) == 19
+    assert len({item["hash"] for item in result["assets"]}) == 19
+    assert result["hard_max"] == 19
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 4]
+    assert len(result["query_stats"]) == 4
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
 
@@ -1128,7 +1128,7 @@ def test_manual_visual_options_returns_three_unique_choices_without_backfill(mon
     assert len(result["query_stats"]) == 1
 
 
-def test_manual_pool_allows_only_one_image_per_source_page(monkeypatch):
+def test_manual_pool_allows_multiple_images_from_same_source_article(monkeypatch):
     image_candidates = []
     for index, page in enumerate(("https://example.com/article-a", "https://example.com/article-a", "https://example.com/article-b")):
         buffer = io.BytesIO()
@@ -1174,7 +1174,7 @@ def test_manual_pool_allows_only_one_image_per_source_page(monkeypatch):
     )
 
     assets = result["assets"]
-    assert len(assets) == 2
+    assert len(assets) == 3
     assert len({item["source_page_url"] for item in assets}) == 2
 
 
@@ -1379,3 +1379,441 @@ def test_canonical_manual_entity_anchor_normalizes_named_team(monkeypatch):
         == "India women's national cricket team"
     )
 
+
+
+
+def test_manual_pool_uses_descending_rank_targets(monkeypatch):
+    image_sets = {}
+    for query_index, target in enumerate((10, 7, 5), 1):
+        values = []
+        for index in range(target):
+            values.append({
+                "bytes": _jpeg_bytes((900 + index, 1200), color=(40 + query_index * 50 + index * 8, 70, 100)),
+                "provenance": {
+                    "provider": "Commons",
+                    "url": f"https://commons.wikimedia.org/wiki/File:{query_index}_{index}.jpg",
+                    "author": "Test",
+                    "license": "cc0",
+                    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+                },
+                "source_image_url": f"https://upload.wikimedia.org/{query_index}_{index}.jpg",
+                "source_page_url": f"https://commons.wikimedia.org/wiki/File:{query_index}_{index}.jpg",
+                "search_title": f"File {query_index} {index}",
+            })
+        image_sets[query_index] = values
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    def fake_plan(_bot, _visual_type, _visual_genre=""):
+        return [
+            ("Commons", lambda query, *_args: image_sets[int(query.split()[1])] ),
+        ]
+
+    monkeypatch.setattr(retrieval, "_source_plan", fake_plan)
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [],
+        ["rank 1", "rank 2", "rank 3"],
+        allow_auto_backfill=False,
+    )
+    assert [row["target"] for row in result["query_stats"]] == [10, 7, 5]
+    assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
+    assert len(result["assets"]) == 22
+
+
+def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
+    values = []
+    for index in range(4):
+        values.append({
+            "bytes": _jpeg_bytes((900 + index, 1200), color=(40 + index * 20, 70, 100)),
+            "provenance": {
+                "provider": "Commons",
+                "url": f"https://commons.wikimedia.org/wiki/File:Article_image_{index}.jpg",
+                "author": "Test",
+                "license": "cc0",
+                "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            },
+            "source_image_url": f"https://upload.wikimedia.org/article_image_{index}.jpg",
+            "source_page_url": "https://example.com/article",
+            "search_title": f"Article image {index}",
+        })
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *_args: [("Commons", lambda *_args: values)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [],
+        ["same article"],
+        allow_auto_backfill=False,
+    )
+    assert len(result["assets"]) == 4
+    assert result["rejection_counts"]["duplicate"] == 0
+
+
+def test_new_manual_search_applies_only_monetization_filter(monkeypatch):
+    values = [
+        {
+            "bytes": _jpeg_bytes((240, 240)),
+            "provenance": {
+                "provider": "Openverse",
+                "url": f"https://example.com/low-{index}.jpg",
+                "license": "cc-by-nc",
+                "license_url": "",
+            },
+        }
+        for index in range(1)
+    ]
+    values.extend(
+        {
+            "bytes": _jpeg_bytes((280, 280), color=(40 + index * 20, 80, 120)),
+            "provenance": {
+                "provider": "Openverse",
+                "url": f"https://example.com/valid-{index}.jpg",
+                "license": "cc0",
+                "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            },
+            "source_image_url": f"https://example.com/valid-{index}.jpg",
+            "source_page_url": f"https://example.com/valid-{index}",
+            "search_title": f"valid {index}",
+        }
+        for index in range(5)
+    )
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *_args: [("Openverse", lambda *_args: values)],
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("identity AI must not run for a new manual search")
+
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fail_if_called)
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "BCCI logo",
+    )
+    assert len(result["assets"]) == 5
+    assert result["rejection_counts"]["monetization"] == 1
+
+
+def test_manual_query_planner_has_non_network_fallback(monkeypatch):
+    import manual_visual_query_runtime as planner
+
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    result = planner.generate_visual_query_suggestions(
+        "Virat Kohli joins India camp",
+        "Virat Kohli joined the India cricket camp in Mumbai.",
+        category="sports",
+        max_queries=5,
+    )
+    assert result
+    assert result[0]["query"]
+
+
+
+def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch):
+    image_bytes = [
+        _jpeg_bytes((900, 1200), (20 + index * 10, 60, 100))
+        for index in range(10)
+    ]
+    calls = []
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def fake_fetcher(*args):
+        page = int(args[-1])
+        calls.append(page)
+        start = (page - 1) * 5
+        return [
+            {
+                "bytes": image_bytes[index],
+                "source_image_url": f"https://cdn.pexels.com/photos/{index + 1}/image.jpg",
+                "provenance": {
+                    "provider": "Pexels",
+                    "url": f"https://www.pexels.com/photo/{index + 1}/",
+                    "author": "Tester",
+                    "license": "Pexels License",
+                    "license_url": "https://www.pexels.com/license/",
+                },
+                "search_title": "Indian cricket team",
+            }
+            for index in range(start, start + 5)
+        ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_manual_query_visual_context",
+        lambda query, scenes: ("GENERAL_CONTEXT", "SPORTS_ACTION"),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [("Pexels", fake_fetcher)],
+    )
+
+    bot = FakeBot()
+    first = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        bot,
+        "Indian cricket team",
+    )
+    first_hashes = {item["hash"] for item in first["assets"]}
+    assert len(first_hashes) == 5
+    assert calls == [1]
+
+    second = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        bot,
+        "Indian cricket team",
+        used_hashes=first_hashes,
+    )
+    second_hashes = {item["hash"] for item in second["assets"]}
+    assert len(second_hashes) == 5
+    assert first_hashes.isdisjoint(second_hashes)
+    assert calls == [1, 2]
+
+
+def test_pixabay_manual_search_requests_latest_page(monkeypatch, tmp_path):
+    import image_sources_runtime as sources
+
+    monkeypatch.setenv("PIXABAY_API_KEY", "test-key")
+    monkeypatch.setattr(sources, "_cache_dir", lambda: tmp_path)
+    requested = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"hits": []}
+
+    monkeypatch.setattr(
+        sources.requests,
+        "get",
+        lambda url, **kwargs: requested.update(kwargs) or Response(),
+    )
+
+    result = sources.fetch_pixabay_candidates(
+        "Indian cricket team",
+        set(),
+        "Indian cricket team",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+        True,
+        2,
+    )
+
+    assert result == []
+    assert requested["params"]["page"] == 2
+    assert requested["params"]["order"] == "latest"
+
+
+def test_pexels_search_requests_requested_page(monkeypatch):
+    monkeypatch.setenv("PEXELS_API_KEY", "test-key")
+    requested = {}
+
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"photos": []}
+
+    monkeypatch.setattr(
+        provider_boundary.requests,
+        "get",
+        lambda url, **kwargs: requested.update(kwargs) or Response(),
+    )
+
+    result = provider_boundary.fetch_pexels_candidates(
+        "cricket team",
+        set(),
+        "cricket team",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+        True,
+        3,
+    )
+
+    assert result == []
+    assert requested["params"]["page"] == 3
+
+
+def test_commons_search_requests_requested_page(monkeypatch):
+    monkeypatch.setattr(provider_boundary, "_api_json", lambda *args, **kwargs: {
+        "query": {
+            "pages": {
+                "1": {
+                    "title": "File:Cricket.jpg",
+                    "imageinfo": [{
+                        "thumburl": "https://example.com/cricket.jpg",
+                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Cricket.jpg",
+                        "extmetadata": {
+                            "LicenseShortName": {"value": "CC BY 4.0"},
+                            "Artist": {"value": "Tester"},
+                            "LicenseUrl": {"value": "https://creativecommons.org/licenses/by/4.0/"},
+                        },
+                    }],
+                    "categories": [],
+                }
+            }
+        }
+    })
+    requested = {}
+
+    original = provider_boundary._api_json
+    def capture(url, *, params=None, headers=None):
+        requested["params"] = dict(params or {})
+        return original(url, params=params, headers=headers)
+
+    monkeypatch.setattr(provider_boundary, "_api_json", capture)
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "_bounded_downloads",
+        lambda urls, used_urls, limit=provider_boundary.MAX_PROVIDER_CANDIDATES: [],
+    )
+
+    result = provider_boundary.fetch_commons_candidates(
+        "cricket team",
+        set(),
+        "cricket team",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+        True,
+        3,
+    )
+
+    assert result == []
+    assert requested["params"]["gsroffset"] == (3 - 1) * provider_boundary.MAX_PROVIDER_CANDIDATES
+
+
+def test_serpapi_recent_discovery_accepts_only_known_stock_hosts(monkeypatch, tmp_path):
+    import image_sources_runtime as sources
+
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-key")
+    monkeypatch.setattr(sources, "_cache_dir", lambda: tmp_path)
+
+    payload = {
+        "images_results": [
+            {
+                "position": 1,
+                "source": "Pexels",
+                "title": "Cricket players",
+                "link": "https://www.pexels.com/photo/cricket-players-123/",
+                "original": "https://images.pexels.com/photos/123/original.jpeg",
+                "unsafe": False,
+                "is_product": False,
+            },
+            {
+                "position": 2,
+                "source": "Unknown",
+                "title": "Other image",
+                "link": "https://example.com/photo.jpg",
+                "original": "https://example.com/photo.jpg",
+                "unsafe": False,
+                "is_product": False,
+            },
+        ]
+    }
+    requested = {}
+
+    class SearchResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    monkeypatch.setattr(
+        sources.requests,
+        "get",
+        lambda url, **kwargs: requested.update(kwargs) or SearchResponse(),
+    )
+    monkeypatch.setattr(
+        sources,
+        "_download",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": _jpeg_bytes((900, 1200), (80, 90, 100)),
+            "provenance": {
+                "provider": metadata["provider"],
+                "url": metadata["url"],
+                "author": "",
+                "license": metadata["license"],
+                "license_url": metadata["license_url"],
+            },
+        },
+    )
+
+    result = sources.fetch_serpapi_candidates(
+        "cricket players",
+        set(),
+        "cricket players",
+        "",
+        "GENERAL_CONTEXT",
+        "SPORTS_ACTION",
+        True,
+        1,
+    )
+
+    assert len(result) == 1
+    assert result[0]["provenance"]["provider"] == "Pexels"
+    assert requested["params"]["licenses"] == "fmc"
+    assert requested["params"]["start_date"].endswith("0101")
+    assert len(requested["params"]["end_date"]) == 8
