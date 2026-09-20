@@ -57,8 +57,7 @@ except ImportError:
     edge_tts = None
 
 try:
-    from ddgs import DDGS
-except ImportError:
+    except ImportError:
     DDGS = None
 
 if not hasattr(PIL.Image, 'ANTIALIAS'):
@@ -794,11 +793,6 @@ def run_analytics_sweep(conn):
     except Exception as e:
         pass
 
-def token_overlap_ratio(text1, text2):
-    tokens1, tokens2 = set(re.findall(r'\w+', text1.lower())), set(re.findall(r'\w+', text2.lower()))
-    if not tokens1 or not tokens2: return 0.0
-    return len(tokens1.intersection(tokens2)) / len(tokens1.union(tokens2))
-
 def gather_and_filter_stories(
     conn,
     genre_key,
@@ -1169,43 +1163,6 @@ async def generate_voiceover_and_timestamps(script_data, language_cfg):
         if not success: return [], []
     return audio_paths, word_timings
 
-def passes_quality_gate(img_data, search_prompt="", video_title=""):
-    if cv2 is not None:
-        try:
-            pil_img = Image.open(io.BytesIO(img_data)).convert("RGB")
-            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            h, w = cv_img.shape[:2]
-            if min(h, w) < 300: return False
-            ratio = w / h
-            if ratio > 2.5 or ratio < 0.4: return False
-            if cv2.Laplacian(cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < 25.0: return False
-        except Exception:
-            pass
-
-    if GEMINI_API_KEY:
-        try:
-            import base64
-            b64_img = base64.b64encode(img_data).decode('utf-8')
-            sys_prompt = (
-                f"You are a fast QA reviewer.\n"
-                f"Topic: {video_title} | Search Term: {search_prompt}\n"
-                f"Reject ONLY IF the image is a heavy internet meme with text overlays, a massive watermark across the center, or completely garbage clip-art.\n"
-                f"If it is a real photo or actual movie still (even if slightly imperfect), return 'TRUE'.\n"
-                f"Return ONLY 'TRUE' or 'FALSE'."
-            )
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "contents": [{"parts": [{"text": sys_prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": b64_img}}]}],
-                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 10}
-            }
-            resp = requests.post(url, json=payload, timeout=5)
-            if resp.status_code == 200:
-                txt = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip().lower()
-                if "false" in txt: return False
-        except Exception:
-            pass 
-    return True
-
 def get_cached_asset(query):
     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', query.lower().strip()) + ".jpg"
     cache_path = os.path.join(ASSET_CACHE_DIR, safe_name)
@@ -1217,109 +1174,6 @@ def save_to_cache(img_bytes, cache_path):
         with open(cache_path, "wb") as f: f.write(img_bytes)
     except:
         pass
-
-def fetch_wiki_person_image(query, used_urls, search_prompt, video_title):
-    search_url = "https://en.wikipedia.org/w/api.php?action=opensearch&search=" + urllib.parse.quote(query) + "&limit=1&namespace=0&format=json"
-    try:
-        resp = requests.get(search_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-        if resp.status_code == 200 and resp.json()[1]:
-            img_url = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&piprop=original&titles=" + urllib.parse.quote(resp.json()[1][0]) + "&format=json"
-            img_resp = requests.get(img_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-            if img_resp.status_code == 200:
-                for p_id, p_info in img_resp.json().get('query', {}).get('pages', {}).items():
-                    if 'original' in p_info:
-                        source_url = p_info['original']['source']
-                        if source_url not in used_urls:
-                            img_data = requests.get(source_url, timeout=5)
-                            if img_data.status_code == 200 and passes_quality_gate(img_data.content, search_prompt, video_title):
-                                used_urls.add(source_url)
-                                return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_wikimedia_commons(query, used_urls, search_prompt, video_title):
-    search_url = "https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=" + urllib.parse.quote(query) + "&srnamespace=6&format=json"
-    try:
-        resp = requests.get(search_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-        if resp.status_code == 200 and resp.json().get('query', {}).get('search', []):
-            for res in resp.json()['query']['search'][:5]:
-                img_url = "https://commons.wikimedia.org/w/api.php?action=query&titles=" + urllib.parse.quote(res['title']) + "&prop=imageinfo&iiprop=url&format=json"
-                img_resp = requests.get(img_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-                if img_resp.status_code == 200:
-                    for p_id, p_info in img_resp.json().get('query', {}).get('pages', {}).items():
-                        if 'imageinfo' in p_info:
-                            actual_url = p_info['imageinfo'][0]['url']
-                            if actual_url not in used_urls:
-                                img_data = requests.get(actual_url, timeout=5)
-                                if img_data.status_code == 200 and passes_quality_gate(img_data.content, search_prompt, video_title):
-                                    used_urls.add(actual_url)
-                                    return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_pexels(query, used_urls, search_prompt, video_title):
-    if not PEXELS_API_KEY: return None
-    try:
-        resp = requests.get("https://api.pexels.com/v1/search", headers={"Authorization": PEXELS_API_KEY}, params={"query": query, "orientation": "portrait", "per_page": 5}, timeout=5)
-        if resp.status_code == 200 and resp.json().get('photos'):
-            for photo in resp.json()['photos']:
-                if photo['src']['large2x'] not in used_urls:
-                    img_data = requests.get(photo['src']['large2x'], timeout=5)
-                    if img_data.status_code == 200 and passes_quality_gate(img_data.content, search_prompt, video_title):
-                        used_urls.add(photo['src']['large2x'])
-                        return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_unsplash(query, used_urls, search_prompt, video_title):
-    if not UNSPLASH_ACCESS_KEY: return None
-    try:
-        resp = requests.get(
-            "https://api.unsplash.com/search/photos",
-            params={"query": query, "orientation": "portrait", "per_page": 5, "client_id": UNSPLASH_ACCESS_KEY},
-            timeout=5,
-        )
-        if resp.status_code == 200:
-            for result in resp.json().get("results", []):
-                url = result.get("urls", {}).get("regular")
-                if not url or url in used_urls: continue
-                img_resp = requests.get(url, timeout=5)
-                if img_resp.status_code == 200 and passes_quality_gate(img_resp.content, search_prompt, video_title):
-                    used_urls.add(url)
-                    return img_resp.content
-    except Exception:
-        pass
-    return None
-
-def fetch_duckduckgo(query, used_urls, search_prompt, video_title):
-    if not allow_unlicensed_visuals() or DDGS is None:
-        return None
-    spoofed_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/"
-    }
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.images(query, max_results=10)
-            for result in results:
-                img_url = result.get("image") or result.get("url")
-                if not img_url or img_url in used_urls:
-                    continue
-                try:
-                    img_resp = requests.get(img_url, headers=spoofed_headers, timeout=6)
-                    if img_resp.status_code == 200 and passes_quality_gate(img_resp.content, search_prompt, video_title):
-                        used_urls.add(img_url)
-                        return img_resp.content
-                except requests.RequestException:
-                    continue
-    except Exception:
-        pass
-    return None
 
 def fetch_hf_ai_image(prompt):
     if not HF_TOKEN: return None
