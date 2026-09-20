@@ -1035,6 +1035,7 @@ class DashboardWorkflowController(WorkflowController):
                 )
                 live_layer["visual_original_path"] = str(live_item.get("path") or "").strip()
                 live_layer["visual_selected_hash"] = str(live_item.get("hash") or "").strip()
+                live_layer["source_image_url"] = str(live_item.get("source_image_url") or "").strip()
 
             self._visual_approved = False
             self._visual_rejected = False
