@@ -899,7 +899,7 @@ class DashboardWorkflowController(WorkflowController):
         return None, None, None
 
     def search_visual_pool(self, replacement_query: str) -> tuple[bool, str]:
-        """Fetch five new monetization-safe images for the global QC pool."""
+        """Fetch five additional identity-checked images for the global QC pool."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -982,11 +982,11 @@ class DashboardWorkflowController(WorkflowController):
 
             count = len(materialized)
             if count == 5:
-                message = f"Found 5 new monetization-safe images for '{query}'."
+                message = f"Found 5 new identity-checked images for '{query}'."
             elif count:
-                message = f"Found {count} new monetization-safe images for '{query}'; no error was raised because the configured sources were exhausted."
+                message = f"Found {count} new identity-checked images for '{query}'; no error was raised because the configured sources were exhausted."
             else:
-                message = f"No new monetization-safe images were returned for '{query}'. Try a different query."
+                message = f"No new identity-checked images were returned for '{query}'. Try a different query."
             self.update("visual_approval", 76, message)
             return True, message
         except Exception as exc:
