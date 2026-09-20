@@ -636,6 +636,9 @@ def patch_content_first_visuals(bot):
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
             seg["visual_source"] = source_type
+            # Bank bytes are already materialized to disk and/or copied into the
+            # repeated-subject rescue pool. Do not keep raw image bytes in script_data.
+            seg.pop("_verified_subject_assets", None)
 
         # Second pass: only unverified/failed scenes may borrow an already-
         # verified alternative for the same factual subject. Successful
