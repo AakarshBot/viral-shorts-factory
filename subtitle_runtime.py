@@ -91,6 +91,15 @@ def _load_regular_font(font_path: str | None, size: int):
 
 
 def _clean_word(value: Any) -> str:
+    # Extract scalar/list contents from NumPy and other array-like values before
+    # stringification so their internal representation can never become caption text.
+    if hasattr(value, "tolist") and not isinstance(value, (bytes, bytearray, str)):
+        try:
+            value = value.tolist()
+        except Exception:
+            pass
+    if isinstance(value, (list, tuple)):
+        value = " ".join(_clean_word(item) for item in value)
     text = str(value or "")
     text = text.replace("\u00a0", " ")
     text = re.sub(r"\s+", " ", text)
