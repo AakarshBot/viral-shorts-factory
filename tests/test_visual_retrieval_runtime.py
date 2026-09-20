@@ -1614,7 +1614,7 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
     second = retrieval.collect_manual_visual_search(
         FakeRuntime(),
         bot,
-        "Indian cricket team",
+        "city skyline",
         used_hashes=first_hashes,
     )
     second_hashes = {item["hash"] for item in second["assets"]}
