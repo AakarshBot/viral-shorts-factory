@@ -13,3 +13,4 @@ asset_cache/
 
 client_secret.json
 token.json
+.aider*

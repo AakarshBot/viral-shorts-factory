@@ -17,8 +17,10 @@ def test_ready_for_upload_updates_exact_run_not_latest_topic():
     # Use a temporary file database because WorkflowController opens its own
     # connection when applying the QC state transition.
     import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".db") as fh:
+    import os
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as fh:
         path = fh.name
+        fh.close()
         db = sqlite3.connect(path)
         migrate_vault(db)
         first_id, _ = create_run_record(db, "Repeated topic", "news", run_id="run-old")
@@ -37,6 +39,7 @@ def test_ready_for_upload_updates_exact_run_not_latest_topic():
             "SELECT id, run_id, status, video_id FROM vault ORDER BY id"
         ).fetchall()
         db.close()
+        os.unlink(path)
 
         assert rows[0] == (first_id, "run-old", "READY_FOR_UPLOAD", "READY_FOR_UPLOAD")
         assert rows[1] == (second_id, "run-current", "PENDING_QC", "PENDING_QC")
