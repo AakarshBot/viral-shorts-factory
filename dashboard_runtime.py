@@ -88,6 +88,24 @@ def run_visual_query_dry_run(
     if not isinstance(script_data, dict):
         raise RuntimeError("The canonical script pipeline returned no usable script.")
 
+    # Match the dashboard production path: the live run chooses the recommended
+    # generated title immediately after write_script() and before visual querying.
+    titles = script_data.get("titles") or [str(selected_story.get("title") or "").strip()]
+    if not isinstance(titles, list):
+        titles = [str(titles or selected_story.get("title") or "").strip()]
+    titles = [str(title or selected_story.get("title") or "").strip() for title in titles if str(title or "").strip()]
+    if not titles:
+        raise RuntimeError("The canonical script pipeline returned no usable title.")
+    try:
+        recommended_index = int(script_data.get("recommended_title_index", 1))
+    except (TypeError, ValueError):
+        recommended_index = 1
+    recommended_index = max(1, min(recommended_index, len(titles)))
+
+    script_data = dict(script_data)
+    script_data["titles"] = titles
+    script_data["title"] = titles[recommended_index - 1]
+
     raw_scenes = script_data.get("script") or []
     if not isinstance(raw_scenes, list) or not raw_scenes:
         raise RuntimeError("The canonical script pipeline returned no scenes.")
