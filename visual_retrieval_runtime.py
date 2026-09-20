@@ -782,19 +782,23 @@ def _signature_close(left: str, right: str, threshold: int = 3) -> bool:
 def _append_unique_candidate(candidate: dict, seen_hashes: set[str], seen_image_urls: set[str], seen_signatures: list[str]) -> bool:
     image_hash = str(candidate.get("hash") or "").strip()
     image_url = str(candidate.get("source_image_url") or "").strip().casefold().rstrip("/")
-    signature = str(candidate.get("signature") or "").strip()
+    source_asset_key = str(candidate.get("source_asset_key") or "").strip().casefold()
+    seen_asset_keys = getattr(_append_unique_candidate, "_seen_asset_keys", None)
+    if not isinstance(seen_asset_keys, set):
+        seen_asset_keys = set()
+        setattr(_append_unique_candidate, "_seen_asset_keys", seen_asset_keys)
     if image_hash and image_hash in seen_hashes:
         return False
     if image_url and image_url in seen_image_urls:
         return False
-    if signature and any(_signature_close(signature, prior) for prior in seen_signatures if prior):
+    if source_asset_key and source_asset_key in seen_asset_keys:
         return False
     if image_hash:
         seen_hashes.add(image_hash)
     if image_url:
         seen_image_urls.add(image_url)
-    if signature:
-        seen_signatures.append(signature)
+    if source_asset_key:
+        seen_asset_keys.add(source_asset_key)
     return True
 
 
@@ -851,6 +855,14 @@ def _manual_candidate_from_data(
             data.get("source_page_url") if isinstance(data, dict) else ""
         ).strip(),
         "source_image_url": source_image_url,
+        "source_asset_key": "|".join(
+            [
+                str(source_name or "").strip().casefold(),
+                str(data.get("source_page_url") if isinstance(data, dict) else "").strip().casefold(),
+                str(data.get("search_title") if isinstance(data, dict) else "").strip().casefold(),
+            ]
+        ).strip("|"),
+
     }
     if not _append_unique_candidate(
         candidate,
@@ -1002,7 +1014,7 @@ def collect_manual_visual_pool(
             source_key = str(source_name or "").strip().casefold()
             if not source_key:
                 continue
-            cache_key = ("manual", source_key, exact_query.casefold())
+            cache_key = ("query", source_key, exact_query.casefold())
             raw_data = search_cache.get(cache_key)
             if raw_data is None:
                 try:
@@ -1264,7 +1276,7 @@ def collect_manual_visual_search(
         if len(candidates) >= 5 or not callable(fetcher):
             break
         source_key = str(source_name or "").strip().casefold()
-        cache_key = ("new-search", source_key, exact_query.casefold())
+        cache_key = ("query", source_key, exact_query.casefold())
         raw_data = search_cache.get(cache_key)
         if raw_data is None:
             try:
