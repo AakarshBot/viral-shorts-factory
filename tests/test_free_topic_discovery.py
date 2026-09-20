@@ -64,3 +64,23 @@ def test_topic_discovery_has_no_removed_paid_or_library_discovery_path():
     assert "_gnews_items" not in source
     assert "_discovery_query_lanes" not in source
     assert "_adaptive_discovery_query" not in source
+
+
+def test_manual_trending_wrapper_preserves_target_and_filter(monkeypatch):
+    captured = {}
+
+    def fake_trends(geos, max_terms=15):
+        captured["geos"] = geos
+        captured["max_terms"] = max_terms
+        return ["Cricket World Cup", "AI research", "Bollywood release"]
+
+    monkeypatch.setattr(story_ranker, "fetch_google_trending_topics", fake_trends)
+    import ultimate_bot
+
+    trends = ultimate_bot.fetch_trending_topics(
+        target="india",
+        query_filter="Cricket OR BCCI",
+    )
+
+    assert captured == {"geos": ("IN",), "max_terms": 30}
+    assert trends == ["Cricket World Cup"]
