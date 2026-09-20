@@ -144,8 +144,13 @@ def test_person_provider_queries_use_canonical_identity_and_structured_commons()
         "Commons", "Vaibhav Sooryavanshi portrait", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 2
     ) == identity
     assert retrieval._provider_search_query(
-        "Openverse", "Vaibhav Sooryavanshi portrait", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 2
-    ) == "Vaibhav Sooryavanshi portrait"
+        "Openverse", "Vaibhav Sooryavanshi", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 1,
+        identity_label="Vaibhav Suryavanshi"
+    ) == "Vaibhav Suryavanshi"
+    assert retrieval._provider_search_query(
+        "Openverse", "Vaibhav Sooryavanshi portrait", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 2,
+        identity_label="Vaibhav Suryavanshi"
+    ) == "Vaibhav Suryavanshi portrait"
 
 
 def test_person_identity_resolver_uses_wikidata_and_caches(monkeypatch):
@@ -162,6 +167,51 @@ def test_person_identity_resolver_uses_wikidata_and_caches(monkeypatch):
     second = boundary.resolve_person_identity("Test Person Identity Resolver")
     assert first == second == {"qid": "Q123456", "label": "Test Person"}
     assert len(calls) == 1
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+
+
+def test_person_identity_resolver_prefers_verified_human(monkeypatch):
+    cache_key = "human identity resolver test"
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+    def fake_api(url, *, params=None, headers=None):
+        action = (params or {}).get("action")
+        if action == "wbsearchentities":
+            return {
+                "search": [
+                    {"id": "Q111", "label": "Organisation With Person-Like Name"},
+                    {"id": "Q222", "label": "Actual Person"},
+                ]
+            }
+        return {
+            "entities": {
+                "Q111": {"claims": {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q43229"}}}}]}, "labels": {"en": {"value": "Wrong Candidate"}}},
+                "Q222": {"claims": {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}]}, "labels": {"en": {"value": "Actual Person"}}},
+            }
+        }
+
+    monkeypatch.setattr(boundary, "_api_json", fake_api)
+    assert boundary.resolve_person_identity("Human Identity Resolver Test") == {"qid": "Q222", "label": "Actual Person"}
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+
+def test_person_identity_resolver_rejects_non_human_when_wikidata_is_complete(monkeypatch):
+    cache_key = "non human identity resolver test"
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+    def fake_api(url, *, params=None, headers=None):
+        action = (params or {}).get("action")
+        if action == "wbsearchentities":
+            return {"search": [{"id": "Q333", "label": "Not A Person"}]}
+        return {
+            "entities": {
+                "Q333": {"claims": {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q43229"}}}]}}}
+            }
+        }
+
+    monkeypatch.setattr(boundary, "_api_json", fake_api)
+    assert boundary.resolve_person_identity("Non Human Identity Resolver Test") == {}
     boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
 
 
