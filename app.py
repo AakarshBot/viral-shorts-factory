@@ -1739,7 +1739,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         title = st.text_input("YouTube title", max_chars=100, key="final_title", disabled=metadata_approved)
         meta_cols = st.columns(2)
         with meta_cols[0]:
-            description = st.text_area("YouTube description", height=140, key="final_description", disabled=not editing)
+            description = st.text_area("YouTube description", height=140, key="final_description", disabled=metadata_approved)
         with meta_cols[1]:
             comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=not editing)
 
@@ -1761,9 +1761,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                         st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
             with note_col:
                 st.caption("Nothing uploads until this approval succeeds.")
-            return
 
-        st.success("Metadata approved.", icon="✅")
+        if metadata_approved:
+            st.success("Metadata approved.", icon="✅")
         if st.button("Edit metadata", width="content", key="edit_metadata"):
             st.session_state["metadata_approved"] = False
             st.rerun()
