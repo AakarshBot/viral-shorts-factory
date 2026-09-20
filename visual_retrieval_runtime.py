@@ -1917,9 +1917,15 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         selected_bytes = selected.get("bytes") if selected else None
         if selected_bytes and selected_hash:
             try:
+                # save_to_cache() already persists the verified-cache marker.
+                # Do not pass unsupported kwargs through runtime wrappers.
                 cache_path = runtime.save_to_cache(
-                    bot, selected_bytes, cache_entity, visual_type,
-                    selected.get("source", "visual"), context, verified=True
+                    bot,
+                    selected_bytes,
+                    cache_entity,
+                    visual_type,
+                    selected.get("source", "visual"),
+                    context,
                 )
                 if cache_path:
                     import json
@@ -1934,8 +1940,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     meta["verified"] = True
                     with open(meta_path, "w", encoding="utf-8") as fh:
                         json.dump(meta, fh, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(
+                    f"   [Visual Cache] Persist failed: {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
 
             try:
                 original_path = os.path.join(
