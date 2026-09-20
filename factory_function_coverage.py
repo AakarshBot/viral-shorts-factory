@@ -33,7 +33,6 @@ SURFACE_MAP: dict[str, str] = {
     "cricket_pipeline_prompts": "Live Factory",
     "run_analytics_sweep": "Channel Statistics",
     "token_overlap_ratio": "Live Factory",
-    "get_trend_signal_bonus": "Live Factory",
     "gather_and_filter_stories": "Live Factory",
     "editorial_gate_batch": "Live Factory",
     "process_scored_candidates": "Live Factory",
