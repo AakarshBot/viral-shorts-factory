@@ -799,11 +799,6 @@ def token_overlap_ratio(text1, text2):
     if not tokens1 or not tokens2: return 0.0
     return len(tokens1.intersection(tokens2)) / len(tokens1.union(tokens2))
 
-def get_trend_signal_bonus(keyword):
-    """Compatibility shim; trend strength is attached during the discovery pass."""
-    return 0.0
-
-
 def gather_and_filter_stories(
     conn,
     genre_key,
@@ -903,25 +898,15 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
     return batch_stories
 
 def process_scored_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode):
-    scored_candidates = []
-    for idx, scores in enumerate(scored_data):
-        if idx >= len(batch_stories): break
-        story = batch_stories[idx]
-        if scores.get("hard_reject", False) or scores.get("monetization_risk", 10) < 5: continue
-        
-        hs, nc, af, mr, sl = scores.get("hook_strength", 5), scores.get("narrative_completeness", 5), scores.get("audience_fit", 5), scores.get("monetization_risk", 5), scores.get("shelf_life", 5)
-        trend_bonus = get_trend_signal_bonus(story['title'])
-        velocity_boost = story.get('velocity_score', 0.0)
-        
-        composite = (hs * 0.25 + nc * 0.20 + af * 0.20 + mr * 0.20 + sl * 0.15) + (bonuses.get(story['genre'], 0) if format_mode == "regular" else 0) + (2.0 if format_mode == "regular" and story['genre'] == last_genre else 0) + story.get('corroboration_bonus', 0) + trend_bonus + velocity_boost - story.get('recency_penalty', 1.0)
-        
-        story.update({"hook_strength": hs, "narrative_completeness": nc, "audience_fit": af, "monetization_risk": mr, "shelf_life": sl, "composite_score": round(composite, 2)})
-        scored_candidates.append(story)
-        
-    if scored_candidates:
-        scored_candidates.sort(key=lambda x: x['composite_score'], reverse=True)
-        return scored_candidates
-    return batch_stories
+    """Compatibility entry point delegated to the canonical editorial scorer."""
+    from editorial_runtime import score_candidates
+    return score_candidates(
+        scored_data or [],
+        batch_stories or [],
+        bonuses or {},
+        last_genre,
+        format_mode,
+    )
 
 def get_insights_for_script(conn):
     try:
