@@ -250,7 +250,56 @@ def generate_visual_query_suggestions(
                 raw = str(response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "") or "")
         except Exception:
             raw = ""
-    return _parse_query_planner_response(raw, limit) or _local_query_fallback(title, body, limit)
+    queries = _parse_query_planner_response(raw, limit) or _local_query_fallback(title, body, limit)
+
+    story_tokens = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", f"{title} {body}", flags=re.UNICODE)
+    }
+    sports_terms = {
+        "cricket", "football", "soccer", "basketball", "tennis", "hockey",
+        "rugby", "baseball", "volleyball", "badminton", "golf", "boxing",
+        "wrestling", "racing", "motorsport", "athletics", "swimming",
+    }
+    sports_story = str(category or "").strip().casefold() in {"sports", "sport"} or bool(
+        story_tokens & sports_terms
+    )
+    if sports_story and queries:
+        action_terms = {
+            "action", "batting", "bowling", "fielding", "playing", "match",
+            "celebration", "celebrating", "training", "scoring",
+        }
+        static_terms = {
+            "logo", "crest", "badge", "emblem", "portrait", "headshot",
+        }
+        preferred = next(
+            (
+                item for item in queries
+                if not (
+                    set(re.findall(r"[\w-]+", str(item.get("query") or "").casefold()))
+                    & static_terms
+                )
+            ),
+            None,
+        )
+        if preferred is not None:
+            preferred_query = str(preferred.get("query") or "").strip()
+            preferred_tokens = set(re.findall(r"[\w-]+", preferred_query.casefold()))
+            if not preferred_tokens & action_terms:
+                action_query = f"{preferred_query} action".strip()
+                preferred = dict(preferred)
+                preferred["query"] = action_query[:180]
+                preferred["reason"] = "Action-oriented first-frame search for a sports story."
+                queries = [
+                    preferred,
+                    *[
+                        item for item in queries
+                        if str(item.get("query") or "").strip().casefold()
+                        != preferred_query.casefold()
+                    ],
+                ]
+
+    return queries[:limit]
 
 
 def _scene_text(scene: dict[str, Any]) -> str:
