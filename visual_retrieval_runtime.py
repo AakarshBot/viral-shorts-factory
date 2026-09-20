@@ -857,13 +857,17 @@ def _manual_candidate_from_data(
             data.get("source_page_url") if isinstance(data, dict) else ""
         ).strip(),
         "source_image_url": source_image_url,
-        "source_asset_key": "|".join(
-            [
-                str(source_name or "").strip().casefold(),
-                str(data.get("source_page_url") if isinstance(data, dict) else "").strip().casefold(),
-                str(data.get("search_title") if isinstance(data, dict) else "").strip().casefold(),
-            ]
-        ).strip("|"),
+        "source_asset_key": (
+            "|".join(
+                [
+                    str(source_name or "").strip().casefold(),
+                    str(data.get("source_page_url") if isinstance(data, dict) else "").strip().casefold(),
+                    str(data.get("search_title") if isinstance(data, dict) else "").strip().casefold(),
+                ]
+            ).strip("|")
+            if isinstance(data, dict) and str(data.get("search_title") or "").strip()
+            else ""
+        ),
 
     }
     if not _append_unique_candidate(
