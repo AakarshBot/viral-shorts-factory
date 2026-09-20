@@ -193,3 +193,36 @@ def test_cluster_marks_gdelt_only_event_as_discovery_gap():
     assert len(events) == 1
     assert events[0]["event_discovery_gap"] is True
     assert events[0]["event_development_state"] == "single-source"
+
+
+def test_gdelt_preserves_boolean_query_and_allows_large_record_cap(monkeypatch):
+    import event_discovery_runtime as runtime
+
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "articles": [{
+                    "title": "Fresh event",
+                    "url": "https://example.com/story",
+                    "domain": "example.com",
+                    "seendate": "20260920T120000Z",
+                }]
+            }
+
+    def fake_get(url, **kwargs):
+        captured.update(kwargs.get("params") or {})
+        return Response()
+
+    monkeypatch.setattr(runtime.requests, "get", fake_get)
+    rows = runtime.fetch_gdelt_articles(
+        "(breaking OR launch) sourcecountry:india",
+        max_records=250,
+    )
+    assert rows
+    assert captured["query"] == "(breaking OR launch) sourcecountry:india"
+    assert captured["maxrecords"] == 250
