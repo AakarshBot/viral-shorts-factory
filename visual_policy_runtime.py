@@ -7,14 +7,10 @@ from __future__ import annotations
 
 import os
 import re
-import threading
-from collections import defaultdict
 
 from PIL import Image, ImageDraw, ImageFont
 
 _INSTALLED = False
-_SUBJECT_LOCK = threading.Lock()
-_SUBJECT_RUNS = {}
 
 _ORGANISATION_ACRONYMS = {
     "BCCI", "ICC", "PCB", "SLC", "BCB", "ACB", "FIFA", "UEFA", "NBA", "NFL", "ATP", "WTA",
@@ -103,64 +99,10 @@ def _headline_fallback(video_title):
     return _clean_search_subject(" ".join(proper[:3])) if proper else _clean_search_subject(words[0])
 
 
-def _subject_limit_wrapper(original):
-    if getattr(original, "_subject_limit_bound", False):
-        return original
-
-    def limited_relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
-        entity = _clean_search_subject(seg.get("primary_entity", "") or "")
-        key = re.sub(r"\s+", " ", entity.lower()).strip()
-        run_key = id(used_hashes)
-        chosen_seg = seg
-        if key:
-            with _SUBJECT_LOCK:
-                run_counts = _SUBJECT_RUNS.setdefault(run_key, defaultdict(int))
-                count = run_counts[key]
-                if count < 2:
-                    run_counts[key] += 1
-                else:
-                    fallback = _headline_fallback(video_title)
-                    if fallback and fallback.lower() != key:
-                        chosen_seg = dict(seg)
-                        chosen_seg["primary_entity"] = fallback
-                        chosen_seg["visual_type"] = "GENERAL_CONTEXT"
-                        chosen_seg["visual_intent"] = "documentary context"
-                        chosen_seg["specific_search_prompt"] = fallback
-                    else:
-                        chosen_seg = dict(seg)
-                        chosen_seg["primary_entity"] = ""
-                        chosen_seg["visual_type"] = "GENERAL_CONTEXT"
-                        chosen_seg["visual_intent"] = "documentary context"
-                        chosen_seg["specific_search_prompt"] = ""
-        try:
-            return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
-        finally:
-            with _SUBJECT_LOCK:
-                if len(_SUBJECT_RUNS) > 32:
-                    _SUBJECT_RUNS.pop(next(iter(_SUBJECT_RUNS)), None)
-
-    limited_relevant_asset._subject_limit_bound = True
-    return limited_relevant_asset
-
-
-def _install_subject_limit():
-    try:
-        import visual_runtime
-        current = getattr(visual_runtime, "_relevant_asset", None)
-        if current and not getattr(current, "_subject_limit_bound", False):
-            visual_runtime._relevant_asset = _subject_limit_wrapper(current)
-            print("   [Visual Policy] Subject repeat limit installed: max two primary-subject uses per run.", flush=True)
-            return True
-    except Exception as exc:
-        print(f"   [Visual Policy] Subject limit unavailable: {type(exc).__name__}: {exc}", flush=True)
-    return False
-
-
 def install_visual_card_policy(bot=None):
     """Patch legacy card renderers without replacing visual search strategy."""
     global _INSTALLED
     if _INSTALLED:
-        _install_subject_limit()
         return True
     try:
         import ultimate_bot as default_bot
@@ -206,7 +148,6 @@ def install_visual_card_policy(bot=None):
             namespace["create_branded_slide"] = create_branded_slide_policy
 
         _INSTALLED = True
-        _install_subject_limit()
         print("   [Visual Policy] Non-Top-5 hook/outro cards disabled; Top-5 cards preserved; authoritative search planner retained.", flush=True)
         return True
     except Exception as exc:
