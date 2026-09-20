@@ -1938,12 +1938,12 @@ class DashboardWorkflowController(WorkflowController):
         with self._lock:
             active_config = getattr(self.bot, "_active_web_config", {}) or {}
         data.update(
-                {
-                    "format_mode": str(
-                        active_config.get("format_mode")
-                        or (data.get("selected_story") or {}).get("format_mode")
-                        or "regular"
-                    ).strip().lower(),
+            {
+                "format_mode": str(
+                    active_config.get("format_mode")
+                    or (data.get("selected_story") or {}).get("format_mode")
+                    or "regular"
+                ).strip().lower(),
                     "script_review_required": data.get("stage") == "script_review",
                     "script_visual_queries": list(self._script_visual_queries),
                     "visual_packages": list(self._visual_packages),
