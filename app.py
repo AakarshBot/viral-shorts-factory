@@ -7,6 +7,7 @@ the user-facing visual approval/upload decisions.
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import re
 import sqlite3
@@ -51,14 +52,36 @@ from dashboard_runtime import (
 
 MAX_DASHBOARD_DISCOVERY_HEADLINES = 28
 
+_UI_ARTIFACT_RE = re.compile(
+    r"(?i)(?<![a-z0-9])_arrow(?:_(?:right|left|up|down))?(?![a-z0-9])"
+)
+
+
+def _ui_text(value: Any, fallback: str = "") -> str:
+    """Normalize generated text before it reaches Streamlit's HTML surface."""
+    if value is None:
+        return fallback
+    text = str(value)
+    text = _UI_ARTIFACT_RE.sub("", text)
+    text = text.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _ui_html(value: Any, fallback: str = "") -> str:
+    """Escape normalized dashboard text so generated content cannot break the layout."""
+    return html.escape(_ui_text(value, fallback), quote=False)
+
+
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
 
 st.markdown("""<style>
 :root{
-  --bg:#f3f5f8;--surface:#ffffff;--surface-soft:#f8fafc;--line:#e1e5eb;--line-strong:#cfd5df;
-  --text:#151a24;--muted:#667085;--muted-2:#8a93a3;--accent:#5b46e8;--accent-deep:#4632c7;
-  --accent-soft:#efedff;--good:#147a50;--good-soft:#eaf7f0;--warn:#a35b04;--warn-soft:#fff4e2;
-  --shadow:0 10px 30px rgba(20,27,39,.07);--shadow-lg:0 18px 48px rgba(20,27,39,.10);
+  --bg:#f4efe8;--surface:#fffdf9;--surface-soft:#faf6ef;--line:#e7ddd1;--line-strong:#d2c5b7;
+  --text:#20242a;--muted:#716a61;--muted-2:#9a9084;--accent:#2f5d62;--accent-deep:#23484c;
+  --accent-soft:#e8f0ef;--good:#2f7b61;--good-soft:#eaf5ef;--warn:#b56b2f;--warn-soft:#fbf0e4;
+  --danger:#b64d42;--shadow:0 10px 30px rgba(69,49,31,.07);--shadow-lg:0 18px 48px rgba(69,49,31,.11);
 }
 html,body,[data-testid="stAppViewContainer"]{background:var(--bg);color:var(--text)}
 [data-testid="stHeader"]{background:rgba(243,245,248,.94);border-bottom:1px solid rgba(207,213,223,.7)}
@@ -206,9 +229,88 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 [data-baseweb="input"]{
   background:#fff!important;
 }
-.crop-shell{background:#f7f8fb;border:1px solid var(--line);border-radius:16px;padding:12px}
+.crop-shell{background:var(--surface-soft);border:1px solid var(--line);border-radius:16px;padding:12px}
 .crop-caption{color:var(--muted);font-size:.73rem;line-height:1.45;margin-bottom:9px}
 .dashboard-footer{text-align:center;color:var(--muted-2);font-size:.7rem;padding:10px 0}
+
+/* Keep generated content contained and readable at every dashboard breakpoint. */
+.story-title,.story-reason,.output-card,.release-gate,.release-gate-detail,.timeline-message,
+.brand-sub,.sidebar-status-copy,.live-bar-copy,.qc-guide-step span,.empty-copy{
+  min-width:0;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.story-title,.output-card{line-height:1.5}
+.story-reason{max-height:7.5rem;overflow:auto;padding-right:4px}
+.release-gate-detail,.timeline-message{line-height:1.5}
+[data-testid="stMarkdownContainer"],[data-testid="stCaptionContainer"],
+[data-testid="stTextArea"],[data-testid="stTextInput"]{min-width:0}
+.stTextInput input,.stTextArea textarea{
+  line-height:1.45!important;
+  overflow-wrap:anywhere!important;
+  word-break:break-word!important;
+}
+.stTextArea textarea{min-height:112px!important}
+.stButton>button,.stLinkButton>a{
+  white-space:normal!important;
+  line-height:1.2!important;
+}
+section[data-testid="stSidebar"]{
+  background:#eee6db;
+  border-right:1px solid #ddd0c1;
+}
+section[data-testid="stSidebar"] .stMarkdown p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
+  color:#655e55;
+}
+.sidebar-title{color:#252a2d}
+.sidebar-kicker{color:var(--accent)}
+.sidebar-status{
+  background:rgba(255,253,249,.86);
+  border:1px solid #dcd0c3;
+  box-shadow:none;
+}
+.sidebar-status-title{color:#252a2d}
+.sidebar-status-copy{color:#756d63}
+[data-testid="stSidebar"] [data-testid="stExpander"]{
+  background:rgba(255,253,249,.82)!important;
+  border-color:#d8ccbf!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary{
+  color:#252a2d!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] pre{
+  background:#20282b!important;
+  color:#e9f0ed!important;
+  border:1px solid #394346!important;
+  border-radius:10px!important;
+  font-size:.72rem!important;
+  line-height:1.45!important;
+  max-height:430px!important;
+  overflow:auto!important;
+}
+[data-testid="stSidebar"] .stButton>button{
+  background:rgba(255,253,249,.84)!important;
+  border-color:#d2c5b7!important;
+}
+.stButton>button[kind="primary"]{
+  background:linear-gradient(180deg,#3d6f74,#2f5d62)!important;
+  border-color:#2b5559!important;
+  box-shadow:0 8px 18px rgba(47,93,98,.16)!important;
+}
+.stButton>button[kind="primary"]:hover{
+  background:linear-gradient(180deg,#35666b,#294f53)!important;
+  border-color:#294f53!important;
+}
+.score-chip{background:#eef3f2;border-color:#cfdfdd;color:#31565a}
+.meta-chip{background:#f7f1e9;border-color:#e2d6ca;color:#665e55}
+.brand-card{background:linear-gradient(135deg,#fffdf9 0%,#f5eee5 100%);border-color:#e4d8cc}
+.factory-status{background:#fffdf9;border-color:#e2d6ca}
+.stage-card.active{border-color:#95b5b2;background:#eaf2f1}
+.stage-card.done{border-color:#bcd9ca;background:#eef7f1}
+.stage-card.stopped{border-color:#ebcbb1;background:#fcf1e6}
+.empty-state{background:linear-gradient(135deg,#fffdf9 0%,#f4eeea 100%);border-color:#dfd3c8}
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -448,9 +550,9 @@ def build_config() -> Dict[str, Any]:
 
 def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
     st.markdown(
-        f"<div class='section-kicker'>{kicker}</div>"
-        f"<div class='section-title'>{title}</div>"
-        + (f"<div class='section-subtitle'>{subtitle}</div>" if subtitle else ""),
+        f"<div class='section-kicker'>{_ui_html(kicker)}</div>"
+        f"<div class='section-title'>{_ui_html(title)}</div>"
+        + (f"<div class='section-subtitle'>{_ui_html(subtitle)}</div>" if subtitle else ""),
         unsafe_allow_html=True,
     )
 
@@ -491,7 +593,7 @@ def render_header(action_mode: str) -> None:
         status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
         st.markdown(
             f"<div class='factory-status'><div class='factory-status-label'>FACTORY STATUS</div>"
-            f"<div class='factory-status-value'>{status}</div></div>",
+            f"<div class='factory-status-value'>{_ui_html(status)}</div></div>",
             unsafe_allow_html=True,
         )
 
@@ -589,7 +691,7 @@ def render_sidebar_controls() -> Dict[str, Any]:
 
     st.sidebar.markdown(
         f"<div class='sidebar-status'><div class='sidebar-status-title'>{status_title}</div>"
-        f"<div class='sidebar-status-copy'>{status_copy}</div></div>",
+        f"<div class='sidebar-status-copy'>{_ui_html(status_copy)}</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -644,7 +746,7 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     message = str(snapshot.get("message") or "").strip()
     if message:
         st.markdown(
-            f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {message}</div></div>",
+            f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {_ui_html(message)}</div></div>",
             unsafe_allow_html=True,
         )
 
@@ -656,7 +758,7 @@ def _script_text(script_data: Dict[str, Any]) -> str:
     for index, scene in enumerate(scenes, 1):
         if not isinstance(scene, dict):
             continue
-        voiceover = str(scene.get("voiceover", "") or "").strip()
+        voiceover = _ui_text(scene.get("voiceover", ""))
         if voiceover:
             blocks.append(f"Scene {index}\n{voiceover}")
     return "\n\n".join(blocks)
@@ -685,11 +787,11 @@ def render_script(snapshot: Dict[str, Any]) -> None:
 
         previews = [scene for scene in scenes if isinstance(scene, dict)][:2] if isinstance(scenes, list) else []
         for index, scene in enumerate(previews, 1):
-            voiceover = str(scene.get("voiceover") or "").strip()
+            voiceover = _ui_text(scene.get("voiceover"))
             if voiceover:
                 st.markdown(
                     f"<div class='output-card'><div class='small-muted'>SCENE {index}</div>"
-                    f"<div style='margin-top:5px;line-height:1.5'>{voiceover}</div></div>",
+                    f"<div style='margin-top:5px;line-height:1.5;overflow-wrap:anywhere'>{_ui_html(voiceover)}</div></div>",
                     unsafe_allow_html=True,
                 )
         with st.expander("Open full narration", expanded=False):
@@ -779,7 +881,7 @@ def render_script_visual_query_review(
                 st.markdown(f"<div class='story-rank'>SLIDE {index:02d}</div>", unsafe_allow_html=True)
                 if voiceover:
                     st.markdown(
-                        f"<div style='font-size:.92rem;line-height:1.6;margin:7px 0 4px'>{voiceover}</div>",
+                        f"<div style='font-size:.92rem;line-height:1.6;margin:7px 0 4px;overflow-wrap:anywhere'>{_ui_html(voiceover)}</div>",
                         unsafe_allow_html=True,
                     )
         submitted = st.form_submit_button(
@@ -1108,7 +1210,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
     def render_pool_section(title: str, description: str, assets: list[dict], section_key: str, rejected_section: bool = False) -> None:
         st.markdown(
-            f"<div class='qc-pool-heading'><b>{title}</b><span>{description}</span></div>",
+            f"<div class='qc-pool-heading'><b>{_ui_html(title)}</b><span>{_ui_html(description)}</span></div>",
             unsafe_allow_html=True,
         )
         if not assets:
@@ -1190,7 +1292,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         group_id = str(group.get("id") or "search")
         group_items = [dict(item) for item in (group.get("items") or []) if isinstance(item, dict)]
         st.markdown(
-            f"<div class='qc-pool-heading'><b>Search · {group.get('query','')}</b><span>{len(group_items)} result(s)</span></div>",
+            f"<div class='qc-pool-heading'><b>Search · {_ui_html(group.get('query',''))}</b><span>{len(group_items)} result(s)</span></div>",
             unsafe_allow_html=True,
         )
         for row_start in range(0, len(group_items), 3):
@@ -1309,8 +1411,8 @@ def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
         rows.append(
             f"<div class='timeline-row'><div class='timeline-dot'>{icon}</div>"
             f"<div class='timeline-main'><div class='timeline-head'>{event.get('stage', 'Factory')}"
-            f"<span class='timeline-time'>{event.get('time', '')}</span></div>"
-            f"<div class='timeline-message'>{event.get('message', '')}</div></div></div>"
+            f"<span class='timeline-time'>{_ui_html(event.get('time', ''))}</span></div>"
+            f"<div class='timeline-message'>{_ui_html(event.get('message', ''))}</div></div></div>"
         )
     st.markdown("<div class='timeline'>" + "".join(rows) + "</div>", unsafe_allow_html=True)
 
@@ -1334,7 +1436,7 @@ def render_research_summary(snapshot: Dict[str, Any]) -> None:
     _render_section_header("Research", "Selected story")
     with st.container(border=True):
         st.markdown(
-            f"<div style='font-size:1.08rem;font-weight:780;line-height:1.4'>{headline}</div>",
+            f"<div style='font-size:1.08rem;font-weight:780;line-height:1.4;overflow-wrap:anywhere'>{_ui_html(headline)}</div>",
             unsafe_allow_html=True,
         )
         if source:
@@ -1392,14 +1494,11 @@ def render_powershell_widget(snapshot: Dict[str, Any]) -> None:
 
     with st.sidebar:
         with st.expander(f"🖥️ PowerShell · {status}", expanded=False):
-            st.caption(
-                "Mirrors the active factory worker's PowerShell stdout/stderr. "
-                "This panel updates with the live factory progress."
-            )
+            st.caption("Live worker output · newest lines appear at the bottom.")
             if lines:
                 visible = lines[-100:]
                 st.code("\n".join(visible), language="powershell")
-                st.caption(f"Showing the latest {len(visible)} lines · stage: {stage or 'ready'}")
+                st.caption(f"{len(visible)} lines · stage: {_ui_text(stage, 'ready')}")
             else:
                 st.info("No factory PowerShell output captured yet.")
 
@@ -1554,8 +1653,8 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         gate_class = "pass" if passed else "block"
         gate_html.append(
             f"<div class='release-gate {gate_class}'><div class='release-gate-name'>"
-            f"{'✓' if passed else '✕'} {gate.get('label', '')}</div>"
-            f"<div class='release-gate-detail'>{gate.get('detail', '')}</div></div>"
+            f"{'✓' if passed else '✕'} {_ui_html(gate.get('label', ''))}</div>"
+            f"<div class='release-gate-detail'>{_ui_html(gate.get('detail', ''))}</div></div>"
         )
     st.markdown("<div class='release-gates'>" + "".join(gate_html) + "</div>", unsafe_allow_html=True)
 
@@ -1693,7 +1792,7 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
         selected = snapshot.get("selected_story") or {}
         if selected:
             st.markdown(
-                f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{selected.get('title', '')}</b></div>",
+                f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{_ui_html(selected.get('title', ''))}</b></div>",
                 unsafe_allow_html=True,
             )
 
@@ -1768,9 +1867,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 unsafe_allow_html=True,
             )
             st.markdown(
-                f"<div class='meta-row'><span class='meta-chip'>Mode · {mode_label}</span>"
-                f"<span class='meta-chip'>Language · {language_label}</span>"
-                f"<span class='meta-chip'>Category · {category_label}</span></div>",
+                f"<div class='meta-row'><span class='meta-chip'>Mode · {_ui_html(mode_label)}</span>"
+                f"<span class='meta-chip'>Language · {_ui_html(language_label)}</span>"
+                f"<span class='meta-chip'>Category · {_ui_html(category_label)}</span></div>",
                 unsafe_allow_html=True,
             )
             st.write("")
@@ -1817,7 +1916,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     pending_candidate = st.session_state.get("pending_candidate")
     if pending_candidate:
         headline = str(pending_candidate.get("title") or "Untitled story").strip()
-        source = str(pending_candidate.get("source_label") or "News source").strip()
+        source = _ui_text(pending_candidate.get("source_label"), "News source")
         url = str(pending_candidate.get("story_url") or "").strip()
 
         config_for_queries = dict(st.session_state.web_config or {})
@@ -1831,7 +1930,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         with st.container(border=True):
             st.markdown("<div class='story-rank'>SELECTED HEADLINE</div>", unsafe_allow_html=True)
             st.markdown(
-                f"<div class='story-title' style='font-size:1.35rem'>{headline}</div>",
+                f"<div class='story-title' style='font-size:1.35rem;overflow-wrap:anywhere'>{_ui_html(headline)}</div>",
                 unsafe_allow_html=True,
             )
             st.caption(f"Source · {source}")
@@ -1856,8 +1955,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 )
                 if index < len(query_suggestions):
                     suggestion = query_suggestions[index]
-                    hint = str(suggestion.get("source_hint") or "Configured image source").strip()
-                    reason = str(suggestion.get("reason") or "").strip()
+                    hint = _ui_text(suggestion.get("source_hint"), "Configured image source")
+                    reason = _ui_text(suggestion.get("reason"))
                     if hint or reason:
                         st.caption(
                             (f"{hint}" if hint else "")
@@ -1940,18 +2039,19 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
                 with st.container(border=True):
                     st.markdown(f"<div class='story-rank'>#{rank:02d}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='story-title'>{title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='story-title'>{_ui_html(title)}</div>", unsafe_allow_html=True)
                     article_label = "article" if evidence["articles"] == 1 else "articles"
                     publisher_label = f" · {evidence['independent_publishers']} publishers" if evidence["independent_publishers"] else ""
                     fit_label = f" · Channel fit {history_fit:.1f}/10" if candidate.get("ai_recommendation") else ""
                     st.markdown(
                         f"<span class='score-chip'>Score {score:.1f}</span> "
-                        f"<span class='story-meta'>{evidence['articles']} {article_label}{publisher_label}{fit_label}</span>",
+                        f"<span class='story-meta'>{evidence['articles']} {_ui_html(article_label)}{_ui_html(publisher_label)}{_ui_html(fit_label)}</span>",
                         unsafe_allow_html=True,
                     )
                     if reason:
-                        st.markdown(f"<div class='story-reason'>{reason}</div>", unsafe_allow_html=True)
-                    st.caption(f"Source · {source}")
+                        with st.expander("Why this story", expanded=False):
+                            st.caption(_ui_text(reason))
+                    st.caption(f"Source · {_ui_text(source)}")
                     action_cols = st.columns([1, 1])
                     with action_cols[0]:
                         if url.startswith(("http://", "https://")):
