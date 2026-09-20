@@ -1060,7 +1060,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
                     if original_path and os.path.isfile(original_path):
                         from PIL import Image
-                        from streamlit_cropper import st_cropper
 
                         original_image = Image.open(original_path).convert("RGB")
                         stored_box = item.get("crop_box") or {}
@@ -1078,7 +1077,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if st_cropper is None:
                             st.warning(
                                 "Interactive cropping is unavailable in this Python environment. "
-                                "Run \`python -m pip install -r requirements.txt\` and restart Streamlit."
+                                "Run `python -m pip install -r requirements.txt` and restart Streamlit."
                             )
                         else:
                             crop_left, crop_right = st.columns([1.18, 0.82], gap="medium")
