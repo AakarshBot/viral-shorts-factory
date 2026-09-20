@@ -1681,7 +1681,6 @@ def _perform_upload(
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
-    @st.fragment(run_every="1s")
     def _fragment():
         snapshot = controller.snapshot()
         render_stage_progress(snapshot)
