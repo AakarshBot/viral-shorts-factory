@@ -1585,7 +1585,7 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
                     "license": "Pexels License",
                     "license_url": "https://www.pexels.com/license/",
                 },
-                "search_title": "Indian cricket team",
+                "search_title": "city skyline",
             }
             for index in range(start, start + 5)
         ]
