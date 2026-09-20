@@ -1128,3 +1128,89 @@ def test_manual_pool_scene_selection_prefers_scene_relevant_candidate():
         set(),
     )
     assert selected["hash"] == "press"
+
+def test_commons_team_search_handles_womens_team_and_scene_modifier(monkeypatch):
+    calls = []
+    downloads = []
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_wikidata_entity",
+        lambda query: {
+            "qid": "Q6019705",
+            "label": "India women's national cricket team",
+            "description": "women's national cricket team of India",
+        },
+    )
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        calls.append(dict(params or {}))
+        return {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:India women's national cricket team.jpg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/india-women.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:India_women.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC0"},
+                                "Artist": {"value": "Example"},
+                                "ImageDescription": {"value": "India women's national cricket team"},
+                            },
+                        }],
+                        "categories": [{"title": "Category:India women's national cricket team"}],
+                    }
+                }
+            }
+        }
+
+    def fake_download(url, used_urls=None, metadata=None):
+        downloads.append((url, dict(metadata or {})))
+        return {
+            "bytes": b"image-bytes",
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        }
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+    monkeypatch.setattr(provider_boundary, "_download_image", fake_download)
+
+    candidates = provider_boundary.fetch_commons_candidates(
+        "India Womens National Team celebrate",
+        set(),
+        "",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+    )
+
+    searches = [call.get("gsrsearch") for call in calls]
+    assert "haswbstatement:P180=Q6019705" in searches
+    assert "India women's national cricket team celebration" in searches
+    assert "India Womens National Team celebrate" in searches
+    assert len(searches) <= 4
+    assert candidates
+    assert downloads
+
+
+def test_canonical_manual_entity_anchor_normalizes_named_team(monkeypatch):
+    import visual_search_intent_runtime as intent_runtime
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_wikidata_entity",
+        lambda query: {
+            "qid": "Q6019705",
+            "label": "India women's national cricket team",
+        },
+    )
+
+    assert (
+        intent_runtime.canonical_manual_entity_anchor(
+            "India Womens National Team celebrate",
+            "",
+        )
+        == "India women's national cricket team"
+    )
+

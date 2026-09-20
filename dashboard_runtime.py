@@ -22,6 +22,30 @@ from PIL import Image
 from workflow_runtime import WorkflowController
 
 
+def _manual_crop_box_to_shorts(img: Image.Image, crop_box: dict[str, Any]) -> Image.Image:
+    """Apply the exact 9:16 area selected by the dashboard cropper."""
+    source = img.convert("RGB")
+    try:
+        left = int(crop_box.get("left", 0))
+        top = int(crop_box.get("top", 0))
+        width = int(crop_box.get("width", 0))
+        height = int(crop_box.get("height", 0))
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError("The selected crop area is invalid.")
+
+    left = max(0, min(source.width - 1, left))
+    top = max(0, min(source.height - 1, top))
+    width = max(1, min(source.width - left, width))
+    height = max(1, min(source.height - top, height))
+
+    aspect = width / max(1, height)
+    if abs(aspect - (9 / 16)) > 0.025:
+        raise ValueError("The selected crop area must remain 9:16 for Shorts.")
+
+    cropped = source.crop((left, top, left + width, top + height))
+    return cropped.resize((1080, 1920), Image.Resampling.LANCZOS)
+
+
 def _manual_crop_to_shorts(img: Image.Image, zoom: float = 1.0, x_center: float = 0.5, y_center: float = 0.5) -> Image.Image:
     """Create a user-positioned 9:16 crop from the preserved original source."""
     source = img.convert("RGB")
@@ -1271,8 +1295,9 @@ class DashboardWorkflowController(WorkflowController):
         zoom: float = 1.0,
         x_center: float = 0.5,
         y_center: float = 0.5,
+        crop_box: dict[str, Any] | None = None,
     ) -> tuple[bool, str]:
-        """Apply a dashboard-selected crop to the preserved original visual source."""
+        """Apply a dashboard-selected crop to the preserved original visual source or an exact crop box."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -1319,7 +1344,10 @@ class DashboardWorkflowController(WorkflowController):
             ).strip()
 
             original = Image.open(source_path).convert("RGB")
-            cropped = _manual_crop_to_shorts(original, zoom, x_center, y_center).convert("RGBA")
+            if crop_box:
+                cropped = _manual_crop_box_to_shorts(original, crop_box).convert("RGBA")
+            else:
+                cropped = _manual_crop_to_shorts(original, zoom, x_center, y_center).convert("RGBA")
 
             if format_mode == "top5" and index == 1:
                 rendered = visual_runtime._render_image_slide(
@@ -1362,6 +1390,16 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_crop_zoom": float(max(1.0, min(4.0, zoom))),
                     "visual_crop_x": float(max(0.0, min(1.0, x_center))),
                     "visual_crop_y": float(max(0.0, min(1.0, y_center))),
+                    "visual_crop_box": (
+                        {
+                            "left": int(crop_box.get("left", 0)),
+                            "top": int(crop_box.get("top", 0)),
+                            "width": int(crop_box.get("width", 0)),
+                            "height": int(crop_box.get("height", 0)),
+                        }
+                        if isinstance(crop_box, dict)
+                        else dict(layer.get("visual_crop_box") or {})
+                    ),
                     "visual_crop_manual": True,
                     "source_credit": source_credit_for_type(
                         str(layer.get("source_type") or "visual")

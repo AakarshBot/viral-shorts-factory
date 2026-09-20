@@ -509,6 +509,47 @@ def _commons_person_seed(query: str) -> str:
     return " ".join(kept[:4]).strip()
 
 
+def _commons_team_search_variants(query: str, visual_type: str, visual_genre: str) -> list[str]:
+    """Normalize common women's-team phrasing into Commons-friendly search terms."""
+    exact = _clean_query(query)
+    if not exact:
+        return []
+
+    visual_l = str(visual_type or "").strip().upper()
+    genre_l = str(visual_genre or "").strip().upper()
+    team_like = (
+        visual_l in {"ORGANIZATION", "EVENT"}
+        or genre_l in {"TEAM_ACTION", "SPORTS_ACTION", "SPORTS_MATCH"}
+    )
+    lowered = exact.casefold()
+    women_team = bool(
+        re.search(r"\bwomen'?s\b", lowered)
+        and re.search(r"\bnational\b", lowered)
+        and re.search(r"\bteam\b", lowered)
+    )
+    if not team_like or not women_team:
+        return []
+
+    normalized = re.sub(r"\bwomens\b", "women's", exact, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bwomen\s+s\b", "women's", normalized, flags=re.IGNORECASE)
+    if re.search(r"\bindia\b", normalized, flags=re.IGNORECASE) and not re.search(
+        r"\bcricket\b|\bfootball\b|\bhockey\b", normalized, flags=re.IGNORECASE
+    ):
+        core = "India women's national cricket team"
+    else:
+        core = re.sub(
+            r"\b(?:celebrate|celebrates|celebrating|celebration|pose|poses|pictured)\b",
+            "",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        core = re.sub(r"\s+", " ", core).strip(" -,:")
+    variants = [core]
+    if re.search(r"\b(?:celebrate|celebrates|celebrating|celebration)\b", exact, flags=re.IGNORECASE):
+        variants.insert(0, f"{core} celebration")
+    return list(dict.fromkeys(item.strip() for item in variants if item.strip()))[:2]
+
+
 def _commons_search_queries(
     query: str,
     visual_type: str = "",
@@ -522,10 +563,16 @@ def _commons_search_queries(
     searches: list[tuple[str, str, str]] = []
     visual_l = str(visual_type or "").strip().upper()
     genre_l = str(visual_genre or "").strip().upper()
+
+    team_variants = _commons_team_search_variants(exact, visual_l, genre_l)
+    team_core = team_variants[-1] if team_variants else ""
+    team_like = bool(team_variants)
+
     person_seed = _commons_person_seed(exact) if (
-        visual_l == "PERSON"
-        or genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION", "SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION"}
+        (visual_l == "PERSON" and not team_like)
+        or genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"}
     ) else ""
+
     person_qid = ""
     person_label = ""
     if person_seed:
@@ -542,8 +589,9 @@ def _commons_search_queries(
             )
 
     structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
-    if str(visual_type or "").strip().upper() in structured_types and not person_qid:
-        resolved_entity = resolve_wikidata_entity(exact)
+    if visual_l in structured_types and not person_qid:
+        structured_query = team_core or exact
+        resolved_entity = resolve_wikidata_entity(structured_query)
         entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
         entity_label = str((resolved_entity or {}).get("label") or "").strip()
         if re.fullmatch(r"Q\d+", entity_qid):
@@ -551,15 +599,26 @@ def _commons_search_queries(
                 (
                     f"haswbstatement:P180={entity_qid}",
                     "structured-depicts-entity",
-                    entity_label or exact,
+                    entity_label or structured_query,
                 )
             )
 
-    # Always retain the literal query. Scene-specific refinements are already
-    # generated upstream, so this provider remains bounded to two searches.
-    searches.append((exact, "text", ""))
-    return searches
+    for variant in team_variants:
+        searches.append((variant, "normalized-team", team_core))
 
+    # Manual queries are never silently replaced: the exact literal always stays in the ladder.
+    searches.append((exact, "text", ""))
+
+    deduped: list[tuple[str, str, str]] = []
+    seen = set()
+    for entry in searches:
+        q = str(entry[0] or "").strip()
+        key_q = q.casefold()
+        if not q or key_q in seen:
+            continue
+        seen.add(key_q)
+        deduped.append(entry)
+    return deduped[:4]
 
 def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Search Commons with topic-aware structured/text discovery and open-license filtering."""

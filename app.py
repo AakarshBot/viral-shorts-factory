@@ -48,88 +48,99 @@ st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="
 
 st.markdown("""<style>
 :root{
-  --bg:#0b0d12;--surface:#11151d;--surface-2:#151a23;--line:rgba(255,255,255,.09);
-  --line-strong:rgba(255,255,255,.14);--text:#f5f7fb;--muted:#95a0b2;--muted-2:#6f7a8c;
-  --accent:#8b5cf6;--accent-soft:rgba(139,92,246,.12);--good:#34d399;--good-soft:rgba(52,211,153,.11);
-  --warn:#f59e0b;--warn-soft:rgba(245,158,11,.1);
+  --bg:#f3f5f8;--surface:#ffffff;--surface-soft:#f8fafc;--line:#e1e5eb;--line-strong:#cfd5df;
+  --text:#151a24;--muted:#667085;--muted-2:#8a93a3;--accent:#5b46e8;--accent-deep:#4632c7;
+  --accent-soft:#efedff;--good:#147a50;--good-soft:#eaf7f0;--warn:#a35b04;--warn-soft:#fff4e2;
+  --shadow:0 10px 30px rgba(20,27,39,.07);--shadow-lg:0 18px 48px rgba(20,27,39,.10);
 }
-html,body,[data-testid="stAppViewContainer"]{background:var(--bg)}
-[data-testid="stHeader"]{background:rgba(11,13,18,.72)}
-.block-container{max-width:1320px;padding-top:1.4rem;padding-bottom:3rem}
-section[data-testid="stSidebar"]{background:#0d1016;border-right:1px solid var(--line)}
-section[data-testid="stSidebar"]>div{padding-top:1.25rem}
-*{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important}
-h1,h2,h3,h4{letter-spacing:-.035em}
+html,body,[data-testid="stAppViewContainer"]{background:var(--bg);color:var(--text)}
+[data-testid="stHeader"]{background:rgba(243,245,248,.94);border-bottom:1px solid rgba(207,213,223,.7)}
+.block-container{max-width:1380px;padding-top:1.45rem;padding-bottom:3rem}
+section[data-testid="stSidebar"]{background:#11151d;border-right:1px solid #252b35;color:#eef2f7}
+section[data-testid="stSidebar"]>div{padding-top:1.15rem}
+section[data-testid="stSidebar"] .stMarkdown p,section[data-testid="stSidebar"] label,section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{color:#b9c1cf}
+*{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
+h1,h2,h3,h4{color:var(--text);letter-spacing:-.04em}
 p{color:var(--text)}
-.small-muted{color:var(--muted);font-size:.82rem}
-.section-kicker{color:#a995ff;text-transform:uppercase;letter-spacing:.14em;font-size:.68rem;font-weight:800;margin-bottom:.25rem}
-.section-title{font-size:1.65rem;font-weight:800;line-height:1.15;margin:0}
-.section-subtitle{color:var(--muted);font-size:.9rem;line-height:1.5;margin:.45rem 0 1.15rem}
-.brand-card{background:linear-gradient(135deg,#151925 0%,#11151d 58%,#171329 100%);border:1px solid var(--line-strong);border-radius:20px;padding:18px 22px;min-height:86px;display:flex;flex-direction:column;justify-content:center}
-.brand-title{font-size:1.9rem;font-weight:850;line-height:1.05;letter-spacing:-.045em}
-.brand-sub{color:var(--muted);font-size:.88rem;margin-top:7px}
-.brand-pill{display:inline-block;width:max-content;border-radius:999px;padding:5px 9px;background:var(--accent-soft);border:1px solid rgba(139,92,246,.28);color:#cbbcff;font-size:.68rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;margin-bottom:8px}
-.panel,.candidate,.story-card,.output-card,.release-card{background:var(--surface);border:1px solid var(--line);border-radius:16px}
+.small-muted{color:var(--muted);font-size:.78rem}
+.section-kicker{color:var(--accent);text-transform:uppercase;letter-spacing:.14em;font-size:.66rem;font-weight:850;margin-bottom:.28rem}
+.section-title{color:var(--text);font-size:1.78rem;font-weight:850;line-height:1.1;margin:0}
+.section-subtitle{color:var(--muted);font-size:.9rem;line-height:1.5;margin:.4rem 0 1.15rem}
+.brand-card{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:18px 23px;min-height:88px;display:flex;flex-direction:column;justify-content:center;box-shadow:var(--shadow)}
+.brand-pill{display:inline-block;width:max-content;border-radius:999px;padding:5px 9px;background:var(--accent-soft);border:1px solid #dcd7ff;color:var(--accent-deep);font-size:.64rem;font-weight:850;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.brand-title{font-size:1.9rem;font-weight:900;line-height:1.02;color:var(--text)}
+.brand-sub{color:var(--muted);font-size:.86rem;margin-top:7px}
+.factory-status{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px;text-align:right;box-shadow:var(--shadow)}
+.factory-status-label{font-size:.62rem;color:var(--muted-2);font-weight:850;letter-spacing:.12em}
+.factory-status-value{font-size:.96rem;font-weight:900;color:var(--text);margin-top:3px}
+.panel,.candidate,.story-card,.output-card,.release-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
 .panel{padding:16px 18px}
-.story-card{padding:17px 18px;height:100%}
+.story-card{padding:18px 18px;height:100%}
 .output-card{padding:15px 16px}
 .release-card{padding:16px 18px}
-.story-rank{color:#a995ff;font-size:.68rem;font-weight:850;letter-spacing:.12em}
-.story-title{font-size:1.02rem;font-weight:780;line-height:1.35;margin:7px 0}
-.story-meta{color:var(--muted);font-size:.78rem;line-height:1.45}
-.story-reason{color:#bcc5d4;font-size:.84rem;line-height:1.45;margin:10px 0 13px}
-.score-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;background:rgba(255,255,255,.04);border:1px solid var(--line);color:#d9deea;font-size:.7rem;font-weight:750}
+.story-rank{color:var(--accent);font-size:.66rem;font-weight:900;letter-spacing:.13em}
+.story-title{font-size:1.03rem;font-weight:820;line-height:1.38;margin:7px 0}
+.story-meta{color:var(--muted);font-size:.76rem;line-height:1.45}
+.story-reason{color:#505a6a;font-size:.84rem;line-height:1.48;margin:10px 0 13px}
+.score-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;background:#f2f4f7;border:1px solid var(--line);color:#414a59;font-size:.68rem;font-weight:800}
 .stage-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0 14px}
 .stage-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 11px}
-.stage-card.active{border-color:rgba(139,92,246,.5);background:var(--accent-soft)}
-.stage-card.done{border-color:rgba(52,211,153,.25);background:var(--good-soft)}
-.stage-card.stopped{border-color:rgba(245,158,11,.35);background:var(--warn-soft)}
-.stage-name{font-size:.77rem;font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-card.active{border-color:#beb4ff;background:var(--accent-soft)}
+.stage-card.done{border-color:#bfe5d2;background:var(--good-soft)}
+.stage-card.stopped{border-color:#f1cf9f;background:var(--warn-soft)}
+.stage-name{font-size:.76rem;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stage-state{color:var(--muted);font-size:.66rem;margin-top:4px}
-.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 18px}
-.qc-guide-step{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
-.qc-guide-step b{display:block;font-size:.78rem;margin-bottom:3px}
-.qc-guide-step span{color:var(--muted);font-size:.72rem;line-height:1.4}
-.qc-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.67rem;font-weight:850;letter-spacing:.08em}
-.qc-status.ready{color:#a9f5d6;background:var(--good-soft);border:1px solid rgba(52,211,153,.24)}
-.qc-status.attention{color:#ffd597;background:var(--warn-soft);border:1px solid rgba(245,158,11,.25)}
-.qc-meta{color:var(--muted);font-size:.75rem;line-height:1.45}
-.qc-card-title{font-size:.98rem;font-weight:800;margin-bottom:7px}
-.timeline{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 16px}
-.timeline-row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:12px 0 18px}
+.qc-guide-step{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:12px 13px;box-shadow:var(--shadow)}
+.qc-guide-step b{display:block;font-size:.77rem;margin-bottom:3px;color:var(--text)}
+.qc-guide-step span{color:var(--muted);font-size:.71rem;line-height:1.42}
+.qc-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.65rem;font-weight:900;letter-spacing:.08em}
+.qc-status.ready{color:var(--good);background:var(--good-soft);border:1px solid #c6e8d6}
+.qc-status.attention{color:var(--warn);background:var(--warn-soft);border:1px solid #f0d8b0}
+.qc-meta{color:var(--muted);font-size:.74rem;line-height:1.45}
+.qc-card-title{font-size:.97rem;font-weight:850;margin-bottom:7px;color:var(--text)}
+.timeline{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 16px;box-shadow:var(--shadow)}
+.timeline-row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #edf0f4}
 .timeline-row:last-child{border-bottom:0}
 .timeline-dot{width:22px;flex:0 0 22px;text-align:center}
-.timeline-main{min-width:0;flex:1}.timeline-head{font-size:.78rem;font-weight:780}
-.timeline-time{color:var(--muted-2);font-size:.68rem;margin-left:7px}
-.timeline-message{color:var(--muted);font-size:.78rem;line-height:1.4;margin-top:2px}
-.sidebar-title{font-size:1.05rem;font-weight:800;letter-spacing:-.02em}
-.sidebar-kicker{color:#a995ff;text-transform:uppercase;letter-spacing:.12em;font-size:.65rem;font-weight:800}
-.sidebar-status{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:12px 13px;margin-top:10px}
-.sidebar-status-title{font-size:.76rem;font-weight:780}
-.sidebar-status-copy{color:var(--muted);font-size:.72rem;margin-top:3px;line-height:1.4}
+.timeline-main{min-width:0;flex:1}.timeline-head{font-size:.77rem;font-weight:800;color:var(--text)}
+.timeline-time{color:var(--muted-2);font-size:.66rem;margin-left:7px}
+.timeline-message{color:var(--muted);font-size:.77rem;line-height:1.4;margin-top:2px}
+.sidebar-title{font-size:1.04rem;font-weight:850;letter-spacing:-.02em;color:#f6f8fb}
+.sidebar-kicker{color:#a99cff;text-transform:uppercase;letter-spacing:.12em;font-size:.62rem;font-weight:850}
+.sidebar-status{background:#171c25;border:1px solid #29303b;border-radius:13px;padding:12px 13px;margin-top:10px}
+.sidebar-status-title{font-size:.75rem;font-weight:800;color:#f3f5f8}
+.sidebar-status-copy{color:#9ca6b5;font-size:.69rem;margin-top:3px;line-height:1.4}
 .release-gates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .release-gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
-.release-gate.pass{border-color:rgba(52,211,153,.22)}
-.release-gate.block{border-color:rgba(245,158,11,.22)}
-.release-gate-name{font-size:.76rem;font-weight:800}
-.release-gate-detail{color:var(--muted);font-size:.7rem;line-height:1.4;margin-top:3px}
-.live-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141b;border:1px solid var(--line);border-radius:14px;padding:10px 13px;margin:10px 0 16px}
-.live-bar-copy{color:var(--muted);font-size:.76rem}.live-bar-copy b{color:var(--text)}
-.empty-state{background:linear-gradient(145deg,#11151d,#151225);border:1px solid var(--line-strong);border-radius:20px;padding:26px}
-.empty-title{font-size:1.55rem;font-weight:820;letter-spacing:-.035em}
+.release-gate.pass{border-color:#c6e8d6;background:linear-gradient(180deg,#fff,#f7fcf9)}
+.release-gate.block{border-color:#f0d8b0;background:linear-gradient(180deg,#fff,#fffbf4)}
+.release-gate-name{font-size:.75rem;font-weight:850;color:var(--text)}
+.release-gate-detail{color:var(--muted);font-size:.69rem;line-height:1.4;margin-top:3px}
+.live-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 13px;margin:10px 0 16px;box-shadow:var(--shadow)}
+.live-bar-copy{color:var(--muted);font-size:.75rem}.live-bar-copy b{color:var(--text)}
+.empty-state{background:linear-gradient(135deg,#ffffff 0%,#f8f7ff 100%);border:1px solid #ddd9ff;border-radius:21px;padding:28px;box-shadow:var(--shadow-lg)}
+.empty-title{font-size:1.58rem;font-weight:900;letter-spacing:-.04em;color:var(--text)}
 .empty-copy{color:var(--muted);font-size:.88rem;line-height:1.55;max-width:720px}
 .meta-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
-.meta-chip{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:999px;padding:5px 9px;color:#c2cad7;font-size:.7rem}
-[data-testid="stMetric"]{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:11px 13px}
-[data-testid="stMetricLabel"]{color:var(--muted)!important;font-size:.72rem!important}
-[data-testid="stMetricValue"]{font-size:1.28rem!important}
-.stButton>button,.stLinkButton>a{border-radius:10px;min-height:40px;font-weight:750;border:1px solid var(--line-strong)}
-.stButton>button[kind="primary"]{background:linear-gradient(180deg,#8b5cf6,#7046da);border-color:rgba(255,255,255,.16);box-shadow:0 7px 20px rgba(112,70,218,.22)}
-.stTextInput>div>div,.stTextArea>div>div,.stSelectbox>div>div{background:#0f1319!important;border-color:var(--line)!important}
-div[data-testid="stExpander"]{border:1px solid var(--line)!important;border-radius:12px!important;background:rgba(255,255,255,.015)!important}
-div[data-testid="stExpander"] summary p{font-size:.82rem;font-weight:750}
-[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.dashboard-footer{text-align:center;color:var(--muted-2);font-size:.72rem;padding:10px 0}
+.meta-chip{border:1px solid var(--line);background:#f7f8fa;border-radius:999px;padding:5px 9px;color:#596273;font-size:.69rem}
+[data-testid="stMetric"]{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:11px 13px;box-shadow:var(--shadow)}
+[data-testid="stMetricLabel"]{color:var(--muted)!important;font-size:.7rem!important}
+[data-testid="stMetricValue"]{color:var(--text)!important;font-size:1.3rem!important}
+.stButton>button,.stLinkButton>a{border-radius:10px;min-height:40px;font-weight:800;border:1px solid var(--line-strong);background:var(--surface);color:var(--text)}
+.stButton>button[kind="primary"]{background:linear-gradient(180deg,#6854ef,#533dd9);color:#fff;border-color:#4e39cd;box-shadow:0 8px 18px rgba(91,70,232,.18)}
+.stButton>button:hover,.stLinkButton>a:hover{border-color:#b8bec9;background:#f8f9fb}
+.stButton>button[kind="primary"]:hover{background:linear-gradient(180deg,#5f4be5,#4b37c9);color:#fff;border-color:#4633bd}
+.stTextInput>div>div,.stTextArea>div>div,.stSelectbox>div>div{background:var(--surface)!important;border-color:var(--line)!important;color:var(--text)!important}
+.stTextInput input,.stTextArea textarea{color:var(--text)!important}
+div[data-testid="stExpander"]{border:1px solid var(--line)!important;border-radius:12px!important;background:var(--surface)!important}
+div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:var(--text)}
+[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+[data-testid="stProgress"] div[role="progressbar"]{background:#e7eaf0}
+[data-testid="stProgress"] div[role="progressbar"] > div{background:var(--accent)}
+.crop-shell{background:#f7f8fb;border:1px solid var(--line);border-radius:16px;padding:12px}
+.crop-caption{color:var(--muted);font-size:.73rem;line-height:1.45;margin-bottom:9px}
+.dashboard-footer{text-align:center;color:var(--muted-2);font-size:.7rem;padding:10px 0}
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -396,7 +407,7 @@ def render_header(action_mode: str) -> None:
                 logo_path = candidate_path
                 break
 
-    left, middle, right = st.columns([0.8, 5.7, 1.2], gap="medium")
+    left, middle, right = st.columns([0.75, 5.45, 1.4], gap="medium")
     with left:
         if logo_path:
             st.image(logo_path, width=72)
@@ -413,8 +424,8 @@ def render_header(action_mode: str) -> None:
         snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
         status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
         st.markdown(
-            f"<div style='text-align:right;padding-top:12px'><div class='small-muted'>FACTORY STATUS</div>"
-            f"<div style='font-size:1rem;font-weight:800;margin-top:4px'>{status}</div></div>",
+            f"<div class='factory-status'><div class='factory-status-label'>FACTORY STATUS</div>"
+            f"<div class='factory-status-value'>{status}</div></div>",
             unsafe_allow_html=True,
         )
 
@@ -752,6 +763,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "crop_zoom": float(layer.get("visual_crop_zoom") or 1.0),
                 "crop_x": float(layer.get("visual_crop_x") if layer.get("visual_crop_x") is not None else 0.5),
                 "crop_y": float(layer.get("visual_crop_y") if layer.get("visual_crop_y") is not None else 0.5),
+                "crop_box": dict(layer.get("visual_crop_box") or {}),
                 "original_path": str(layer.get("visual_original_path") or "").strip(),
                 "manual_pool_mode": bool(layer.get("visual_manual_pool_mode", False)),
                 "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
@@ -986,62 +998,73 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                         else:
                                             st.error(message)
 
-                with st.expander("✂️ Fine-tune / find another", expanded=False):
+                with st.expander("✂️ Reframe image", expanded=False):
                     original_path = str(item.get("original_path") or "").strip()
-                    st.caption("Manual crop uses the preserved original and does not make another provider or AI call.")
+                    st.markdown(
+                        "<div class='crop-caption'>Drag the 9:16 frame over the original image. "
+                        "Move or resize the frame until the subject is positioned exactly where you want it.</div>",
+                        unsafe_allow_html=True,
+                    )
+
                     if original_path and os.path.isfile(original_path):
-                        st.image(
-                            original_path,
-                            caption="Original source",
-                            width="stretch",
-                        )
+                        from PIL import Image
+                        from streamlit_cropper import st_cropper
 
-                    crop_cols = st.columns(3, gap="small")
-                    with crop_cols[0]:
-                        crop_zoom = st.slider(
-                            "Zoom",
-                            min_value=1.0,
-                            max_value=4.0,
-                            value=float(item.get("crop_zoom") or 1.0),
-                            step=0.1,
-                            key=f"crop_zoom_{run_id}_{item['index']}",
-                        )
-                    with crop_cols[1]:
-                        crop_x = st.slider(
-                            "Horizontal",
-                            min_value=0,
-                            max_value=100,
-                            value=int(float(item.get("crop_x") or 0.5) * 100),
-                            step=1,
-                            key=f"crop_x_{run_id}_{item['index']}",
-                        )
-                    with crop_cols[2]:
-                        crop_y = st.slider(
-                            "Vertical",
-                            min_value=0,
-                            max_value=100,
-                            value=int(float(item.get("crop_y") or 0.5) * 100),
-                            step=1,
-                            key=f"crop_y_{run_id}_{item['index']}",
-                        )
+                        original_image = Image.open(original_path).convert("RGB")
+                        stored_box = item.get("crop_box") or {}
+                        default_coords = None
+                        try:
+                            if all(key in stored_box for key in ("left", "top", "width", "height")):
+                                left = int(stored_box["left"])
+                                top = int(stored_box["top"])
+                                width = int(stored_box["width"])
+                                height = int(stored_box["height"])
+                                default_coords = (left, left + width, top, top + height)
+                        except (TypeError, ValueError):
+                            default_coords = None
 
-                    if st.button(
-                        "Apply crop",
-                        type="secondary",
-                        width="stretch",
-                        key=f"apply_crop_{run_id}_{item['index']}",
-                    ):
-                        ok, message = controller.crop_visual(
-                            item["index"],
-                            zoom=float(crop_zoom),
-                            x_center=float(crop_x) / 100.0,
-                            y_center=float(crop_y) / 100.0,
-                        )
-                        if ok:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
+                        crop_left, crop_right = st.columns([1.18, 0.82], gap="medium")
+                        with crop_left:
+                            crop_result = st_cropper(
+                                img_file=original_image,
+                                realtime_update=True,
+                                default_coords=default_coords,
+                                box_color="#5b46e8",
+                                aspect_ratio=(9, 16),
+                                return_type="both",
+                                key=f"visual_cropper_{run_id}_{item['index']}",
+                                should_resize_image=True,
+                                stroke_width=3,
+                            )
+                            if isinstance(crop_result, tuple) and len(crop_result) == 2:
+                                crop_preview, crop_box = crop_result
+                            else:
+                                crop_preview, crop_box = crop_result, {}
+
+                        with crop_right:
+                            st.markdown("**Shorts preview**")
+                            if crop_preview is not None:
+                                st.image(crop_preview, width="stretch")
+                            st.caption("9:16 frame · no provider or AI call")
+
+                        if isinstance(crop_box, dict) and crop_box:
+                            if st.button(
+                                "Apply this crop",
+                                type="primary",
+                                width="stretch",
+                                key=f"apply_crop_{run_id}_{item['index']}",
+                            ):
+                                ok, message = controller.crop_visual(
+                                    item["index"],
+                                    crop_box=crop_box,
+                                )
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                    else:
+                        st.info("The preserved original image is not available for cropping.")
 
                     query_key = f"replace_visual_{run_id}_{item['index']}_query"
                     replacement_query = st.text_input(

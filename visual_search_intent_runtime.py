@@ -49,7 +49,7 @@ _MANUAL_SCENE_WORDS = {
     "logo", "logos", "portrait", "portraits", "headshot", "headshots",
     "press", "conference", "interview", "speech", "speaking", "meeting",
     "match", "game", "batting", "bowling", "training", "stadium", "arena",
-    "final", "finals", "opening", "ceremony", "celebration", "celebrating",
+    "final", "finals", "opening", "ceremony", "celebrate", "celebration", "celebrating",
     "crowd", "fans", "night", "day", "action", "action-shot", "screenshot",
     "map", "flag", "flags", "poster", "posters", "chart", "graph", "document",
     "documents", "office", "headquarters",
@@ -77,6 +77,23 @@ def _manual_entity_from_query(manual: str, resolved_subject: str) -> str:
         if word.casefold() not in _MANUAL_SCENE_WORDS
     ]
     return " ".join(words[:4]).strip() or query
+
+
+def canonical_manual_entity_anchor(manual: str, resolved_subject: str = "") -> str:
+    """Return a canonical named entity for verification while keeping retrieval exact."""
+    query = _clean(manual)
+    anchor = _manual_entity_from_query(query, resolved_subject)
+    if not anchor:
+        return query
+    try:
+        from visual_provider_boundary_runtime import resolve_wikidata_entity
+        resolved = resolve_wikidata_entity(anchor)
+        label = clean_text((resolved or {}).get("label") or "")
+        if label:
+            return label
+    except Exception:
+        pass
+    return anchor
 
 
 # These are retrieval-quality filters, not domain rules. They remove words that
@@ -402,4 +419,4 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         manual=bool(manual),
     )
 
-__all__ = ["VisualSearchIntent", "resolve_visual_search_intent"]
+__all__ = ["VisualSearchIntent", "resolve_visual_search_intent", "canonical_manual_entity_anchor"]
