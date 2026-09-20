@@ -1338,6 +1338,16 @@ def collect_manual_visual_options(
     result["enough_options"] = len(result["assets"]) >= result["minimum_options"]
     result["target"] = maximum
     result["hard_max"] = maximum
+    result["query_stats"] = [
+        {
+            "query": str(query or "").strip(),
+            "rank": 1,
+            "target": maximum,
+            "verified": len(result["assets"]),
+            "qa_requests": 0,
+            "pool_origin": "manual",
+        }
+    ]
     return result
 
 
