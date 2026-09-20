@@ -218,7 +218,7 @@ def _render_intelligence(st) -> None:
         if not table:
             continue
         st.markdown(f"**{label}**")
-        st.dataframe(table[:8], use_container_width=True, hide_index=True)
+        st.dataframe(table[:8], width="stretch", hide_index=True)
         st.caption("Patterns require at least two factory videos. Treat small samples as directional, not causal.")
 
 
