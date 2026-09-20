@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import visual_provider_boundary_runtime as boundary
 import visual_retrieval_runtime as retrieval
+import visual_search_intent_runtime as search_intent
 
 
 def test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers():
@@ -117,9 +118,65 @@ def test_retrieval_accepts_multi_candidate_provider_payloads(monkeypatch):
     assert seg["asset_provenance"]["license"] == "by"
 
 
+def test_person_portrait_intent_is_identity_first():
+    scene = {
+        "primary_entity": "Vaibhav Sooryavanshi",
+        "visual_type": "PERSON",
+        "visual_intent": "portrait",
+        "specific_search_prompt": "Vaibhav Sooryavanshi",
+        "voiceover": "Vaibhav Sooryavanshi is an Indian cricketer.",
+    }
+    intent = search_intent.resolve_visual_search_intent(scene)
+    assert intent.visual_genre == "PERSON_PORTRAIT"
+    assert intent.queries == ("Vaibhav Sooryavanshi", "Vaibhav Sooryavanshi portrait")
+    assert intent.query == "Vaibhav Sooryavanshi"
+
+
+def test_person_provider_queries_use_canonical_identity_and_structured_commons():
+    identity = "Vaibhav Sooryavanshi"
+    assert retrieval._provider_search_query(
+        "Wikipedia", "Vaibhav Sooryavanshi portrait", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 1
+    ) == identity
+    assert retrieval._provider_search_query(
+        "Commons", "Vaibhav Sooryavanshi", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 1
+    ) == "haswbstatement:P180=Q123"
+    assert retrieval._provider_search_query(
+        "Commons", "Vaibhav Sooryavanshi portrait", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 2
+    ) == identity
+    assert retrieval._provider_search_query(
+        "Openverse", "Vaibhav Sooryavanshi portrait", identity, "PERSON", "PERSON_PORTRAIT", "Q123", 2
+    ) == "Vaibhav Sooryavanshi portrait"
+
+
+def test_person_identity_resolver_uses_wikidata_and_caches(monkeypatch):
+    cache_key = "test person identity resolver"
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+    calls = []
+
+    def fake_api(url, *, params=None, headers=None):
+        calls.append((url, params))
+        return {"search": [{"id": "Q123456", "label": "Test Person"}]}
+
+    monkeypatch.setattr(boundary, "_api_json", fake_api)
+    first = boundary.resolve_person_identity("Test Person Identity Resolver")
+    second = boundary.resolve_person_identity("Test Person Identity Resolver")
+    assert first == second == {"qid": "Q123456", "label": "Test Person"}
+    assert len(calls) == 1
+    boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
+
+
+def test_godl_india_is_an_explicit_commercial_license():
+    assert boundary.is_allowed_license("GODL-India")
+    assert boundary.is_allowed_license("Government Open Data License - India")
+
+
 if __name__ == "__main__":
     test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers()
     test_raw_candidate_adapters_have_no_legacy_quality_gate_dependency()
     test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods()
     test_commons_candidate_adapter_is_bounded()
+    test_person_portrait_intent_is_identity_first()
+    test_person_provider_queries_use_canonical_identity_and_structured_commons()
+    test_person_identity_resolver_uses_wikidata_and_caches()
+    test_godl_india_is_an_explicit_commercial_license()
     print("Visual provider boundary regression checks passed.")
