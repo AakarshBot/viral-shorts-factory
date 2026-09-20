@@ -46,6 +46,12 @@ def test_visual_query_dry_run_uses_real_query_path_and_excludes_manual_queries(m
         assert isinstance(conn, sqlite3.Connection)
         return {
             "title": "Rishabh Pant returns to training",
+            "titles": [
+                "Rishabh Pant returns to training",
+                "Pant's training update explained",
+                "What the training return means",
+            ],
+            "recommended_title_index": 2,
             "research_source_count": 3,
             "research_evidence_status": "supported",
             "script": [
@@ -91,6 +97,7 @@ def test_visual_query_dry_run_uses_real_query_path_and_excludes_manual_queries(m
     assert result["status"] == "PASS"
     assert result["image_retrieval_performed"] is False
     assert result["manual_queries_excluded"] is True
+    assert result["story_title"] == "Pant's training update explained"
     assert len(result["results"]) == 2
     assert all(item.get("query") for item in result["results"])
     assert all(item.get("queries") for item in result["results"])
