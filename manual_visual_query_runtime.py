@@ -269,6 +269,11 @@ def generate_visual_query_suggestions(
             "action", "batting", "bowling", "fielding", "playing", "match",
             "celebration", "celebrating", "training", "scoring",
         }
+        action_context_terms = {
+            "final", "finals", "semi", "semifinal", "quarterfinal", "tournament",
+            "series", "fixture", "innings", "stadium", "camp", "match", "game",
+            "cricket", "football", "soccer", "basketball", "tennis",
+        }
         static_terms = {
             "logo", "crest", "badge", "emblem", "portrait", "headshot",
         }
@@ -286,7 +291,17 @@ def generate_visual_query_suggestions(
             preferred_query = str(preferred.get("query") or "").strip()
             preferred_tokens = set(re.findall(r"[\w-]+", preferred_query.casefold()))
             if not preferred_tokens & action_terms:
-                action_query = f"{preferred_query} action".strip()
+                context_term = next(
+                    (
+                        token.casefold()
+                        for token in re.findall(r"[\w-]+", f"{title} {body}", flags=re.UNICODE)
+                        if token.casefold() in action_context_terms
+                    ),
+                    "",
+                )
+                action_query = " ".join(
+                    item for item in (preferred_query, context_term, "action") if item
+                ).strip()
                 preferred = dict(preferred)
                 preferred["query"] = action_query[:180]
                 preferred["reason"] = "Action-oriented first-frame search for a sports story."
