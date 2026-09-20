@@ -143,7 +143,11 @@ def provenance_is_retainable(record: dict[str, Any]) -> bool:
     code = normalize_license_code(record.get("license"))
     if "-nc" in license_name or "-nd" in license_name:
         return False
-    if code in {"by-nc", "by-nc-sa", "by-nd", "by-sa-nd"}:
+    if code in {
+        "by-nc", "by-nc-sa", "by-nd", "by-sa-nd",
+        "all-rights-reserved", "fair-use", "standard-youtube-license",
+        "non-commercial", "no-derivatives",
+    }:
         return False
     return True
 
