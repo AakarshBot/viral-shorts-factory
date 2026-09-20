@@ -1175,3 +1175,12 @@ def test_dashboard_css_never_overrides_streamlit_icon_font():
                     unsafe_selectors.append(selectors)
 
     assert unsafe_selectors == []
+
+
+def test_final_artifact_qc_export_is_available():
+    """Upload QC must have the artifact validator expected by final_qc_runtime."""
+    from branding_runtime import _artifact_qc
+
+    passed, detail = _artifact_qc("")
+    assert passed is False
+    assert "missing" in detail.lower()
