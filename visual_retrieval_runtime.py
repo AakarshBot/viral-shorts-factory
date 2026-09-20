@@ -626,7 +626,6 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "search_text": str(asset.get("search_text") or "").strip(),
                 "source_page_url": str(asset.get("source_page_url") or "").strip(),
                 "source_image_url": str(asset.get("source_image_url") or "").strip(),
-                "source_asset_key": str(asset.get("source_asset_key") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
                 "used": False,
             }
@@ -757,7 +756,7 @@ def _source_image_key(data: Any) -> str:
 def _append_unique_candidate(
     candidate: dict,
     seen_hashes: set[str],
-    seen_image_urls: set[str]
+    seen_image_urls: set[str],
 ) -> bool:
     image_hash = str(candidate.get("hash") or "").strip()
     image_url = str(candidate.get("source_image_url") or "").strip().casefold().rstrip("/")
@@ -1200,8 +1199,6 @@ def collect_manual_visual_search(
     exact_query = str(query or "").strip()
     if not exact_query:
         return {"assets": [], "target": 5, "rejection_counts": {}}
-
-    from visual_search_intent_runtime import resolve_visual_search_intent
 
     scenes = [{"manual_visual_query": exact_query, "primary_entity": exact_query}]
     try:
