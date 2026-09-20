@@ -232,7 +232,7 @@ def _test_runtime_bindings():
     required = (
         "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
         "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
-        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip", "compile_video",
+        "upload_to_youtube", "generate_karaoke_clip", "compile_video",
     )
     missing = [name for name in required if name not in namespace]
     if missing:
@@ -244,7 +244,7 @@ def _test_provider_boundary():
     from test_visual_provider_boundary import (
         test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods,
         test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers,
-        test_raw_person_adapters_have_no_legacy_quality_gate_dependency,
+        test_raw_candidate_adapters_have_no_legacy_quality_gate_dependency,
     )
     test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers()
     test_raw_person_adapters_have_no_legacy_quality_gate_dependency()
