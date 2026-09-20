@@ -705,6 +705,71 @@ def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_cand
     assert source == "visual-rescue"
 
 
+def test_commons_person_search_uses_structured_depicts(monkeypatch):
+    calls = []
+    downloads = []
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda query: {"qid": "Q16224802", "label": "Smriti Mandhana"},
+    )
+
+    def fake_api_json(_url, *, params=None, headers=None):
+        calls.append(dict(params or {}))
+        return {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:2017 Women's Cricket World Cup IMG 2690.jpg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/smriti.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:2017_Women's_Cricket_World_Cup_IMG_2690.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC Zero 1.0"},
+                                "Artist": {"value": "Robert Drummond"},
+                                "ImageDescription": {"value": "Smriti Mandhana batting"},
+                            },
+                        }],
+                        "categories": [
+                            {"title": "Category:Smriti Mandhana"},
+                            {"title": "Category:India Women v Australia Women, Women's Cricket World Cup 2017"},
+                        ],
+                    }
+                }
+            }
+        }
+
+    def fake_download(url, used_urls=None, metadata=None):
+        downloads.append((url, dict(metadata or {})))
+        return {
+            "bytes": b"image-bytes",
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        }
+
+    monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
+    monkeypatch.setattr(provider_boundary, "_download_image", fake_download)
+
+    candidates = provider_boundary.fetch_commons_candidates("Smriti Mandhana action")
+
+    assert calls
+    assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q16224802"
+    assert calls[1]["gsrsearch"] == "Smriti Mandhana action"
+    assert candidates
+    assert candidates[0]["commons_match_mode"] == "structured-depicts"
+    assert candidates[0]["commons_matched_entity"] == "Smriti Mandhana"
+    assert "India Women v Australia Women" in candidates[0]["search_tags"]
+    assert downloads
+
+
+def test_commons_cc_zero_license_is_accepted_after_normalization():
+    from visual_licensing_runtime import normalize_license_code
+
+    assert normalize_license_code("CC Zero 1.0 Universal") == "cc0"
+    assert normalize_license_code("CC0 1.0") == "cc0"
+
+
 def test_provider_search_metadata_survives_provenance_wrapping():
     from visual_licensing_runtime import licensed_candidate
 
