@@ -1100,14 +1100,17 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         with action_cols[0]:
                             use_popover(asset, f"{section_key}_use_{asset_hash[:12]}")
                         with action_cols[1]:
-                            crop_popover(
-                                asset,
-                                f"{section_key}_crop_{asset_hash[:12]}",
-                                lambda crop_box, asset_hash=asset_hash: controller.crop_visual_pool_asset(
-                                    asset_hash,
-                                    crop_box,
-                                ),
-                            )
+                            if not bool(asset.get("used")):
+                                crop_popover(
+                                    asset,
+                                    f"{section_key}_crop_{asset_hash[:12]}",
+                                    lambda crop_box, asset_hash=asset_hash: controller.crop_visual_pool_asset(
+                                        asset_hash,
+                                        crop_box,
+                                    ),
+                                )
+                            else:
+                                st.caption("Crop on assigned slide")
 
     available = [
         asset for asset in pool
