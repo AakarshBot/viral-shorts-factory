@@ -67,7 +67,16 @@ def render_top5_card(bot,bg_img,item_number,total_items,summary_text,width=1080,
 
 
 def patch_dashboard_runtime(bot):
-    """Apply requested improvements to Streamlit execution."""
+    """Apply requested improvements to Streamlit execution.
+
+    The dashboard theme is presentation-only. It does not alter factory
+    generation, scoring, provider selection, upload gates, or media logic.
+    """
+    try:
+        from dashboard_theme import apply_dashboard_theme
+        apply_dashboard_theme()
+    except Exception as exc:
+        print(f"[Dashboard theme] visual theme skipped: {type(exc).__name__}: {exc}")
     bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.render_top5_card=lambda bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None:render_top5_card(bot,bg_img,item_number,total_items,summary_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
