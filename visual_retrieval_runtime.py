@@ -903,7 +903,14 @@ def collect_manual_visual_pool(
 
             raw_data = runtime._call_fetcher_with_timeout(
                 fetcher,
-                (exact_query, set(), exact_query, video_title),
+                (
+                    exact_query,
+                    set(),
+                    exact_query,
+                    video_title,
+                    visual_type,
+                    visual_genre,
+                ),
                 source_name,
                 exact_query,
             )
@@ -1038,7 +1045,14 @@ def collect_manual_visual_pool(
                         continue
                     raw_data = runtime._call_fetcher_with_timeout(
                         fetcher,
-                        (source_query, set(), query, video_title),
+                        (
+                            source_query,
+                            set(),
+                            query,
+                            video_title,
+                            visual_type,
+                            visual_genre,
+                        ),
                         source_name,
                         source_query,
                     )
@@ -1249,9 +1263,9 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             fetch_entity = cache_entity if str(source).casefold() == "wikipedia" else source_query
             local_used_urls = set(used_urls)
             args = (
-                (fetch_entity, local_used_urls, query, video_title)
+                (fetch_entity, local_used_urls, query, video_title, visual_type, visual_genre)
                 if str(source).casefold() == "wikipedia"
-                else (source_query, local_used_urls, query, video_title)
+                else (source_query, local_used_urls, query, video_title, visual_type, visual_genre)
             )
             raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, source_query)
             used_urls.update(local_used_urls)
