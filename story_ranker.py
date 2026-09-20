@@ -5,7 +5,7 @@ import math
 import os
 import re
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus, urlparse
@@ -1269,6 +1269,39 @@ def diversity_rerank(stories, max_items=28):
 
 
 
+DISCOVERY_SOURCE_WAIT_SECONDS = 12.0
+
+
+def _resolve_discovery_futures(future_sources, timeout=DISCOVERY_SOURCE_WAIT_SECONDS):
+    """Resolve completed discovery workers without allowing one source to block the newsroom."""
+    if not future_sources:
+        return {}
+
+    futures = list(future_sources)
+    done, pending = wait(futures, timeout=max(1.0, float(timeout)))
+
+    resolved = {}
+    for future in done:
+        label = future_sources.get(future, "discovery source")
+        try:
+            resolved[future] = future.result()
+        except Exception as exc:
+            print(
+                f"   [Discovery] {label} failed ({type(exc).__name__}); continuing with the other sources.",
+                flush=True,
+            )
+
+    for future in pending:
+        label = future_sources.get(future, "discovery source")
+        future.cancel()
+        print(
+            f"   [Discovery] {label} exceeded the {float(timeout):g}s discovery wait; continuing without it.",
+            flush=True,
+        )
+
+    return resolved
+
+
 def collect_high_recall_stories(
     bot,
     genre_key,
@@ -1304,7 +1337,19 @@ def collect_high_recall_stories(
     if not broad_discovery:
         gdelt_queries = gdelt_queries[:2]
 
-    with ThreadPoolExecutor(max_workers=16 if broad_discovery else 8, thread_name_prefix="discovery-radar") as pool:
+    pool = ThreadPoolExecutor(
+        max_workers=16 if broad_discovery else 8,
+        thread_name_prefix="discovery-radar",
+    )
+    google_futures = []
+    rss_futures = []
+    official_futures = []
+    trend_futures = []
+    reddit_futures = []
+    gdelt_futures = []
+    future_sources = {}
+
+    try:
         google_futures = [
             pool.submit(_google_news_search_items, query, genre_key, 60)
             for query in google_queries if query
@@ -1331,19 +1376,42 @@ def collect_high_recall_stories(
         ]
 
         for future in google_futures:
-            raw.extend(future.result())
+            future_sources[future] = "Google News"
         for future in rss_futures:
-            raw.extend(future.result())
+            future_sources[future] = "RSS"
         for future in official_futures:
-            raw.extend(future.result())
+            future_sources[future] = "official feeds"
         for future in trend_futures:
-            raw.extend(future.result())
-        social_rows = []
+            future_sources[future] = "Google Trends"
         for future in reddit_futures:
-            social_rows.extend(future.result())
-        raw.extend(social_rows)
+            future_sources[future] = "Reddit"
         for future in gdelt_futures:
-            raw.extend(future.result())
+            future_sources[future] = "GDELT"
+
+        print(
+            f"   [Discovery] Waiting up to {DISCOVERY_SOURCE_WAIT_SECONDS:g}s for free-source radar.",
+            flush=True,
+        )
+        resolved = _resolve_discovery_futures(future_sources)
+
+        for future in google_futures:
+            raw.extend(resolved.get(future) or [])
+        for future in rss_futures:
+            raw.extend(resolved.get(future) or [])
+        for future in official_futures:
+            raw.extend(resolved.get(future) or [])
+
+        social_rows = []
+        for future in trend_futures:
+            raw.extend(resolved.get(future) or [])
+        for future in reddit_futures:
+            social_rows.extend(resolved.get(future) or [])
+        raw.extend(social_rows)
+
+        for future in gdelt_futures:
+            raw.extend(resolved.get(future) or [])
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     social_titles = [row.get("title", "") for row in social_rows]
     for story in raw:
@@ -1373,7 +1441,6 @@ def collect_high_recall_stories(
         flush=True,
     )
     return events, social_titles
-
 
 def rank_story_candidates(stories, conn=None, target_category="", target_format="", target_language="", social_titles=None, ai_cricket=False):
     """Rank an event-first discovery pool through the existing editorial funnel."""
