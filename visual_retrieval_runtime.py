@@ -694,6 +694,7 @@ def collect_manual_visual_pool(
         start_visual_qa_scene,
         strict_gemini_check_batch,
     )
+    from visual_search_intent_runtime import _manual_entity_from_query
 
     used_hashes = used_hashes or set()
     assets = []
@@ -719,6 +720,7 @@ def collect_manual_visual_pool(
         # The global video budget remains shared and bounded.
         start_visual_qa_scene()
 
+        entity_anchor = str(_manual_entity_from_query(exact_query, "") or exact_query).strip()
         visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
         try:
             source_plan = _source_plan(bot, visual_type, visual_genre)
@@ -814,7 +816,7 @@ def collect_manual_visual_pool(
                     continue
                 result_map = strict_gemini_check_batch(
                     [item[2] for item in batch],
-                    exact_query,
+                    entity_anchor,
                     os.getenv("GEMINI_API_KEY"),
                     tier="IDENTITY",
                     visual_type=visual_type,
@@ -869,11 +871,148 @@ def collect_manual_visual_pool(
             elif local_index in verdicts:
                 rejected_counts["entity_uncertain"] += 1
 
+
+        # One compact, evidence-backed refinement is allowed only when this manual
+        # query has not produced its five entity-verified candidates yet.
+        refinement_query = ""
+        refinement_verified = 0
+        refinement_resolution_rejected = 0
+        if query_verified < MANUAL_QUERY_VERIFIED_TARGET and len(assets) < MANUAL_POOL_MAX:
+            best_scene = None
+            best_overlap = -1
+            query_tokens = {
+                token.casefold()
+                for token in re.findall(r"[\w-]+", exact_query, flags=re.UNICODE)
+                if len(token) > 2
+            }
+            for scene in scenes or []:
+                if not isinstance(scene, dict):
+                    continue
+                scene_tokens = {
+                    token.casefold()
+                    for token in re.findall(r"[\w-]+", _manual_scene_text(scene), flags=re.UNICODE)
+                    if len(token) > 2
+                }
+                overlap = len(query_tokens & scene_tokens)
+                if overlap > best_overlap:
+                    best_scene = scene
+                    best_overlap = overlap
+            refinement_query = _scene_refinement_query(best_scene or {}, entity_anchor)
+            if refinement_query and refinement_query.casefold() != exact_query.casefold():
+                start_visual_qa_scene()
+                refinement_candidates = []
+                refinement_sources = set()
+                for source_index, (source, fetcher) in enumerate(source_plan):
+                    if source_index >= REFINEMENT_SOURCE_LIMIT:
+                        break
+                    source_name = str(source or "").strip()
+                    source_key = source_name.casefold()
+                    if not callable(fetcher) or not source_key or source_key in refinement_sources:
+                        continue
+                    refinement_sources.add(source_key)
+                    raw_data = runtime._call_fetcher_with_timeout(
+                        fetcher,
+                        (refinement_query, set(), refinement_query, video_title),
+                        source_name,
+                        refinement_query,
+                    )
+                    for candidate_index, data in enumerate(_candidate_items(raw_data), 1):
+                        valid, reason, normalized = _preflight_image(data)
+                        if not valid:
+                            rejected_counts["invalid_image"] += 1
+                            continue
+                        image_hash = _hash_image(bot, normalized)
+                        if image_hash in seen_hashes or any(item[3] == image_hash for item in refinement_candidates):
+                            rejected_counts["duplicate"] += 1
+                            continue
+                        record = candidate_provenance(data)
+                        if not provenance_is_usable(record):
+                            rejected_counts["monetization"] += 1
+                            continue
+                        priority = _candidate_priority(
+                            source_name,
+                            normalized,
+                            visual_type,
+                            refinement_query,
+                            visual_genre,
+                            data=data,
+                        )
+                        refinement_candidates.append(
+                            (
+                                candidate_index,
+                                data,
+                                normalized,
+                                image_hash,
+                                priority,
+                                record,
+                                source_name,
+                                refinement_query,
+                                reason,
+                            )
+                        )
+                        if len(refinement_candidates) >= REFINEMENT_CANDIDATE_POOL:
+                            break
+
+                refinement_candidates.sort(
+                    key=lambda item: (
+                        -float(item[4]),
+                        str(item[6]).casefold(),
+                        int(item[0]),
+                    )
+                )
+                refinement_batch = refinement_candidates[:REFINEMENT_CANDIDATE_POOL]
+                if refinement_batch:
+                    result_map = strict_gemini_check_batch(
+                        [item[2] for item in refinement_batch],
+                        entity_anchor,
+                        os.getenv("GEMINI_API_KEY"),
+                        tier="IDENTITY",
+                        visual_type=visual_type,
+                        visual_genre=visual_genre,
+                    )
+                    qa_requests += 1
+                    for local_index, verdict in result_map.items():
+                        if verdict is True and query_verified < MANUAL_QUERY_VERIFIED_TARGET and len(assets) < MANUAL_POOL_MAX:
+                            item = refinement_batch[int(local_index)]
+                            status = (
+                                "factory-rejected-resolution"
+                                if str(item[8]).startswith("resolution-soft:")
+                                else "entity-verified"
+                            )
+                            if status == "factory-rejected-resolution":
+                                rejected_counts["resolution_soft"] += 1
+                                refinement_resolution_rejected += 1
+                            assets.append(
+                                {
+                                    "subject": entity_anchor,
+                                    "bytes": item[2],
+                                    "hash": item[3],
+                                    "source": item[6],
+                                    "query": refinement_query,
+                                    "visual_type": visual_type,
+                                    "visual_genre": visual_genre,
+                                    "provenance": dict(item[5]),
+                                    "priority": float(item[4]),
+                                    "search_text": _candidate_search_text(item[1]),
+                                    "status": status,
+                                    "manual_query_index": query_index,
+                                }
+                            )
+                            seen_hashes.add(item[3])
+                            query_verified += 1
+                            refinement_verified += 1
+                        elif verdict is False:
+                            rejected_counts["entity_no"] += 1
+                        elif verdict is not None:
+                            rejected_counts["entity_uncertain"] += 1
+
         query_stats.append(
             {
                 "query": exact_query,
                 "verified": query_verified,
-                "resolution_rejected": query_resolution_rejected,
+                "refinement_query": refinement_query,
+                "refinement_verified": refinement_verified,
+                "resolution_rejected": query_resolution_rejected + refinement_resolution_rejected,
                 "qa_requests": qa_requests,
                 "visual_type": visual_type,
                 "visual_genre": visual_genre,
