@@ -1730,7 +1730,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.markdown("#### 1 · Metadata")
         st.caption("Approve the exact title, description and pinned comment used for upload.")
 
-        title = st.text_input("YouTube title", max_chars=100, key="final_title", disabled=not editing)
+        title = st.text_input("YouTube title", max_chars=100, key="final_title", disabled=metadata_approved)
         meta_cols = st.columns(2)
         with meta_cols[0]:
             description = st.text_area("YouTube description", height=140, key="final_description", disabled=not editing)
