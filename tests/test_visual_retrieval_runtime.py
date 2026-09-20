@@ -1388,7 +1388,7 @@ def test_manual_pool_uses_descending_rank_targets(monkeypatch):
         values = []
         for index in range(target):
             values.append({
-                "bytes": _jpeg_bytes((900 + index, 1200), color=(40 + index * 15, 70, 100)),
+                "bytes": _jpeg_bytes((900 + index, 1200), color=(40 + query_index * 50 + index * 8, 70, 100)),
                 "provenance": {
                     "provider": "Commons",
                     "url": f"https://commons.wikimedia.org/wiki/File:{query_index}_{index}.jpg",
@@ -1496,7 +1496,7 @@ def test_new_manual_search_applies_only_monetization_filter(monkeypatch):
     ]
     values.extend(
         {
-            "bytes": _jpeg_bytes((280, 280)),
+            "bytes": _jpeg_bytes((280, 280), color=(40 + index * 20, 80, 120)),
             "provenance": {
                 "provider": "Openverse",
                 "url": f"https://example.com/valid-{index}.jpg",
