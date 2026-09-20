@@ -1,13 +1,13 @@
 """Canonical visual-search intent for the Shorts factory.
 
 Automatic queries are built for image retrieval rather than prose. The factual
-identity is mandatory; scene evidence is ranked for searchable visual anchors
-such as named organizations/events, concrete actions, and photographable
-contexts. Manual queries remain exact and authoritative.
+identity is mandatory; scene evidence is used only for a compact searchable
+refinement. Manual queries remain exact for provider retrieval while their
+entity anchor is separated for entity-only verification.
 
-Retrieval is intentionally bounded to one primary query plus up to four
-evidence-backed refinements and the exact factual identity fallback. Query
-construction never invents facts or fan-outs into a blind ladder.
+Retrieval is intentionally bounded to one primary query plus one compact
+evidence-backed refinement. Query construction never invents facts or fans
+out into a blind ladder.
 """
 from __future__ import annotations
 
@@ -63,7 +63,11 @@ def _manual_entity_from_query(manual: str, resolved_subject: str) -> str:
     if resolved:
         query_tokens = set(tokens(query))
         resolved_tokens = set(tokens(resolved))
-        if query_tokens & resolved_tokens:
+        meaningful_tokens = query_tokens or resolved_tokens
+        if (
+            query_tokens & resolved_tokens
+            and len(resolved_tokens) >= max(1, int(len(meaningful_tokens) * 0.6))
+        ):
             return resolved
 
     words = [
