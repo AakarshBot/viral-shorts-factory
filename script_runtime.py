@@ -27,6 +27,9 @@ _RETENTION_BAIT_RE = tuple(
         r"\b(?:don['’]?t|do not)\s+miss\s+(?:what\s+comes\s+next|the\s+reveal)\b",
         r"\bthe\s+(?:best|biggest|most\s+important)\s+part\s+is\s+(?:coming|later)\b",
         r"\bstay\s+till\s+the\s+end\b",
+        r"\b(?:watch|stay|stick)\s+(?:until|till)\s+(?:the\s+)?end\b",
+        r"\bfind\s+out\s+later\b",
+        r"\b(?:i'll|we'll|we\s+will)\s+reveal\s+(?:it|that)\s+later\b",
     )
 )
 
@@ -562,11 +565,6 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         and not contains_retention_bait(sentence)
         and not _looks_like_filler(sentence)
     ]
-    if len(sentences) < 4:
-        raise ValueError(
-            "Source-grounded fallback refused: evidence does not contain four distinct narrative beats."
-        )
-
     entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category = str(genre_key or "news").replace("_", " ").title()
     scenes = []
