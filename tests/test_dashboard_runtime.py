@@ -1215,3 +1215,27 @@ def test_dashboard_output_summary_reports_visual_qc_readiness():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert 'ready_visuals = sum(1 for item in visuals if item.get("qc_passed"))' in source
     assert 'f"{ready_visuals}/{len(visuals)} ready"' in source
+
+
+def test_dashboard_crop_editor_has_free_rectangle_mode_and_full_source():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert '"Rectangle (free)"' in source
+    assert 'crop_asset.get("original_path")' in source
+    assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
+
+
+def test_upload_panel_keeps_public_private_controls_and_comment_override_path():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    workflow_source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    uploader_source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert 'key="upload_public"' in app_source
+    assert 'key="upload_private"' in app_source
+    assert 'publish_mode' in workflow_source
+    assert 'comment_override=final_comment' in workflow_source
+    assert 'youtube.commentThreads().insert' in uploader_source
+    assert 'if privacy == "public":' in uploader_source
+
+
+def test_dashboard_header_does_not_render_empty_top_band():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert '[data-testid="stHeader"]{background:transparent;border-bottom:none}' in source
