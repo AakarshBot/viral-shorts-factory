@@ -679,6 +679,8 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "source_page_url": str(asset.get("source_page_url") or "").strip(),
                 "source_image_url": str(asset.get("source_image_url") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
+                "action_search": bool(asset.get("action_search")),
+                "search_variant_index": int(asset.get("search_variant_index") or 1),
                 "used": False,
             }
         )
