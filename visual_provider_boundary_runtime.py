@@ -368,65 +368,65 @@ def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int =
 
 
 def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
-    """Resolve near-exact Wikipedia person pages in one API call."""
+    """Resolve near-exact Wikipedia person pages with one search + one batched metadata call."""
     entity = _clean_query(query)
     if not entity:
         return []
     payload = _api_json(
         "https://en.wikipedia.org/w/api.php",
         params={
-            "action": "query",
-            "generator": "search",
-            "gsrsearch": entity,
-            "redirects": 1,
-            "gsrnamespace": 0,
-            "gsrlimit": MAX_PROVIDER_CANDIDATES,
-            "prop": "pageimages|pageprops",
-            "piprop": "name|original|thumbnail",
-            "ppprop": "wikibase_item",
-            "pilicense": "free",
-            "pithumbsize": 1600,
+            "action": "query", "generator": "search", "gsrsearch": entity,
+            "redirects": 1, "gsrnamespace": 0, "gsrlimit": MAX_PROVIDER_CANDIDATES,
+            "prop": "pageimages|pageprops", "piprop": "name|original|thumbnail",
+            "ppprop": "wikibase_item", "pilicense": "free", "pithumbsize": 1600,
             "format": "json",
         },
     )
     pages = payload.get("query", {}).get("pages", {}) if payload else {}
-    urls: list[Any] = []
-    for page_position, page in enumerate(pages.values() if isinstance(pages, dict) else [], 1):
+    ordered = sorted(
+        [p for p in (pages.values() if isinstance(pages, dict) else []) if isinstance(p, dict)],
+        key=lambda p: int(p.get("index") or 10**9),
+    )
+    file_names = []
+    for page in ordered:
+        name = str(page.get("pageimage") or "").strip()
+        if name and name not in file_names:
+            file_names.append(name)
+    if not file_names:
+        return []
+
+    info_payload = _api_json(
+        "https://en.wikipedia.org/w/api.php",
+        params={
+            "action": "query",
+            "titles": "|".join("File:" + name for name in file_names),
+            "prop": "imageinfo",
+            "iiprop": "url|mime|extmetadata",
+            "iiurlwidth": 1600,
+            "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl|ImageDescription",
+            "format": "json",
+        },
+    )
+    info_pages = info_payload.get("query", {}).get("pages", {}) if info_payload else {}
+    info_by_title = {}
+    for page in info_pages.values() if isinstance(info_pages, dict) else []:
         if not isinstance(page, dict):
             continue
-        title = str(page.get("title", "")).strip()
-        # Wikipedia's search engine is the relevance filter. Do not impose a
-        # brittle token-level name match here: legitimate pages commonly use
-        # compacted names, punctuation, initials, aliases, transliterations or
-        # redirects. The authoritative identity decision happens later at the
-        # semantic visual-QA boundary.
+        imageinfo = page.get("imageinfo") or []
+        title = str(page.get("title") or "").strip()
+        if title and imageinfo and isinstance(imageinfo[0], dict):
+            info_by_title[title.casefold()] = imageinfo[0]
+
+    urls = []
+    for position, page in enumerate(ordered, 1):
+        title = str(page.get("title") or "").strip()
         file_name = str(page.get("pageimage") or "").strip()
-        if not file_name:
-            continue
-        info_payload = _api_json(
-            "https://en.wikipedia.org/w/api.php",
-            params={
-                "action": "query",
-                "prop": "imageinfo",
-                "titles": "File:" + file_name,
-                "iiprop": "url|mime|extmetadata",
-                "iiurlwidth": 1600,
-                "iiextmetadatafilter": "LicenseShortName|Artist|LicenseUrl|ImageDescription",
-                "format": "json",
-            },
-        )
-        file_pages = info_payload.get("query", {}).get("pages", {}) if info_payload else {}
-        info = None
-        for file_page in file_pages.values() if isinstance(file_pages, dict) else []:
-            imageinfo = file_page.get("imageinfo") or [] if isinstance(file_page, dict) else []
-            if imageinfo and isinstance(imageinfo[0], dict):
-                info = imageinfo[0]
-                break
+        info = info_by_title.get(("File:" + file_name).casefold())
         if not info:
             continue
         ext = info.get("extmetadata") or {}
-        def _meta_value(key):
-            value = ext.get(key)
+        def _meta_value(name):
+            value = ext.get(name)
             return value.get("value", "") if isinstance(value, dict) else str(value or "")
         license_code = normalize_license_code(_meta_value("LicenseShortName"))
         if not is_allowed_license(license_code):
@@ -443,11 +443,10 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
                     "license_url": _meta_value("LicenseUrl") or LICENSE_URLS.get(license_code, ""),
                     "search_title": title,
                     "search_description": _meta_value("ImageDescription"),
-                    "search_position": page_position,
+                    "search_position": position,
                 },
             ))
     return _bounded_downloads(urls, used_urls)
-
 
 def _commons_search_query(query: str) -> str:
     """Use the vocabulary Commons actually uses for match/event media."""
@@ -734,9 +733,9 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
         src = photo.get("src") or {}
         if isinstance(src, dict):
             author = str(photo.get("photographer") or "")
-            for url in (src.get("large2x"), src.get("large"), src.get("original")):
-                if url:
-                    urls.append((str(url), {
+            url = src.get("large2x") or src.get("large") or src.get("original")
+            if url:
+                urls.append((str(url), {
                         "provider": "Pexels",
                         "url": str(photo.get("url") or url),
                         "author": author,
@@ -767,9 +766,9 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
         if isinstance(urls_meta, dict):
             user = item.get("user") or {}
             author = str(user.get("name") or user.get("username") or "") if isinstance(user, dict) else ""
-            for url in (urls_meta.get("regular"), urls_meta.get("full"), urls_meta.get("raw")):
-                if url:
-                    urls.append((str(url), {
+            url = urls_meta.get("regular") or urls_meta.get("full") or urls_meta.get("raw")
+            if url:
+                urls.append((str(url), {
                         "provider": "Unsplash",
                         "url": str((item.get("links") or {}).get("html") or url),
                         "author": author,
