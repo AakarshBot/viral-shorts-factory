@@ -761,11 +761,6 @@ def collect_manual_visual_pool(
                     continue
 
                 record = candidate_provenance(data)
-                if not provenance_is_usable(record):
-                    # Commercial-use incompatibility is a factory-hard rejection.
-                    # It never enters the reviewer pool or consumes entity-QA budget.
-                    rejected_counts["monetization"] += 1
-                    continue
 
                 priority = _candidate_priority(
                     source_name,
@@ -826,7 +821,11 @@ def collect_manual_visual_pool(
                 base_offset = (0 if group_index == 0 else primary_count) + offset
                 for local_index, verdict in result_map.items():
                     verdicts[base_offset + int(local_index)] = verdict
-                entity_passes = sum(value is True for value in verdicts.values())
+                entity_passes = sum(
+                    verdict is True and provenance_is_usable(candidates[index][5])
+                    for index, verdict in verdicts.items()
+                    if 0 <= int(index) < len(candidates)
+                )
                 if entity_passes >= MANUAL_QUERY_VERIFIED_TARGET:
                     break
             if entity_passes >= MANUAL_QUERY_VERIFIED_TARGET:
@@ -837,6 +836,9 @@ def collect_manual_visual_pool(
         for local_index, candidate in enumerate(candidates):
             verdict = verdicts.get(local_index)
             if verdict is True:
+                if not provenance_is_usable(candidate[5]):
+                    rejected_counts["monetization"] += 1
+                    continue
                 status = (
                     "factory-rejected-resolution"
                     if str(candidate[7]).startswith("resolution-soft:")
@@ -974,6 +976,9 @@ def collect_manual_visual_pool(
                     for local_index, verdict in result_map.items():
                         if verdict is True and query_verified < MANUAL_QUERY_VERIFIED_TARGET and len(assets) < MANUAL_POOL_MAX:
                             item = refinement_batch[int(local_index)]
+                            if not provenance_is_usable(item[5]):
+                                rejected_counts["monetization"] += 1
+                                continue
                             status = (
                                 "factory-rejected-resolution"
                                 if str(item[8]).startswith("resolution-soft:")
