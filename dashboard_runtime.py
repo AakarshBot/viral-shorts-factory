@@ -740,7 +740,7 @@ class DashboardWorkflowController(WorkflowController):
         self.update(
             "audio",
             42,
-            "Slide queries saved. Creating the voiceover and preparing visuals.",
+            "Script review complete. Creating the voiceover and preparing visuals.",
         )
         return live_script
 
@@ -921,8 +921,10 @@ class DashboardWorkflowController(WorkflowController):
                     if isinstance(item, dict) and str(item.get("hash") or "").strip():
                         used_hashes.add(str(item.get("hash")).strip())
 
+            import visual_runtime
+
             result = collect_manual_visual_search(
-                self.bot,
+                visual_runtime,
                 self.bot,
                 query,
                 video_title=video_title,
