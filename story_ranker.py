@@ -1485,7 +1485,6 @@ def patch_story_selection(bot):
             trend_keyword,
             custom_gnews_q,
             custom_rss_url,
-            ai_cricket=ai_cricket,
         )
 
         relevant = []
