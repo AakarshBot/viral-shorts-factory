@@ -735,11 +735,18 @@ def _manual_query_target(query_index: int) -> int:
     return targets[min(rank, len(targets)) - 1]
 
 
+_VISUAL_SEARCH_CACHE_FALLBACK: dict[int, dict] = {}
+
+
 def _visual_search_cache(bot) -> dict:
     cache = getattr(bot, "_visual_source_search_cache", None)
-    if not isinstance(cache, dict):
-        cache = {}
+    if isinstance(cache, dict):
+        return cache
+    cache = _VISUAL_SEARCH_CACHE_FALLBACK.setdefault(id(bot), {})
+    try:
         setattr(bot, "_visual_source_search_cache", cache)
+    except Exception:
+        pass
     return cache
 
 
@@ -1264,7 +1271,6 @@ def collect_manual_visual_search(
                 bot,
                 seen_hashes,
                 seen_urls,
-                set(),
                 rejected_counts,
             )
             if candidate is None:
