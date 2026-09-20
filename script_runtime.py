@@ -217,7 +217,7 @@ def repair_script_structure(script_data, format_mode):
         voiceover = str(scene.get("voiceover") or "").strip()
         parts = _split_scene_text(voiceover)
         if not parts:
-            parts = [voiceover] if 8 <= _scene_word_count(voiceover) <= 30 else []
+            parts = [voiceover] if SCENE_MIN_WORDS <= _scene_word_count(voiceover) <= SCENE_MAX_WORDS else []
         for part in parts:
             copy = dict(scene)
             copy["voiceover"] = part
