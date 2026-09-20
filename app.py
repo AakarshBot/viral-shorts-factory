@@ -1050,13 +1050,18 @@ def render_visual_details(snapshot: Dict[str, Any]) -> None:
 
 
 
-@st.dialog("PowerShell output", width="large")
 def render_powershell_output(lines: list[str]) -> None:
-    st.caption("Exact stdout/stderr captured from the active factory worker.")
-    if lines:
-        st.code("\n".join(lines), language="powershell")
-    else:
-        st.info("No factory console output has been captured yet.")
+    with st.popover(
+        "🖥️ Open exact PowerShell output",
+        type="secondary",
+        width="stretch",
+        help="Open the exact stdout/stderr captured from the active factory worker.",
+    ):
+        st.caption("Exact stdout/stderr captured from the active factory worker.")
+        if lines:
+            st.code("\n".join(lines), language="powershell")
+        else:
+            st.info("No factory console output has been captured yet.")
 
 def render_console(snapshot: Dict[str, Any]) -> None:
     lines = snapshot.get("console_lines") or []
@@ -1079,13 +1084,7 @@ def render_console(snapshot: Dict[str, Any]) -> None:
     if operation_percent is not None:
         st.markdown(f"**{operation_label}** · {operation_percent}%")
         st.progress(max(0.0, min(1.0, operation_percent / 100)))
-    if st.button(
-        "🖥️ Open exact PowerShell output",
-        type="secondary",
-        width="stretch",
-        key="open_powershell_output",
-    ):
-        render_powershell_output(lines)
+    render_powershell_output(lines)
 
 
 def render_logs(snapshot: Dict[str, Any]) -> None:
