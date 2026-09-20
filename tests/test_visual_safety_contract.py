@@ -3,6 +3,7 @@ import io
 from PIL import Image
 
 import visual_retrieval_runtime as retrieval
+import visual_qa_runtime as visual_qa
 from visual_query_entities_runtime import search_slide_visual
 
 
@@ -98,7 +99,7 @@ def test_visual_batch_qc_is_the_active_retrieval_boundary(monkeypatch):
         calls["qa"] += 1
         return {index: None for index in range(len(images))}
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", fake_batch)
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
     monkeypatch.setattr(
         retrieval,
         "_source_plan",
