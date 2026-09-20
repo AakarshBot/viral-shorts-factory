@@ -627,7 +627,6 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "source_page_url": str(asset.get("source_page_url") or "").strip(),
                 "source_image_url": str(asset.get("source_image_url") or "").strip(),
                 "source_asset_key": str(asset.get("source_asset_key") or "").strip(),
-                "signature": str(asset.get("signature") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
                 "used": False,
             }
@@ -755,31 +754,6 @@ def _source_image_key(data: Any) -> str:
     return ""
 
 
-def _candidate_signature(normalized: bytes) -> str:
-    """Compact perceptual signature used only to catch obvious transformed duplicates."""
-    try:
-        image = Image.open(io.BytesIO(normalized)).convert("L").resize((32, 32), Image.Resampling.LANCZOS)
-        pixels = list(image.getdata())
-        if not pixels:
-            return ""
-        average = sum(pixels) / len(pixels)
-        bits = 0
-        for pixel in pixels:
-            bits = (bits << 1) | int(pixel >= average)
-        return f"{bits:064x}"
-    except Exception:
-        return ""
-
-
-def _signature_close(left: str, right: str, threshold: int = 3) -> bool:
-    try:
-        a = int(str(left or ""), 16)
-        b = int(str(right or ""), 16)
-    except (TypeError, ValueError):
-        return False
-    return (a ^ b).bit_count() <= int(threshold)
-
-
 def _append_unique_candidate(
     candidate: dict,
     seen_hashes: set[str],
@@ -838,7 +812,6 @@ def _manual_candidate_from_data(
         "data": data,
         "bytes": normalized,
         "hash": image_hash,
-        "signature": signature,
         "priority": _candidate_priority(
             source_name,
             normalized,
@@ -909,7 +882,6 @@ def collect_manual_visual_pool(
     seen_hashes = set(used_hashes)
     seen_image_urls: set[str] = set()
     seen_asset_keys: set[str] = set()
-    seen_signatures: list[str] = []
     query_stats: list[dict] = []
     rejected_counts = {
         "entity_no": 0,
