@@ -110,6 +110,8 @@ def test_extractives_are_substantive_and_publication_blocked():
             "Players remain focused on the tournament while the issue is being resolved by officials.",
             "The latest update gives no indication that the overall campaign has been cancelled or suspended.",
             "Further decisions depend on the outcome of the ongoing discussions around the clothing supply.",
+            "Officials are also reviewing whether the delay changes any scheduled preparation steps or creates additional logistical requirements.",
+            "The available evidence describes the situation as an operational issue rather than a cancellation of the tournament campaign.",
         ]
     )
     fallback = _extractive_script_fallback(
@@ -130,7 +132,6 @@ def test_extractives_are_substantive_and_publication_blocked():
         for scene in fallback["script"]
     )
     assert sum(len(scene["voiceover"].split()) for scene in fallback["script"]) >= SCRIPT_MIN_TOTAL_WORDS
-
 
 def test_content_density_rejects_five_tiny_scenes():
     script = {
