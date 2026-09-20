@@ -140,6 +140,7 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
     # P31=Q5 (human) when available, then use the first relevant item as a
     # compatibility fallback if structured type data is incomplete.
     verified_qid = ""
+    detail_succeeded = False
     if candidate_ids:
         detail_payload = _api_json(
             "https://www.wikidata.org/w/api.php",
@@ -152,7 +153,8 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
             },
         )
         entities = detail_payload.get("entities", {}) if detail_payload else {}
-        if isinstance(entities, dict):
+        detail_succeeded = isinstance(entities, dict) and bool(entities)
+        if detail_succeeded:
             for qid in candidate_ids[:5]:
                 entity = entities.get(qid)
                 claims = entity.get("claims", {}) if isinstance(entity, dict) else {}
@@ -166,14 +168,17 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
                 if verified_qid:
                     break
 
-    qid = verified_qid or (candidate_ids[0] if candidate_ids else "")
+    if detail_succeeded:
+        if not verified_qid:
+            return {}
+        qid = verified_qid
+    else:
+        qid = candidate_ids[0] if candidate_ids else ""
     if not qid:
         return {}
     label = labels.get(qid, "")
-    entity = {}
-    if candidate_ids:
-        detail_payload = detail_payload if "detail_payload" in locals() and isinstance(detail_payload, dict) else {}
-        detail_entities = detail_payload.get("entities", {}) if detail_payload else {}
+    if detail_succeeded:
+        detail_entities = detail_payload.get("entities", {}) if isinstance(detail_payload, dict) else {}
         if isinstance(detail_entities, dict) and isinstance(detail_entities.get(qid), dict):
             entity = detail_entities[qid]
             label_data = entity.get("labels", {}).get("en", {}) if isinstance(entity.get("labels"), dict) else {}
