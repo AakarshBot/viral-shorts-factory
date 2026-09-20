@@ -1678,9 +1678,9 @@ def test_manual_action_search_uses_action_query_variants(monkeypatch):
 
     assert len(result["assets"]) == 5
     assert queries[:3] == [
-        "India women's national team",
         "India women's national team action",
         "India women's national team celebration",
+        "India women's national team playing",
     ]
     action_queries = [str(item.get("query") or "") for item in result["assets"]]
     assert any(query.endswith(" action") for query in action_queries)
