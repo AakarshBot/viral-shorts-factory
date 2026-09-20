@@ -45,7 +45,7 @@ MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_
 MAX_SEMANTIC_CHECKS_PER_SOURCE = max(1, min(3, int(os.getenv("VISUAL_SEMANTIC_CHECKS_PER_SOURCE", "3"))))
 MAX_ENTITY_BANK_PER_QUERY = max(3, min(10, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "10"))))
 INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
-ENTITY_CHECK_PRIMARY_POOL = max(10, min(10, int(os.getenv("VISUAL_ENTITY_CHECK_PRIMARY_POOL", "10"))))
+ENTITY_CHECK_PRIMARY_POOL = 10
 REFINEMENT_CANDIDATE_POOL = max(6, min(12, int(os.getenv("VISUAL_REFINEMENT_CANDIDATE_POOL", "10"))))
 INITIAL_SOURCE_LIMIT = max(1, min(3, int(os.getenv("VISUAL_INITIAL_SOURCE_LIMIT", "3"))))
 REFINEMENT_SOURCE_LIMIT = max(1, min(2, int(os.getenv("VISUAL_REFINEMENT_SOURCE_LIMIT", "2"))))
@@ -647,15 +647,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         source_plan = _source_plan(bot, visual_type, visual_genre)
     except TypeError:
         source_plan = _source_plan(bot, visual_type)
-
-    qa_scene = dict(seg)
-    qa_scene["primary_entity"] = visual_anchor
-    qa_scene["factual_primary_entity"] = visual_anchor
-    qa_scene["visual_intent"] = visual_intent.intent or intent
-    qa_scene["specific_search_prompt"] = visual_intent.query
-    qa_scene["voiceover"] = voice
-    qa_scene["visual_type"] = visual_type
-    qa_scene["visual_genre"] = visual_genre
 
     verified_assets = []
     verified_hashes = set()
