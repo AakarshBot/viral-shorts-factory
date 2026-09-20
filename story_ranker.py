@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 import requests
 
@@ -128,7 +128,14 @@ def _published_datetime(story):
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         candidates.append(parsed.astimezone(timezone.utc))
-    return max(candidates) if candidates else None
+
+    now = datetime.now(timezone.utc)
+    future_cutoff = now.timestamp() + (15 * 60)
+    trustworthy = [
+        value for value in candidates
+        if value.timestamp() <= future_cutoff
+    ]
+    return max(trustworthy) if trustworthy else None
 
 
 def _age_hours(story):
@@ -300,9 +307,10 @@ def _canonical_url(value):
 
 
 def _source_quality(story):
+    """Score the publisher itself, never reputation words found inside article text."""
     source = _clean(story.get("source") or story.get("publisher") or story.get("source_name"))
     domain = _source_domain(story)
-    blob = f"{source} {domain} {_text_blob(story)}"
+    blob = f"{source} {domain}"
     score = min(5.0, sum(1 for term in SOURCE_QUALITY_TERMS if term in blob))
     if _clean(story.get("collection_source")) == "official":
         score = min(5.0, score + 2.0)
@@ -478,17 +486,22 @@ def _cricket_relevance_pass(story, genre_key):
 
 
 GOOGLE_NEWS_RADAR_QUERIES = (
-    "(India OR Indian) (news OR update OR announced)",
-    "(world OR global) (news OR update OR announced)",
-    '("breaking news" OR "latest news" OR "just in")',
-    "(technology OR AI OR science) (news OR launch OR research)",
-    "(business OR economy OR markets OR company) (news OR deal OR earnings)",
-    "(sports OR cricket OR football OR tennis) (news OR match OR tournament)",
+    "(India OR Indian OR world OR global) (news OR announced OR decision OR deal OR launch)",
+    "(technology OR AI OR science) (news OR launch OR research OR breakthrough)",
+    "(business OR economy OR markets OR company) (news OR deal OR earnings OR investment)",
+    "(sports OR cricket OR football OR tennis) (news OR match OR tournament OR record)",
     "(entertainment OR movies OR music OR celebrity) (news OR release OR announcement)",
     "(health OR medicine OR wellness) (news OR study OR approval)",
 )
 GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
 REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
+
+DISCOVERY_SOURCE_WAIT_SECONDS = 10.0
+DISCOVERY_SIGNAL_WAIT_SECONDS = 8.0
+DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
+DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
+DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
+DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD = 6
 
 
 def _trend_traffic_score(value, rank=0):
@@ -702,10 +715,32 @@ def _official_feed_urls(genre_key, genre_cfg):
 
 
 def _official_feed_items(genre_key, genre_cfg):
-    items = []
-    for url in _official_feed_urls(genre_key, genre_cfg):
-        items.extend(_rss_items(url, genre_key, collection_source="official"))
-    return items
+    """Fetch configured official feeds in parallel without serializing the lane."""
+    urls = _official_feed_urls(genre_key, genre_cfg)
+    if not urls:
+        return []
+
+    pool = ThreadPoolExecutor(
+        max_workers=min(4, len(urls)),
+        thread_name_prefix="discovery-official",
+    )
+    futures = {
+        pool.submit(_rss_items, url, genre_key, collection_source="official"): url
+        for url in urls
+    }
+    try:
+        done, pending = wait(futures, timeout=8.0)
+        items = []
+        for future in done:
+            try:
+                items.extend(future.result() or [])
+            except Exception:
+                continue
+        for future in pending:
+            future.cancel()
+        return items
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _reddit_items(genre_key="", subreddit="", limit=50):
@@ -1302,6 +1337,119 @@ def _resolve_discovery_futures(future_sources, timeout=DISCOVERY_SOURCE_WAIT_SEC
     return resolved
 
 
+def _google_news_query_from_url(url):
+    """Extract a Google News RSS search query so it is not fetched twice."""
+    try:
+        parsed = urlparse(str(url or "").strip())
+        if parsed.netloc.lower().removeprefix("www.") != "news.google.com":
+            return ""
+        if not parsed.path.rstrip("/").endswith("/rss/search"):
+            return ""
+        query = parse_qs(parsed.query).get("q", [""])[0]
+        return unquote(str(query or "")).strip()
+    except Exception:
+        return ""
+
+
+def _is_reddit_json_url(url):
+    """Identify Reddit JSON endpoints that belong in the social lane, not RSS."""
+    try:
+        parsed = urlparse(str(url or "").strip())
+        host = parsed.netloc.lower().removeprefix("www.")
+        return host.endswith("reddit.com") and parsed.path.lower().endswith(".json")
+    except Exception:
+        return False
+
+
+def _dedupe_discovery_queries(queries, max_items):
+    seen = set()
+    output = []
+    for query in queries:
+        text_value = re.sub(r"\s+", " ", str(query or "").strip())
+        key = text_value.casefold()
+        if not text_value or key in seen:
+            continue
+        seen.add(key)
+        output.append(text_value)
+        if len(output) >= max(1, int(max_items)):
+            break
+    return output
+
+
+def _build_discovery_google_queries(
+    genre_key,
+    genre_cfg,
+    trend_keyword=None,
+    custom_gnews_q=None,
+    selected_rss="",
+    broad_discovery=False,
+):
+    """Build a bounded Google News query budget around requested/category context."""
+    genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
+    candidates = []
+    rss_query = _google_news_query_from_url(selected_rss)
+
+    for value in (
+        trend_keyword,
+        custom_gnews_q,
+        rss_query,
+        genre_cfg.get("gnews_q"),
+    ):
+        text_value = str(value or "").strip()
+        if text_value:
+            candidates.append(text_value)
+
+    targeted = bool(
+        str(trend_keyword or "").strip()
+        or str(custom_gnews_q or "").strip()
+        or str(rss_query or "").strip()
+    )
+    has_category_query = bool(str(genre_cfg.get("gnews_q") or "").strip())
+
+    if broad_discovery:
+        radar_budget = 4 if targeted or has_category_query else len(GOOGLE_NEWS_RADAR_QUERIES)
+        candidates.extend(GOOGLE_NEWS_RADAR_QUERIES[:radar_budget])
+        return _dedupe_discovery_queries(candidates, DISCOVERY_MAX_GOOGLE_QUERIES_BROAD)
+
+    candidates.append(GOOGLE_NEWS_RADAR_QUERIES[0])
+    return _dedupe_discovery_queries(candidates, DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD)
+
+
+def _resolve_discovery_futures(future_sources, timeout):
+    """Resolve completed discovery workers without allowing one source to block its lane."""
+    if not future_sources:
+        return {}
+
+    futures = list(future_sources)
+    done, pending = wait(futures, timeout=max(1.0, float(timeout)))
+
+    resolved = {}
+    for future in done:
+        label = future_sources.get(future, "discovery source")
+        try:
+            resolved[future] = future.result()
+        except Exception as exc:
+            print(
+                f"   [Discovery] {label} failed ({type(exc).__name__}); continuing with the other sources.",
+                flush=True,
+            )
+
+    for future in pending:
+        label = future_sources.get(future, "discovery source")
+        if future.cancel():
+            print(
+                f"   [Discovery] {label} exceeded the {float(timeout):g}s lane budget; continuing without it.",
+                flush=True,
+            )
+        else:
+            print(
+                f"   [Discovery] {label} still running at the {float(timeout):g}s lane boundary; continuing without it.",
+                flush=True,
+            )
+
+    return resolved
+
+
 def collect_high_recall_stories(
     bot,
     genre_key,
@@ -1311,136 +1459,163 @@ def collect_high_recall_stories(
     custom_rss_url=None,
     broad_discovery=False,
 ):
-    """Collect broad free discovery signals and collapse them into distinct events."""
+    """Collect bounded factual discovery plus separate trend/social signals."""
     genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
-    raw = []
-    google_queries = list(GOOGLE_NEWS_RADAR_QUERIES)
-    for query in (trend_keyword, custom_gnews_q):
-        text_value = str(query or "").strip()
-        if text_value and text_value not in google_queries:
-            google_queries.insert(0, text_value)
-    if not broad_discovery:
-        google_queries = google_queries[:4]
 
-    selected_rss = str(custom_rss_url or genre_cfg.get("rss_url") or "").strip()
-    trend_geos = GOOGLE_TRENDS_GEOS if broad_discovery else ("IN",)
-    reddit_subreddits = REDDIT_RADAR_SUBREDDITS if broad_discovery else ("",)
+    configured_rss = str(custom_rss_url or genre_cfg.get("rss_url") or "").strip()
+    selected_rss = configured_rss
+    if _is_reddit_json_url(selected_rss):
+        selected_rss = ""
 
-    gdelt_queries = [
-        "sourcecountry:india",
-        "(breaking OR announced OR decision OR deal OR launch OR crisis OR court OR record OR discovery OR incident)",
-    ]
-    if trend_keyword:
-        gdelt_queries.insert(0, str(trend_keyword).strip())
-    elif custom_gnews_q:
-        gdelt_queries.insert(0, str(custom_gnews_q).strip())
-    if not broad_discovery:
-        gdelt_queries = gdelt_queries[:2]
-
-    pool = ThreadPoolExecutor(
-        max_workers=16 if broad_discovery else 8,
-        thread_name_prefix="discovery-radar",
+    google_queries = _build_discovery_google_queries(
+        genre_key,
+        genre_cfg,
+        trend_keyword=trend_keyword,
+        custom_gnews_q=custom_gnews_q,
+        selected_rss=configured_rss,
+        broad_discovery=broad_discovery,
     )
+
+    trend_geos = GOOGLE_TRENDS_GEOS if broad_discovery else ("IN",)
+    reddit_subreddits = REDDIT_RADAR_SUBREDDITS[:DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD] if broad_discovery else ("",)
+
+    official_urls = _official_feed_urls(genre_key, genre_cfg)
+    core_job_count = len(google_queries) + bool(selected_rss) + bool(official_urls)
+    core_pool = ThreadPoolExecutor(
+        max_workers=max(1, core_job_count),
+        thread_name_prefix="discovery-core",
+    )
+    signal_job_count = len(trend_geos) + len(reddit_subreddits)
+    signal_pool = ThreadPoolExecutor(
+        max_workers=max(1, signal_job_count),
+        thread_name_prefix="discovery-signals",
+    )
+
     google_futures = []
     rss_futures = []
     official_futures = []
     trend_futures = []
     reddit_futures = []
-    gdelt_futures = []
-    future_sources = {}
 
     try:
         google_futures = [
-            pool.submit(_google_news_search_items, query, genre_key, 60)
-            for query in google_queries if query
+            core_pool.submit(_google_news_search_items, query, genre_key, 60)
+            for query in google_queries
         ]
-        rss_futures = (
-            [pool.submit(_rss_items, selected_rss, genre_key, "rss", 60)]
-            if selected_rss else []
-        )
-        official_futures = (
-            [pool.submit(_official_feed_items, genre_key, genre_cfg)]
-            if _official_feed_urls(genre_key, genre_cfg) else []
-        )
+        if selected_rss:
+            rss_futures = [
+                core_pool.submit(_rss_items, selected_rss, genre_key, "rss", 60)
+            ]
+        if official_urls:
+            official_futures = [
+                core_pool.submit(_official_feed_items, genre_key, genre_cfg)
+            ]
+
         trend_futures = [
-            pool.submit(_google_trends_items, geo, 10)
+            signal_pool.submit(_google_trends_items, geo, 10)
             for geo in trend_geos
         ]
         reddit_futures = [
-            pool.submit(_reddit_items, genre_key, subreddit, 50)
+            signal_pool.submit(_reddit_items, genre_key, subreddit, 40)
             for subreddit in reddit_subreddits
         ]
-        gdelt_futures = [
-            pool.submit(fetch_gdelt_articles, query, timespan="48h", max_records=250)
-            for query in gdelt_queries if query
-        ]
 
-        for future in google_futures:
-            future_sources[future] = "Google News"
-        for future in rss_futures:
-            future_sources[future] = "RSS"
-        for future in official_futures:
-            future_sources[future] = "official feeds"
-        for future in trend_futures:
-            future_sources[future] = "Google Trends"
-        for future in reddit_futures:
-            future_sources[future] = "Reddit"
-        for future in gdelt_futures:
-            future_sources[future] = "GDELT"
+        core_sources = {future: "Google News" for future in google_futures}
+        core_sources.update({future: "RSS" for future in rss_futures})
+        core_sources.update({future: "official feeds" for future in official_futures})
 
         print(
-            f"   [Discovery] Waiting up to {DISCOVERY_SOURCE_WAIT_SECONDS:g}s for free-source radar.",
+            f"   [Discovery] Factual intake: {len(core_sources)} bounded source job(s).",
             flush=True,
         )
-        resolved = _resolve_discovery_futures(future_sources)
+        resolved_core = _resolve_discovery_futures(
+            core_sources,
+            DISCOVERY_SOURCE_WAIT_SECONDS,
+        )
 
-        for future in google_futures:
-            raw.extend(resolved.get(future) or [])
-        for future in rss_futures:
-            raw.extend(resolved.get(future) or [])
-        for future in official_futures:
-            raw.extend(resolved.get(future) or [])
+        signal_sources = {future: "Google Trends" for future in trend_futures}
+        signal_sources.update({future: "Reddit" for future in reddit_futures})
+        resolved_signals = _resolve_discovery_futures(
+            signal_sources,
+            DISCOVERY_SIGNAL_WAIT_SECONDS,
+        )
+
+        raw = []
+        for future in (*google_futures, *rss_futures, *official_futures):
+            raw.extend(resolved_core.get(future) or [])
 
         social_rows = []
-        for future in trend_futures:
-            raw.extend(resolved.get(future) or [])
         for future in reddit_futures:
-            social_rows.extend(resolved.get(future) or [])
-        raw.extend(social_rows)
+            social_rows.extend(resolved_signals.get(future) or [])
+        social_titles = [
+            str(row.get("title") or "")
+            for row in social_rows
+            if isinstance(row, dict) and str(row.get("title") or "").strip()
+        ]
 
-        for future in gdelt_futures:
-            raw.extend(resolved.get(future) or [])
+        # Google Trends rows contain linked news articles and can be used as factual
+        # source records; Reddit remains an audience-interest signal only.
+        for future in trend_futures:
+            raw.extend(resolved_signals.get(future) or [])
+
+        compacted = []
+        seen = set()
+        for story in raw:
+            if not isinstance(story, dict):
+                continue
+            key = _canonical_url(_source_url_from_item(story))
+            if not key:
+                key = "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
+            if key in seen:
+                continue
+            seen.add(key)
+            compacted.append(story)
+
+        if len(compacted) < DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT:
+            gdelt_query = (
+                str(trend_keyword or "").strip()
+                or str(custom_gnews_q or "").strip()
+                or str(genre_cfg.get("gnews_q") or "").strip()
+                or GOOGLE_NEWS_RADAR_QUERIES[0]
+            )
+            print(
+                f"   [Discovery] Core factual intake is light ({len(compacted)}); using one bounded GDELT fallback.",
+                flush=True,
+            )
+            gdelt_rows = fetch_gdelt_articles(
+                gdelt_query,
+                timespan="48h",
+                max_records=75,
+                timeout=3.0,
+            )
+            for row in gdelt_rows:
+                key = _canonical_url(_source_url_from_item(row))
+                if not key:
+                    key = "title:" + " ".join(sorted(_tokens(row.get("title", ""))))
+                if key not in seen:
+                    seen.add(key)
+                    compacted.append(row)
+
+        for story in compacted:
+            story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
+            story["trend_bonus"] = min(
+                4.0,
+                _safe_float(story.get("trend_bonus")) or 0.0,
+            )
+
+        events = cluster_news_events(compacted)
+        for event in events:
+            event["recommended_category"] = _infer_discovery_category(event)
+
+        print(
+            f"   [Discovery Funnel] factual intake={len(compacted)} -> distinct events={len(events)}; signals handled separately.",
+            flush=True,
+        )
+        return events, social_titles
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        core_pool.shutdown(wait=False, cancel_futures=True)
+        signal_pool.shutdown(wait=False, cancel_futures=True)
 
-    social_titles = [row.get("title", "") for row in social_rows]
-    for story in raw:
-        story["social_signal_raw"] = _social_signal(story.get("title", ""), social_titles)
-        story["trend_bonus"] = min(4.0, _safe_float(story.get("trend_bonus")) or 0.0)
-
-    compacted = []
-    seen = set()
-    for story in raw:
-        if not isinstance(story, dict):
-            continue
-        key = _canonical_url(_source_url_from_item(story))
-        if not key:
-            key = "title:" + " ".join(sorted(_tokens(story.get("title", ""))))
-        if key in seen:
-            continue
-        seen.add(key)
-        compacted.append(story)
-
-    events = cluster_news_events(compacted)
-    for event in events:
-        event["recommended_category"] = _infer_discovery_category(event)
-
-    print(
-        f"   [Discovery Funnel] article intake={len(compacted)} -> "
-        f"distinct events={len(events)}; free-source radar complete.",
-        flush=True,
-    )
-    return events, social_titles
 
 def rank_story_candidates(stories, conn=None, target_category="", target_format="", target_language="", social_titles=None, ai_cricket=False):
     """Rank an event-first discovery pool through the existing editorial funnel."""
