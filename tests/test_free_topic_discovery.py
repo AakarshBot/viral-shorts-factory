@@ -64,3 +64,139 @@ def test_topic_discovery_has_no_removed_paid_or_library_discovery_path():
     assert "_gnews_items" not in source
     assert "_discovery_query_lanes" not in source
     assert "_adaptive_discovery_query" not in source
+
+
+def test_discovery_query_budget_prioritizes_requested_and_category_context():
+    requested = "Smriti Mandhana latest match"
+    category = "Cricket OR IPL OR BCCI OR Tennis"
+    queries = story_ranker._build_discovery_google_queries(
+        "sports_stories_of_day",
+        {"gnews_q": category},
+        custom_gnews_q=requested,
+        broad_discovery=False,
+    )
+
+    assert queries[0] == requested
+    assert category in queries
+    assert len(queries) <= story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD
+
+
+def test_google_news_search_rss_url_is_not_fetched_as_a_second_rss_lane():
+    query = "Test Cricket OR ICC OR Ashes"
+    rss_url = (
+        "https://news.google.com/rss/search?q="
+        + story_ranker.quote_plus(query)
+        + "&hl=en-IN&gl=IN&ceid=IN:en"
+    )
+
+    queries = story_ranker._build_discovery_google_queries(
+        "sports_stories_of_day",
+        {},
+        custom_gnews_q=query,
+        selected_rss=rss_url,
+        broad_discovery=False,
+    )
+
+    assert queries.count(query) == 1
+
+
+def test_source_quality_uses_publisher_not_article_text():
+    story = {
+        "source": "Unknown Source",
+        "url": "https://example.com/story",
+        "text": "Reuters reported that the event happened today.",
+    }
+
+    assert story_ranker._source_quality(story) == 0
+
+
+def test_reddit_is_social_signal_not_factual_event_input(monkeypatch):
+    def fake_google(*_args, **_kwargs):
+        return [{
+            "title": "Major company announces new product",
+            "text": "Company announcement",
+            "description": "Company announcement",
+            "source": "Reuters",
+            "source_name": "Reuters",
+            "publisher": "Reuters",
+            "url": "https://reuters.example/product",
+            "publishedAt": "2026-09-20T10:00:00Z",
+            "genre": "",
+            "collection_source": "google_news_rss",
+        }]
+
+    def fake_reddit(*_args, **_kwargs):
+        return [{
+            "title": "Major company announces new product",
+            "text": "Social discussion",
+            "description": "Social discussion",
+            "source": "Reddit r/news",
+            "source_name": "Reddit r/news",
+            "publisher": "Reddit r/news",
+            "url": "https://reddit.com/r/news/example",
+            "publishedAt": "2026-09-20T10:01:00Z",
+            "genre": "",
+            "collection_source": "reddit",
+        }]
+
+    monkeypatch.setattr(story_ranker, "_google_news_search_items", fake_google)
+    monkeypatch.setattr(story_ranker, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(story_ranker, "_official_feed_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(story_ranker, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(story_ranker, "_reddit_items", fake_reddit)
+    monkeypatch.setattr(story_ranker, "fetch_gdelt_articles", lambda *args, **kwargs: [])
+
+    events, social_titles = story_ranker.collect_high_recall_stories(
+        None,
+        "national_global_affairs",
+        {"gnews_q": "company news"},
+        broad_discovery=False,
+    )
+
+    assert social_titles == ["Major company announces new product"]
+    assert events
+    assert all(
+        str(item.get("collection_source") or "").lower() != "reddit"
+        for event in events
+        for item in (event.get("event_evidence") or [])
+    )
+
+
+def test_gdelt_is_only_used_as_one_fallback_when_core_intake_is_light(monkeypatch):
+    gdelt_calls = []
+
+    def fake_google(*_args, **_kwargs):
+        return [{
+            "title": "Single core event",
+            "text": "Core event",
+            "description": "Core event",
+            "source": "Example News",
+            "source_name": "Example News",
+            "publisher": "Example News",
+            "url": "https://example.com/core",
+            "publishedAt": "2026-09-20T10:00:00Z",
+            "genre": "",
+            "collection_source": "google_news_rss",
+        }]
+
+    monkeypatch.setattr(story_ranker, "_google_news_search_items", fake_google)
+    monkeypatch.setattr(story_ranker, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(story_ranker, "_official_feed_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(story_ranker, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(story_ranker, "_reddit_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        story_ranker,
+        "fetch_gdelt_articles",
+        lambda *args, **kwargs: gdelt_calls.append((args, kwargs)) or [],
+    )
+
+    story_ranker.collect_high_recall_stories(
+        None,
+        "national_global_affairs",
+        {"gnews_q": "company news"},
+        broad_discovery=False,
+    )
+
+    assert len(gdelt_calls) == 1
+    assert gdelt_calls[0][1]["max_records"] == 75
+    assert gdelt_calls[0][1]["timeout"] == 3.0
