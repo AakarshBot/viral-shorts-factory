@@ -64,8 +64,8 @@ def test_cheap_filter_evaluates_full_intake_before_truncating(monkeypatch):
     result = _cheap_filter(stories, max_items=2, max_age_hours=48)
 
     assert [item["title"] for item in result] == [
-        "Strong event story one",
-        "Strong event story two",
+        "Strong event story one launches today",
+        "Strong event story two launches today",
     ]
 
 
