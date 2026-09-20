@@ -137,8 +137,9 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
 
     # wbsearchentities is intentionally relevance-ranked but does not itself
     # guarantee that the top item is a human. Verify the candidate type through
-    # P31=Q5 (human) when available, then use the first relevant item as a
-    # compatibility fallback if structured type data is incomplete.
+    # P31=Q5 (human) when structured entity data is available. If the detail
+    # request itself is unavailable, preserve the search result as a bounded
+    # compatibility fallback and let the downstream semantic-QA gate decide.
     verified_qid = ""
     detail_succeeded = False
     if candidate_ids:
