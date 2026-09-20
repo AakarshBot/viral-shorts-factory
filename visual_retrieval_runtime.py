@@ -726,6 +726,141 @@ def _manual_query_visual_context(query: str, scenes: list[dict]) -> tuple[str, s
     return visual_type, visual_genre
 
 
+
+def _manual_query_target(query_index: int) -> int:
+    """Return the descending identity-approved target for an ordered manual query."""
+    rank = max(1, int(query_index))
+    targets = (10, 7, 5, 4, 3)
+    return targets[min(rank, len(targets)) - 1]
+
+
+def _visual_search_cache(bot) -> dict:
+    cache = getattr(bot, "_visual_source_search_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(bot, "_visual_source_search_cache", cache)
+    return cache
+
+
+def _source_image_key(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    for field in ("source_image_url", "image_url", "download_url"):
+        value = str(data.get(field) or "").strip()
+        if value.startswith(("http://", "https://")):
+            return value.rstrip("/").casefold()
+    return ""
+
+
+def _candidate_signature(normalized: bytes) -> str:
+    """Compact perceptual signature used only to catch obvious transformed duplicates."""
+    try:
+        image = Image.open(io.BytesIO(normalized)).convert("L").resize((32, 32), Image.Resampling.LANCZOS)
+        pixels = list(image.getdata())
+        if not pixels:
+            return ""
+        average = sum(pixels) / len(pixels)
+        bits = 0
+        for pixel in pixels:
+            bits = (bits << 1) | int(pixel >= average)
+        return f"{bits:064x}"
+    except Exception:
+        return ""
+
+
+def _signature_close(left: str, right: str, threshold: int = 3) -> bool:
+    try:
+        a = int(str(left or ""), 16)
+        b = int(str(right or ""), 16)
+    except (TypeError, ValueError):
+        return False
+    return (a ^ b).bit_count() <= int(threshold)
+
+
+def _append_unique_candidate(candidate: dict, seen_hashes: set[str], seen_image_urls: set[str], seen_signatures: list[str]) -> bool:
+    image_hash = str(candidate.get("hash") or "").strip()
+    image_url = str(candidate.get("source_image_url") or "").strip().casefold().rstrip("/")
+    signature = str(candidate.get("signature") or "").strip()
+    if image_hash and image_hash in seen_hashes:
+        return False
+    if image_url and image_url in seen_image_urls:
+        return False
+    if signature and any(_signature_close(signature, prior) for prior in seen_signatures if prior):
+        return False
+    if image_hash:
+        seen_hashes.add(image_hash)
+    if image_url:
+        seen_image_urls.add(image_url)
+    if signature:
+        seen_signatures.append(signature)
+    return True
+
+
+def _manual_candidate_from_data(
+    source_name: str,
+    data: Any,
+    query: str,
+    visual_type: str,
+    visual_genre: str,
+    bot,
+    seen_hashes: set[str],
+    seen_image_urls: set[str],
+    seen_signatures: list[str],
+    rejected_counts: dict[str, int],
+) -> dict | None:
+    normalized = _as_image_bytes(data)
+    if not normalized:
+        rejected_counts["invalid_image"] += 1
+        return None
+
+    record = candidate_provenance(data)
+    if not provenance_is_usable(record):
+        rejected_counts["monetization"] += 1
+        return None
+
+    valid, reason, normalized = _preflight_image(normalized)
+    if not valid or normalized is None:
+        rejected_counts["invalid_image"] += 1
+        return None
+
+    image_hash = _hash_image(bot, normalized)
+    source_image_url = _source_image_key(data)
+    signature = _candidate_signature(normalized)
+    candidate = {
+        "data": data,
+        "bytes": normalized,
+        "hash": image_hash,
+        "signature": signature,
+        "priority": _candidate_priority(
+            source_name,
+            normalized,
+            visual_type,
+            query,
+            visual_genre,
+            data=data,
+        ),
+        "provenance": record,
+        "source": str(source_name or "").strip(),
+        "query": str(query or "").strip(),
+        "visual_type": str(visual_type or "GENERAL_CONTEXT").upper(),
+        "visual_genre": str(visual_genre or "GENERAL_CONTEXT").upper(),
+        "resolution_note": str(reason or "image-decodable"),
+        "source_page_url": str(
+            data.get("source_page_url") if isinstance(data, dict) else ""
+        ).strip(),
+        "source_image_url": source_image_url,
+    }
+    if not _append_unique_candidate(
+        candidate,
+        seen_hashes,
+        seen_image_urls,
+        seen_signatures,
+    ):
+        rejected_counts["duplicate"] += 1
+        return None
+    return candidate
+
+
 def collect_manual_visual_pool(
     runtime,
     bot,
@@ -738,45 +873,33 @@ def collect_manual_visual_pool(
     pool_max: int | None = None,
     allow_auto_backfill: bool = True,
 ) -> dict:
-    """Build a bounded verified image pool from exact manual queries.
-
-    Normal production uses the ten-image shared pool. Dashboard replacement
-    searches can request a smaller exact-query pool without changing the normal
-    production retrieval contract.
-    """
-    from visual_qa_runtime import (
-        GEMINI_VISUAL_BATCH_SIZE,
-        start_visual_qa_scene,
-        strict_gemini_check_batch,
-    )
+    """Build the shared entity-verified pool from the user's ordered queries."""
+    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
     from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
 
-    requested_max = (
-        MANUAL_POOL_MAX
-        if pool_max is None
-        else max(1, min(MANUAL_POOL_MAX, int(pool_max)))
-    )
-    requested_target = (
-        MANUAL_POOL_TARGET
-        if pool_target is None
-        else max(1, min(requested_max, int(pool_target)))
-    )
+    parsed_queries = [str(item or "").strip() for item in (manual_queries or []) if str(item or "").strip()]
+    default_max = sum(_manual_query_target(index) for index in range(1, len(parsed_queries) + 1))
+    requested_max = max(1, int(pool_max)) if pool_max is not None else max(1, default_max or MANUAL_POOL_MAX)
+    if pool_target is not None:
+        requested_max = max(requested_max, int(pool_target))
 
-    used_hashes = used_hashes or set()
-    used_source_pages = used_source_pages or set()
-    assets = []
+    used_hashes = set(used_hashes or set())
+    _ = used_source_pages  # Retained only for compatibility with older callers.
+    assets: list[dict] = []
     seen_hashes = set(used_hashes)
-    seen_source_pages: set[str] = set(used_source_pages)
-    query_stats = []
+    seen_image_urls: set[str] = set()
+    seen_signatures: list[str] = []
+    query_stats: list[dict] = []
     rejected_counts = {
         "entity_no": 0,
         "entity_uncertain": 0,
         "resolution_soft": 0,
-        "resolution_hard": 0,
         "monetization": 0,
         "invalid_image": 0,
         "duplicate": 0,
     }
+    search_cache = _visual_search_cache(bot)
+    fetch_used_urls: set[str] = set()
 
     def _raw_items(data):
         if data is None:
@@ -785,87 +908,20 @@ def collect_manual_visual_pool(
             return list(data)
         return [data]
 
-    def _prepare_candidate(source_name, data, query, visual_type, visual_genre, local_seen, local_seen_source_pages):
-        """Apply the manual-pool rejection order: licensing -> resolution -> entity QA."""
-        normalized = _as_image_bytes(data)
-        if not normalized:
-            rejected_counts["invalid_image"] += 1
-            return None
-
-        record = candidate_provenance(data)
-        if not provenance_is_usable(record):
-            rejected_counts["monetization"] += 1
-            return None
-
-        valid, reason, normalized = _preflight_image(normalized)
-        if not valid or normalized is None:
-            if str(reason).startswith("resolution-too-low"):
-                rejected_counts["resolution_hard"] += 1
-            else:
-                rejected_counts["invalid_image"] += 1
-            return None
-
-        image_hash = _hash_image(bot, normalized)
-        if image_hash in seen_hashes or image_hash in local_seen:
-            rejected_counts["duplicate"] += 1
-            return None
-
-        source_page_key = _candidate_source_page_key(data)
-        if (
-            source_page_key
-            and (
-                source_page_key in seen_source_pages
-                or source_page_key in local_seen_source_pages
-            )
-        ):
-            rejected_counts["duplicate"] += 1
-            return None
-
-        priority = _candidate_priority(
-            source_name,
-            normalized,
-            visual_type,
-            query,
-            visual_genre,
-            data=data,
-        )
-        local_seen.add(image_hash)
-        if source_page_key:
-            local_seen_source_pages.add(source_page_key)
-        return {
-            "data": data,
-            "bytes": normalized,
-            "hash": image_hash,
-            "priority": priority,
-            "provenance": record,
-            "source": str(source_name or "").strip(),
-            "query": str(query or "").strip(),
-            "visual_type": str(visual_type or "GENERAL_CONTEXT").upper(),
-            "visual_genre": str(visual_genre or "GENERAL_CONTEXT").upper(),
-            "resolution_note": str(reason or "image-decodable"),
-            "source_page_url": str(
-                data.get("source_page_url") if isinstance(data, dict) else ""
-            ).strip(),
-            "source_page_key": source_page_key,
-        }
-
-    def _verify_candidates(candidates, entity_anchor, source_label, query_index=0):
-        """Entity-only Gemini QA for all prepared candidates, bounded by the shared pool cap."""
+    def _verify(candidates, entity_anchor, query_index, target, source_label):
         if not candidates or len(assets) >= requested_max:
             return 0, 0
-
         start_visual_qa_scene()
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
-        qa_requests = 0
         added = 0
-
+        qa_requests = 0
+        query_added = 0
         for offset in range(0, len(candidates), batch_size):
-            if len(assets) >= requested_max:
+            if len(assets) >= requested_max or query_added >= target:
                 break
             batch = candidates[offset : offset + batch_size]
             if not batch:
                 continue
-
             result_map = strict_gemini_check_batch(
                 [item["bytes"] for item in batch],
                 entity_anchor,
@@ -875,7 +931,6 @@ def collect_manual_visual_pool(
                 visual_genre=str(batch[0].get("visual_genre") or "GENERAL_CONTEXT"),
             )
             qa_requests += 1
-
             for local_index, verdict in result_map.items():
                 if not (0 <= int(local_index) < len(batch)):
                     continue
@@ -883,17 +938,17 @@ def collect_manual_visual_pool(
                 if verdict is True:
                     status = (
                         "factory-rejected-resolution"
-                        if str(candidate["resolution_note"]).startswith("resolution-soft:")
+                        if str(candidate.get("resolution_note") or "").startswith("resolution-soft:")
                         else "entity-verified"
                     )
                     if status == "factory-rejected-resolution":
                         rejected_counts["resolution_soft"] += 1
-
                     assets.append(
                         {
                             "subject": entity_anchor,
                             "bytes": candidate["bytes"],
                             "hash": candidate["hash"],
+                            "signature": candidate.get("signature", ""),
                             "source": candidate["source"],
                             "query": candidate["query"],
                             "visual_type": candidate["visual_type"],
@@ -902,108 +957,142 @@ def collect_manual_visual_pool(
                             "priority": float(candidate["priority"]),
                             "search_text": _candidate_search_text(candidate["data"]),
                             "source_page_url": str(candidate.get("source_page_url") or "").strip(),
+                            "source_image_url": str(candidate.get("source_image_url") or "").strip(),
                             "status": status,
                             "manual_query_index": int(query_index or 0),
                             "pool_origin": str(source_label or "manual"),
+                            "used": False,
                         }
                     )
-                    seen_hashes.add(candidate["hash"])
-                    if candidate.get("source_page_key"):
-                        seen_source_pages.add(str(candidate["source_page_key"]))
+                    query_added += 1
                     added += 1
-                    if len(assets) >= requested_max:
+                    if query_added >= target or len(assets) >= requested_max:
                         break
                 elif verdict is False:
                     rejected_counts["entity_no"] += 1
                 else:
                     rejected_counts["entity_uncertain"] += 1
-
-            if len(assets) >= requested_max:
-                break
-
         return added, qa_requests
 
-    # 1) Exact manual queries first. No hidden refinement is inserted between them.
-    for query_index, raw_query in enumerate(manual_queries or [], 1):
-        exact_query = str(raw_query or "").strip()
-        if not exact_query:
-            continue
+    for query_index, raw_query in enumerate(parsed_queries, 1):
         if len(assets) >= requested_max:
             break
-
-        entity_anchor = str(
-            canonical_manual_entity_anchor(exact_query, "")
-            or exact_query
-        ).strip()
+        exact_query = str(raw_query).strip()
+        entity_anchor = str(canonical_manual_entity_anchor(exact_query, "") or exact_query).strip()
         visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
         try:
             source_plan = _source_plan(bot, visual_type, visual_genre)
         except TypeError:
             source_plan = _source_plan(bot, visual_type)
 
-        candidates = []
-        local_seen = set()
-        local_seen_source_pages = set()
-        attempted_sources = set()
-        manual_source_limit = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SOURCE_LIMIT", "3"))))
-        for source_index, (source, fetcher) in enumerate(source_plan):
-            if source_index >= manual_source_limit or len(candidates) >= MANUAL_QUERY_RAW_POOL:
-                break
-            source_name = str(source or "").strip()
-            source_key = source_name.casefold()
-            if not callable(fetcher) or not source_key or source_key in attempted_sources:
-                continue
-            attempted_sources.add(source_key)
+        target = _manual_query_target(query_index)
+        query_candidates: list[dict] = []
+        query_seen_hashes: set[str] = set(seen_hashes)
+        query_seen_urls: set[str] = set(seen_image_urls)
+        query_seen_signatures: list[str] = list(seen_signatures)
+        source_attempts = 0
+        qa_requests = 0
+        verified_for_query = 0
 
-            raw_data = runtime._call_fetcher_with_timeout(
-                fetcher,
-                (
-                    exact_query,
-                    set(),
-                    exact_query,
-                    video_title,
-                    visual_type,
-                    visual_genre,
-                ),
-                source_name,
-                exact_query,
-            )
-            for data in _raw_items(raw_data):
-                candidate = _prepare_candidate(
-                    source_name,
+        for source_name, fetcher in source_plan:
+            if not callable(fetcher) or source_attempts >= 3 or verified_for_query >= target:
+                break
+            source_key = str(source_name or "").strip().casefold()
+            if not source_key:
+                continue
+            cache_key = ("manual", source_key, exact_query.casefold())
+            raw_data = search_cache.get(cache_key)
+            if raw_data is None:
+                try:
+                    raw_data = runtime._call_fetcher_with_timeout(
+                        fetcher,
+                        (
+                            exact_query,
+                            fetch_used_urls,
+                            exact_query,
+                            video_title,
+                            visual_type,
+                            visual_genre,
+                            True,
+                        ),
+                        str(source_name),
+                        exact_query,
+                    )
+                except Exception as exc:
+                    print(
+                        f"   [Manual Visual Pool] {source_name} failed safely: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    raw_data = []
+                search_cache[cache_key] = list(_raw_items(raw_data))
+            source_attempts += 1
+
+            for data in search_cache.get(cache_key) or []:
+                candidate = _manual_candidate_from_data(
+                    str(source_name),
                     data,
                     exact_query,
                     visual_type,
                     visual_genre,
-                    local_seen,
-                    local_seen_source_pages,
+                    bot,
+                    query_seen_hashes,
+                    query_seen_urls,
+                    query_seen_signatures,
+                    rejected_counts,
                 )
                 if candidate is None:
                     continue
-                candidates.append(candidate)
-                if len(candidates) >= MANUAL_QUERY_RAW_POOL:
+                query_candidates.append(candidate)
+                if len(query_candidates) >= target * 2:
                     break
 
-        candidates.sort(
-            key=lambda item: (
-                -float(item["priority"]),
-                str(item["source"]).casefold(),
-                str(item["query"]).casefold(),
+            if not query_candidates:
+                continue
+
+            # Verify the strongest current candidates before paying for another source.
+            query_candidates.sort(
+                key=lambda item: (
+                    -float(item.get("priority") or 0.0),
+                    str(item.get("source") or "").casefold(),
+                )
             )
-        )
-        query_verified, qa_requests = _verify_candidates(
-            candidates,
-            entity_anchor,
-            f"manual:{query_index}",
-            query_index=query_index,
-        )
+            before = len(assets)
+            added, requests_made = _verify(
+                query_candidates,
+                entity_anchor,
+                query_index,
+                target,
+                f"manual:{query_index}",
+            )
+            qa_requests += requests_made
+            verified_for_query = len(assets) - before
+
+            if verified_for_query < target and source_attempts < 3:
+                continue
+            break
+
+        # Carry forward the actual accepted identity-approved candidates into the
+        # run-wide dedupe sets. Multiple distinct images from one article are allowed.
+        for asset in assets:
+            if int(asset.get("manual_query_index") or 0) != query_index:
+                continue
+            image_hash = str(asset.get("hash") or "").strip()
+            if image_hash:
+                seen_hashes.add(image_hash)
+            image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
+            if image_url:
+                seen_image_urls.add(image_url)
+            signature = str(asset.get("signature") or "").strip()
+            if signature:
+                seen_signatures.append(signature)
+
         query_stats.append(
             {
                 "query": exact_query,
-                "verified": query_verified,
-                "refinement_query": "",
-                "refinement_verified": 0,
-                "resolution_rejected": 0,
+                "rank": query_index,
+                "target": target,
+                "verified": verified_for_query,
                 "qa_requests": qa_requests,
                 "visual_type": visual_type,
                 "visual_genre": visual_genre,
@@ -1011,28 +1100,20 @@ def collect_manual_visual_pool(
             }
         )
         print(
-            f"   [Manual Visual Pool] exact query {query_index}/{len(manual_queries)} | "
-            f"'{exact_query}' | candidates={len(candidates)} | "
-            f"entity-verified={query_verified} | shared-pool={len(assets)}/{requested_max} "
-            f"| Gemini={qa_requests}",
+            f"   [Manual Visual Pool] query {query_index} target={target} | "
+            f"'{exact_query}' | entity-verified={verified_for_query} | "
+            f"shared-pool={len(assets)}/{requested_max} | Gemini={qa_requests}",
             flush=True,
         )
 
-        # User-supplied queries have priority, but the bounded target is enough
-        # to avoid an endless retrieval loop before optional backfill begins.
-        if len(assets) >= requested_target:
-            break
-
-    # 2) Only after the exact manual-query pass do we use the factory's existing
-    # smart identity + one compact scene-context refinement to fill the SAME pool.
-    auto_queries_used = 0
-    if allow_auto_backfill and not any(str(q or "").strip() for q in manual_queries or []) and len(assets) < requested_target:
+    # Automatic backfill remains unchanged in purpose, but it only fills a manual
+    # pool when the caller explicitly permits it. The current production path does
+    # not use it once a manual query was supplied.
+    if allow_auto_backfill and not parsed_queries:
+        auto_queries_used = 0
         for scene_index, scene in enumerate(scenes or []):
-            if len(assets) >= requested_target or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
+            if auto_queries_used >= AUTO_POOL_QUERY_LIMIT or not isinstance(scene, dict):
                 break
-            if not isinstance(scene, dict):
-                continue
-
             auto_scene = dict(scene)
             auto_entity = str(
                 scene.get("factual_primary_entity")
@@ -1041,7 +1122,6 @@ def collect_manual_visual_pool(
                 or ""
             ).strip()
             auto_scene["manual_visual_query"] = ""
-            auto_scene["manual_visual_query_source"] = ""
             if auto_entity:
                 auto_scene["primary_entity"] = auto_entity
                 auto_scene["visual_search_subject"] = auto_entity
@@ -1049,10 +1129,9 @@ def collect_manual_visual_pool(
                 intent = resolve_visual_search_intent(auto_scene, video_title)
             except Exception:
                 continue
-            queries = [str(item).strip() for item in (intent.queries or ()) if str(item).strip()][:2]
-            if not queries:
+            auto_queries = [str(item).strip() for item in (intent.queries or ()) if str(item).strip()][:2]
+            if not auto_queries:
                 continue
-
             visual_type = str(intent.visual_type or "GENERAL_CONTEXT").upper()
             visual_genre = str(
                 intent.visual_genre
@@ -1062,93 +1141,65 @@ def collect_manual_visual_pool(
             entity_anchor = str(intent.subject or "").strip()
             if not entity_anchor:
                 continue
-
-            try:
-                source_plan = _source_plan(bot, visual_type, visual_genre)
-            except TypeError:
-                source_plan = _source_plan(bot, visual_type)
-
-            for query_round, query in enumerate(queries, 1):
-                if len(assets) >= requested_target or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
+            for query_round, query in enumerate(auto_queries, 1):
+                if auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
                     break
-
                 auto_queries_used += 1
                 candidates = []
-                local_seen = set()
-                local_seen_source_pages = set()
-                attempted_sources = set()
-
-                auto_source_limit = max(1, min(2, int(os.getenv("VISUAL_AUTO_SOURCE_LIMIT", "2"))))
-                for source_index, (source, fetcher) in enumerate(source_plan):
-                    if source_index >= auto_source_limit or len(candidates) >= REFINEMENT_CANDIDATE_POOL:
-                        break
-                    source_name = str(source or "").strip()
-                    source_key = source_name.casefold()
-                    if not callable(fetcher) or not source_key or source_key in attempted_sources:
+                local_hashes = set(seen_hashes)
+                local_urls = set(seen_image_urls)
+                local_signatures = list(seen_signatures)
+                try:
+                    source_plan = _source_plan(bot, visual_type, visual_genre)
+                except TypeError:
+                    source_plan = _source_plan(bot, visual_type)
+                for source_name, fetcher in source_plan[:2]:
+                    if not callable(fetcher):
                         continue
-                    attempted_sources.add(source_key)
-
-                    source_query = _provider_search_query(
-                        source_name,
-                        query,
-                        entity_anchor,
-                        visual_type,
-                        visual_genre,
-                        "",
-                        query_round,
-                        identity_label="",
-                    )
-                    if not source_query:
-                        continue
-                    raw_data = runtime._call_fetcher_with_timeout(
-                        fetcher,
-                        (
-                            source_query,
-                            set(),
-                            query,
-                            video_title,
-                            visual_type,
-                            visual_genre,
-                        ),
-                        source_name,
-                        source_query,
-                    )
-                    for data in _raw_items(raw_data):
-                        candidate = _prepare_candidate(
-                            source_name,
+                    cache_key = ("automatic", str(source_name).casefold(), str(query).casefold())
+                    raw_data = search_cache.get(cache_key)
+                    if raw_data is None:
+                        try:
+                            raw_data = runtime._call_fetcher_with_timeout(
+                                fetcher,
+                                (query, fetch_used_urls, query, video_title, visual_type, visual_genre),
+                                str(source_name),
+                                str(query),
+                            )
+                        except Exception:
+                            raw_data = []
+                        search_cache[cache_key] = list(_raw_items(raw_data))
+                    for data in search_cache.get(cache_key) or []:
+                        candidate = _manual_candidate_from_data(
+                            str(source_name),
                             data,
                             query,
                             visual_type,
                             visual_genre,
-                            local_seen,
+                            bot,
+                            local_hashes,
+                            local_urls,
+                            local_signatures,
+                            rejected_counts,
                         )
-                        if candidate is None:
-                            continue
-                        candidate["source_query"] = source_query
-                        candidates.append(candidate)
+                        if candidate is not None:
+                            candidates.append(candidate)
                         if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
                             break
-
-                candidates.sort(
-                    key=lambda item: (
-                        -float(item["priority"]),
-                        str(item["source"]).casefold(),
-                        str(item["query"]).casefold(),
-                    )
-                )
-                added, qa_requests = _verify_candidates(
-                    candidates[:REFINEMENT_CANDIDATE_POOL],
+                    if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
+                        break
+                candidates.sort(key=lambda item: -float(item.get("priority") or 0.0))
+                added, qa_requests = _verify(
+                    candidates,
                     entity_anchor,
+                    0,
+                    max(1, requested_max - len(assets)),
                     f"automatic:{scene_index}:{query_round}",
-                    query_index=0,
                 )
                 query_stats.append(
                     {
                         "query": query,
                         "verified": added,
-                        "refinement_query": "",
-                        "refinement_verified": 0,
-                        "resolution_rejected": 0,
                         "qa_requests": qa_requests,
                         "visual_type": visual_type,
                         "visual_genre": visual_genre,
@@ -1156,37 +1207,141 @@ def collect_manual_visual_pool(
                         "scene_index": scene_index + 1,
                     }
                 )
-                print(
-                    f"   [Automatic Visual Pool Backfill] scene={scene_index + 1} "
-                    f"query='{query}' | candidates={len(candidates)} | "
-                    f"entity-verified={added} | shared-pool={len(assets)}/{requested_max} "
-                    f"| Gemini={qa_requests}",
-                    flush=True,
-                )
 
-            if len(assets) >= requested_target:
-                break
-
-    deduped = {}
-    for asset in sorted(
-        assets,
-        key=lambda item: (
-            -float(item.get("priority") or 0.0),
-            str(item.get("query") or "").casefold(),
-            str(item.get("source") or "").casefold(),
-        ),
-    ):
-        deduped.setdefault(str(asset.get("hash") or ""), asset)
-    final_assets = list(deduped.values())[:requested_max]
-
+    deduped: dict[str, dict] = {}
+    for asset in assets:
+        key = str(asset.get("hash") or "").strip()
+        if key and key not in deduped:
+            deduped[key] = asset
+    final_assets = list(deduped.values())
     return {
         "assets": final_assets,
-        "queries": [str(item).strip() for item in manual_queries or [] if str(item).strip()],
+        "queries": parsed_queries,
         "query_stats": query_stats,
         "rejection_counts": rejected_counts,
-        "target": requested_target,
-        "hard_max": requested_max,
+        "target": len(final_assets),
+        "hard_max": len(final_assets),
     }
+
+
+def collect_manual_visual_search(
+    runtime,
+    bot,
+    query: str,
+    video_title: str = "",
+    used_hashes: set[str] | None = None,
+) -> dict:
+    """Fetch exactly five new monetization-safe options without identity/resolution QA."""
+    exact_query = str(query or "").strip()
+    if not exact_query:
+        return {"assets": [], "target": 5, "rejection_counts": {}}
+
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    scenes = [{"manual_visual_query": exact_query, "primary_entity": exact_query}]
+    try:
+        visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
+    except Exception:
+        visual_type, visual_genre = "GENERAL_CONTEXT", "GENERAL_CONTEXT"
+
+    existing_hashes = set(used_hashes or set())
+    seen_hashes = set(existing_hashes)
+    seen_urls: set[str] = set()
+    seen_signatures: list[str] = []
+    rejected_counts = {"monetization": 0, "invalid_image": 0, "duplicate": 0}
+    candidates: list[dict] = []
+    search_cache = _visual_search_cache(bot)
+    fetch_used_urls: set[str] = set()
+
+    try:
+        source_plan = _source_plan(bot, visual_type, visual_genre)
+    except TypeError:
+        source_plan = _source_plan(bot, visual_type)
+
+    for source_name, fetcher in source_plan:
+        if len(candidates) >= 5 or not callable(fetcher):
+            break
+        source_key = str(source_name or "").strip().casefold()
+        cache_key = ("new-search", source_key, exact_query.casefold())
+        raw_data = search_cache.get(cache_key)
+        if raw_data is None:
+            try:
+                raw_data = runtime._call_fetcher_with_timeout(
+                    fetcher,
+                    (
+                        exact_query,
+                        fetch_used_urls,
+                        exact_query,
+                        video_title,
+                        visual_type,
+                        visual_genre,
+                        True,
+                    ),
+                    str(source_name),
+                    exact_query,
+                )
+            except Exception as exc:
+                print(
+                    f"   [Manual Visual Search] {source_name} failed safely: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                raw_data = []
+            search_cache[cache_key] = list(raw_data or [])
+
+        for data in search_cache.get(cache_key) or []:
+            candidate = _manual_candidate_from_data(
+                str(source_name),
+                data,
+                exact_query,
+                visual_type,
+                visual_genre,
+                bot,
+                seen_hashes,
+                seen_urls,
+                seen_signatures,
+                rejected_counts,
+            )
+            if candidate is None:
+                continue
+            candidate["status"] = "new-search"
+            candidates.append(candidate)
+            if len(candidates) >= 5:
+                break
+
+    candidates.sort(key=lambda item: (
+        -float(item.get("priority") or 0.0),
+        str(item.get("source") or "").casefold(),
+    ))
+    assets = [
+        {
+            "subject": exact_query,
+            "bytes": item["bytes"],
+            "hash": item["hash"],
+            "signature": item.get("signature", ""),
+            "source": item["source"],
+            "query": exact_query,
+            "visual_type": item["visual_type"],
+            "visual_genre": item["visual_genre"],
+            "provenance": dict(item["provenance"]),
+            "priority": float(item["priority"]),
+            "search_text": _candidate_search_text(item["data"]),
+            "source_page_url": str(item.get("source_page_url") or "").strip(),
+            "source_image_url": str(item.get("source_image_url") or "").strip(),
+            "status": "new-search",
+            "used": False,
+        }
+        for item in candidates[:5]
+    ]
+    return {
+        "assets": assets,
+        "target": 5,
+        "available": len(assets),
+        "exact_query": exact_query,
+        "rejection_counts": rejected_counts,
+        "search_exhausted": len(assets) < 5,
+    }
+
 
 def collect_manual_visual_options(
     runtime,
@@ -1199,26 +1354,19 @@ def collect_manual_visual_options(
     min_options: int = 3,
     max_options: int = 3,
 ) -> dict:
-    """Build a small exact-query pool for dashboard replacement choices."""
-    minimum = max(1, min(3, int(min_options or 3)))
-    maximum = max(minimum, min(10, int(max_options or minimum)))
-    result = collect_manual_visual_pool(
+    """Compatibility wrapper for older dashboard callers; current QC uses the five-image global search."""
+    result = collect_manual_visual_search(
         runtime,
         bot,
-        [scene] if isinstance(scene, dict) else [],
-        [str(query or "").strip()],
+        str(query or "").strip(),
         video_title=video_title,
         used_hashes=used_hashes,
-        used_source_pages=used_source_pages,
-        pool_target=minimum,
-        pool_max=maximum,
-        allow_auto_backfill=False,
     )
-    options = list(result.get("assets") or [])[:maximum]
-    result["assets"] = options
-    result["minimum_options"] = minimum
-    result["available_options"] = len(options)
-    result["enough_options"] = len(options) >= minimum
+    maximum = max(1, int(max_options or 5))
+    result["assets"] = list(result.get("assets") or [])[:maximum]
+    result["minimum_options"] = min(int(min_options or 1), maximum)
+    result["available_options"] = len(result["assets"])
+    result["enough_options"] = len(result["assets"]) >= result["minimum_options"]
     return result
 
 
