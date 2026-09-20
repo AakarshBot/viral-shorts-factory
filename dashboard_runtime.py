@@ -1130,7 +1130,12 @@ class DashboardWorkflowController(WorkflowController):
                 item for item in bank
                 if str(item.get("path") or "").strip() != selected_path
             ]
-            if old_path and os.path.isfile(old_path) and old_path != selected_path:
+            if (
+                old_path
+                and os.path.isfile(old_path)
+                and old_path != selected_path
+                and bool(layer.get("visual_verified"))
+            ):
                 old_entry = {
                     "path": old_path,
                     "subject": str(
