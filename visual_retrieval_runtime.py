@@ -517,8 +517,6 @@ def select_manual_visual_candidate(
         and str(asset.get("hash") or "").strip() not in used_hashes
     ]
     if not candidates:
-        candidates = [asset for asset in assets or [] if isinstance(asset, dict)]
-    if not candidates:
         return None
 
     normal = [
