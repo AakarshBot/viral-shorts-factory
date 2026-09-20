@@ -280,7 +280,14 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     rows = _load_history(conn)
     used_topics = _load_used_topics(conn)
     language = str(web_config.get("language", "english"))
-    raw, social_titles = collect_high_recall_stories(bot, "", {}, broad_discovery=True)
+    requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+    raw, social_titles = collect_high_recall_stories(
+        bot,
+        "",
+        {},
+        custom_gnews_q=requested_topic or None,
+        broad_discovery=True,
+    )
 
     stage30 = _cheap_filter(raw, max_items=120, max_age_hours=48)
     stage20 = _deduplicate_stage(stage30, max_items=90)
@@ -367,7 +374,7 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         if not genre_cfg:
             raise ValueError(f"Unknown category: {genre_key}")
         requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-        custom_q = None
+        custom_q = requested_topic or None
         custom_rss = None
 
     raw, social_titles = collect_high_recall_stories(
