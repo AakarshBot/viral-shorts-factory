@@ -151,7 +151,10 @@ def test_broad_discovery_uses_shared_free_radar_contract():
 
     signature = inspect.signature(story_ranker.collect_high_recall_stories)
     assert "discover_lanes" not in signature.parameters
-    assert len(story_ranker.GOOGLE_NEWS_RADAR_QUERIES) == 8
+    assert len(story_ranker.GOOGLE_NEWS_RADAR_QUERIES) == 6
+    assert story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_BROAD == 7
+    assert story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD == 4
+    assert story_ranker.DISCOVERY_SIGNAL_WAIT_SECONDS == 8.0
     assert story_ranker.GOOGLE_TRENDS_GEOS == ("IN", "US", "GB")
     assert story_ranker.REDDIT_RADAR_SUBREDDITS == (
         "news", "worldnews", "india", "technology", "sports", "movies"
