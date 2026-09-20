@@ -425,6 +425,14 @@ def patch_content_first_visuals(bot):
         # one-per-slide: scene context is applied only after the pool exists.
         manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
         manual_queries = parse_manual_visual_queries(manual_raw)
+        scene_level_manual_queries = [
+            str(scene.get("manual_visual_query") or "").strip()
+            for scene in scenes
+            if isinstance(scene, dict) and str(scene.get("manual_visual_query") or "").strip()
+        ]
+        for query in scene_level_manual_queries:
+            if query not in manual_queries:
+                manual_queries.append(query)
         if manual_queries:
             print(
                 f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
@@ -587,6 +595,24 @@ def patch_content_first_visuals(bot):
                     f"   [Manual Visual Pool] Scene {idx + 1} selected "
                     f"query='{manual_selected.get('query', '')}' status={manual_selected.get('status', '')}",
                     flush=True,
+                )
+            elif manual_queries:
+                bg_img = make_visual_rescue(
+                    str(seg.get("primary_entity") or "Visual rescue").strip(),
+                    str(seg.get("visual_type") or "GENERAL_CONTEXT"),
+                )
+                used_ai = False
+                source_type = "visual-rescue"
+                source_credit = source_credit_for_type(source_type)
+                seg["visual_verified"] = False
+                seg["visual_qc_blocked"] = True
+                seg["visual_qc_block_reason"] = "Manual visual pool produced no entity-verified candidate for this slide."
+                seg["visual_rescue_reason"] = "manual-pool-exhausted"
+                seg["visual_fallback_reason"] = ""
+                seg["visual_query_used"] = ""
+                seg["visual_original_path"] = ""
+                seg["visual_asset_bank"] = list(
+                    manual_pool_materialized
                 )
             elif idx == news_source_scene_index and isinstance(news_source_candidate, dict):
                 bg_img = news_source_candidate["image"]
