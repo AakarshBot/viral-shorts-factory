@@ -1181,10 +1181,9 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_genre": str(layer.get("visual_genre") or "").strip().upper(),
                     "provenance": dict(layer.get("asset_provenance") or {}),
                     "status": "previously-selected",
-                    "original_path": old_original_path,
                     "used": False,
                 }
-                if not any(str(item.get("path") or "") == old_path for item in new_bank):
+                if not any(str(item.get("path") or "") == old_original_path for item in new_bank):
                     new_bank.append(old_entry)
             new_bank = new_bank[:10]
 
@@ -1205,9 +1204,11 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_original_path": selected_path,
                     "source_type": "verified-bank",
                     "visual_verified": True,
-                    "visual_qc_blocked": low_resolution_manual_qc,
-                    "visual_qc_block_reason": (
-                        "Entity verified, but this image is below the normal resolution threshold and requires manual visual QC."
+                    "visual_qc_blocked": False,
+                    "visual_qc_block_reason": "",
+                    "resolution_manual_override": low_resolution_manual_qc,
+                    "resolution_review_note": (
+                        "Selected by manual review despite soft resolution warning."
                         if low_resolution_manual_qc
                         else ""
                     ),
