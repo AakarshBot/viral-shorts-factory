@@ -42,7 +42,6 @@ REAL_SOURCE_SCORES = {
     "unsplash": 70,
 }
 MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "10"))))
-MAX_SEMANTIC_CHECKS_PER_SOURCE = max(1, min(3, int(os.getenv("VISUAL_SEMANTIC_CHECKS_PER_SOURCE", "3"))))
 MAX_ENTITY_BANK_PER_QUERY = max(3, min(10, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "10"))))
 INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
 ENTITY_CHECK_PRIMARY_POOL = 10
@@ -324,36 +323,6 @@ def _candidate_priority(
         3,
     )
 
-def _gate_rejection_bucket(tier_name: str) -> str:
-    tier = str(tier_name or "").upper()
-    if ":SEMANTIC_NO" in tier:
-        return "semantic_no"
-    if ":QA_NO_API_KEY" in tier:
-        return "qa_unavailable"
-    if ":QA_CIRCUIT_BREAKER" in tier:
-        return "qa_circuit_breaker"
-    if ":QA_VIDEO_BUDGET_EXHAUSTED" in tier or ":QA_SCENE_BUDGET_EXHAUSTED" in tier:
-        return "qa_budget_exhausted"
-    if ":QA_QUOTA_OR_RATE_LIMIT" in tier:
-        return "qa_quota_or_rate_limit"
-    if ":QA_REQUEST_EXCEPTION" in tier:
-        return "qa_exception"
-    if ":QA_AMBIGUOUS_RESPONSE" in tier or ":QA_UNCERTAIN" in tier:
-        return "semantic_uncertain"
-    if tier == "LOCAL-QUALITY":
-        return "quality_gate"
-    if tier == "LOCAL-REJECT":
-        return "local_reject"
-    return "semantic_qc_reject"
-
-
-_VISUAL_DESCRIPTOR_WORDS = {
-    "logo", "logos", "portrait", "portraits", "headshot", "headshots", "icon", "icons",
-    "badge", "badges", "emblem", "emblems", "symbol", "symbols", "seal", "seals",
-    "map", "maps", "flag", "flags", "screenshot", "screenshots", "poster", "posters",
-}
-
-
 def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_genre: str = "") -> tuple[bool, str, float]:
     """Return source-level evidence used for ranking and related-asset reuse.
 
@@ -375,68 +344,6 @@ def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_g
 
 
 _RELATED_SUBJECT_ASSET_LIMIT = 3
-
-
-def _related_source_is_safe(source: str, visual_genre: str) -> bool:
-    """Allow only real, licensed sources for verified same-subject reuse."""
-    source_l = str(source or "").strip().casefold()
-    return bool(source_l) and source_l not in {"visual-rescue", "cache", "ai-generated"}
-
-
-
-def _qa_stop_tier(tier_name: str) -> bool:
-    """Return True when semantic QA says retrieval cannot continue safely."""
-    text = str(tier_name or "").upper()
-    return any(
-        token in text
-        for token in (
-            "QA_VIDEO_BUDGET_EXHAUSTED",
-            "QA_SCENE_BUDGET_EXHAUSTED",
-            "QA_CIRCUIT_BREAKER",
-            "QA_QUOTA_OR_RATE_LIMIT",
-            "QA_NO_API_KEY",
-        )
-    )
-
-
-def _record_verified_related_assets(
-    seg: dict,
-    candidates: list[tuple],
-    source: str,
-    query: str,
-    visual_type: str,
-    visual_genre: str,
-) -> None:
-    """Store a small pool of candidates that passed the same semantic QA gate."""
-    existing = list(seg.get("_verified_subject_assets") or [])
-    existing_hashes = {
-        str(item.get("hash") or "")
-        for item in existing
-        if isinstance(item, dict)
-    }
-    if not _related_source_is_safe(source, visual_genre):
-        return
-    for candidate in candidates:
-        if len(existing) >= _RELATED_SUBJECT_ASSET_LIMIT:
-            break
-        _index, _data, normalized, image_hash, _priority, provenance = candidate
-        if image_hash in existing_hashes or not provenance_is_usable(provenance):
-            continue
-        existing.append(
-            {
-                "subject": str(seg.get("primary_entity") or "").strip(),
-                "bytes": normalized,
-                "hash": image_hash,
-                "source": str(source or "").strip(),
-                "query": str(query or "").strip(),
-                "visual_type": str(visual_type or "").strip().upper(),
-                "visual_genre": str(visual_genre or "").strip().upper(),
-                "provenance": dict(provenance),
-            }
-        )
-        existing_hashes.add(image_hash)
-    if existing:
-        seg["_verified_subject_assets"] = existing
 
 
 def _provider_search_query(
