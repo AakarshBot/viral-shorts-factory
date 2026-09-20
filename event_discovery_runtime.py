@@ -8,6 +8,7 @@ normalisation and clustering layer.
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 import re
 from datetime import datetime, timezone
@@ -262,7 +263,14 @@ def _published_datetime(story: dict) -> datetime | None:
 
 def _cluster_compatible(left: dict, right: dict) -> bool:
     """Decide whether two articles likely describe the same real-world event."""
-    overlap = _token_overlap(left.get("title"), right.get("title"))
+    left_title_tokens = set(left.get("identity_title_tokens") or _tokens(left.get("title")))
+    right_title_tokens = set(right.get("identity_title_tokens") or _tokens(right.get("title")))
+    if not left_title_tokens or not right_title_tokens:
+        overlap = 0.0
+    else:
+        overlap = len(left_title_tokens & right_title_tokens) / max(
+            1, len(left_title_tokens | right_title_tokens)
+        )
     left_entities = set(left.get("identity_entities") or _entity_context(left))
     right_entities = set(right.get("identity_entities") or _entity_context(right))
     shared_entities = left_entities & right_entities
@@ -292,8 +300,8 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
         return True
 
     shared_topical_tokens = (
-        _tokens(left.get("title"))
-        & _tokens(right.get("title"))
+        left_title_tokens
+        & right_title_tokens
         - left_entities
         - right_entities
     )
