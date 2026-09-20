@@ -102,7 +102,7 @@ def _clean_word(value: Any) -> str:
         value = " ".join(_clean_word(item) for item in value)
     text = str(value or "")
     # `_arrow` is a formatting artifact, not narration/caption content.
-    text = re.sub(r"(?<!\w)_arrow(?:_right)?(?!\w)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![A-Za-z0-9])_arrow(?:_(?:right|left|up|down))?(?![A-Za-z0-9])", "", text, flags=re.IGNORECASE)
     text = text.replace("\u00a0", " ")
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
