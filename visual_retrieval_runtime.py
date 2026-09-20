@@ -1259,6 +1259,7 @@ def collect_manual_visual_search(
     query: str,
     video_title: str = "",
     used_hashes: set[str] | None = None,
+    used_source_image_urls: set[str] | None = None,
 ) -> dict:
     """Fetch exactly five new monetization-safe options without identity/resolution QA."""
     exact_query = str(query or "").strip()
@@ -1275,12 +1276,16 @@ def collect_manual_visual_search(
 
     existing_hashes = set(used_hashes or set())
     seen_hashes = set(existing_hashes)
-    seen_urls: set[str] = set()
-    seen_signatures: list[str] = []
+    seen_urls: set[str] = {
+        str(value or "").strip().casefold().rstrip("/")
+        for value in (used_source_image_urls or set())
+        if str(value or "").strip()
+    }
+    seen_asset_keys: set[str] = set()
     rejected_counts = {"monetization": 0, "invalid_image": 0, "duplicate": 0}
     candidates: list[dict] = []
     search_cache = _visual_search_cache(bot)
-    fetch_used_urls: set[str] = set()
+    fetch_used_urls: set[str] = set(used_source_image_urls or set())
 
     try:
         source_plan = _source_plan(bot, visual_type, visual_genre)
@@ -1328,7 +1333,7 @@ def collect_manual_visual_search(
                 bot,
                 seen_hashes,
                 seen_urls,
-                seen_signatures,
+                seen_asset_keys,
                 rejected_counts,
             )
             if candidate is None:
