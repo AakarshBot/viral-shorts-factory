@@ -451,13 +451,13 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     assert batch_calls["count"] >= 1
 
 
-def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatch):
+def test_person_action_bypasses_stale_cache_for_fresh_action_retrieval(monkeypatch):
     image_bytes = _jpeg_bytes()
 
     class FakeBot:
         pass
 
-    calls = {"qa": 0}
+    calls = {"qa": 0, "cache": 0}
 
     class FakeRuntime:
         VISUAL_MAX_VERIFICATION_ATTEMPTS = 8
@@ -477,6 +477,7 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
 
         @staticmethod
         def get_cached_asset(*args, **kwargs):
+            calls["cache"] += 1
             return retrieval.Image.open(io.BytesIO(image_bytes)).convert("RGB"), "cached"
 
         @staticmethod
@@ -506,7 +507,7 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
         "Pat Cummins interview",
     )
 
-    assert calls["qa"] >= 1
+    assert calls["cache"] == 0
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
@@ -515,6 +516,74 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
     assert retrieval._trusted_source_evidence(
         "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
     )[0] is False
+
+
+def test_verified_non_action_cache_reuses_without_gemini_and_restores_provenance(tmp_path, monkeypatch):
+    image_bytes = _jpeg_bytes((1200, 1600))
+
+    cache_path = tmp_path / "cached.jpg"
+    Image.open(io.BytesIO(image_bytes)).convert("RGB").save(cache_path, "JPEG", quality=95)
+    with open(tmp_path / "cached.json", "w", encoding="utf-8") as fh:
+        import json
+        json.dump(
+            {
+                "verified": True,
+                "verification_version": 2,
+                "provenance": {
+                    "provider": "Pexels",
+                    "url": "https://www.pexels.com/photo/test/",
+                    "author": "Tester",
+                    "license": "Pexels License",
+                    "license_url": "https://www.pexels.com/license/",
+                },
+            },
+            fh,
+        )
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return Image.open(cache_path).convert("RGB"), str(cache_path)
+
+        @staticmethod
+        def _call_fetcher_with_timeout(*args, **kwargs):
+            raise AssertionError("provider retrieval should not run after a valid cache hit")
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            raise AssertionError("cache should not be rewritten on a valid cache hit")
+
+    def fail_qa(*_args, **_kwargs):
+        raise AssertionError("Gemini should not be called for a verified cache hit")
+
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", fail_qa)
+
+    scene = {
+        "primary_entity": "Northstar Labs",
+        "factual_primary_entity": "Northstar Labs",
+        "visual_intent": "headquarters",
+        "specific_search_prompt": "Northstar Labs headquarters",
+        "voiceover": "Northstar Labs headquarters is shown.",
+    }
+
+    image, used_ai, source = retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        scene,
+        "technology",
+        set(),
+        set(),
+        "Northstar Labs headquarters story",
+    )
+
+    assert image.size == (1200, 1600)
+    assert used_ai is False
+    assert source == "cached"
+    assert scene["visual_verification_attempts"] == 0
+    assert scene["asset_provenance"]["provider"] == "Pexels"
 
 
 def test_commons_logo_still_passes_visual_qc(monkeypatch):
