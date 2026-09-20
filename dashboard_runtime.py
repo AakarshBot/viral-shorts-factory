@@ -603,6 +603,25 @@ class DashboardWorkflowController(WorkflowController):
         self._dashboard_visual_gate_wrapper = None
         self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
+
+        # Restore the canonical factory callables before the next production run.
+        # Dashboard review/progress wrappers close over this controller instance;
+        # keeping them attached across runs would route the next run into stale
+        # gates and stale Streamlit state.
+        canonical = getattr(self.bot, "_canonical_dashboard_runtime_bindings", {})
+        run_robot = getattr(self.bot, "run_robot", None)
+        namespace = getattr(run_robot, "__globals__", None)
+        if isinstance(canonical, dict):
+            for name, value in canonical.items():
+                if value is None:
+                    continue
+                try:
+                    setattr(self.bot, name, value)
+                except Exception:
+                    pass
+                if isinstance(namespace, dict):
+                    namespace[name] = value
+
         super().reset()
 
     @staticmethod
