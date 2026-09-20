@@ -39,7 +39,7 @@ def _test_imports():
 
 def _test_environment():
     names = (
-        "GEMINI_API_KEY", "GROQ_API_KEY", "GNEWS_API_KEY",
+        "GEMINI_API_KEY", "GROQ_API_KEY",
         "UNSPLASH_ACCESS_KEY", "HF_TOKEN", "PEXELS_API_KEY",
     )
     configured = sum(1 for name in names if str(os.getenv(name) or "").strip())
