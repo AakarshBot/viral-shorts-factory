@@ -110,6 +110,24 @@ def _as_image_bytes(data: Any) -> bytes | None:
     return None
 
 
+def _candidate_source_page_key(data: Any) -> str:
+    """Normalize the page/article that supplied an image for pool diversity."""
+    if not isinstance(data, dict):
+        return ""
+    candidates = (
+        data.get("source_page_url"),
+        data.get("source_article_url"),
+        data.get("foreign_landing_url"),
+        data.get("pageURL"),
+        data.get("landing_url"),
+    )
+    for value in candidates:
+        url = str(value or "").strip()
+        if url.startswith(("http://", "https://")):
+            return url.rstrip("/").casefold()
+    return ""
+
+
 def _preflight_image(data: Any) -> tuple[bool, str, bytes | None]:
     """Cheap decode/size/aspect validation; invalid bytes consume no QA budget."""
     if data is None:
@@ -606,6 +624,7 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "provenance": dict(asset.get("provenance") or {}),
                 "priority": float(asset.get("priority") or 0.0),
                 "search_text": str(asset.get("search_text") or "").strip(),
+                "source_page_url": str(asset.get("source_page_url") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
                 "used": False,
             }
@@ -714,6 +733,7 @@ def collect_manual_visual_pool(
     manual_queries: list[str],
     video_title: str = "",
     used_hashes: set[str] | None = None,
+    used_source_pages: set[str] | None = None,
     pool_target: int | None = None,
     pool_max: int | None = None,
     allow_auto_backfill: bool = True,
@@ -743,8 +763,10 @@ def collect_manual_visual_pool(
     )
 
     used_hashes = used_hashes or set()
+    used_source_pages = used_source_pages or set()
     assets = []
     seen_hashes = set(used_hashes)
+    seen_source_pages: set[str] = set(used_source_pages)
     query_stats = []
     rejected_counts = {
         "entity_no": 0,
@@ -763,7 +785,7 @@ def collect_manual_visual_pool(
             return list(data)
         return [data]
 
-    def _prepare_candidate(source_name, data, query, visual_type, visual_genre, local_seen):
+    def _prepare_candidate(source_name, data, query, visual_type, visual_genre, local_seen, local_seen_source_pages):
         """Apply the manual-pool rejection order: licensing -> resolution -> entity QA."""
         normalized = _as_image_bytes(data)
         if not normalized:
@@ -788,6 +810,17 @@ def collect_manual_visual_pool(
             rejected_counts["duplicate"] += 1
             return None
 
+        source_page_key = _candidate_source_page_key(data)
+        if (
+            source_page_key
+            and (
+                source_page_key in seen_source_pages
+                or source_page_key in local_seen_source_pages
+            )
+        ):
+            rejected_counts["duplicate"] += 1
+            return None
+
         priority = _candidate_priority(
             source_name,
             normalized,
@@ -797,6 +830,8 @@ def collect_manual_visual_pool(
             data=data,
         )
         local_seen.add(image_hash)
+        if source_page_key:
+            local_seen_source_pages.add(source_page_key)
         return {
             "data": data,
             "bytes": normalized,
@@ -808,6 +843,10 @@ def collect_manual_visual_pool(
             "visual_type": str(visual_type or "GENERAL_CONTEXT").upper(),
             "visual_genre": str(visual_genre or "GENERAL_CONTEXT").upper(),
             "resolution_note": str(reason or "image-decodable"),
+            "source_page_url": str(
+                data.get("source_page_url") if isinstance(data, dict) else ""
+            ).strip(),
+            "source_page_key": source_page_key,
         }
 
     def _verify_candidates(candidates, entity_anchor, source_label, query_index=0):
@@ -862,12 +901,15 @@ def collect_manual_visual_pool(
                             "provenance": dict(candidate["provenance"]),
                             "priority": float(candidate["priority"]),
                             "search_text": _candidate_search_text(candidate["data"]),
+                            "source_page_url": str(candidate.get("source_page_url") or "").strip(),
                             "status": status,
                             "manual_query_index": int(query_index or 0),
                             "pool_origin": str(source_label or "manual"),
                         }
                     )
                     seen_hashes.add(candidate["hash"])
+                    if candidate.get("source_page_key"):
+                        seen_source_pages.add(str(candidate["source_page_key"]))
                     added += 1
                     if len(assets) >= requested_max:
                         break
@@ -901,6 +943,7 @@ def collect_manual_visual_pool(
 
         candidates = []
         local_seen = set()
+        local_seen_source_pages = set()
         attempted_sources = set()
         manual_source_limit = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SOURCE_LIMIT", "3"))))
         for source_index, (source, fetcher) in enumerate(source_plan):
@@ -933,6 +976,7 @@ def collect_manual_visual_pool(
                     visual_type,
                     visual_genre,
                     local_seen,
+                    local_seen_source_pages,
                 )
                 if candidate is None:
                     continue
@@ -982,7 +1026,7 @@ def collect_manual_visual_pool(
     # 2) Only after the exact manual-query pass do we use the factory's existing
     # smart identity + one compact scene-context refinement to fill the SAME pool.
     auto_queries_used = 0
-    if allow_auto_backfill and len(assets) < requested_target:
+    if allow_auto_backfill and not any(str(q or "").strip() for q in manual_queries or []) and len(assets) < requested_target:
         for scene_index, scene in enumerate(scenes or []):
             if len(assets) >= requested_target or auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
                 break
@@ -1031,6 +1075,7 @@ def collect_manual_visual_pool(
                 auto_queries_used += 1
                 candidates = []
                 local_seen = set()
+                local_seen_source_pages = set()
                 attempted_sources = set()
 
                 auto_source_limit = max(1, min(2, int(os.getenv("VISUAL_AUTO_SOURCE_LIMIT", "2"))))
@@ -1150,6 +1195,7 @@ def collect_manual_visual_options(
     query: str,
     video_title: str = "",
     used_hashes: set[str] | None = None,
+    used_source_pages: set[str] | None = None,
     min_options: int = 3,
     max_options: int = 3,
 ) -> dict:
@@ -1163,6 +1209,7 @@ def collect_manual_visual_options(
         [str(query or "").strip()],
         video_title=video_title,
         used_hashes=used_hashes,
+        used_source_pages=used_source_pages,
         pool_target=minimum,
         pool_max=maximum,
         allow_auto_backfill=False,

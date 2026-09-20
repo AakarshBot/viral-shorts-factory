@@ -852,7 +852,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _recommended_shorts_crop_box(img, aspect_ratio=None) -> dict[str, int]:
-    """Return a large centered 9:16 crop box spanning most of the source image."""
+    """Return a large, centered 9:16 starter frame in original-image pixels."""
     width = max(2, int(getattr(img, "width", 2)))
     height = max(2, int(getattr(img, "height", 2)))
     target_aspect = 9 / 16
@@ -862,9 +862,8 @@ def _recommended_shorts_crop_box(img, aspect_ratio=None) -> dict[str, int]:
         except (TypeError, ValueError, ZeroDivisionError):
             target_aspect = 9 / 16
 
-    padding = 0.06
-    usable_width = max(2, int(round(width * (1 - 2 * padding))))
-    usable_height = max(2, int(round(height * (1 - 2 * padding))))
+    usable_width = max(2, int(round(width * 0.60)))
+    usable_height = max(2, int(round(height * 0.60)))
     if usable_width / max(1, usable_height) > target_aspect:
         crop_height = usable_height
         crop_width = max(2, int(round(crop_height * target_aspect)))
@@ -874,11 +873,9 @@ def _recommended_shorts_crop_box(img, aspect_ratio=None) -> dict[str, int]:
 
     crop_width = min(width, crop_width)
     crop_height = min(height, crop_height)
-    left = max(0, int(round((width - crop_width) / 2)))
-    top = max(0, int(round((height - crop_height) / 2)))
     return {
-        "left": left,
-        "top": top,
+        "left": max(0, int(round((width - crop_width) / 2))),
+        "top": max(0, int(round((height - crop_height) / 2))),
         "width": crop_width,
         "height": crop_height,
     }
@@ -1108,9 +1105,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 with st.expander("✂️ Reframe image", expanded=False):
                     original_path = str(item.get("original_path") or "").strip()
                     st.markdown(
-                        "<div class='crop-caption'>The full original image stays visible. "
-                        "Drag the fixed 9:16 frame across it and use the corner handles to zoom in or out. "
-                        "The highlighted area is the exact frame used for the Short.</div>",
+                        "<div class='crop-caption'>Full source image · fixed 9:16 frame. "
+                        "Drag the highlighted frame anywhere on the image, then use its corner or edge handles to "
+                        "zoom and reframe. The pixel coordinates below are the exact area that will become the Short.</div>",
                         unsafe_allow_html=True,
                     )
 
@@ -1118,6 +1115,17 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         from PIL import Image
 
                         original_image = Image.open(original_path).convert("RGB")
+                        stored_box = item.get("crop_box") or {}
+                        default_coords = None
+                        try:
+                            if all(key in stored_box for key in ("left", "top", "width", "height")):
+                                left = int(stored_box["left"])
+                                top = int(stored_box["top"])
+                                width = int(stored_box["width"])
+                                height = int(stored_box["height"])
+                                default_coords = (left, left + width, top, top + height)
+                        except (TypeError, ValueError):
+                            default_coords = None
 
                         if st_cropper is None:
                             st.warning(
@@ -1130,13 +1138,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 crop_result = st_cropper(
                                     img_file=original_image,
                                     realtime_update=True,
-                                    default_coords=None,
-                                    box_color="#5b46e8",
+                                    default_coords=default_coords,
+                                    box_color="#177fd1",
                                     aspect_ratio=(9, 16),
                                     box_algorithm=_recommended_shorts_crop_box,
                                     return_type="both",
                                     key=f"visual_cropper_{run_id}_{item['index']}",
-                                    should_resize_image=True,
+                                    should_resize_image=False,
                                     stroke_width=3,
                                 )
                                 if isinstance(crop_result, tuple) and len(crop_result) == 2:
@@ -1151,6 +1159,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 st.caption("9:16 frame · no provider or AI call")
     
                             if isinstance(crop_box, dict) and crop_box:
+                                x = int(crop_box.get("left", 0) or 0)
+                                y = int(crop_box.get("top", 0) or 0)
+                                width = int(crop_box.get("width", 0) or 0)
+                                height = int(crop_box.get("height", 0) or 0)
+                                st.caption(
+                                    f"Selected frame · x {x}px · y {y}px · width {width}px · height {height}px"
+                                )
                                 if st.button(
                                     "Apply crop",
                                     type="primary",

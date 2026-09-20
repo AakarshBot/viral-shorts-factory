@@ -705,7 +705,7 @@ def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_cand
     assert source == "visual-rescue"
 
 
-def test_commons_person_search_uses_structured_depicts(monkeypatch):
+def test_commons_person_action_search_preserves_action_intent(monkeypatch):
     calls = []
     downloads = []
 
@@ -761,11 +761,13 @@ def test_commons_person_search_uses_structured_depicts(monkeypatch):
     )
 
     assert calls
-    assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q16224802"
-    assert calls[1]["gsrsearch"] == "Smriti Mandhana action"
+    searches = [str(call.get("gsrsearch") or "") for call in calls]
+    assert "Smriti Mandhana action cricket" in searches
+    assert "Smriti Mandhana action" in searches
+    assert all("haswbstatement:P180=" not in query for query in searches)
     assert candidates
-    assert candidates[0]["commons_match_mode"] == "structured-depicts-person"
-    assert candidates[0]["commons_matched_entity"] == "Smriti Mandhana"
+    assert any(item["commons_match_mode"] == "person-action-text" for item in candidates)
+    assert "Smriti Mandhana" in candidates[0]["commons_matched_entity"]
     assert "India Women v Australia Women" in candidates[0]["search_tags"]
     assert downloads
 
@@ -1124,6 +1126,103 @@ def test_manual_visual_options_returns_three_unique_choices_without_backfill(mon
     assert result["enough_options"] is True
     assert all(stat["pool_origin"] == "manual" for stat in result["query_stats"])
     assert len(result["query_stats"]) == 1
+
+
+def test_manual_pool_allows_only_one_image_per_source_page(monkeypatch):
+    image_candidates = []
+    for index, page in enumerate(("https://example.com/article-a", "https://example.com/article-a", "https://example.com/article-b")):
+        buffer = io.BytesIO()
+        Image.new(
+            "RGB",
+            (1000, 1400),
+            (30 + index * 40, 70, 120),
+        ).save(buffer, format="JPEG", quality=95)
+        candidate = _licensed_candidate(buffer.getvalue(), "cc0")
+        candidate["source_page_url"] = page
+        candidate["search_title"] = f"Article image {index + 1}"
+
+        image_candidates.append(candidate)
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [("Openverse", lambda *inner: image_candidates)],
+    )
+
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        object(),
+        [{"primary_entity": "Test Person", "voiceover": "Test Person appears."}],
+        ["Test Person"],
+        "Test story",
+        pool_target=10,
+        pool_max=10,
+        allow_auto_backfill=False,
+    )
+
+    assets = result["assets"]
+    assert len(assets) == 2
+    assert len({item["source_page_url"] for item in assets}) == 2
+
+
+def test_manual_pool_action_query_is_not_collapsed_to_identity_only(monkeypatch):
+    monkeypatch.setattr(
+        provider_boundary,
+        "resolve_person_identity",
+        lambda _entity: {"qid": "Q123", "label": "Vaibhav Sooryavanshi"},
+    )
+
+    searches = provider_boundary._commons_search_queries(
+        "Vaibhav Sooryavanshi batting",
+        "PERSON",
+        "PERSON_ACTION",
+    )
+    query_values = [item[0] for item in searches]
+
+    assert "Vaibhav Sooryavanshi batting" in query_values
+    assert any("vaibhav sooryavanshi batting cricket" == value.casefold() for value in query_values)
+    assert any(mode == "person-action-text" for _, mode, _ in searches)
+
+
+def test_provider_429_short_circuits_repeated_api_calls(monkeypatch):
+    calls = []
+
+    class Response:
+        status_code = 429
+        headers = {"Retry-After": "60"}
+
+        def raise_for_status(self):
+            raise AssertionError("429 should be handled before raise_for_status")
+
+        def json(self):
+            return {}
+
+    def fake_get(*args, **kwargs):
+        calls.append(args[0])
+        return Response()
+
+    provider_boundary._PROVIDER_429_UNTIL.clear()
+    monkeypatch.setattr(provider_boundary.requests, "get", fake_get)
+
+    first = provider_boundary._api_json("https://example.test/api")
+    second = provider_boundary._api_json("https://example.test/api")
+
+    assert first is None
+    assert second is None
+    assert calls == ["https://example.test/api"]
 
 def test_manual_pool_retains_entity_verified_soft_resolution_candidate(monkeypatch):
     low = io.BytesIO()

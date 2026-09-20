@@ -423,10 +423,11 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choic
     }]]
     controller.update("visual_approval", 76, "Visuals ready.")
 
-    monkeypatch.setattr(
-        visual_retrieval_runtime,
-        "collect_manual_visual_options",
-        lambda *args, **kwargs: {
+    captured_used_hashes = []
+
+    def fake_collect(*args, **kwargs):
+        captured_used_hashes.append(set(kwargs.get("used_hashes") or set()))
+        return {
             "assets": [
                 {
                     "bytes": b"image-bytes",
@@ -445,7 +446,12 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choic
             "minimum_options": 3,
             "available_options": 3,
             "enough_options": True,
-        },
+        }
+
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "collect_manual_visual_options",
+        fake_collect,
     )
     monkeypatch.setattr(
         visual_retrieval_runtime,
@@ -466,6 +472,12 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choic
         "hash-2",
         "hash-3",
     ]
+
+    # A second search must exclude the three choices already displayed.
+    ok, _ = controller.search_visual_options(1, "Shafali Verma century")
+    assert ok is True
+    assert {"hash-1", "hash-2", "hash-3"}.issubset(captured_used_hashes[-1])
+    assert snapshot["visual_packages"][0][0]["image"] == str(current)
 
 def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
     async def fake_visuals(*_args, **_kwargs):
@@ -871,6 +883,10 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
     assert "Subject verified, but the image is below the normal resolution target." in source
     assert "Apply crop" in source
     assert "controller.crop_visual(" in source
+    assert 'aspect_ratio=(9, 16)' in source
+    assert 'return_type="both"' in source
+    assert 'should_resize_image=False' in source
+    assert "Selected frame · x" in source
 
 
 def test_repository_does_not_use_deprecated_streamlit_container_width():
