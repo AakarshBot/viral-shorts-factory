@@ -10,6 +10,7 @@ import hashlib
 import io
 import os
 import threading
+import time
 
 from PIL import Image
 
@@ -18,9 +19,10 @@ GEMINI_VISUAL_MAX_REQUESTS = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PE
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "5")))
 GEMINI_VISUAL_RETRIES = 0
 GEMINI_VISUAL_MODEL = os.getenv("GEMINI_VISUAL_MODEL", "gemini-3.1-flash-lite")
-GEMINI_VISUAL_BATCH_SIZE = max(2, min(5, int(os.getenv("GEMINI_VISUAL_BATCH_SIZE", "5"))))
-GEMINI_VISUAL_QA_MAX_SIDE = max(512, min(1400, int(os.getenv("GEMINI_VISUAL_QA_MAX_SIDE", "1024"))))
-VISUAL_QA_RUNTIME_VERSION = "2026-09-20-v15-entity-only-batch"
+GEMINI_VISUAL_BATCH_SIZE = max(2, min(10, int(os.getenv("GEMINI_VISUAL_BATCH_SIZE", "10"))))
+GEMINI_VISUAL_QA_MAX_SIDE = max(512, min(1024, int(os.getenv("GEMINI_VISUAL_QA_MAX_SIDE", "768"))))
+GEMINI_VISUAL_QA_JPEG_QUALITY = max(60, min(85, int(os.getenv("GEMINI_VISUAL_QA_JPEG_QUALITY", "78"))))
+VISUAL_QA_RUNTIME_VERSION = "2026-09-20-v16-entity-batch-payload-hardened"
 
 _VIDEO_CALLS = 0
 _SCENE_CALLS = 0
@@ -157,15 +159,21 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         return None
 
 
-def _prepare_batch_image(img_bytes: bytes) -> Image.Image:
-    """Shrink only the Gemini QA copy; stored/downloaded originals are untouched."""
+def _prepare_batch_image(img_bytes: bytes) -> bytes:
+    """Create a compact Gemini-only JPEG copy; stored/downloaded originals are untouched."""
     image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    if max(image.size) > GEMINI_VISUAL_QA_MAX_SIDE:
-        image.thumbnail(
-            (GEMINI_VISUAL_QA_MAX_SIDE, GEMINI_VISUAL_QA_MAX_SIDE),
-            Image.Resampling.LANCZOS,
-        )
-    return image
+    image.thumbnail(
+        (GEMINI_VISUAL_QA_MAX_SIDE, GEMINI_VISUAL_QA_MAX_SIDE),
+        Image.Resampling.LANCZOS,
+    )
+    buffer = io.BytesIO()
+    image.save(
+        buffer,
+        format="JPEG",
+        quality=GEMINI_VISUAL_QA_JPEG_QUALITY,
+        optimize=True,
+    )
+    return buffer.getvalue()
 
 
 def _parse_batch_verdicts(raw_text, expected_count):
@@ -244,27 +252,31 @@ def strict_gemini_check_batch(
 
         client = genai.Client(api_key=api_key)
         prompt = (
-            f"Check these {len(uncached)} images for one requested visual subject: {entity}\n\n"
-            "For each numbered image, answer exactly N YES, N NO, or N UNCERTAIN, "
-            "with one very short reason. Do not judge action, scene, composition, narration, "
-            "or search intent. Only judge whether the requested subject is visibly represented.\n\n"
-            "Requested subject must be recognisable across people, organisations, teams, "
-            "places, landmarks, products, documents, symbols, objects, concepts, processes, "
-            "charts and maps. Reject unrelated images.\n\n"
-            "Images:"
+            f"Verify whether the requested subject '{entity}' is visibly represented in each image.\n"
+            "Return exactly one line per image in the form: IMAGE N YES, IMAGE N NO, or IMAGE N UNCERTAIN.\n"
+            "Judge only subject identity. Do not judge action, scene, composition, narration, "
+            "or search intent. For named people or real-world entities, require the specific entity. "
+            "Reject unrelated or unidentifiable images."
         )
         contents = [prompt]
         for index, data, _key in uncached:
             contents.append(f"\nIMAGE {index + 1}")
-            contents.append(_prepare_batch_image(data))
+            contents.append(
+                types.Part.from_bytes(
+                    data=_prepare_batch_image(data),
+                    mime_type="image/jpeg",
+                )
+            )
 
         response = client.models.generate_content(
             model=GEMINI_VISUAL_MODEL,
             contents=contents,
             config=types.GenerateContentConfig(
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                max_output_tokens=96,
+                temperature=0,
+                http_options=types.HttpOptions(timeout=45000),
             ),
-            timeout=45,
         )
         raw_text = str(getattr(response, "text", "") or "").strip()
         verdicts = _parse_batch_verdicts(raw_text, len(uncached))
@@ -292,9 +304,10 @@ def strict_gemini_check_batch(
             retry_groups = (uncached[:midpoint], uncached[midpoint:])
             print(
                 f"   [Visual QA] ENTITY-BATCH transient 503/deadline; "
-                f"retrying as {len(retry_groups[0])}+{len(retry_groups[1])} smaller batch(es).",
+                f"retrying once as {len(retry_groups[0])}+{len(retry_groups[1])} smaller batch(es).",
                 flush=True,
             )
+            time.sleep(2)
             for retry_group in retry_groups:
                 if not retry_group:
                     continue
