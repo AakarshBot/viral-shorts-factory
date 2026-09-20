@@ -573,6 +573,7 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "visual_genre": str(asset.get("visual_genre") or "").strip().upper(),
                 "provenance": dict(asset.get("provenance") or {}),
                 "priority": float(asset.get("priority") or 0.0),
+                "search_text": str(asset.get("search_text") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
                 "used": False,
             }
