@@ -1623,6 +1623,7 @@ class DashboardWorkflowController(WorkflowController):
                 "assigned_slide": 0,
                 "preserved_from_replacement": True,
             }
+        )
 
     def replace_visual_from_bank(self, visual_index: int, bank_index: int) -> tuple[bool, str]:
         """Replace one reviewed visual with a previously entity-verified bank image."""
