@@ -776,3 +776,17 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
     assert "Entity verified but factory-rejected for resolution" in source
     assert "Apply manual crop" in source
     assert "controller.crop_visual(" in source
+
+
+def test_repository_does_not_use_deprecated_streamlit_container_width():
+    repo_root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in repo_root.rglob("*.py"):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        deprecated_arg = "use_container_" + "width"
+        if deprecated_arg in source:
+            offenders.append(str(path.relative_to(repo_root)))
+    assert offenders == []
