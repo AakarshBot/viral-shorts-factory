@@ -191,17 +191,6 @@ def install() -> bool:
         }
         patched.append("story_ranker._tokens")
 
-        import semantic_runtime
-        semantic_runtime._tokens = lambda value: {
-            word for word in unicode_words(value)
-            if len(word) > 2 and word not in {
-                "the", "and", "for", "with", "from", "this", "that", "into", "after",
-                "before", "over", "under", "what", "how", "why", "world", "news",
-                "latest", "today", "just", "new", "says", "said", "will", "has", "have",
-            }
-        }
-        patched.append("semantic_runtime._tokens")
-
         import workflow_runtime
         workflow_runtime._token_set = lambda value: {
             word for word in unicode_words(value)

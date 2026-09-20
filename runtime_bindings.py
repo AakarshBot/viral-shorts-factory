@@ -140,20 +140,6 @@ def _install_visual_cache_safety():
         return False
 
 
-def _wrap_trend_signal(bot):
-    current = getattr(bot, "get_trend_signal_bonus", None)
-    if current is None or getattr(current, "_cached_trend_signal", False):
-        return current
-
-    @functools.lru_cache(maxsize=128)
-    def cached(keyword):
-        return current(keyword)
-
-    cached._cached_trend_signal = True
-    bot.get_trend_signal_bonus = cached
-    return cached
-
-
 def _patch_editorial_scoring(bot):
     try:
         from editorial_runtime import patch_editorial_scoring
@@ -303,7 +289,6 @@ def bind_dashboard_patches(bot):
         validate._index_normalized = True
         bot.validate_script = validate
 
-    _wrap_trend_signal(bot)
     _patch_editorial_scoring(bot)
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
@@ -336,8 +321,8 @@ def bind_dashboard_patches(bot):
     names = (
         "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
         "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "compile_video",
-        "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep",
-        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip",
+        "auto_pilot_selection", "run_analytics_sweep",
+        "upload_to_youtube", "generate_karaoke_clip",
     )
     bound = []
     for name in names:

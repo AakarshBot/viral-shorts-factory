@@ -91,7 +91,7 @@ def runtime_surface_audit() -> list[str]:
                 if not hasattr(module, attr):
                     errors.append(f"{name}: missing {attr}")
         elif name == "visual_provider_boundary_runtime":
-            for attr in ("build_raw_source_plan", "fetch_wikipedia_person", "fetch_commons"):
+            for attr in ("build_raw_source_plan", "fetch_wikipedia_person_candidates", "fetch_commons_candidates"):
                 if not callable(getattr(module, attr, None)):
                     errors.append(f"{name}: missing callable {attr}")
         elif name == "visual_strategy_runtime":

@@ -9,7 +9,6 @@ import textwrap
 import re
 import time
 import random
-import warnings
 import difflib
 import sys
 import urllib.parse
@@ -23,7 +22,7 @@ import subprocess
 
 load_dotenv()
 
-from visual_licensing_runtime import allow_unlicensed_visuals, append_image_credits
+from visual_licensing_runtime import append_image_credits
 from script_runtime import append_research_sources
 
 
@@ -42,8 +41,6 @@ try:
 except ImportError:
     cv2 = None
 
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="duckduckgo_search")
-
 IMAGEMAGICK_BINARY_PATH = ""  
 if IMAGEMAGICK_BINARY_PATH:
     os.environ["IMAGEMAGICK_BINARY"] = IMAGEMAGICK_BINARY_PATH
@@ -56,11 +53,6 @@ try:
 except ImportError:
     edge_tts = None
 
-try:
-    from ddgs import DDGS
-except ImportError:
-    DDGS = None
-
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = getattr(PIL.Image, "Resampling", PIL.Image).LANCZOS
 
@@ -69,7 +61,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-SHEET_ID = "1WMJYZvwTZJi-_tLm87l0qO8BVJpa4M7Ee5hSm3UUiYw"
 
 PALETTE = {
     "bg": (15, 20, 35),
@@ -109,7 +100,6 @@ BRAND_SAFETY_KEYWORDS = [
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
-    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
 
@@ -540,63 +530,10 @@ def print_metric_recommendations(title, scores, is_retention=False):
     if out: print(" > ".join(out))
     else: print("   Not enough historical data to generate recommendations.")
 
-def epsilon_greedy_selection(options_dict, scores_dict, epsilon=0.2):
-    valid_keys = list(options_dict.keys())
-    undertested = [k for k in valid_keys if k not in scores_dict or scores_dict[k]['score'] is None or scores_dict[k]['count'] < 5]
-    
-    if random.random() < epsilon and undertested:
-        choice = random.choice(undertested)
-        print(f"   [Auto-Pilot] 🎲 EXPLORE Mode: Selected '{choice}' (gathering more data)")
-        return choice
-    
-    best_choice, best_score = random.choice(valid_keys), -1
-    for k in valid_keys:
-        score = scores_dict.get(k, {}).get("score")
-        if score is not None and score > best_score:
-            best_score, best_choice = score, k
-            
-    print(f"   [Auto-Pilot] 📈 EXPLOIT Mode: Selected '{best_choice}' (Score: {round(best_score, 2) if best_score != -1 else 'N/A'})")
-    return best_choice
-
 def auto_pilot_selection(conn):
-    print("\n🤖 AUTO-PILOT ACTIVATED. Processing Epsilon-Greedy Selections...")
-    format_scores = get_smart_metrics(conn, "format_used", "avg_view_percentage")
-    format_choice = epsilon_greedy_selection({"regular": 1, "top5": 1, "trending": 1}, format_scores)
-    
-    cat_scores = get_smart_metrics(conn, "genre", "avg_view_percentage")
-    valid_cats = {k: v for k, v in CONTENT_CATEGORIES.items() if (v["usable_regular"] if format_choice in ["regular", "trending"] else v["usable_top5"]) and k != "tech_reviews"}
-    cat_choice = epsilon_greedy_selection(valid_cats, cat_scores)
-    
-    lang_scores = get_smart_metrics(conn, "language_used", "avg_view_percentage")
-    lang_choice = epsilon_greedy_selection(LANGUAGES, lang_scores)
-    
-    combo_key = f"{format_choice}|{cat_choice}|{lang_choice}"
-    return format_choice, cat_choice, LANGUAGES[lang_choice], combo_key
-
-def fetch_trending_topics(target="india", query_filter=None):
-    from story_ranker import fetch_google_trending_topics
-    geo = {
-        "india": "IN",
-        "us": "US",
-        "united states": "US",
-        "uk": "GB",
-        "great britain": "GB",
-    }.get(str(target or "").strip().lower(), "IN")
-    trends = fetch_google_trending_topics((geo,), max_terms=30)
-    if query_filter:
-        terms = [
-            token.strip()
-            for token in re.split(r"\s+(?:OR|AND)\s+", str(query_filter), flags=re.IGNORECASE)
-            if token.strip()
-        ]
-        filtered = [
-            trend for trend in trends
-            if any(term.casefold() in trend.casefold() for term in terms)
-        ]
-        if filtered:
-            trends = filtered
-    return trends or ["India Tech", "Bollywood", "Cricket", "Stock Market", "AI"]
-
+    """Compatibility entry point delegated to the canonical Shorts selector."""
+    from autopilot_runtime import select_auto_pilot
+    return select_auto_pilot(sys.modules[__name__], conn)
 
 def manual_prompts(conn):
     scores = get_smart_metrics(conn, "format_used", metric_col="avg_view_percentage")
@@ -681,128 +618,9 @@ def cricket_pipeline_prompts():
     return format_mode, "sports_stories_of_day", LANGUAGES[lang_key], f"{format_mode}|cricket_focus|{lang_key}", trend_keyword, custom_q, custom_rss
 
 def run_analytics_sweep(conn):
-    print("\n📊 RUNNING FULL CHANNEL SYNC & ANALYTICS SWEEP...")
-    c = conn.cursor()
-    
-    try:
-        import googleapiclient.discovery
-        creds = get_google_credentials()
-        youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
-        yt_analytics = googleapiclient.discovery.build("youtubeAnalytics", "v2", credentials=creds)
-        sheets = googleapiclient.discovery.build("sheets", "v4", credentials=creds)
-
-        channels_resp = youtube.channels().list(part="contentDetails", mine=True).execute()
-        uploads_playlist_id = channels_resp['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-        
-        playlist_videos = []
-        next_page_token = None
-        while True:
-            pl_resp = youtube.playlistItems().list(
-                part="snippet,contentDetails",
-                playlistId=uploads_playlist_id,
-                maxResults=50,
-                pageToken=next_page_token
-            ).execute()
-            playlist_videos.extend(pl_resp.get('items', []))
-            next_page_token = pl_resp.get('nextPageToken')
-            if not next_page_token:
-                break
-
-        print(f"   [+] Found {len(playlist_videos)} total videos on channel. Syncing records...")
-
-        sheet_range = "Sheet1!A:G"
-        sheet_resp = sheets.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=sheet_range).execute()
-        existing_rows = sheet_resp.get('values', [])
-        
-        sheet_row_map = {}
-        for idx, row in enumerate(existing_rows):
-            if len(row) > 2 and "youtu" in row[2]:
-                sheet_row_map[row[2].strip()] = idx + 1
-
-        rows_to_append = []
-        updates_batch = []
-
-        for item in playlist_videos:
-            vid_id = item['contentDetails']['videoId']
-            snippet = item['snippet']
-            title = snippet.get('title', 'Untitled')
-            pub_date = snippet.get('publishedAt', str(datetime.now()))[:10]
-            vid_url = "https://youtu.be/" + vid_id
-
-            try:
-                stat_req = youtube.videos().list(part="statistics", id=vid_id).execute()
-                stats = stat_req['items'][0]['statistics'] if stat_req.get('items') else {}
-                views = int(stats.get('viewCount', 0))
-                likes = int(stats.get('likeCount', 0))
-            except Exception:
-                pass
-
-            avg_pct, ctr = 0.0, 0.0
-            try:
-                ret_req = yt_analytics.reports().query(ids="channel==MINE", startDate=pub_date, endDate=str(datetime.now())[:10], metrics="averageViewPercentage", dimensions="video", filters=f"video=={vid_id}").execute()
-                if ret_req.get('rows'): avg_pct = float(ret_req['rows'][0][1])
-            except Exception:
-                pass
-
-            try:
-                ctr_req = yt_analytics.reports().query(ids="channel==MINE", startDate=pub_date, endDate=str(datetime.now())[:10], metrics="videoThumbnailImpressionsClickThroughRate", dimensions="video", filters=f"video=={vid_id}").execute()
-                if ctr_req.get('rows'): ctr = float(ctr_req['rows'][0][1])
-            except Exception:
-                pass
-
-            inferred_genre = infer_genre_from_title(title)
-
-            c.execute("SELECT topic FROM vault WHERE video_id = ?", (vid_id,))
-            existing_vault = c.fetchone()
-            if not existing_vault:
-                c.execute("""
-                    INSERT OR IGNORE INTO vault 
-                    (topic, date_used, genre, video_id, reported, views, title_used, format_used, language_used, avg_view_percentage, title_ctr)
-                    VALUES (?, ?, ?, ?, 1, ?, ?, 'regular', 'english', ?, ?)
-                """, (title, pub_date, inferred_genre, vid_id, views, title, avg_pct, ctr))
-            else:
-                c.execute("UPDATE vault SET views = ?, avg_view_percentage = ?, title_ctr = ?, reported = 1 WHERE video_id = ?", (views, avg_pct, ctr, vid_id))
-            conn.commit()
-
-            row_data = [pub_date, title, vid_url, views, likes, round(avg_pct, 1), ctr]
-
-            if vid_url in sheet_row_map:
-                row_idx = sheet_row_map[vid_url]
-                updates_batch.append({
-                    "range": f"Sheet1!A{row_idx}:G{row_idx}",
-                    "values": [row_data]
-                })
-            else:
-                rows_to_append.append(row_data)
-
-        if updates_batch:
-            sheets.spreadsheets().values().batchUpdate(
-                spreadsheetId=SHEET_ID,
-                body={"valueInputOption": "USER_ENTERED", "data": updates_batch}
-            ).execute()
-
-        if rows_to_append:
-            sheets.spreadsheets().values().append(
-                spreadsheetId=SHEET_ID,
-                range="Sheet1!A:G",
-                valueInputOption="USER_ENTERED",
-                body={"values": rows_to_append}
-            ).execute()
-
-        print(f"   [+] Full channel sync complete. Updated {len(updates_batch)} existing rows and appended {len(rows_to_append)} new videos.")
-
-    except Exception as e:
-        pass
-
-def token_overlap_ratio(text1, text2):
-    tokens1, tokens2 = set(re.findall(r'\w+', text1.lower())), set(re.findall(r'\w+', text2.lower()))
-    if not tokens1 or not tokens2: return 0.0
-    return len(tokens1.intersection(tokens2)) / len(tokens1.union(tokens2))
-
-def get_trend_signal_bonus(keyword):
-    """Compatibility shim; trend strength is attached during the discovery pass."""
-    return 0.0
-
+    """Compatibility entry point delegated to exact-video learning sync."""
+    from learning_runtime import sync_factory_analytics
+    return sync_factory_analytics(sys.modules[__name__], conn)
 
 def gather_and_filter_stories(
     conn,
@@ -903,25 +721,15 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
     return batch_stories
 
 def process_scored_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode):
-    scored_candidates = []
-    for idx, scores in enumerate(scored_data):
-        if idx >= len(batch_stories): break
-        story = batch_stories[idx]
-        if scores.get("hard_reject", False) or scores.get("monetization_risk", 10) < 5: continue
-        
-        hs, nc, af, mr, sl = scores.get("hook_strength", 5), scores.get("narrative_completeness", 5), scores.get("audience_fit", 5), scores.get("monetization_risk", 5), scores.get("shelf_life", 5)
-        trend_bonus = get_trend_signal_bonus(story['title'])
-        velocity_boost = story.get('velocity_score', 0.0)
-        
-        composite = (hs * 0.25 + nc * 0.20 + af * 0.20 + mr * 0.20 + sl * 0.15) + (bonuses.get(story['genre'], 0) if format_mode == "regular" else 0) + (2.0 if format_mode == "regular" and story['genre'] == last_genre else 0) + story.get('corroboration_bonus', 0) + trend_bonus + velocity_boost - story.get('recency_penalty', 1.0)
-        
-        story.update({"hook_strength": hs, "narrative_completeness": nc, "audience_fit": af, "monetization_risk": mr, "shelf_life": sl, "composite_score": round(composite, 2)})
-        scored_candidates.append(story)
-        
-    if scored_candidates:
-        scored_candidates.sort(key=lambda x: x['composite_score'], reverse=True)
-        return scored_candidates
-    return batch_stories
+    """Compatibility entry point delegated to the canonical editorial scorer."""
+    from editorial_runtime import score_candidates
+    return score_candidates(
+        scored_data or [],
+        batch_stories or [],
+        bonuses or {},
+        last_genre,
+        format_mode,
+    )
 
 def get_insights_for_script(conn):
     try:
@@ -1184,43 +992,6 @@ async def generate_voiceover_and_timestamps(script_data, language_cfg):
         if not success: return [], []
     return audio_paths, word_timings
 
-def passes_quality_gate(img_data, search_prompt="", video_title=""):
-    if cv2 is not None:
-        try:
-            pil_img = Image.open(io.BytesIO(img_data)).convert("RGB")
-            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            h, w = cv_img.shape[:2]
-            if min(h, w) < 300: return False
-            ratio = w / h
-            if ratio > 2.5 or ratio < 0.4: return False
-            if cv2.Laplacian(cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < 25.0: return False
-        except Exception:
-            pass
-
-    if GEMINI_API_KEY:
-        try:
-            import base64
-            b64_img = base64.b64encode(img_data).decode('utf-8')
-            sys_prompt = (
-                f"You are a fast QA reviewer.\n"
-                f"Topic: {video_title} | Search Term: {search_prompt}\n"
-                f"Reject ONLY IF the image is a heavy internet meme with text overlays, a massive watermark across the center, or completely garbage clip-art.\n"
-                f"If it is a real photo or actual movie still (even if slightly imperfect), return 'TRUE'.\n"
-                f"Return ONLY 'TRUE' or 'FALSE'."
-            )
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "contents": [{"parts": [{"text": sys_prompt}, {"inlineData": {"mimeType": "image/jpeg", "data": b64_img}}]}],
-                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 10}
-            }
-            resp = requests.post(url, json=payload, timeout=5)
-            if resp.status_code == 200:
-                txt = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip().lower()
-                if "false" in txt: return False
-        except Exception:
-            pass 
-    return True
-
 def get_cached_asset(query):
     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', query.lower().strip()) + ".jpg"
     cache_path = os.path.join(ASSET_CACHE_DIR, safe_name)
@@ -1232,109 +1003,6 @@ def save_to_cache(img_bytes, cache_path):
         with open(cache_path, "wb") as f: f.write(img_bytes)
     except:
         pass
-
-def fetch_wiki_person_image(query, used_urls, search_prompt, video_title):
-    search_url = "https://en.wikipedia.org/w/api.php?action=opensearch&search=" + urllib.parse.quote(query) + "&limit=1&namespace=0&format=json"
-    try:
-        resp = requests.get(search_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-        if resp.status_code == 200 and resp.json()[1]:
-            img_url = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&piprop=original&titles=" + urllib.parse.quote(resp.json()[1][0]) + "&format=json"
-            img_resp = requests.get(img_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-            if img_resp.status_code == 200:
-                for p_id, p_info in img_resp.json().get('query', {}).get('pages', {}).items():
-                    if 'original' in p_info:
-                        source_url = p_info['original']['source']
-                        if source_url not in used_urls:
-                            img_data = requests.get(source_url, timeout=5)
-                            if img_data.status_code == 200 and passes_quality_gate(img_data.content, search_prompt, video_title):
-                                used_urls.add(source_url)
-                                return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_wikimedia_commons(query, used_urls, search_prompt, video_title):
-    search_url = "https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=" + urllib.parse.quote(query) + "&srnamespace=6&format=json"
-    try:
-        resp = requests.get(search_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-        if resp.status_code == 200 and resp.json().get('query', {}).get('search', []):
-            for res in resp.json()['query']['search'][:5]:
-                img_url = "https://commons.wikimedia.org/w/api.php?action=query&titles=" + urllib.parse.quote(res['title']) + "&prop=imageinfo&iiprop=url&format=json"
-                img_resp = requests.get(img_url, headers={"User-Agent": "ViralStudioBot/1.0"}, timeout=5)
-                if img_resp.status_code == 200:
-                    for p_id, p_info in img_resp.json().get('query', {}).get('pages', {}).items():
-                        if 'imageinfo' in p_info:
-                            actual_url = p_info['imageinfo'][0]['url']
-                            if actual_url not in used_urls:
-                                img_data = requests.get(actual_url, timeout=5)
-                                if img_data.status_code == 200 and passes_quality_gate(img_data.content, search_prompt, video_title):
-                                    used_urls.add(actual_url)
-                                    return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_pexels(query, used_urls, search_prompt, video_title):
-    if not PEXELS_API_KEY: return None
-    try:
-        resp = requests.get("https://api.pexels.com/v1/search", headers={"Authorization": PEXELS_API_KEY}, params={"query": query, "orientation": "portrait", "per_page": 5}, timeout=5)
-        if resp.status_code == 200 and resp.json().get('photos'):
-            for photo in resp.json()['photos']:
-                if photo['src']['large2x'] not in used_urls:
-                    img_data = requests.get(photo['src']['large2x'], timeout=5)
-                    if img_data.status_code == 200 and passes_quality_gate(img_data.content, search_prompt, video_title):
-                        used_urls.add(photo['src']['large2x'])
-                        return img_data.content
-    except Exception:
-        pass
-    return None
-
-def fetch_unsplash(query, used_urls, search_prompt, video_title):
-    if not UNSPLASH_ACCESS_KEY: return None
-    try:
-        resp = requests.get(
-            "https://api.unsplash.com/search/photos",
-            params={"query": query, "orientation": "portrait", "per_page": 5, "client_id": UNSPLASH_ACCESS_KEY},
-            timeout=5,
-        )
-        if resp.status_code == 200:
-            for result in resp.json().get("results", []):
-                url = result.get("urls", {}).get("regular")
-                if not url or url in used_urls: continue
-                img_resp = requests.get(url, timeout=5)
-                if img_resp.status_code == 200 and passes_quality_gate(img_resp.content, search_prompt, video_title):
-                    used_urls.add(url)
-                    return img_resp.content
-    except Exception:
-        pass
-    return None
-
-def fetch_duckduckgo(query, used_urls, search_prompt, video_title):
-    if not allow_unlicensed_visuals() or DDGS is None:
-        return None
-    spoofed_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/"
-    }
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.images(query, max_results=10)
-            for result in results:
-                img_url = result.get("image") or result.get("url")
-                if not img_url or img_url in used_urls:
-                    continue
-                try:
-                    img_resp = requests.get(img_url, headers=spoofed_headers, timeout=6)
-                    if img_resp.status_code == 200 and passes_quality_gate(img_resp.content, search_prompt, video_title):
-                        used_urls.add(img_url)
-                        return img_resp.content
-                except requests.RequestException:
-                    continue
-    except Exception:
-        pass
-    return None
 
 def fetch_hf_ai_image(prompt):
     if not HF_TOKEN: return None

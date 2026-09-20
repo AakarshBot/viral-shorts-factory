@@ -58,12 +58,6 @@ def _story(title, score):
     }
 
 
-def test_collector_accepts_legacy_discover_lanes_keyword():
-    parameter = inspect.signature(collect_high_recall_stories).parameters.get("discover_lanes")
-    assert parameter is not None
-    assert parameter.default is None
-
-
 def test_discovery_returns_stable_pool_up_to_28_without_production_calls():
     stories = [
         _story("Government announces new renewable energy targets", 12),

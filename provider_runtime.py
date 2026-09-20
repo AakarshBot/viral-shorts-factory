@@ -63,35 +63,10 @@ def hf_text_to_image(prompt):
 hf_text_to_image._disabled = False
 
 
-def _local_quality_gate(img_data, search_prompt="", video_title=""):
-    """Cheap local image sanity only; semantic QA belongs to the strict visual gate."""
-    try:
-        image = Image.open(io.BytesIO(img_data)).convert("RGB")
-        width, height = image.size
-        if min(width, height) < 300:
-            return False
-        ratio = width / max(1, height)
-        if ratio > 2.5 or ratio < 0.4:
-            return False
-        # Preserve the original local blur rejection without reintroducing
-        # a second semantic/Gemini quality owner.
-        import cv2
-        import numpy as np
-        cv_img = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)
-        if cv2.Laplacian(cv_img, cv2.CV_64F).var() < 25.0:
-            return False
-        return True
-    except Exception:
-        return False
-
 
 def patch_provider_adapters(bot):
     """Bind current providers; visual_qa_runtime owns Gemini QA budgets/circuit breaking."""
     bot.fetch_hf_ai_image = hf_text_to_image
-
-    # Legacy fetchers may call passes_quality_gate() before returning data.
-    # Keep that check local-only so it cannot trigger a hidden Gemini request.
-    bot.passes_quality_gate = _local_quality_gate
 
     if not getattr(bot, "_provider_adapters_installed", False):
         bot._provider_adapters_installed = True

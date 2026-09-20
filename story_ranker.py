@@ -477,7 +477,6 @@ def _cricket_relevance_pass(story, genre_key):
     return False
 
 
-@lru_cache(maxsize=1)
 GOOGLE_NEWS_RADAR_QUERIES = (
     "(India OR Indian) (news OR update OR announced)",
     "(world OR global) (news OR update OR announced)",
@@ -1277,8 +1276,6 @@ def collect_high_recall_stories(
     trend_keyword=None,
     custom_gnews_q=None,
     custom_rss_url=None,
-    ai_cricket=False,
-    discover_lanes=None,
     broad_discovery=False,
 ):
     """Collect broad free discovery signals and collapse them into distinct events."""
@@ -1488,7 +1485,6 @@ def patch_story_selection(bot):
             trend_keyword,
             custom_gnews_q,
             custom_rss_url,
-            ai_cricket=ai_cricket,
         )
 
         relevant = []

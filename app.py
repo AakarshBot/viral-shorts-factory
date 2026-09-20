@@ -21,7 +21,6 @@ from factory_runtime import install_safe_exception_hook, patch_dashboard_runtime
 from provider_runtime import patch_provider_adapters
 from quality_runtime import patch_quality_control
 from runtime_bindings import bind_dashboard_patches
-from semantic_runtime import patch_semantic_dedup
 from story_ranker import patch_story_selection
 from visual_content_runtime import patch_content_first_visuals as patch_visual_pipeline
 from visual_qa_runtime import install_visual_qa_bridge
@@ -106,7 +105,6 @@ def initialise_runtime() -> None:
     if not getattr(ultimate_bot, "_dashboard_runtime_initialized", False):
         install_safe_exception_hook()
         patch_dashboard_runtime(ultimate_bot)
-        patch_semantic_dedup()
         patch_story_selection(ultimate_bot)
         patch_quality_control(ultimate_bot)
         install_visual_qa_bridge(visual_runtime)
@@ -114,7 +112,6 @@ def initialise_runtime() -> None:
         from audio_runtime import patch_audio_pipeline
         patch_audio_pipeline(ultimate_bot)
         patch_provider_adapters(ultimate_bot)
-        ultimate_bot.token_overlap_ratio = lambda _a, _b: 0.0
         ultimate_bot.run_analytics_sweep = lambda _conn: print(
             "[Learning] Automatic analytics sync disabled in newsroom workflow.", flush=True
         )

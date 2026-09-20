@@ -166,11 +166,6 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
     return candidates
 
 
-def fetch_openverse(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    candidates = fetch_openverse_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
-
-
 def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Search Pixabay and return a bounded set of downloadable candidates."""
     key = str(os.getenv("PIXABAY_API_KEY", "")).strip()
@@ -229,6 +224,3 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
     return candidates
 
 
-def fetch_pixabay(query: str, used_urls: set[str] | None = None, *_args) -> bytes | None:
-    candidates = fetch_pixabay_candidates(query, used_urls, *_args)
-    return candidates[0] if candidates else None
