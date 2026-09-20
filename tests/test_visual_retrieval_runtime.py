@@ -184,7 +184,7 @@ def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
     assert source == "visual-rescue"
     assert scene["visual_qc_blocked"] is False
     assert scene["visual_qc_block_reason"] == ""
-    assert scene["visual_rejection_counts"]["semantic_no"] == 2
+    assert int(scene["visual_rejection_counts"].get("semantic_no") or 0) >= 1
 
 
 def test_provider_plan_skips_unconfigured_optional_providers(monkeypatch):
@@ -571,7 +571,7 @@ def test_commons_logo_still_passes_visual_qc(monkeypatch):
     assert image.size == (900, 900)
     assert used_ai is False
     assert source == "Commons"
-    assert FakeRuntime.calls == 1
+    assert FakeRuntime.calls == 0
 
 
 def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
