@@ -76,13 +76,19 @@ def _manual_crop_to_shorts(img: Image.Image, zoom: float = 1.0, x_center: float 
 
 
 def upload_ready_for_manual_decision(snapshot: dict[str, Any]) -> bool:
-    """Return True only when a completed, idle render is ready for upload visibility selection."""
+    """Expose Final QC whenever a complete idle render exists, including recoverable QC errors."""
+    snapshot = snapshot or {}
     video_path = str(snapshot.get("video_path") or "").strip()
-    return (
-        bool(snapshot.get("completed"))
-        and not bool(snapshot.get("thread_alive"))
-        and bool(video_path)
-    )
+    if not video_path or bool(snapshot.get("thread_alive")):
+        return False
+    if bool(snapshot.get("completed")):
+        return True
+    # Older runs could have completed rendering and then fallen into an error while
+    # entering final QC. Keep that render recoverable; the live release gates still
+    # decide whether an upload button may be used.
+    return str(snapshot.get("stage") or "").strip().lower() == "error" and int(
+        snapshot.get("percent", 0) or 0
+    ) >= 100 and os.path.isfile(video_path)
 
 
 _ARTIFACT_QC_CACHE: dict[tuple[str, int], tuple[bool, str]] = {}
