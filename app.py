@@ -901,6 +901,29 @@ def render_script_visual_query_review(
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
+    visual_pipeline = str(snapshot.get("visual_pipeline") or "option1_scrape").strip()
+    if visual_pipeline == "option2_storyboard":
+        _render_section_header(
+            "Step 04 · Script review",
+            "Review the narration",
+            "Option 2 will turn this verified script into an original editorial visual storyboard. Manual image-search fields are disabled for this pipeline.",
+        )
+        with st.container(border=True):
+            st.markdown(
+                "<div class='output-card'><div class='small-muted'>OPTION 2 · ORIGINAL STORYBOARD</div>"
+                "<div style='margin-top:7px;line-height:1.55'>The visual engine will choose lead cards, fact graphics, stat panels, timelines, comparisons, scorecards, process layouts and tactical diagrams from the verified script. It does not scrape news photographs.</div></div>",
+                unsafe_allow_html=True,
+            )
+        if st.button(
+            "Continue with Option 2 storyboard",
+            type="primary",
+            width="stretch",
+            key=f"continue_option2_script_{run_id}",
+        ):
+            controller.submit_script_visual_queries([""] * len(scenes))
+            st.rerun()
+        return
+
     _render_section_header(
         "Step 04 · Script review",
         "Review the narration",
