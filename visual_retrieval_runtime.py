@@ -42,8 +42,10 @@ REAL_SOURCE_SCORES = {
     "unsplash": 70,
 }
 MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "10"))))
+MAX_SEMANTIC_CHECKS_PER_SOURCE = max(1, min(3, int(os.getenv("VISUAL_SEMANTIC_CHECKS_PER_SOURCE", "3"))))
 MAX_ENTITY_BANK_PER_QUERY = max(3, min(10, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "10"))))
 INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
+ENTITY_CHECK_PRIMARY_POOL = max(10, min(10, int(os.getenv("VISUAL_ENTITY_CHECK_PRIMARY_POOL", "10"))))
 REFINEMENT_CANDIDATE_POOL = max(6, min(12, int(os.getenv("VISUAL_REFINEMENT_CANDIDATE_POOL", "10"))))
 INITIAL_SOURCE_LIMIT = max(1, min(3, int(os.getenv("VISUAL_INITIAL_SOURCE_LIMIT", "3"))))
 REFINEMENT_SOURCE_LIMIT = max(1, min(2, int(os.getenv("VISUAL_REFINEMENT_SOURCE_LIMIT", "2"))))
@@ -750,24 +752,45 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             continue
 
         query_candidates.sort(key=lambda item: (-float(item[4]), str(item[6]).casefold(), int(item[0])))
+        # First inspect only the strongest 10 in one batch. If that does not
+        # produce at least three entity-approved images, inspect the next 10.
+        # This normally costs one Gemini call per search term and never requires
+        # scene-level verification.
         check_candidates = query_candidates[:raw_target]
+        primary_count = min(ENTITY_CHECK_PRIMARY_POOL, len(check_candidates))
+        batches = [check_candidates[:primary_count]]
+        if len(check_candidates) > primary_count:
+            batches.append(check_candidates[primary_count:])
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         local_results = {}
 
-        for offset in range(0, len(check_candidates), batch_size):
-            batch = check_candidates[offset : offset + batch_size]
-            result_map = strict_gemini_check_batch(
-                [item[2] for item in batch],
-                cache_entity,
-                os.getenv("GEMINI_API_KEY"),
-                tier="IDENTITY",
-                visual_type=visual_type,
-                visual_genre=visual_genre,
-            )
-            verification_attempts += 1
-            for local_index, verdict in result_map.items():
-                local_results[offset + int(local_index)] = verdict
+        for batch_number, batch_start in enumerate(batches):
+            if not batch:
+                continue
+            for offset in range(0, len(batch), batch_size):
+                batch = batch[offset : offset + batch_size]
+                result_map = strict_gemini_check_batch(
+                    [item[2] for item in batch],
+                    cache_entity,
+                    os.getenv("GEMINI_API_KEY"),
+                    tier="IDENTITY",
+                    visual_type=visual_type,
+                    visual_genre=visual_genre,
+                )
+                verification_attempts += 1
+                base_index = (0 if batch_number == 0 else primary_count) + offset
+                for local_index, verdict in result_map.items():
+                    local_results[base_index + int(local_index)] = verdict
+                if verification_attempts >= 4:
+                    break
             if verification_attempts >= 4:
+                break
+
+            # Three usable alternatives are enough to keep every slide healthy.
+            # Ten is the bank target, not a reason to spend another AI call.
+            if len(
+                [value for value in local_results.values() if value is True]
+            ) >= 3:
                 break
 
         round_verified = 0
@@ -792,7 +815,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     round_verified += 1
             elif verdict is False:
                 _record_visual_rejection(seg, "semantic_no", f"{item[6]}:candidate {item[0]}:ENTITY_NO")
-            else:
+            elif local_index in local_results:
                 _record_visual_rejection(seg, "semantic_uncertain", f"{item[6]}:candidate {item[0]}:ENTITY_UNCERTAIN")
 
         last_round = str(query)
