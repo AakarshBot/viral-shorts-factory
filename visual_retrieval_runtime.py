@@ -626,6 +626,7 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "search_text": str(asset.get("search_text") or "").strip(),
                 "source_page_url": str(asset.get("source_page_url") or "").strip(),
                 "source_image_url": str(asset.get("source_image_url") or "").strip(),
+                "source_asset_key": str(asset.get("source_asset_key") or "").strip(),
                 "signature": str(asset.get("signature") or "").strip(),
                 "status": str(asset.get("status") or "entity-verified"),
                 "used": False,
@@ -903,6 +904,7 @@ def collect_manual_visual_pool(
     assets: list[dict] = []
     seen_hashes = set(used_hashes)
     seen_image_urls: set[str] = set()
+    seen_asset_keys: set[str] = set()
     seen_signatures: list[str] = []
     query_stats: list[dict] = []
     rejected_counts = {
@@ -973,6 +975,7 @@ def collect_manual_visual_pool(
                             "search_text": _candidate_search_text(candidate["data"]),
                             "source_page_url": str(candidate.get("source_page_url") or "").strip(),
                             "source_image_url": str(candidate.get("source_image_url") or "").strip(),
+                            "source_asset_key": str(candidate.get("source_asset_key") or "").strip(),
                             "status": status,
                             "manual_query_index": int(query_index or 0),
                             "pool_origin": str(source_label or "manual"),
@@ -1004,7 +1007,7 @@ def collect_manual_visual_pool(
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
-        query_seen_asset_keys: set[str] = set()
+        query_seen_asset_keys: set[str] = set(seen_asset_keys)
         source_attempts = 0
         qa_requests = 0
         verified_for_query = 0
@@ -1098,6 +1101,17 @@ def collect_manual_visual_pool(
             image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
             if image_url:
                 seen_image_urls.add(image_url)
+            asset_key = str(
+                asset.get("source_asset_key")
+                or "|".join(
+                    [
+                        str(asset.get("source") or "").strip().casefold(),
+                        str(asset.get("source_page_url") or "").strip().casefold(),
+                    ]
+                )
+            ).strip("|")
+            if asset_key:
+                seen_asset_keys.add(asset_key)
             signature = str(asset.get("signature") or "").strip()
             if signature:
                 seen_signatures.append(signature)
