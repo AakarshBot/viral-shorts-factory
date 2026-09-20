@@ -1041,7 +1041,7 @@ def _deduplicate_stage(stories, max_items=15):
             shared_actions = left_actions & right_actions
 
             if (
-                title_overlap >= 0.50
+                title_overlap >= 0.62
                 and shared_entities >= 1
                 and shared_actions
                 and story.get("event_id") != old.get("event_id")
