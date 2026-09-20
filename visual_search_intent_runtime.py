@@ -45,6 +45,35 @@ def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+_MANUAL_SCENE_WORDS = {
+    "logo", "logos", "portrait", "portraits", "headshot", "headshots",
+    "press", "conference", "interview", "speech", "speaking", "meeting",
+    "match", "game", "batting", "bowling", "training", "stadium", "arena",
+    "final", "finals", "opening", "ceremony", "celebration", "celebrating",
+    "crowd", "fans", "night", "day", "action", "action-shot", "screenshot",
+    "map", "flag", "flags", "poster", "posters", "chart", "graph", "document",
+    "documents", "office", "headquarters",
+}
+
+
+def _manual_entity_from_query(manual: str, resolved_subject: str) -> str:
+    """Keep the manual search phrase intact while separating its entity anchor."""
+    query = _clean(manual)
+    resolved = clean_text(resolved_subject or "")
+    if resolved:
+        query_tokens = set(tokens(query))
+        resolved_tokens = set(tokens(resolved))
+        if query_tokens & resolved_tokens:
+            return resolved
+
+    words = [
+        word
+        for word in re.findall(r"[\w-]+", query, flags=re.UNICODE)
+        if word.casefold() not in _MANUAL_SCENE_WORDS
+    ]
+    return " ".join(words[:4]).strip() or query
+
+
 # These are retrieval-quality filters, not domain rules. They remove words that
 # usually describe the script rather than help an image index identify a frame.
 _SEARCH_WEAK = {
@@ -290,7 +319,8 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
 
     if manual:
         scene_resolution = resolve_subject(base, video_title)
-        subject = manual
+        resolved_subject = scene_resolution.get("subject") or scene_resolution.get("factual_entity") or ""
+        subject = _manual_entity_from_query(manual, resolved_subject)
         visual_type = str(scene_resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
 
         # Manual queries are authoritative for retrieval, but stale generated
