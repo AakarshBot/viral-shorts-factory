@@ -1,6 +1,7 @@
 """Deterministic story grounding for automatic visual entities."""
 from __future__ import annotations
 import re
+from difflib import SequenceMatcher
 from typing import Any
 from visual_semantic_guard_runtime import clean_text, infer_role, key
 
@@ -129,6 +130,69 @@ def _role(scene:dict[str,Any],entity:str)->str:
     try: return str(infer_role({"primary_entity":entity,"visual_intent":scene.get("visual_intent",""),"visual_type":scene.get("visual_type","")}) or "GENERAL_CONTEXT").upper()
     except Exception: return "GENERAL_CONTEXT"
 
+def _person_name_candidates(evidence: str) -> list[str]:
+    """Extract conservative proper-name phrases from story evidence."""
+    words = re.findall(r"[\w][\w'’/-]*", _strip_domains(evidence), flags=re.UNICODE)
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for size in (2, 3, 4):
+        for start in range(0, max(0, len(words) - size + 1)):
+            phrase_words = words[start:start + size]
+            if not all(
+                word[:1].isupper() or word.isupper()
+                for word in phrase_words
+            ):
+                continue
+            keys = [key(word) for word in phrase_words]
+            if any(not item or item in _GENERIC or item in _STOP for item in keys):
+                continue
+            phrase = " ".join(phrase_words).strip()
+            phrase_key = phrase.casefold()
+            if phrase_key not in seen:
+                seen.add(phrase_key)
+                candidates.append(phrase)
+    return candidates
+
+
+def _repair_fuzzy_person_identity(original: str, evidence: str) -> tuple[str, float]:
+    """Repair a likely spelling variant only when story evidence corroborates it."""
+    candidate_words = re.findall(r"[\w][\w'’/-]*", _norm(original), flags=re.UNICODE)
+    if not 2 <= len(candidate_words) <= 4:
+        return "", 0.0
+
+    candidate_keys = [key(word) for word in candidate_words]
+    if any(not item or item in _GENERIC or item in _STOP for item in candidate_keys):
+        return "", 0.0
+
+    best_name = ""
+    best_score = 0.0
+    for phrase in _person_name_candidates(evidence):
+        target_words = re.findall(r"[\w][\w'’/-]*", phrase, flags=re.UNICODE)
+        if len(target_words) != len(candidate_words):
+            continue
+        target_keys = [key(word) for word in target_words]
+        similarities = [
+            SequenceMatcher(None, left, right).ratio()
+            for left, right in zip(candidate_keys, target_keys)
+        ]
+        exact_matches = sum(left == right for left, right in zip(candidate_keys, target_keys))
+        if exact_matches < max(1, len(candidate_words) - 1):
+            continue
+        if min(similarities, default=0.0) < 0.88:
+            continue
+        score = sum(similarities) / len(similarities)
+        anchored = (
+            candidate_keys[0] == target_keys[0]
+            or candidate_keys[-1] == target_keys[-1]
+        )
+        if not anchored or score < 0.90:
+            continue
+        if score > best_score:
+            best_name = phrase
+            best_score = score
+    return best_name, best_score
+
+
 def _support(entity:str,evidence:str,role:str)->tuple[float,str]:
     et=_tokens(entity); ev=set(_tokens(evidence))
     if not et or not ev: return 0.0,"no usable evidence"
@@ -230,6 +294,18 @@ def ground_scene_entity(scene:dict[str,Any],script_data:dict[str,Any])->dict[str
     if scene_voiceover:
         evidence = (evidence + "\n" + scene_voiceover).strip()
     role=_role(scene,original)
+    if role == "PERSON":
+        repaired_person, repair_score = _repair_fuzzy_person_identity(original, evidence)
+        if repaired_person and repaired_person.casefold() != original.casefold():
+            return {
+                "entity": repaired_person,
+                "grounded": True,
+                "changed": True,
+                "reason": f"person spelling variant corroborated by story evidence: {repair_score:.2f}",
+                "confidence": min(0.99, repair_score),
+                "original_entity": original,
+            }
+
     source_name_contamination=_entity_matches_publisher(original,script_data)
     contaminated=_entity_contains_publisher_domain(original,script_data)
     explicit_branding=any(
