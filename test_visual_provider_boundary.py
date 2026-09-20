@@ -187,7 +187,12 @@ def test_person_identity_resolver_prefers_verified_human(monkeypatch):
         return {
             "entities": {
                 "Q111": {"claims": {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q43229"}}}}]}, "labels": {"en": {"value": "Wrong Candidate"}}},
-                "Q222": {"claims": {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}]}, "labels": {"en": {"value": "Actual Person"}}},
+                "Q222": {
+                    "claims": {
+                        "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}]
+                    },
+                    "labels": {"en": {"value": "Actual Person"}}
+                },
             }
         }
 
