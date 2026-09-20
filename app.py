@@ -576,6 +576,16 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             bank_path = str(bank_item.get("path") or "").strip()
             if bank_path and os.path.isfile(bank_path):
                 bank.append(dict(bank_item))
+        factory_rejected = [
+            dict(item)
+            for item in bank
+            if str(item.get("status") or "").strip() == "factory-rejected-resolution"
+        ]
+        unused_verified = [
+            dict(item)
+            for item in bank
+            if str(item.get("status") or "").strip() != "factory-rejected-resolution"
+        ]
         items.append(
             {
                 "index": index,
@@ -599,7 +609,14 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "manual_query": str(layer.get("manual_visual_query") or "").strip(),
                 "query_used": str(layer.get("visual_query_used") or "").strip(),
                 "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
-                "bank": bank,
+                "crop_zoom": float(layer.get("visual_crop_zoom") or 1.0),
+                "crop_x": float(layer.get("visual_crop_x") if layer.get("visual_crop_x") is not None else 0.5),
+                "crop_y": float(layer.get("visual_crop_y") if layer.get("visual_crop_y") is not None else 0.5),
+                "manual_pool_mode": bool(layer.get("visual_manual_pool_mode", False)),
+                "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
+                "manual_pool_query_stats": list(layer.get("visual_manual_pool_query_stats") or []),
+                "factory_rejected": factory_rejected,
+                "bank": unused_verified,
             }
         )
     return items
@@ -619,8 +636,8 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         unsafe_allow_html=True,
     )
     st.caption(
-        f"{len(items)} visuals are ready. Each current visual has already passed entity-level AI verification. "
-        "Review the active image or swap it directly with another verified image from its bank."
+        f"{len(items)} visuals are ready. Entity verification is completed before scene selection. "
+        "The current image is the scene-selected candidate; other entity-verified images remain available for manual swaps."
     )
 
     columns = st.columns(3, gap="medium")
@@ -648,17 +665,19 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 st.error(f"Visual QC blocked: {reason}", icon="⛔")
 
             query = item["manual_query"] or item["query_used"] or "automatic entity search"
-            st.caption(f"Search: {query}")
+            st.caption(f"Retrieval: {query}")
+            if item.get("manual_pool_mode"):
+                st.caption(f"Shared manual pool: {item.get('manual_pool_size', 0)} entity-verified images.")
 
             bank = item.get("bank") or []
             if bank:
-                st.markdown(f"**Verified image bank · {len(bank)} unused**")
+                st.markdown(f"**Unused entity-verified images · {len(bank)}**")
                 bank_cols = st.columns(2, gap="small")
-                for bank_index, bank_item in enumerate(bank[:10], 1):
+                for bank_index, bank_item in enumerate(bank[:19], 1):
                     with bank_cols[(bank_index - 1) % 2]:
                         bank_path = str(bank_item.get("path") or "").strip()
                         if bank_path and os.path.isfile(bank_path):
-                            st.image(bank_path, width=165)
+                            st.image(bank_path, width=190)
                         source = str(bank_item.get("source") or "verified").strip()
                         bank_query = str(bank_item.get("query") or "").strip()
                         st.caption(
@@ -679,7 +698,102 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             else:
                                 st.error(message)
             else:
-                st.caption("No additional entity-verified bank images were available for this visual.")
+                st.caption("No additional entity-verified images were available for this visual.")
+
+            rejected = item.get("factory_rejected") or []
+            if rejected:
+                st.markdown(f"**Entity verified but factory-rejected for resolution · {len(rejected)}**")
+                reject_cols = st.columns(2, gap="small")
+                for rejected_index, rejected_item in enumerate(rejected[:10], 1):
+                    with reject_cols[(rejected_index - 1) % 2]:
+                        rejected_path = str(rejected_item.get("path") or "").strip()
+                        if rejected_path and os.path.isfile(rejected_path):
+                            st.image(rejected_path, width=190)
+                        rejected_query = str(rejected_item.get("query") or "").strip()
+                        st.caption(
+                            "Low resolution — manual QC"
+                            + (f" · {rejected_query}" if rejected_query else "")
+                        )
+                        if st.button(
+                            "Use this image anyway",
+                            use_container_width=True,
+                            key=f"use_rejected_{run_id}_{item['index']}_{rejected_index}",
+                        ):
+                            packages = snapshot.get("visual_packages") or []
+                            package = packages[item["index"] - 1] if item["index"] - 1 < len(packages) else None
+                            layer = package[0] if isinstance(package, list) and package else package
+                            live_bank = layer.get("visual_asset_bank") if isinstance(layer, dict) else []
+                            bank_position = next(
+                                (
+                                    pos
+                                    for pos, entry in enumerate(live_bank or [], 1)
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("path") or "") == rejected_path
+                                ),
+                                None,
+                            )
+                            if bank_position is not None:
+                                ok, message = controller.replace_visual_from_bank(
+                                    item["index"],
+                                    bank_position,
+                                )
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("That resolution-review image is no longer available.")
+
+            with st.expander("Manual crop", expanded=False):
+                st.caption(
+                    "Crop from the preserved original source. This does not make another provider or AI call."
+                )
+                crop_cols = st.columns(3, gap="small")
+                with crop_cols[0]:
+                    crop_zoom = st.slider(
+                        "Zoom",
+                        min_value=1.0,
+                        max_value=4.0,
+                        value=float(item.get("crop_zoom") or 1.0),
+                        step=0.1,
+                        key=f"crop_zoom_{run_id}_{item['index']}",
+                    )
+                with crop_cols[1]:
+                    crop_x = st.slider(
+                        "Horizontal",
+                        min_value=0,
+                        max_value=100,
+                        value=int(float(item.get("crop_x") or 0.5) * 100),
+                        step=1,
+                        key=f"crop_x_{run_id}_{item['index']}",
+                    )
+                with crop_cols[2]:
+                    crop_y = st.slider(
+                        "Vertical",
+                        min_value=0,
+                        max_value=100,
+                        value=int(float(item.get("crop_y") or 0.5) * 100),
+                        step=1,
+                        key=f"crop_y_{run_id}_{item['index']}",
+                    )
+                if st.button(
+                    "Apply manual crop",
+                    type="secondary",
+                    use_container_width=True,
+                    key=f"apply_crop_{run_id}_{item['index']}",
+                ):
+                    ok, message = controller.crop_visual(
+                        item["index"],
+                        zoom=float(crop_zoom),
+                        x_center=float(crop_x) / 100.0,
+                        y_center=float(crop_y) / 100.0,
+                    )
+                    if ok:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
 
             replacement_count = len(
                 history.get(str(item["index"]))
