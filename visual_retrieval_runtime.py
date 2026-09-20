@@ -579,6 +579,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             )
 
     identity_qid = ""
+    identity_label = ""
     if visual_type == "PERSON":
         try:
             from visual_provider_boundary_runtime import resolve_person_identity
