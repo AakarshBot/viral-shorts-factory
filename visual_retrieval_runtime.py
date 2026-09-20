@@ -15,6 +15,7 @@ boundary for image decode, dimensions, deduplication and semantic QA.
 from __future__ import annotations
 
 import hashlib
+import json
 import io
 import os
 import re
@@ -1616,36 +1617,38 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
     # The cache is retained for automatic scenes. Manual queries intentionally
     # perform a fresh search so the dashboard receives a real image bank.
-    if not manual_query:
-        cached_img, _cache_path = runtime.get_cached_asset(bot, cache_entity, visual_type, context)
-        if cached_img is not None:
-            buffer = io.BytesIO()
-            cached_img.save(buffer, format="JPEG", quality=95)
-            cached_bytes = buffer.getvalue()
-            cached_hash = _hash_image(bot, cached_bytes)
-            if cached_hash not in used_hashes:
-                try:
-                    cached_ok, _cached_tier, _score, hard_reject = runtime._strict_gate(
-                        bot, cached_bytes, seg, video_title, source="cache"
-                    )
-                except Exception:
-                    cached_ok, hard_reject = False, True
-                if cached_ok and not hard_reject:
+    if not manual_query and visual_genre not in ACTION_VISUAL_GENRES:
+        cached_img, cache_path = runtime.get_cached_asset(
+            bot,
+            cache_entity,
+            visual_type,
+            context,
+        )
+        if cached_img is not None and cache_path:
+            cache_meta = {}
+            try:
+                meta_path = os.path.splitext(str(cache_path))[0] + ".json"
+                with open(meta_path, "r", encoding="utf-8") as fh:
+                    cache_meta = json.load(fh)
+            except Exception:
+                cache_meta = {}
+
+            cached_provenance = cache_meta.get("provenance")
+            if isinstance(cached_provenance, dict) and provenance_is_usable(cached_provenance):
+                buffer = io.BytesIO()
+                cached_img.save(buffer, format="JPEG", quality=95)
+                cached_bytes = buffer.getvalue()
+                cached_hash = _hash_image(bot, cached_bytes)
+                if cached_hash not in used_hashes:
                     used_hashes.add(cached_hash)
                     seg["visual_verified"] = True
                     seg["visual_rescue_reason"] = ""
                     seg["visual_fallback_reason"] = ""
                     seg["visual_query_used"] = "cache"
-                    seg["visual_verification_attempts"] = 1
-                    try:
-                        original_path = os.path.join(
-                            bot.ASSETS_DIR,
-                            f"visual_original_cache_{cached_hash[:16]}.jpg",
-                        )
-                        cached_img.convert("RGB").save(original_path, "JPEG", quality=92)
-                        seg["visual_original_path"] = original_path
-                    except Exception:
-                        seg["visual_original_path"] = ""
+                    seg["visual_provider_query_used"] = "cache"
+                    seg["visual_verification_attempts"] = 0
+                    seg["visual_original_path"] = str(cache_path)
+                    seg["asset_provenance"] = dict(cached_provenance)
                     return cached_img.convert("RGB"), False, "cached"
 
     try:
