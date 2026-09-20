@@ -1006,6 +1006,11 @@ class DashboardWorkflowController(WorkflowController):
             return False, "That image is no longer available on the dashboard host."
 
         layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+        if isinstance(layer, dict):
+            outgoing_path = str(layer.get("visual_original_path") or "").strip()
+            if not outgoing_path or not os.path.isfile(outgoing_path):
+                outgoing_path = str(layer.get("image") or "").strip()
+            self._preserve_replaced_visual_in_pool(layer, outgoing_path)
         if not isinstance(layer, dict):
             return False, "The selected slide is invalid."
 
@@ -1954,7 +1959,7 @@ class DashboardWorkflowController(WorkflowController):
 
             cropped_pool_layer = dict(layer)
             cropped_pool_layer["visual_query_used"] = "manual-crop"
-            cropped_pool_layer["visual_original_path"] = output_path
+            cropped_pool_layer["visual_original_path"] = source_path
             self._preserve_replaced_visual_in_pool(cropped_pool_layer, output_path)
 
             new_layer = dict(layer)
