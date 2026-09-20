@@ -108,6 +108,7 @@ def test_retrieval_accepts_multi_candidate_provider_payloads(monkeypatch):
     ]
     monkeypatch.setattr(retrieval, "_source_plan", lambda _bot, _visual_type: [("Commons", lambda *args: candidates)])
     monkeypatch.setattr(retrieval, "_hash_image", lambda _bot, data: __import__("hashlib").sha256(data).hexdigest())
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: True for index in range(len(images))})
 
     seg = {"primary_entity": "Northstar Research Summit", "specific_search_prompt": "Northstar Research Summit", "voiceover": "Northstar Research Summit opened today"}
     image, used_ai, source = retrieval.run_visual_retrieval(ProviderRuntime(), object(), seg, "business", set(), set(), "Northstar Research Summit")
