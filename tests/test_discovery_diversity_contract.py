@@ -11,7 +11,6 @@ class _Bot:
         self.gather_and_filter_stories = lambda *_args, **_kwargs: []
         self.editorial_gate_batch = lambda *_args, **_kwargs: []
         self.process_scored_candidates = lambda *_args, **_kwargs: []
-        self.passes_quality_gate = lambda *_args, **_kwargs: True
         self.write_script = lambda *_args, **_kwargs: {}
         self.run_robot = lambda *_args, **_kwargs: None
 
