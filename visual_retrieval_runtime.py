@@ -27,6 +27,8 @@ from visual_licensing_runtime import (
     candidate_bytes,
     candidate_provenance,
     provenance_is_usable,
+    provenance_is_retainable,
+    provenance_status,
     rescue_provenance,
 )
 
@@ -43,12 +45,12 @@ REAL_SOURCE_SCORES = {
 }
 MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "10"))))
 MAX_ENTITY_BANK_PER_QUERY = max(3, min(10, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "10"))))
-INITIAL_CANDIDATE_POOL = max(10, min(10, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "10"))))
-MANUAL_POOL_MAX = max(10, min(10, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "10"))))
-MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "10"))))
+INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
+MANUAL_POOL_MAX = max(10, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))))
+MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "20"))))
 AUTO_POOL_QUERY_LIMIT = max(1, min(4, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "4"))))
 MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
-MANUAL_QUERY_RAW_POOL = max(10, min(10, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "10"))))
+MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
 MANUAL_SEARCH_MAX_PAGES = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SEARCH_MAX_PAGES", "3"))))
 HARD_MIN_IMAGE_SIDE = max(240, min(540, int(os.getenv("VISUAL_HARD_MIN_IMAGE_SIDE", "360"))))
 SOFT_MIN_IMAGE_SIDE = max(HARD_MIN_IMAGE_SIDE, min(900, int(os.getenv("VISUAL_SOFT_MIN_IMAGE_SIDE", "540"))))
@@ -543,12 +545,20 @@ def select_manual_visual_candidate(
         for asset in candidates
         if str(asset.get("status") or "").strip() != "factory-rejected-resolution"
     ]
-    scene_good = [
+    commercial_verified = [
         asset
         for asset in normal
+        if str(asset.get("provenance_status") or "commercial-verified").strip()
+        == "commercial-verified"
+    ]
+    scene_good = [
+        asset
+        for asset in commercial_verified
         if _manual_candidate_scene_score(asset, scene) >= MANUAL_SCENE_GOOD_SCORE
     ]
-    pool = scene_good or normal or candidates
+    pool = scene_good or commercial_verified
+    if not pool:
+        return None
 
     return sorted(
         pool,
@@ -673,6 +683,7 @@ def materialize_visual_bank(bot, seg: dict, scene_index: int = 0) -> list[dict]:
             "visual_type": str(asset.get("visual_type") or "").strip().upper(),
             "visual_genre": str(asset.get("visual_genre") or "").strip().upper(),
             "provenance": dict(asset.get("provenance") or {}),
+            "provenance_status": str(asset.get("provenance_status") or "commercial-verified"),
             "status": "entity-verified-unused",
             "used": False,
         })
@@ -796,8 +807,9 @@ def _manual_candidate_from_data(
 
     record = candidate_provenance(data)
     if not provenance_is_usable(record):
-        rejected_counts["monetization"] += 1
-        return None
+        if not provenance_is_retainable(record):
+            rejected_counts["monetization"] += 1
+            return None
 
     valid, reason, normalized = _preflight_image(normalized)
     if not valid or normalized is None:
@@ -819,6 +831,7 @@ def _manual_candidate_from_data(
             data=data,
         ),
         "provenance": record,
+        "provenance_status": provenance_status(record),
         "source": str(source_name or "").strip(),
         "query": str(query or "").strip(),
         "visual_type": str(visual_type or "GENERAL_CONTEXT").upper(),
@@ -1543,7 +1556,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     continue
 
                 record = candidate_provenance(data)
-                if not provenance_is_usable(record):
+                if not provenance_is_usable(record) and not provenance_is_retainable(record):
                     _record_visual_rejection(seg, "licensing_provenance", f"{source}:candidate {candidate_index}")
                     continue
 
@@ -1551,7 +1564,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     source, normalized, visual_type, query, visual_genre, data=data
                 )
                 query_candidates.append(
-                    (candidate_index, data, normalized, image_hash, priority, record, str(source), str(query))
+                    (candidate_index, data, normalized, image_hash, priority, record, provenance_status(record), str(source), str(query))
                 )
                 if len(query_candidates) >= raw_target:
                     break
@@ -1594,12 +1607,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             if verification_attempts >= 4:
                 break
 
-            # Three usable alternatives are enough to keep every slide healthy.
-            # Ten is the bank target, not a reason to spend another AI call.
-            if len(
-                [value for value in local_results.values() if value is True]
-            ) >= 3:
-                break
+            # Continue through the bounded candidate batches so the dashboard
+            # receives more alternatives. The verification-attempt cap remains.
 
         round_verified = 0
         for local_index, item in enumerate(check_candidates):
@@ -1616,15 +1625,16 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                         "visual_type": visual_type,
                         "visual_genre": visual_genre,
                         "provenance": dict(item[5]),
+                        "provenance_status": str(item[6] or "commercial-verified"),
                         "priority": float(item[4]),
                     }
                 )
                 if len(verified_assets) > before:
                     round_verified += 1
             elif verdict is False:
-                _record_visual_rejection(seg, "semantic_no", f"{item[6]}:candidate {item[0]}:ENTITY_NO")
+                _record_visual_rejection(seg, "semantic_no", f"{item[7]}:candidate {item[0]}:ENTITY_NO")
             elif local_index in local_results:
-                _record_visual_rejection(seg, "semantic_uncertain", f"{item[6]}:candidate {item[0]}:ENTITY_UNCERTAIN")
+                _record_visual_rejection(seg, "semantic_uncertain", f"{item[7]}:candidate {item[0]}:ENTITY_UNCERTAIN")
 
         last_round = str(query)
         print(
@@ -1633,7 +1643,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             flush=True,
         )
 
-        if len(verified_assets) >= MAX_ENTITY_BANK_PER_QUERY or len(verified_assets) >= 3:
+        if len(verified_assets) >= MAX_ENTITY_BANK_PER_QUERY:
             break
 
     if verified_assets:
