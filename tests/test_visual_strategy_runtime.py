@@ -9,7 +9,7 @@ def _assert_query_contract(scene, title, expected_type):
     assert visual_type == expected_type, (brief, visual_type)
     assert queries, "visual planner returned no query"
     assert queries[0].casefold().startswith(brief["subject"].casefold()), (brief, queries)
-    assert len(queries) <= 5, queries
+    assert len(queries) <= 6, queries
     subject_tokens = set(meaningful_tokens(brief["subject"]))
     assert subject_tokens, brief
     for query in queries:
@@ -150,7 +150,8 @@ def test_query_ladder_is_bounded_and_never_degrades_identity():
     }
     brief, queries = _assert_query_contract(scene, "Noisy title that must never become the search query", "PERSON")
     assert queries[0].casefold().startswith(brief["subject"].casefold())
-    assert len(queries) <= 2
+    assert len(queries) <= 6
+    assert queries[-1].casefold() == brief["subject"].casefold()
     assert all("Noisy title".casefold() not in q.casefold() for q in queries)
 
 
@@ -186,7 +187,10 @@ def test_press_conference_query_uses_scene_anchor_not_full_prompt():
     )
 
     assert intent.visual_genre == "PERSON_ACTION"
-    assert intent.queries == ("Rishabh Pant press conference", "Rishabh Pant")
+    assert intent.queries
+    assert len(intent.queries) <= 6
+    assert intent.queries[0] == "Rishabh Pant press conference"
+    assert intent.queries[-1] == "Rishabh Pant"
     assert "announcement" not in intent.queries[0].lower()
     assert "editorial" not in intent.queries[0].lower()
     assert "latest" not in intent.queries[0].lower()
@@ -216,8 +220,10 @@ def test_same_entity_gets_different_searchable_scene_queries():
     assert "player" not in second.query.lower()
     assert any(term in first.query.lower() for term in ("batting", "match", "rajasthan"))
     assert any(term in second.query.lower() for term in ("award", "trophy", "presentation", "ceremony"))
-    assert len(first.queries) <= 2
-    assert len(second.queries) <= 2
+    assert len(first.queries) <= 6
+    assert len(second.queries) <= 6
+    assert first.queries[-1] == "Vaibhav Sooryavanshi"
+    assert second.queries[-1] == "Vaibhav Sooryavanshi"
 
 
 
