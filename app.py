@@ -1725,7 +1725,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         )
     st.markdown("<div class='release-gates'>" + "".join(gate_html) + "</div>", unsafe_allow_html=True)
 
-    editing = not bool(st.session_state.get("metadata_approved"))
+    metadata_approved = bool(st.session_state.get("metadata_approved"))
     with st.container(border=True):
         st.markdown("#### 1 · Metadata")
         st.caption("Approve the exact title, description and pinned comment used for upload.")
@@ -1737,7 +1737,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         with meta_cols[1]:
             comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=not editing)
 
-        if editing:
+        if not metadata_approved:
             approve_col, note_col = st.columns([1, 2])
             with approve_col:
                 if st.button("Approve metadata", type="primary", width="stretch", key="approve_metadata"):
@@ -1773,16 +1773,24 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.video(video_path)
     with publish_col:
         st.markdown("#### 3 · Publish")
-        st.caption("Private stays hidden. Public needs explicit confirmation.")
-        if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not qc_ready):
-            if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
+        st.caption("Private stays hidden. Public always requires a second confirmation.")
+        private_ready = metadata_approved and qc_ready
+        public_ready = private_ready and not public_blocked
+        if not metadata_approved:
+            st.info("Approve metadata above to unlock upload.")
+        elif not qc_ready:
+            st.warning("Upload is locked until every release QC gate passes.")
+        if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not public_ready):
+            if public_blocked:
+                st.error("Public upload blocked by a release policy gate.")
+            elif not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                 st.error("Public upload blocked: release QC is no longer passing.")
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
         if public_blocked:
             st.caption("Public publishing is currently blocked by a release policy gate.")
-        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not qc_ready):
+        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not private_ready):
             if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                 st.error("Private upload blocked: release QC is no longer passing.")
             else:
