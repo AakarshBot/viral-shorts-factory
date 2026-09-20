@@ -91,6 +91,21 @@ _SPORTS_CONTEXT_TERMS = {
     "wrestling", "racing", "motorsport", "athletics", "swimming",
 }
 
+_CONTEXTUAL_MANUAL_GENRES = {
+    "SPORTS_ACTION", "SPORTS_MATCH", "TEAM_ACTION",
+    "PLACE_SCENE", "EVENT_SCENE", "GENERAL_PHOTO", "GENERAL_CONTEXT",
+}
+
+_ACTION_PROVIDER_ORDER = {
+    "serpapi": -1,
+    "pexels": 0,
+    "pixabay": 1,
+    "openverse": 2,
+    "commons": 3,
+    "unsplash": 4,
+    "wikipedia": 5,
+}
+
 _VISUAL_DESCRIPTOR_WORDS = {
     "logo", "logos", "badge", "badges", "emblem", "emblems",
     "crest", "crests", "branding", "brand", "brands", "symbol", "symbols",
@@ -787,6 +802,62 @@ def _manual_query_target(query_index: int) -> int:
     rank = max(1, int(query_index))
     targets = (10, 7, 5, 4, 3)
     return targets[min(rank, len(targets)) - 1]
+
+
+def _is_action_search_query(query: str, visual_genre: str, category: str = "") -> bool:
+    query_text = str(query or "").strip()
+    genre = str(visual_genre or "").strip().upper()
+    query_tokens = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", query_text, flags=re.UNICODE)
+    }
+    category_tokens = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", str(category or ""))
+    }
+    sports_context = bool(query_tokens & _SPORTS_CONTEXT_TERMS) or bool(
+        category_tokens & _SPORTS_CONTEXT_TERMS
+    )
+    team_context = bool(
+        re.search(r"\bnational\s+team\b", query_text, flags=re.IGNORECASE)
+        or re.search(r"\b(?:xi|squad)\b", query_text, flags=re.IGNORECASE)
+    )
+    branding_or_portrait = genre in {"TEAM_BRANDING", "ORG_BRANDING", "PERSON_PORTRAIT"}
+    return genre in ACTION_VISUAL_GENRES or (
+        (sports_context or team_context) and not branding_or_portrait
+    )
+
+
+def _prepare_action_source_plan(
+    source_plan,
+    query: str,
+    visual_genre: str,
+    category: str = "",
+    *,
+    allow_recent_discovery: bool = False,
+):
+    action_search = _is_action_search_query(query, visual_genre, category)
+    plan = list(source_plan or [])
+    if (
+        allow_recent_discovery
+        and action_search
+        and str(visual_genre or "").strip().upper() in _CONTEXTUAL_MANUAL_GENRES
+        and str(os.getenv("SERPAPI_API_KEY", "")).strip()
+    ):
+        try:
+            from image_sources_runtime import fetch_serpapi_candidates
+            if all(str(name).strip().casefold() != "serpapi" for name, _fetcher in plan):
+                plan.insert(0, ("SerpApi", fetch_serpapi_candidates))
+        except Exception:
+            pass
+    if action_search:
+        plan.sort(
+            key=lambda item: (
+                _ACTION_PROVIDER_ORDER.get(str(item[0] or "").strip().casefold(), 99),
+                str(item[0] or "").casefold(),
+            )
+        )
+    return plan, action_search
 
 
 def _visual_search_cache(bot) -> dict:
