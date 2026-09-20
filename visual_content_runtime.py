@@ -388,6 +388,8 @@ def _select_related_asset(
     return candidates[0][1] if candidates else None
 
 def patch_content_first_visuals(bot):
+    if getattr(bot, "_content_first_visuals_patched", False):
+        return bot
     try:
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
@@ -915,4 +917,5 @@ def patch_content_first_visuals(bot):
         return packages
 
     bot.process_visuals_async = process
+    bot._content_first_visuals_patched = True
     return bot
