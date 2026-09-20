@@ -79,7 +79,7 @@ def test_deduplicate_stage_removes_same_entity_same_action_repeats():
         event_corroboration_score=6.0,
     )
     repeated = _fresh_story(
-        title="NASA successfully launches Artemis mission",
+        title="NASA launches Artemis mission successfully from Florida",
         event_id="event-b",
         event_entities=["nasa", "artemis"],
         event_actions=["launch"],
