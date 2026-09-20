@@ -448,6 +448,136 @@ def _scene_refinement_query(seg: dict, entity: str) -> str:
     return f"{entity_text} {' '.join(candidates[:2])}".strip()
 
 
+
+
+def _manual_scene_text(scene: dict) -> str:
+    return " ".join(
+        str(scene.get(field) or "")
+        for field in (
+            "factual_primary_entity",
+            "primary_entity",
+            "visual_search_subject",
+            "voiceover",
+            "visual_intent",
+            "specific_search_prompt",
+            "factual_visual_intent",
+            "visual_context",
+        )
+    )
+
+
+def _manual_candidate_scene_score(asset: dict, scene: dict) -> float:
+    """Rank a verified manual-query candidate for a slide without another AI call."""
+    query = str(asset.get("query") or "")
+    metadata = str(asset.get("search_text") or "")
+    scene_text = _manual_scene_text(scene)
+
+    def words(value: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[\w-]+", value.casefold(), flags=re.UNICODE)
+            if len(token) > 2 and token not in _VISUAL_REFINE_STOPWORDS
+        }
+
+    q_words = words(query)
+    metadata_words = words(metadata)
+    scene_words = words(scene_text)
+    entity = str(
+        scene.get("factual_primary_entity")
+        or scene.get("primary_entity")
+        or scene.get("visual_search_subject")
+        or ""
+    ).strip()
+    entity_words = words(entity)
+
+    score = float(asset.get("priority") or 0.0) * 0.20
+    if entity_words:
+        score += len(q_words & entity_words) * 36.0
+        score += len(metadata_words & entity_words) * 18.0
+    score += len(q_words & scene_words) * 12.0
+    score += len(metadata_words & scene_words) * 6.0
+    if entity and entity.casefold() in query.casefold():
+        score += 90.0
+    return round(score, 3)
+
+
+def select_manual_visual_candidate(
+    assets: list[dict],
+    scene: dict,
+    used_hashes: set[str] | None = None,
+):
+    """Choose the strongest unused manual-pool image; soft-resolution assets are last resort."""
+    used_hashes = used_hashes or set()
+    candidates = [
+        asset
+        for asset in assets or []
+        if isinstance(asset, dict)
+        and str(asset.get("hash") or "").strip() not in used_hashes
+    ]
+    if not candidates:
+        candidates = [asset for asset in assets or [] if isinstance(asset, dict)]
+    if not candidates:
+        return None
+
+    normal = [asset for asset in candidates if asset.get("status") != "factory-rejected-resolution"]
+    pool = normal or candidates
+    return sorted(
+        pool,
+        key=lambda asset: (
+            -_manual_candidate_scene_score(asset, scene),
+            str(asset.get("query") or "").casefold(),
+            str(asset.get("source") or "").casefold(),
+        ),
+    )[0]
+
+
+def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list[dict]:
+    """Persist a shared manual-query pool once; dashboard layers reuse these paths."""
+    root = getattr(bot, "ASSETS_DIR", None)
+    if not root:
+        return []
+    try:
+        os.makedirs(root, exist_ok=True)
+    except Exception:
+        return []
+
+    output = []
+    for position, asset in enumerate(assets or [], 1):
+        if not isinstance(asset, dict) or not asset.get("bytes"):
+            continue
+        image_hash = str(asset.get("hash") or "").strip()
+        if not image_hash:
+            continue
+        path = os.path.join(
+            root,
+            f"visual_manual_pool_{re.sub(r'[^A-Za-z0-9_-]+', '_', str(pool_id))}_{image_hash[:12]}.jpg",
+        )
+        try:
+            image = Image.open(io.BytesIO(asset["bytes"])).convert("RGB")
+            image.save(path, "JPEG", quality=90)
+        except Exception as exc:
+            print(
+                f"   [Visual Manual Pool] Could not materialize candidate {position}: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            continue
+        output.append(
+            {
+                "path": path,
+                "subject": str(asset.get("subject") or "").strip(),
+                "hash": image_hash,
+                "source": str(asset.get("source") or "").strip(),
+                "query": str(asset.get("query") or "").strip(),
+                "visual_type": str(asset.get("visual_type") or "").strip().upper(),
+                "visual_genre": str(asset.get("visual_genre") or "").strip().upper(),
+                "provenance": dict(asset.get("provenance") or {}),
+                "priority": float(asset.get("priority") or 0.0),
+                "status": str(asset.get("status") or "entity-verified"),
+                "used": False,
+            }
+        )
+    return output
 def materialize_visual_bank(bot, seg: dict, scene_index: int = 0) -> list[dict]:
     """Persist entity-verified alternatives as lightweight dashboard-ready files."""
     assets = list(seg.get("_verified_subject_assets") or [])
