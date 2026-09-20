@@ -14,9 +14,9 @@ def test_person_source_plan_uses_raw_multi_candidate_adapters_not_bot_fetchers()
     )
 
 
-def test_raw_person_adapters_have_no_legacy_quality_gate_dependency():
-    assert "passes_quality_gate" not in boundary.fetch_wikipedia_person.__code__.co_names
-    assert "passes_quality_gate" not in boundary.fetch_commons.__code__.co_names
+def test_raw_candidate_adapters_have_no_legacy_quality_gate_dependency():
+    assert "passes_quality_gate" not in boundary.fetch_wikipedia_person_candidates.__code__.co_names
+    assert "passes_quality_gate" not in boundary.fetch_commons_candidates.__code__.co_names
 
 
 def test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods():
@@ -55,7 +55,6 @@ def test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods():
 def test_commons_candidate_adapter_is_bounded():
     assert 1 <= boundary.MAX_PROVIDER_CANDIDATES <= 6
     assert callable(boundary.fetch_commons_candidates)
-    assert callable(boundary.fetch_duckduckgo_candidates)
     assert callable(boundary.fetch_wikipedia_person_candidates)
 
 
