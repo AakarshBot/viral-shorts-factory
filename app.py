@@ -394,7 +394,7 @@ def render_sidebar_controls() -> Dict[str, Any]:
 
     if st.sidebar.button(
         "Reset current run",
-        use_container_width=True,
+        width="stretch",
         disabled=bool(sidebar_snapshot.get("thread_alive")),
     ):
         reset_run()
@@ -538,7 +538,7 @@ def render_script_visual_query_review(
         submitted = st.form_submit_button(
             "✅ Save slide queries & continue",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     if submitted:
@@ -702,7 +702,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         )
                         if st.button(
                             "Use this image",
-                            use_container_width=True,
+                            width="stretch",
                             key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
                         ):
                             live_bank = item.get("all_bank") or []
@@ -747,7 +747,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         )
                         if st.button(
                             "Use this image",
-                            use_container_width=True,
+                            width="stretch",
                             key=f"use_scene_rejected_{run_id}_{item['index']}_{rejected_index}",
                         ):
                             live_bank = item.get("all_bank") or []
@@ -790,7 +790,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         )
                         if st.button(
                             "Use this image anyway",
-                            use_container_width=True,
+                            width="stretch",
                             key=f"use_resolution_rejected_{run_id}_{item['index']}_{rejected_index}",
                         ):
                             packages = snapshot.get("visual_packages") or []
@@ -861,7 +861,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 if st.button(
                     "Apply manual crop",
                     type="secondary",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"apply_crop_{run_id}_{item['index']}",
                 ):
                     ok, message = controller.crop_visual(
@@ -894,7 +894,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 if st.button(
                     "Search another visual",
                     type="secondary",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"replace_visual_{run_id}_{item['index']}_search",
                 ):
                     ok, message = controller.replace_visual(item["index"], replacement_query)
@@ -911,7 +911,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if st.button(
             "✅ Approve visuals & continue",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="approve_visuals",
             disabled=bool(qc_blocked),
         ):
@@ -925,7 +925,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     with reject_col:
         if st.button(
             "⛔ Reject visuals & stop production",
-            use_container_width=True,
+            width="stretch",
             key="reject_visuals",
         ):
             controller.reject_visuals()
@@ -963,7 +963,7 @@ def render_research_summary(snapshot: Dict[str, Any]) -> None:
     if source:
         st.markdown(f"**Source:** {source}")
     if url.startswith(("http://", "https://")):
-        st.link_button("Open source article", url, use_container_width=True)
+        st.link_button("Open source article", url, width="stretch")
 
 
 def render_audio_preview(snapshot: Dict[str, Any]) -> None:
@@ -1080,7 +1080,7 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
                             icon="⛔",
                         )
                     else:
-                        st.image(item["path"], use_container_width=True)
+                        st.image(item["path"], width="stretch")
                     st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
     if video_path and os.path.isfile(video_path):
         with st.expander("Final rendered video", expanded=True):
@@ -1186,7 +1186,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             if st.button(
                 "✅ Approve title, description & comment",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="approve_metadata",
             ):
                 try:
@@ -1206,7 +1206,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         return
 
     st.success("Metadata approved. You can now choose how the Short is published.", icon="✅")
-    if st.button("✏️ Edit metadata", use_container_width=True, key="edit_metadata"):
+    if st.button("✏️ Edit metadata", width="stretch", key="edit_metadata"):
         st.session_state["metadata_approved"] = False
         st.rerun()
 
@@ -1228,7 +1228,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         if st.button(
             "🌐 Upload Publicly",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="upload_public",
             disabled=not qc_ready,
         ):
@@ -1241,7 +1241,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with private_col:
         if st.button(
             "🔒 Upload Privately",
-            use_container_width=True,
+            width="stretch",
             key="upload_private",
             disabled=not qc_ready,
         ):
@@ -1263,7 +1263,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
         confirm_col, cancel_col = st.columns(2)
         with confirm_col:
-            if st.button("✅ Yes, upload publicly", type="primary", use_container_width=True, key="confirm_upload_public"):
+            if st.button("✅ Yes, upload publicly", type="primary", width="stretch", key="confirm_upload_public"):
                 if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                     st.error("Upload blocked: one or more live QC gates are not passing.")
                 else:
@@ -1277,7 +1277,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                         "public",
                     )
         with cancel_col:
-            if st.button("← Cancel", use_container_width=True, key="cancel_upload_public"):
+            if st.button("← Cancel", width="stretch", key="cancel_upload_public"):
                 st.session_state["confirm_public_upload"] = False
                 st.rerun()
 
@@ -1367,7 +1367,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     )
 
     if not st.session_state.candidates:
-        if st.button("🚀 Find today's ranked topics", type="primary", use_container_width=True):
+        if st.button("🚀 Find today's ranked topics", type="primary", width="stretch"):
             controller.reset()
             try:
                 controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
@@ -1435,7 +1435,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             if st.button(
                 "🚀 Start production",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="start_selected_topic",
             ):
                 config = dict(st.session_state.web_config)
@@ -1453,7 +1453,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         with cancel_col:
             if st.button(
                 "← Choose another headline",
-                use_container_width=True,
+                width="stretch",
                 key="cancel_selected_topic",
             ):
                 st.session_state.pending_candidate = None
@@ -1508,7 +1508,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 if st.button(
                     "Use headline →",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"use_candidate_{start_index + offset}",
                 ):
                     st.session_state.pending_candidate = dict(candidate)
@@ -1520,7 +1520,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         if st.button(
             "← Previous",
             disabled=page <= 0,
-            use_container_width=True,
+            width="stretch",
             key="candidate_previous",
         ):
             st.session_state.candidate_page = page - 1
@@ -1535,7 +1535,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         if st.button(
             "Next →",
             disabled=page >= page_count - 1,
-            use_container_width=True,
+            width="stretch",
             key="candidate_next",
         ):
             st.session_state.candidate_page = page + 1
@@ -1566,7 +1566,7 @@ def render_channel_statistics() -> None:
     ctr_col, live_col = st.columns(2)
     ctr_col.metric("Average title CTR", f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—")
     with live_col:
-        if st.button("↻ Refresh live YouTube totals", use_container_width=True, key="refresh_live_channel_stats"):
+        if st.button("↻ Refresh live YouTube totals", width="stretch", key="refresh_live_channel_stats"):
             st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
 
     live = st.session_state.get("live_channel_stats") or {}
@@ -1587,15 +1587,15 @@ def render_channel_statistics() -> None:
 
     st.markdown("### By format")
     if stats["by_format"]:
-        st.dataframe(stats["by_format"], use_container_width=True, hide_index=True)
+        st.dataframe(stats["by_format"], width="stretch", hide_index=True)
 
     st.markdown("### By language")
     if stats["by_language"]:
-        st.dataframe(stats["by_language"], use_container_width=True, hide_index=True)
+        st.dataframe(stats["by_language"], width="stretch", hide_index=True)
 
     st.markdown("### Recent factory history")
     if stats["recent"]:
-        st.dataframe(stats["recent"], use_container_width=True, hide_index=True)
+        st.dataframe(stats["recent"], width="stretch", hide_index=True)
     else:
         st.info("No recorded factory runs yet.")
 
@@ -1604,7 +1604,7 @@ def render_offline_page() -> None:
     st.markdown("<div class='section-kicker'>Engineering</div><h2 style='margin-top:0'>Offline diagnostics</h2>", unsafe_allow_html=True)
     st.caption("These checks are safe to run while coding. They make zero provider/API calls.")
 
-    if st.button("🧪 Run offline diagnostics", type="primary", use_container_width=True):
+    if st.button("🧪 Run offline diagnostics", type="primary", width="stretch"):
         with st.spinner("Running offline factory checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
             st.session_state.show_offline_diagnostics = True
@@ -1669,7 +1669,7 @@ def render_final_branding_preview() -> None:
         "It is a synthetic 1080×1920 frame, so it never renders or modifies a production video."
     )
 
-    if st.button("▶ Render final branding preview", type="primary", use_container_width=True):
+    if st.button("▶ Render final branding preview", type="primary", width="stretch"):
         with st.spinner("Rendering the canonical branding overlay..."):
             result = run_demo_section("scene_branding")
         st.session_state.last_demo_results["scene_branding"] = result
@@ -1686,7 +1686,7 @@ def render_final_branding_preview() -> None:
 
     preview_path = (result.get("artifacts") or {}).get("final_branding_preview")
     if preview_path and os.path.isfile(preview_path):
-        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", use_container_width=True)
+        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", width="stretch")
 
 
 def render_demo_page() -> None:
@@ -1711,7 +1711,7 @@ def render_demo_page() -> None:
         ("factory_function_coverage", "Factory function coverage"),
     ]
 
-    if st.button("▶ Run all demo checks", type="primary", use_container_width=True):
+    if st.button("▶ Run all demo checks", type="primary", width="stretch"):
         results = {}
         with st.spinner("Running all demo sections..."):
             for key, _label in sections:
@@ -1722,7 +1722,7 @@ def render_demo_page() -> None:
     for index, (key, label) in enumerate(sections):
         with columns[index % 2]:
             st.markdown(f"<div class='panel'><div class='qc-title'>{label}</div></div>", unsafe_allow_html=True)
-            if st.button(f"Test {label}", key=f"demo_{key}", use_container_width=True):
+            if st.button(f"Test {label}", key=f"demo_{key}", width="stretch"):
                 result = run_demo_section(key)
                 st.session_state.last_demo_results[key] = result
 
@@ -1736,7 +1736,7 @@ def render_demo_page() -> None:
                 for artifact_name, artifact_path in artifacts.items():
                     if artifact_path and os.path.isfile(artifact_path):
                         st.caption(artifact_name.replace("_", " ").title())
-                        st.image(artifact_path, use_container_width=True)
+                        st.image(artifact_path, width="stretch")
 
     st.markdown("---")
     render_factory_function_coverage()
