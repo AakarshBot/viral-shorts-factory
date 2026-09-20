@@ -105,7 +105,6 @@ def initialise_runtime() -> None:
     if not getattr(ultimate_bot, "_dashboard_runtime_initialized", False):
         install_safe_exception_hook()
         patch_dashboard_runtime(ultimate_bot)
-        patch_semantic_dedup()
         patch_story_selection(ultimate_bot)
         patch_quality_control(ultimate_bot)
         install_visual_qa_bridge(visual_runtime)
