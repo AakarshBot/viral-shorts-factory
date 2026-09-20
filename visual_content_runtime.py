@@ -393,8 +393,7 @@ def patch_content_first_visuals(bot):
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import fit_visual_image, install as install_visual_quality
         from visual_retrieval_runtime import (
-            classify_manual_pool_for_scene,
-            collect_manual_visual_pool,
+                    collect_manual_visual_pool,
             make_visual_rescue,
             materialize_manual_visual_pool,
             materialize_visual_bank,
