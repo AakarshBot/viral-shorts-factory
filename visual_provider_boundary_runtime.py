@@ -300,6 +300,14 @@ def resolve_wikidata_entity(entity: str) -> dict[str, str]:
         qid = str(item.get("id") or "").strip()
         label = str(item.get("label") or "").strip()
         description = str(item.get("description") or "").strip()
+        aliases = item.get("aliases") or []
+        if not isinstance(aliases, list):
+            aliases = []
+        alias_values = [
+            str(alias.get("value") or "").strip()
+            for alias in aliases
+            if isinstance(alias, dict) and str(alias.get("value") or "").strip()
+        ]
         if not re.fullmatch(r"Q\d+", qid) or not label:
             continue
         label_norm = _normalize_identity_text(label)
@@ -307,14 +315,27 @@ def resolve_wikidata_entity(entity: str) -> dict[str, str]:
         score = 0.0
         if label_norm == query_norm:
             score += 100.0
+        if any(_normalize_identity_text(alias) == query_norm for alias in alias_values):
+            score += 95.0
         if query_norm and query_norm in label_norm:
             score += 35.0
         score += 20.0 * len(query_tokens & label_tokens) / max(1, len(query_tokens))
-        ranked.append((score, {"qid": qid, "label": label, "description": description}))
+        ranked.append(
+            (
+                score,
+                {
+                    "qid": qid,
+                    "label": label,
+                    "description": description,
+                },
+            )
+        )
 
     if not ranked:
         return {}
     ranked.sort(key=lambda item: (-item[0], item[1]["label"].casefold()))
+    if ranked[0][0] < 20.0:
+        return {}
     resolved = dict(ranked[0][1])
     if len(_WIKIDATA_ENTITY_CACHE) >= _WIKIDATA_ENTITY_CACHE_MAX:
         oldest_key = next(iter(_WIKIDATA_ENTITY_CACHE), "")
@@ -513,8 +534,12 @@ def _commons_search_queries(
                 )
             )
 
-    structured_types = {"ORGANIZATION", "LOCATION", "PRODUCT"}
-    if str(visual_type or "").strip().upper() in structured_types and not person_seed:
+    structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
+    person_qid = ""
+    if person_seed:
+        person_probe = resolve_person_identity(person_seed)
+        person_qid = str((person_probe or {}).get("qid") or "").strip()
+    if str(visual_type or "").strip().upper() in structured_types and not person_qid:
         resolved_entity = resolve_wikidata_entity(exact)
         entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
         entity_label = str((resolved_entity or {}).get("label") or "").strip()
