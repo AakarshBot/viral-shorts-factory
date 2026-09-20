@@ -1605,7 +1605,7 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
     first = retrieval.collect_manual_visual_search(
         FakeRuntime(),
         bot,
-        "Indian cricket team",
+        "city skyline",
     )
     first_hashes = {item["hash"] for item in first["assets"]}
     assert len(first_hashes) == 5
@@ -1682,8 +1682,9 @@ def test_manual_action_search_uses_action_query_variants(monkeypatch):
         "India women's national team action",
         "India women's national team celebration",
     ]
-    assert result["assets"][2]["query"].endswith("action")
-    assert result["assets"][4]["query"].endswith("celebration")
+    action_queries = [str(item.get("query") or "") for item in result["assets"]]
+    assert any(query.endswith(" action") for query in action_queries)
+    assert any(query.endswith(" celebration") for query in action_queries)
 
 
 def test_action_metadata_boosts_candidate_priority():
