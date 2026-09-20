@@ -1191,7 +1191,8 @@ class DashboardWorkflowController(WorkflowController):
                 }
                 if not any(str(item.get("path") or "") == old_original_path for item in new_bank):
                     new_bank.append(old_entry)
-            new_bank = new_bank[:10]
+            bank_limit = 20 if bool(layer.get("visual_manual_pool_mode")) else 10
+            new_bank = new_bank[:bank_limit]
 
             replacement_path = os.path.join(
                 bot.ASSETS_DIR,
@@ -1221,7 +1222,6 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_rescue_reason": "",
                     "visual_fallback_reason": "",
                     "visual_query_used": f"bank:{selected_query}",
-                    "visual_original_path": selected_path,
                     "source_credit": source_credit_for_type(selected_source),
                     "bank_selected_status": selected_status,
                     "source_image_url": str(
