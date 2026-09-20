@@ -211,7 +211,11 @@ def test_person_identity_resolver_rejects_non_human_when_wikidata_is_complete(mo
             return {"search": [{"id": "Q333", "label": "Not A Person"}]}
         return {
             "entities": {
-                "Q333": {"claims": {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q43229"}}}]}}}
+                "Q333": {
+                    "claims": {
+                        "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q43229"}}}}]
+                    }
+                }
             }
         }
 
