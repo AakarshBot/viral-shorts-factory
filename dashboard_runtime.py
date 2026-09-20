@@ -552,6 +552,9 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
         self._visual_search_options: dict[int, list[dict[str, Any]]] = {}
+        self._visual_pool: list[dict[str, Any]] = []
+        self._visual_search_groups: list[dict[str, Any]] = []
+        self._visual_pool_crop_target: str = ""
         self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
         self._dashboard_logs: list[str] = []
@@ -577,6 +580,9 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_packages = []
         self._visual_replacement_history = {}
         self._visual_search_options = {}
+        self._visual_pool = []
+        self._visual_search_groups = []
+        self._visual_pool_crop_target = ""
         self._dashboard_logs = []
         self._activity_events = []
         self._audio_paths = []
@@ -754,6 +760,14 @@ class DashboardWorkflowController(WorkflowController):
         gate = self._ensure_manual_gate_state()
 
         self._visual_packages = packages
+        script_data = self.state.script_data if isinstance(self.state.script_data, dict) else {}
+        manual_pool = script_data.get("visual_manual_pool") if isinstance(script_data, dict) else []
+        self._visual_pool = [
+            dict(item) for item in (manual_pool or [])
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        ]
+        self._visual_search_groups = []
+        self._visual_pool_crop_target = ""
         self._visual_approval_event = gate["visual_event"]
         gate["visual_event"].clear()
         gate["visual_approved"] = False
@@ -1685,6 +1699,19 @@ class DashboardWorkflowController(WorkflowController):
                         key: [dict(item) for item in value]
                         for key, value in self._visual_search_options.items()
                     },
+                    "visual_pool": [dict(item) for item in self._visual_pool],
+                    "visual_search_groups": [
+                        {
+                            "id": str(group.get("id") or ""),
+                            "query": str(group.get("query") or ""),
+                            "items": [dict(item) for item in (group.get("items") or [])],
+                            "target": int(group.get("target") or 5),
+                            "available": len(
+                                [item for item in (group.get("items") or []) if not bool(item.get("used"))]
+                            ),
+                        }
+                        for group in self._visual_search_groups
+                    ],
                     "visual_replacement_history": {
                         key: list(value)
                         for key, value in self._visual_replacement_history.items()
