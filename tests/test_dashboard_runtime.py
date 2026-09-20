@@ -786,6 +786,7 @@ def test_repository_does_not_use_deprecated_streamlit_container_width():
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if "use_container_width" in source:
+        deprecated_arg = "use_container_" + "width"
+        if deprecated_arg in source:
             offenders.append(str(path.relative_to(repo_root)))
     assert offenders == []
