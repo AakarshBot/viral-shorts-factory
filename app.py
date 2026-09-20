@@ -1399,7 +1399,10 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     with st.container(border=True):
                         if path and os.path.isfile(path):
                             st.image(path, width=260)
-                        caption = str(asset.get("source") or "monetization-safe source").strip()
+                        provenance_state = str(asset.get("provenance_status") or "commercial-verified").strip()
+                        caption = str(asset.get("source") or "visual source").strip()
+                        if provenance_state == "provenance-review":
+                            caption += " · licence review"
                         st.caption(caption)
                         used = bool(asset.get("used"))
                         if used:
