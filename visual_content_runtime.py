@@ -504,7 +504,9 @@ def patch_content_first_visuals(bot):
                 or scene.get("primary_entity")
                 or scene.get("visual_search_subject")
             )
-            scene["_related_asset_rescue_eligible"] = bool(subject_key)
+            scene["_related_asset_rescue_eligible"] = bool(
+                subject_key and subject_counts.get(subject_key, 0) >= 2
+            )
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
         news_source_candidate = await _load_verified_news_source_candidate(
@@ -563,7 +565,7 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
-            if seg.get("_verified_subject_assets"):
+            if seg.get("_related_asset_rescue_eligible"):
                 _register_related_assets(
                     related_pool,
                     seg.get("_verified_subject_assets") or [],
