@@ -730,7 +730,7 @@ def collect_manual_visual_pool(
         start_visual_qa_scene,
         strict_gemini_check_batch,
     )
-    from visual_search_intent_runtime import _manual_entity_from_query, resolve_visual_search_intent
+    from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
 
     used_hashes = used_hashes or set()
     assets = []
@@ -880,7 +880,7 @@ def collect_manual_visual_pool(
             break
 
         entity_anchor = str(
-            _manual_entity_from_query(exact_query, "")
+            canonical_manual_entity_anchor(exact_query, "")
             or exact_query
         ).strip()
         visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)

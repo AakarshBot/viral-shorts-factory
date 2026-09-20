@@ -46,17 +46,105 @@ MAX_DASHBOARD_DISCOVERY_HEADLINES = 28
 
 st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
 
-st.markdown("<style>\n.block-container{padding-top:1.5rem;padding-bottom:3rem;max-width:1500px}\nsection[data-testid=\"stSidebar\"]{border-right:1px solid rgba(255,255,255,.08)}\n.brand-card{background:linear-gradient(135deg,#161e35,#10172a 60%,#1a1434);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:26px 30px;margin-bottom:22px;box-shadow:0 16px 50px rgba(0,0,0,.18)}\n.brand-title{font-size:2rem;font-weight:800;letter-spacing:-.04em}.brand-sub{color:#91a0bb;margin-top:6px}\n.section-kicker{color:#9eacc4;text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;font-weight:700;margin-bottom:4px}\n.panel,.candidate{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.018));border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.1)}\n.candidate{min-height:245px}.candidate-rank{color:#9aa9c4;font-size:.72rem;font-weight:800;letter-spacing:.1em}.candidate-title{font-size:1.06rem;font-weight:750;line-height:1.35;margin:9px 0 10px}.candidate-reason{color:#aebbd0;font-size:.88rem;line-height:1.45;min-height:74px}.small-muted{color:#91a0bb;font-size:.82rem}\n.stage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0 18px}.stage-card{border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:11px 12px;background:rgba(255,255,255,.02)}.stage-card.active{border-color:rgba(124,92,255,.55);background:rgba(124,92,255,.08)}.stage-card.done{border-color:rgba(45,212,191,.3)}.stage-name{font-size:.8rem;font-weight:700}.stage-state{color:#91a0bb;font-size:.72rem;margin-top:3px}\ndiv[data-testid=\"stMetric\"]{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:12px 14px}.stButton>button,.stLinkButton>a{border-radius:10px;font-weight:650;min-height:42px}.dashboard-footer{text-align:center;color:#91a0bb;font-size:.78rem;padding:8px 0}\n@media(max-width:900px){.stage-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand-title{font-size:1.55rem}}\n</style>", unsafe_allow_html=True)
-
 st.markdown("""<style>
-*{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
-.brand-card{background:linear-gradient(135deg,#2a0d35,#1a1030 60%,#3a0d5c);border:1px solid rgba(190,140,255,.15);box-shadow:0 16px 50px rgba(80,20,120,.35);border-radius:18px;padding:22px 28px;margin-bottom:20px}
-.brand-title{font-family:system-ui,sans-serif;font-size:1.9rem;font-weight:800;color:#f8e8ff;letter-spacing:-.03em;line-height:1.1;text-shadow:0 2px 14px rgba(190,140,255,.4)}
-.stButton>button{background:linear-gradient(180deg,#7b3fe6,#5a2fc0);border:1px solid rgba(255,255,255,.25);box-shadow:0 6px 18px rgba(123,63,230,.45),inset 0 1px 0 rgba(255,255,255,.2)}
+:root{
+  --bg:#f3f5f8;--surface:#ffffff;--surface-soft:#f8fafc;--line:#e1e5eb;--line-strong:#cfd5df;
+  --text:#151a24;--muted:#667085;--muted-2:#8a93a3;--accent:#5b46e8;--accent-deep:#4632c7;
+  --accent-soft:#efedff;--good:#147a50;--good-soft:#eaf7f0;--warn:#a35b04;--warn-soft:#fff4e2;
+  --shadow:0 10px 30px rgba(20,27,39,.07);--shadow-lg:0 18px 48px rgba(20,27,39,.10);
+}
+html,body,[data-testid="stAppViewContainer"]{background:var(--bg);color:var(--text)}
+[data-testid="stHeader"]{background:rgba(243,245,248,.94);border-bottom:1px solid rgba(207,213,223,.7)}
+.block-container{max-width:1380px;padding-top:1.45rem;padding-bottom:3rem}
+section[data-testid="stSidebar"]{background:#11151d;border-right:1px solid #252b35;color:#eef2f7}
+section[data-testid="stSidebar"]>div{padding-top:1.15rem}
+section[data-testid="stSidebar"] .stMarkdown p,section[data-testid="stSidebar"] label,section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{color:#b9c1cf}
+*{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important;letter-spacing:-.01em}
+h1,h2,h3,h4{color:var(--text);letter-spacing:-.04em}
+p{color:var(--text)}
+.small-muted{color:var(--muted);font-size:.78rem}
+.section-kicker{color:var(--accent);text-transform:uppercase;letter-spacing:.14em;font-size:.66rem;font-weight:850;margin-bottom:.28rem}
+.section-title{color:var(--text);font-size:1.78rem;font-weight:850;line-height:1.1;margin:0}
+.section-subtitle{color:var(--muted);font-size:.9rem;line-height:1.5;margin:.4rem 0 1.15rem}
+.brand-card{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:18px 23px;min-height:88px;display:flex;flex-direction:column;justify-content:center;box-shadow:var(--shadow)}
+.brand-pill{display:inline-block;width:max-content;border-radius:999px;padding:5px 9px;background:var(--accent-soft);border:1px solid #dcd7ff;color:var(--accent-deep);font-size:.64rem;font-weight:850;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.brand-title{font-size:1.9rem;font-weight:900;line-height:1.02;color:var(--text)}
+.brand-sub{color:var(--muted);font-size:.86rem;margin-top:7px}
+.factory-status{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px;text-align:right;box-shadow:var(--shadow)}
+.factory-status-label{font-size:.62rem;color:var(--muted-2);font-weight:850;letter-spacing:.12em}
+.factory-status-value{font-size:.96rem;font-weight:900;color:var(--text);margin-top:3px}
+.panel,.candidate,.story-card,.output-card,.release-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.panel{padding:16px 18px}
+.story-card{padding:18px 18px;height:100%}
+.output-card{padding:15px 16px}
+.release-card{padding:16px 18px}
+.story-rank{color:var(--accent);font-size:.66rem;font-weight:900;letter-spacing:.13em}
+.story-title{font-size:1.03rem;font-weight:820;line-height:1.38;margin:7px 0}
+.story-meta{color:var(--muted);font-size:.76rem;line-height:1.45}
+.story-reason{color:#505a6a;font-size:.84rem;line-height:1.48;margin:10px 0 13px}
+.score-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;background:#f2f4f7;border:1px solid var(--line);color:#414a59;font-size:.68rem;font-weight:800}
+.stage-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0 14px}
+.stage-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 11px}
+.stage-card.active{border-color:#beb4ff;background:var(--accent-soft)}
+.stage-card.done{border-color:#bfe5d2;background:var(--good-soft)}
+.stage-card.stopped{border-color:#f1cf9f;background:var(--warn-soft)}
+.stage-name{font-size:.76rem;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-state{color:var(--muted);font-size:.66rem;margin-top:4px}
+.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:12px 0 18px}
+.qc-guide-step{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:12px 13px;box-shadow:var(--shadow)}
+.qc-guide-step b{display:block;font-size:.77rem;margin-bottom:3px;color:var(--text)}
+.qc-guide-step span{color:var(--muted);font-size:.71rem;line-height:1.42}
+.qc-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.65rem;font-weight:900;letter-spacing:.08em}
+.qc-status.ready{color:var(--good);background:var(--good-soft);border:1px solid #c6e8d6}
+.qc-status.attention{color:var(--warn);background:var(--warn-soft);border:1px solid #f0d8b0}
+.qc-meta{color:var(--muted);font-size:.74rem;line-height:1.45}
+.qc-card-title{font-size:.97rem;font-weight:850;margin-bottom:7px;color:var(--text)}
+.timeline{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 16px;box-shadow:var(--shadow)}
+.timeline-row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #edf0f4}
+.timeline-row:last-child{border-bottom:0}
+.timeline-dot{width:22px;flex:0 0 22px;text-align:center}
+.timeline-main{min-width:0;flex:1}.timeline-head{font-size:.77rem;font-weight:800;color:var(--text)}
+.timeline-time{color:var(--muted-2);font-size:.66rem;margin-left:7px}
+.timeline-message{color:var(--muted);font-size:.77rem;line-height:1.4;margin-top:2px}
+.sidebar-title{font-size:1.04rem;font-weight:850;letter-spacing:-.02em;color:#f6f8fb}
+.sidebar-kicker{color:#a99cff;text-transform:uppercase;letter-spacing:.12em;font-size:.62rem;font-weight:850}
+.sidebar-status{background:#171c25;border:1px solid #29303b;border-radius:13px;padding:12px 13px;margin-top:10px}
+.sidebar-status-title{font-size:.75rem;font-weight:800;color:#f3f5f8}
+.sidebar-status-copy{color:#9ca6b5;font-size:.69rem;margin-top:3px;line-height:1.4}
+.release-gates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.release-gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
+.release-gate.pass{border-color:#c6e8d6;background:linear-gradient(180deg,#fff,#f7fcf9)}
+.release-gate.block{border-color:#f0d8b0;background:linear-gradient(180deg,#fff,#fffbf4)}
+.release-gate-name{font-size:.75rem;font-weight:850;color:var(--text)}
+.release-gate-detail{color:var(--muted);font-size:.69rem;line-height:1.4;margin-top:3px}
+.live-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 13px;margin:10px 0 16px;box-shadow:var(--shadow)}
+.live-bar-copy{color:var(--muted);font-size:.75rem}.live-bar-copy b{color:var(--text)}
+.empty-state{background:linear-gradient(135deg,#ffffff 0%,#f8f7ff 100%);border:1px solid #ddd9ff;border-radius:21px;padding:28px;box-shadow:var(--shadow-lg)}
+.empty-title{font-size:1.58rem;font-weight:900;letter-spacing:-.04em;color:var(--text)}
+.empty-copy{color:var(--muted);font-size:.88rem;line-height:1.55;max-width:720px}
+.meta-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.meta-chip{border:1px solid var(--line);background:#f7f8fa;border-radius:999px;padding:5px 9px;color:#596273;font-size:.69rem}
+[data-testid="stMetric"]{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:11px 13px;box-shadow:var(--shadow)}
+[data-testid="stMetricLabel"]{color:var(--muted)!important;font-size:.7rem!important}
+[data-testid="stMetricValue"]{color:var(--text)!important;font-size:1.3rem!important}
+.stButton>button,.stLinkButton>a{border-radius:10px;min-height:40px;font-weight:800;border:1px solid var(--line-strong);background:var(--surface);color:var(--text)}
+.stButton>button[kind="primary"]{background:linear-gradient(180deg,#6854ef,#533dd9);color:#fff;border-color:#4e39cd;box-shadow:0 8px 18px rgba(91,70,232,.18)}
+.stButton>button:hover,.stLinkButton>a:hover{border-color:#b8bec9;background:#f8f9fb}
+.stButton>button[kind="primary"]:hover{background:linear-gradient(180deg,#5f4be5,#4b37c9);color:#fff;border-color:#4633bd}
+.stTextInput>div>div,.stTextArea>div>div,.stSelectbox>div>div{background:var(--surface)!important;border-color:var(--line)!important;color:var(--text)!important}
+.stTextInput input,.stTextArea textarea{color:var(--text)!important}
+div[data-testid="stExpander"]{border:1px solid var(--line)!important;border-radius:12px!important;background:var(--surface)!important}
+div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:var(--text)}
+[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+[data-testid="stProgress"] div[role="progressbar"]{background:#e7eaf0}
+[data-testid="stProgress"] div[role="progressbar"] > div{background:var(--accent)}
+.crop-shell{background:#f7f8fb;border:1px solid var(--line);border-radius:16px;padding:12px}
+.crop-caption{color:var(--muted);font-size:.73rem;line-height:1.45;margin-bottom:9px}
+.dashboard-footer{text-align:center;color:var(--muted-2);font-size:.7rem;padding:10px 0}
+@media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
+@media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>""", unsafe_allow_html=True)
-
-
-st.markdown("<style>\n.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 22px}\n.qc-guide-step{border:1px solid rgba(190,140,255,.14);background:rgba(255,255,255,.025);border-radius:14px;padding:13px 14px}\n.qc-guide-step b{display:block;font-size:.9rem;margin-bottom:4px}\n.qc-guide-step span{color:#9da9bf;font-size:.8rem;line-height:1.4}\n.qc-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:.72rem;font-weight:800;letter-spacing:.06em}\n.qc-status.ready{color:#b7f7df;background:rgba(45,212,191,.11);border:1px solid rgba(45,212,191,.24)}\n.qc-status.attention{color:#ffd7ad;background:rgba(251,146,60,.11);border:1px solid rgba(251,146,60,.24)}\n.qc-meta{color:#9da9bf;font-size:.8rem;line-height:1.45}\n.qc-card-title{font-size:1.05rem;font-weight:800;margin-bottom:8px}\n@media(max-width:900px){.qc-guide{grid-template-columns:1fr}}\n</style>", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
@@ -292,14 +380,24 @@ def build_config() -> Dict[str, Any]:
     }
 
 
+def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
+    st.markdown(
+        f"<div class='section-kicker'>{kicker}</div>"
+        f"<div class='section-title'>{title}</div>"
+        + (f"<div class='section-subtitle'>{subtitle}</div>" if subtitle else ""),
+        unsafe_allow_html=True,
+    )
+
 def render_header(action_mode: str) -> None:
     titles = {
-        "Live Factory": ("Live Factory", "Run a complete Short from topic discovery through final upload review."),
-        "Channel Statistics": ("Channel Statistics", "See the performance history currently recorded by the factory."),
-        "Run Offline Diagnostics": ("Offline Diagnostics", "Run code and runtime checks without using production provider calls."),
-        "Demo Factory": ("Demo Factory", "Exercise individual factory sections with safe, controlled test inputs."),
+        "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
+        "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
+        "Demo Factory": ("Demo Factory", "Controlled tests for factory components."),
+        "Final Branding Preview": ("Final Branding Preview", "Inspect the canonical branding compositor."),
     }
-    title, subtitle = titles[action_mode]
+    title, subtitle = titles.get(action_mode, ("Dashboard", "Viral Shorts Factory"))
+
     logo_path = ""
     brand_dir = getattr(ultimate_bot, "BRAND_ASSETS_DIR", None)
     if brand_dir:
@@ -309,34 +407,53 @@ def render_header(action_mode: str) -> None:
                 logo_path = candidate_path
                 break
 
-    if logo_path:
-        left, right = st.columns([1, 7])
-        with left:
-            st.image(logo_path, width=86)
-        with right:
-            st.markdown(
-                f"""
-<div class="brand-card">
-  <div class="brand-title">Viral Shorts Factory</div>
-  <div class="brand-sub">{title} · {subtitle}</div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-    else:
+    left, middle, right = st.columns([0.75, 5.45, 1.4], gap="medium")
+    with left:
+        if logo_path:
+            st.image(logo_path, width=72)
+        else:
+            st.markdown("<div style='font-size:2.3rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
+    with middle:
         st.markdown(
-            f"""
-<div class="brand-card">
-  <div class="brand-title">🎬 Viral Shorts Factory</div>
-  <div class="brand-sub">{title} · {subtitle}</div>
-</div>
-""",
+            f"<div class='brand-card'><span class='brand-pill'>{title}</span>"
+            f"<div class='brand-title'>Viral Shorts Factory</div>"
+            f"<div class='brand-sub'>{subtitle}</div></div>",
+            unsafe_allow_html=True,
+        )
+    with right:
+        snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
+        status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
+        st.markdown(
+            f"<div class='factory-status'><div class='factory-status-label'>FACTORY STATUS</div>"
+            f"<div class='factory-status-value'>{status}</div></div>",
             unsafe_allow_html=True,
         )
 
+def render_workspace_navigation() -> str:
+    options = [
+        "Live Factory",
+        "Channel Statistics",
+        "Run Offline Diagnostics",
+        "Demo Factory",
+        "Final Branding Preview",
+    ]
+    current = st.session_state.get("dashboard_utility", "Live Factory")
+    if current == "None" or current not in options:
+        current = "Live Factory"
+    st.sidebar.markdown("<div class='sidebar-kicker'>Workspace</div>", unsafe_allow_html=True)
+    selected = st.sidebar.selectbox(
+        "Go to",
+        options,
+        index=options.index(current),
+        key="dashboard_utility",
+        label_visibility="collapsed",
+    )
+    return selected
 
 def render_sidebar_controls() -> Dict[str, Any]:
-    st.sidebar.markdown("## Factory setup")
+    st.sidebar.markdown("<div class='sidebar-kicker'>Production workspace</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("<div class='sidebar-title'>Factory setup</div>", unsafe_allow_html=True)
+
     channel_options = _channel_options()
     st.sidebar.selectbox("Channel", channel_options, key="selected_channel")
 
@@ -371,9 +488,13 @@ def render_sidebar_controls() -> Dict[str, Any]:
             key="requested_topic",
         )
     elif st.session_state.editorial_mode == "AI":
-        st.sidebar.info("AI mode uses current news, channel history, genre fit, vault topics and trend signals to produce a Top 10.")
+        with st.sidebar.expander("How AI mode works", expanded=False):
+            st.caption("AI mode blends current news, channel history, genre fit, vault topics and trend signals into a Top 10.")
     else:
-        options = category_options("top5" if st.session_state.editorial_mode == "Top Five" else "regular", st.session_state.editorial_mode)
+        options = category_options(
+            "top5" if st.session_state.editorial_mode == "Top Five" else "regular",
+            st.session_state.editorial_mode,
+        )
         labels = list(options.keys())
         current_key = st.session_state.get("category_key", next(iter(options.values())))
         current_label = next((label for label, key in options.items() if key == current_key), labels[0])
@@ -386,14 +507,25 @@ def render_sidebar_controls() -> Dict[str, Any]:
         st.session_state.category_key = options[selected_label]
 
     sidebar_snapshot = st.session_state.workflow_controller.snapshot()
+    st.sidebar.divider()
     if sidebar_snapshot.get("thread_alive"):
-        st.sidebar.success("Factory run active", icon="⚙️")
+        status_title = f"Running · {int(sidebar_snapshot.get('percent', 0) or 0)}%"
+        status_copy = str(sidebar_snapshot.get("message") or "Factory production is active.").strip()
     elif sidebar_snapshot.get("completed"):
-        st.sidebar.success("Latest run complete", icon="✅")
+        status_title = "Latest run complete"
+        status_copy = "Review the generated Short below."
     elif sidebar_snapshot.get("stage") == "error":
-        st.sidebar.error("Latest run stopped", icon="⚠️")
+        status_title = "Latest run stopped"
+        status_copy = str(sidebar_snapshot.get("error") or "The factory stopped with an error.").strip()
     else:
-        st.sidebar.info("Ready for a new run")
+        status_title = "Ready"
+        status_copy = "No production run is active."
+
+    st.sidebar.markdown(
+        f"<div class='sidebar-status'><div class='sidebar-status-title'>{status_title}</div>"
+        f"<div class='sidebar-status-copy'>{status_copy}</div></div>",
+        unsafe_allow_html=True,
+    )
 
     if st.sidebar.button(
         "Reset current run",
@@ -402,67 +534,53 @@ def render_sidebar_controls() -> Dict[str, Any]:
     ):
         reset_run()
         st.rerun()
-    if st.session_state.workflow_controller.snapshot().get("thread_alive"):
-        st.sidebar.caption("A live run is active. Use the visual review controls to stop or continue it.")
 
     return build_config()
-
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     stages = [
         ("Discovery", "discovery", 10, 14),
         ("Research", "research", 15, 23),
         ("Script", "script", 24, 38),
-        ("Script Review", "script_review", 39, 40),
+        ("Review", "script_review", 39, 40),
         ("Voiceover", "audio", 41, 54),
         ("Visuals", "visuals", 55, 75),
-        ("Visual Review", "visual_approval", 76, 76),
-        ("Final Render", "render", 77, 95),
+        ("Visual QC", "visual_approval", 76, 76),
+        ("Render", "render", 77, 95),
         ("Final QC", "qc", 96, 100),
     ]
     current = str(snapshot.get("stage") or "idle")
     percent = int(snapshot.get("percent", 0) or 0)
 
-    st.markdown(
-        "<div class='section-kicker'>Production pipeline</div>"
-        "<h3 style='margin-top:0'>Factory progress</h3>",
-        unsafe_allow_html=True,
+    _render_section_header(
+        "Production pipeline",
+        "Factory progress",
+        "One overall progress bar, with each stage reduced to a simple status.",
     )
+    st.progress(max(0.0, min(1.0, percent / 100)), text=f"{percent}% complete")
 
-    # Keep every stage visible, but use a compact grid instead of eight full-width
-    # progress sections. The overall bar remains the primary progress indicator.
-    overall = max(0.0, min(1.0, percent / 100))
-    st.progress(overall, text=f"Overall progress · {percent}%")
-
-    for row_start in range(0, len(stages), 4):
-        row = stages[row_start:row_start + 4]
-        cols = st.columns(len(row), gap="small")
-        for column, (label, key, lo, hi) in zip(cols, row):
-            if current == "error":
-                value = 0.0
-                icon = "⚠️"
-                state = "Stopped"
-            elif percent >= hi:
-                value = 1.0
-                icon = "✓"
-                state = "Complete"
-            elif current == key:
-                value = 0.04 if hi <= lo else max(0.02, min(1.0, (percent - lo) / max(1, hi - lo)))
-                icon = "●"
-                state = "Active"
-            else:
-                value = 0.0
-                icon = "○"
-                state = "Waiting"
-            with column:
-                st.markdown(f"**{icon} {label}**")
-                st.progress(value)
-                st.caption(state)
+    cards = []
+    for label, key, _lo, hi in stages:
+        if current == "error":
+            state, css_class, icon = "Stopped", "stopped", "⚠️"
+        elif percent >= hi:
+            state, css_class, icon = "Done", "done", "✓"
+        elif current == key:
+            state, css_class, icon = "Now", "active", "●"
+        else:
+            state, css_class, icon = "Next", "", "○"
+        cards.append(
+            f"<div class='stage-card {css_class}'><div class='stage-name'>{icon} {label}</div>"
+            f"<div class='stage-state'>{state}</div></div>"
+        )
+    st.markdown("<div class='stage-strip'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
 
     message = str(snapshot.get("message") or "").strip()
     if message:
-        st.info(message, icon="ℹ️")
-
+        st.markdown(
+            f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {message}</div></div>",
+            unsafe_allow_html=True,
+        )
 
 def _script_text(script_data: Dict[str, Any]) -> str:
     scenes = script_data.get("script", [])
@@ -483,10 +601,40 @@ def render_script(snapshot: Dict[str, Any]) -> None:
     text = _script_text(script_data)
     if not text:
         return
-    st.markdown("### Script")
-    st.caption("Written automatically from the selected story.")
-    st.text_area("Generated narration", value=text, height=320, disabled=True, key="dashboard_script_preview")
 
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    scene_count = len(scenes) if isinstance(scenes, list) else 0
+    word_count = len(re.findall(r"\b[\w’'-]+\b", text))
+    _render_section_header(
+        "Story output",
+        "Script",
+        "The narration generated from the selected story.",
+    )
+
+    with st.container(border=True):
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("Scenes", scene_count)
+        metric_cols[1].metric("Words", word_count)
+        metric_cols[2].metric("Status", "Ready")
+
+        previews = [scene for scene in scenes if isinstance(scene, dict)][:2] if isinstance(scenes, list) else []
+        for index, scene in enumerate(previews, 1):
+            voiceover = str(scene.get("voiceover") or "").strip()
+            if voiceover:
+                st.markdown(
+                    f"<div class='output-card'><div class='small-muted'>SCENE {index}</div>"
+                    f"<div style='margin-top:5px;line-height:1.5'>{voiceover}</div></div>",
+                    unsafe_allow_html=True,
+                )
+        with st.expander("Open full narration", expanded=False):
+            st.text_area(
+                "Generated narration",
+                value=text,
+                height=300,
+                disabled=True,
+                label_visibility="collapsed",
+                key="dashboard_script_preview",
+            )
 
 def render_script_visual_query_review(
     controller: DashboardWorkflowController,
@@ -499,13 +647,10 @@ def render_script_visual_query_review(
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
-    st.markdown(
-        "<div class='section-kicker'>Step 04 · Visual planning</div>"
-        "<h2 style='margin-top:0'>Review the script and set image searches</h2>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "This is a lightweight visual-query check. Add a manual search only where you think the automatic subject/query could miss the important image."
+    _render_section_header(
+        "Step 04 · Visual planning",
+        "Guide the image search",
+        "Only add a manual query where the automatic subject would miss the image you need.",
     )
 
     with st.form(key=f"script_visual_query_review_{run_id}"):
@@ -520,39 +665,30 @@ def render_script_visual_query_review(
                 or ""
             ).strip()
 
-            st.markdown(f"### Slide {index}")
-            if voiceover:
-                st.markdown(
-                    f"<div class='panel'><div class='small-muted'>SCRIPT</div>{voiceover}</div>",
-                    unsafe_allow_html=True,
+            with st.container(border=True):
+                st.markdown(f"<div class='story-rank'>SLIDE {index:02d}</div>", unsafe_allow_html=True)
+                if voiceover:
+                    st.markdown(
+                        f"<div style='font-size:.9rem;line-height:1.55;margin:7px 0 9px'>{voiceover}</div>",
+                        unsafe_allow_html=True,
+                    )
+                if automatic_subject:
+                    st.caption(f"Automatic visual subject · {automatic_subject}")
+                st.text_input(
+                    "Manual image search query (optional)",
+                    placeholder="e.g. Rishabh Pant press conference",
+                    key=f"script_visual_query_{run_id}_{index}",
                 )
-            if automatic_subject:
-                st.caption(f"Automatic visual subject: {automatic_subject}")
 
-            st.text_input(
-                "Manual image search query (optional)",
-                placeholder="e.g. Rishabh Pant press conference",
-                key=f"script_visual_query_{run_id}_{index}",
-            )
-
-        st.caption(
-            "Only the slides where you enter a query are overridden. Blank slides keep the automatic visual-search logic."
-        )
         submitted = st.form_submit_button(
-            "✅ Save slide queries & continue",
+            "Save slide queries & continue",
             type="primary",
             width="stretch",
         )
 
     if submitted:
         queries = [
-            str(
-                st.session_state.get(
-                    f"script_visual_query_{run_id}_{index}",
-                    "",
-                )
-                or ""
-            ).strip()
+            str(st.session_state.get(f"script_visual_query_{run_id}_{index}", "") or "").strip()
             for index in range(1, len(scenes) + 1)
         ]
         if controller.submit_script_visual_queries(queries):
@@ -560,7 +696,6 @@ def render_script_visual_query_review(
         else:
             st.error("The script review is no longer active. Refreshing the dashboard.")
             st.rerun()
-
 
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
     items = []
@@ -628,6 +763,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "crop_zoom": float(layer.get("visual_crop_zoom") or 1.0),
                 "crop_x": float(layer.get("visual_crop_x") if layer.get("visual_crop_x") is not None else 0.5),
                 "crop_y": float(layer.get("visual_crop_y") if layer.get("visual_crop_y") is not None else 0.5),
+                "crop_box": dict(layer.get("visual_crop_box") or {}),
                 "original_path": str(layer.get("visual_original_path") or "").strip(),
                 "manual_pool_mode": bool(layer.get("visual_manual_pool_mode", False)),
                 "manual_pool_size": int(layer.get("visual_manual_pool_size") or 0),
@@ -862,62 +998,73 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                         else:
                                             st.error(message)
 
-                with st.expander("✂️ Fine-tune / find another", expanded=False):
+                with st.expander("✂️ Reframe image", expanded=False):
                     original_path = str(item.get("original_path") or "").strip()
-                    st.caption("Manual crop uses the preserved original and does not make another provider or AI call.")
+                    st.markdown(
+                        "<div class='crop-caption'>Drag the 9:16 frame over the original image. "
+                        "Move or resize the frame until the subject is positioned exactly where you want it.</div>",
+                        unsafe_allow_html=True,
+                    )
+
                     if original_path and os.path.isfile(original_path):
-                        st.image(
-                            original_path,
-                            caption="Original source",
-                            width="stretch",
-                        )
+                        from PIL import Image
+                        from streamlit_cropper import st_cropper
 
-                    crop_cols = st.columns(3, gap="small")
-                    with crop_cols[0]:
-                        crop_zoom = st.slider(
-                            "Zoom",
-                            min_value=1.0,
-                            max_value=4.0,
-                            value=float(item.get("crop_zoom") or 1.0),
-                            step=0.1,
-                            key=f"crop_zoom_{run_id}_{item['index']}",
-                        )
-                    with crop_cols[1]:
-                        crop_x = st.slider(
-                            "Horizontal",
-                            min_value=0,
-                            max_value=100,
-                            value=int(float(item.get("crop_x") or 0.5) * 100),
-                            step=1,
-                            key=f"crop_x_{run_id}_{item['index']}",
-                        )
-                    with crop_cols[2]:
-                        crop_y = st.slider(
-                            "Vertical",
-                            min_value=0,
-                            max_value=100,
-                            value=int(float(item.get("crop_y") or 0.5) * 100),
-                            step=1,
-                            key=f"crop_y_{run_id}_{item['index']}",
-                        )
+                        original_image = Image.open(original_path).convert("RGB")
+                        stored_box = item.get("crop_box") or {}
+                        default_coords = None
+                        try:
+                            if all(key in stored_box for key in ("left", "top", "width", "height")):
+                                left = int(stored_box["left"])
+                                top = int(stored_box["top"])
+                                width = int(stored_box["width"])
+                                height = int(stored_box["height"])
+                                default_coords = (left, left + width, top, top + height)
+                        except (TypeError, ValueError):
+                            default_coords = None
 
-                    if st.button(
-                        "Apply crop",
-                        type="secondary",
-                        width="stretch",
-                        key=f"apply_crop_{run_id}_{item['index']}",
-                    ):
-                        ok, message = controller.crop_visual(
-                            item["index"],
-                            zoom=float(crop_zoom),
-                            x_center=float(crop_x) / 100.0,
-                            y_center=float(crop_y) / 100.0,
-                        )
-                        if ok:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
+                        crop_left, crop_right = st.columns([1.18, 0.82], gap="medium")
+                        with crop_left:
+                            crop_result = st_cropper(
+                                img_file=original_image,
+                                realtime_update=True,
+                                default_coords=default_coords,
+                                box_color="#5b46e8",
+                                aspect_ratio=(9, 16),
+                                return_type="both",
+                                key=f"visual_cropper_{run_id}_{item['index']}",
+                                should_resize_image=True,
+                                stroke_width=3,
+                            )
+                            if isinstance(crop_result, tuple) and len(crop_result) == 2:
+                                crop_preview, crop_box = crop_result
+                            else:
+                                crop_preview, crop_box = crop_result, {}
+
+                        with crop_right:
+                            st.markdown("**Shorts preview**")
+                            if crop_preview is not None:
+                                st.image(crop_preview, width="stretch")
+                            st.caption("9:16 frame · no provider or AI call")
+
+                        if isinstance(crop_box, dict) and crop_box:
+                            if st.button(
+                                "Apply crop",
+                                type="primary",
+                                width="stretch",
+                                key=f"apply_crop_{run_id}_{item['index']}",
+                            ):
+                                ok, message = controller.crop_visual(
+                                    item["index"],
+                                    crop_box=crop_box,
+                                )
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                    else:
+                        st.info("The preserved original image is not available for cropping.")
 
                     query_key = f"replace_visual_{run_id}_{item['index']}_query"
                     replacement_query = st.text_input(
@@ -992,18 +1139,31 @@ def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
     events = snapshot.get("activity_events") or []
     if not events:
         return
-    st.markdown("### Live activity")
-    st.caption("Plain-language progress from the actual factory stages.")
-    for index, event in enumerate(events):
-        icon = "⚙️" if index == len(events) - 1 and snapshot.get("thread_alive") else "✅"
-        st.markdown(
-            f"<div class='panel' style='padding:12px 16px;margin-bottom:8px'>"
-            f"<b>{icon} {event.get('stage', 'Factory')}</b> "
-            f"<span class='small-muted'>{event.get('time', '')}</span><br>"
-            f"<span>{event.get('message', '')}</span></div>",
-            unsafe_allow_html=True,
-        )
 
+    _render_section_header(
+        "Run activity",
+        "What the factory is doing",
+        "Recent milestones from the active production run.",
+    )
+    recent = events[-8:]
+    rows = []
+    for index, event in enumerate(recent):
+        active = index == len(recent) - 1 and snapshot.get("thread_alive")
+        icon = "●" if active else "✓"
+        rows.append(
+            f"<div class='timeline-row'><div class='timeline-dot'>{icon}</div>"
+            f"<div class='timeline-main'><div class='timeline-head'>{event.get('stage', 'Factory')}"
+            f"<span class='timeline-time'>{event.get('time', '')}</span></div>"
+            f"<div class='timeline-message'>{event.get('message', '')}</div></div></div>"
+        )
+    st.markdown("<div class='timeline'>" + "".join(rows) + "</div>", unsafe_allow_html=True)
+
+    if len(events) > len(recent):
+        with st.expander(f"Earlier activity · {len(events) - len(recent)} events", expanded=False):
+            for event in events[:-len(recent)]:
+                st.caption(
+                    f"{event.get('stage', 'Factory')} · {event.get('time', '')} · {event.get('message', '')}"
+                )
 
 def render_research_summary(snapshot: Dict[str, Any]) -> None:
     story = snapshot.get("selected_story") or {}
@@ -1014,49 +1174,66 @@ def render_research_summary(snapshot: Dict[str, Any]) -> None:
     url = str(story.get("story_url") or story.get("url") or story.get("link") or "").strip()
     if not any((headline, source, url)):
         return
-    st.markdown("### Story & research")
-    if headline:
-        st.markdown(f"**Headline:** {headline}")
-    if source:
-        st.markdown(f"**Source:** {source}")
-    if url.startswith(("http://", "https://")):
-        st.link_button("Open source article", url, width="stretch")
 
+    _render_section_header("Research", "Selected story")
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='font-size:1.08rem;font-weight:780;line-height:1.4'>{headline}</div>",
+            unsafe_allow_html=True,
+        )
+        if source:
+            st.caption(f"Source · {source}")
+        if url.startswith(("http://", "https://")):
+            st.link_button("Open source article", url, width="content")
 
 def render_audio_preview(snapshot: Dict[str, Any]) -> None:
-    paths = [str(path).strip() for path in (snapshot.get("audio_paths") or []) if str(path or "").strip()]
+    paths = [
+        str(path).strip()
+        for path in (snapshot.get("audio_paths") or [])
+        if str(path or "").strip()
+    ]
     existing = [path for path in paths if os.path.isfile(path)]
     if not existing:
         return
-    st.markdown("### Voiceover")
-    st.caption(f"{len(existing)} narration track(s) generated with word-level timing.")
-    for index, path in enumerate(existing, 1):
-        st.audio(path, format="audio/mpeg")
-        st.caption(f"Scene {index}")
 
+    _render_section_header(
+        "Audio output",
+        "Voiceover",
+        f"{len(existing)} narration track(s) are ready to listen to.",
+    )
+    cols = st.columns(min(2, len(existing)))
+    for index, path in enumerate(existing, 1):
+        with cols[(index - 1) % len(cols)]:
+            with st.container(border=True):
+                st.caption(f"SCENE {index}")
+                st.audio(path, format="audio/mpeg")
 
 def render_visual_details(snapshot: Dict[str, Any]) -> None:
     items = _visual_items(snapshot)
     if not items:
         return
     with st.expander("Visual sourcing details", expanded=False):
+        st.caption("Provider, manual-search and rescue details are kept here so the main review stays visual.")
         for item in items:
             details = [f"Visual {item['index']}: {item['visual_type']} · {item['source']}"]
             if item.get("manual_query"):
                 details.append(f"Manual query: {item['manual_query']}")
             if item.get("rescue_reason"):
                 details.append(f"Rescue: {item['rescue_reason']}")
-            st.markdown(" — ".join(details))
+            st.caption(" — ".join(details))
 
-
-
-@st.dialog("PowerShell output", width="large")
 def render_powershell_output(lines: list[str]) -> None:
-    st.caption("Exact stdout/stderr captured from the active factory worker.")
-    if lines:
-        st.code("\n".join(lines), language="powershell")
-    else:
-        st.info("No factory console output has been captured yet.")
+    with st.popover(
+        "🖥️ Open exact PowerShell output",
+        type="secondary",
+        width="stretch",
+        help="Open the exact stdout/stderr captured from the active factory worker.",
+    ):
+        st.caption("Exact stdout/stderr captured from the active factory worker.")
+        if lines:
+            st.code("\n".join(lines), language="powershell")
+        else:
+            st.info("No factory console output has been captured yet.")
 
 def render_console(snapshot: Dict[str, Any]) -> None:
     lines = snapshot.get("console_lines") or []
@@ -1079,27 +1256,20 @@ def render_console(snapshot: Dict[str, Any]) -> None:
     if operation_percent is not None:
         st.markdown(f"**{operation_label}** · {operation_percent}%")
         st.progress(max(0.0, min(1.0, operation_percent / 100)))
-    if st.button(
-        "🖥️ Open exact PowerShell output",
-        type="secondary",
-        width="stretch",
-        key="open_powershell_output",
-    ):
-        render_powershell_output(lines)
+    render_powershell_output(lines)
 
 
 def render_logs(snapshot: Dict[str, Any]) -> None:
     logs = snapshot.get("dashboard_logs") or []
     if not logs:
         return
-    with st.expander("Technical activity summary", expanded=False):
+    with st.expander("Technical details", expanded=False):
         for index, message in enumerate(logs):
             prefix = "Latest" if index == len(logs) - 1 else "Done"
-            st.markdown(f"**{prefix}:** {message}")
-
+            st.caption(f"{prefix} · {message}")
 
 def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
-    """Keep the generated title, script, audio, visuals and final video visible."""
+    """Show a compact output dashboard without duplicating dedicated review sections."""
     script_data = snapshot.get("script_data") or {}
     metadata = snapshot.get("final_metadata") or {}
     story = snapshot.get("selected_story") or {}
@@ -1108,54 +1278,52 @@ def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
     comment = str(metadata.get("pinned_comment") or script_data.get("pinned_comment") or "").strip()
     visuals = _visual_items(snapshot)
     audio = [
-        str(path).strip() for path in (snapshot.get("audio_paths") or [])
+        str(path).strip()
+        for path in (snapshot.get("audio_paths") or [])
         if str(path or "").strip() and os.path.isfile(str(path).strip())
     ]
     video_path = str(snapshot.get("video_path") or "").strip()
+
     if not any((title, script_data, description, comment, visuals, audio, video_path)):
         return
 
-    st.markdown("---")
-    st.markdown("<div class='section-kicker'>Generated outputs</div><h2 style='margin-top:0'>Your Short</h2>", unsafe_allow_html=True)
-    if title:
-        st.markdown(f"### Title\n**{title}**")
-
-    cols = st.columns(3)
+    _render_section_header(
+        "Output summary",
+        "Your Short",
+        "A compact view of what is ready without repeating the review panels above.",
+    )
+    cols = st.columns(4)
     cols[0].metric("Script", "Ready" if script_data else "Waiting")
-    cols[1].metric("Voiceover", f"{len(audio)} track(s)" if audio else "Waiting")
+    cols[1].metric("Voiceover", f"{len(audio)} tracks" if audio else "Waiting")
     cols[2].metric("Visuals", f"{len(visuals)} ready" if visuals else "Waiting")
+    cols[3].metric("Final video", "Ready" if video_path and os.path.isfile(video_path) else "Waiting")
 
-    if script_data:
-        with st.expander("Generated script", expanded=True):
-            st.text_area("Narration", value=_script_text(script_data), height=280, disabled=True, key="generated_output_script")
-    if description or comment:
-        with st.expander("Generated YouTube metadata", expanded=False):
+    if title or description or comment:
+        with st.expander("YouTube metadata", expanded=False):
+            if title:
+                st.markdown(f"**Title**  \n{title}")
             if description:
-                st.text_area("Description", value=description, height=130, disabled=True, key="generated_output_description")
+                st.text_area(
+                    "Description",
+                    value=description,
+                    height=120,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="generated_output_description",
+                )
             if comment:
-                st.text_area("Pinned comment", value=comment, height=100, disabled=True, key="generated_output_comment")
-    if audio:
-        with st.expander("Generated voiceover", expanded=False):
-            for index, path in enumerate(audio, 1):
-                st.audio(path, format="audio/mpeg")
-                st.caption(f"Scene {index}")
-    if visuals:
-        with st.expander("Generated visuals", expanded=(snapshot.get("visual_review_required", False))):
-            cols = st.columns(3)
-            for index, item in enumerate(visuals):
-                with cols[index % 3]:
-                    if item.get("missing"):
-                        st.error(
-                            f"Visual {item['index']} has no rendered image file available.",
-                            icon="⛔",
-                        )
-                    else:
-                        st.image(item["path"], width="stretch")
-                    st.caption(f"Visual {item['index']} · {item['source']} · {item['visual_type']}")
-    if video_path and os.path.isfile(video_path):
-        with st.expander("Final rendered video", expanded=True):
-            st.video(video_path)
+                st.text_area(
+                    "Pinned comment",
+                    value=comment,
+                    height=90,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="generated_output_comment",
+                )
 
+    if video_path and os.path.isfile(video_path):
+        with st.expander("Watch final Short", expanded=False):
+            st.video(video_path)
 
 def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
     video_path = str(snapshot.get("video_path") or "").strip()
@@ -1181,140 +1349,106 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.session_state["metadata_loaded_run_id"] = run_id
         st.session_state["metadata_approved"] = False
 
-    st.markdown("---")
-    st.markdown("<div class='section-kicker'>Release gate</div><h2 style='margin-top:0'>Final QC & upload</h2>", unsafe_allow_html=True)
-
-    gates = evaluate_live_qc_gates(
-        snapshot,
-        {
-            "title": str(st.session_state.get("final_title") or metadata.get("title") or script_data.get("title") or ""),
-            "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
-            "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
-        },
+    _render_section_header(
+        "Final step",
+        "QC & publish",
+        "Review the gates, approve the metadata, then choose how the Short is published.",
     )
+
+    current_metadata = {
+        "title": str(st.session_state.get("final_title") or metadata.get("title") or script_data.get("title") or ""),
+        "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
+        "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
+    }
+    gates = evaluate_live_qc_gates(snapshot, current_metadata)
     passed_count = sum(1 for gate in gates if gate["passed"])
     qc_ready = passed_count == len(gates)
     public_blocked = any(bool(gate.get("public_blocked")) for gate in gates)
     fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+
     if fallback_mode == "extractive_source_grounded":
         st.error(
             "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
             "Private upload remains available after the other QC gates pass.",
             icon="⛔",
         )
-    st.markdown(f"**Live gate status: {passed_count}/{len(gates)} passing**")
-    gate_cols = st.columns(2)
-    for index, gate in enumerate(gates):
-        with gate_cols[index % 2]:
-            if gate["passed"]:
-                st.success(f"✓ {gate['label']} — PASS", icon="✅")
-            else:
-                st.error(f"✕ {gate['label']} — BLOCKED", icon="⛔")
-            st.caption(gate["detail"])
 
-    st.markdown("### Upload QC")
-    if qc_ready:
-        st.success(
-            "All release QC gates are passing. Both upload modes are available.",
-            icon="✅",
-        )
-    else:
-        st.warning(
-            "Upload is locked until every release QC gate passes.",
-            icon="🔒",
-        )
-        blocked = [gate["label"] for gate in gates if not gate["passed"]]
-        if blocked:
-            st.caption("Blocked by: " + " · ".join(blocked))
+    st.markdown(
+        f"<div class='live-bar'><div class='live-bar-copy'><b>Release QC</b> · "
+        f"{passed_count}/{len(gates)} gates passing</div><div class='small-muted'>"
+        f"{'READY' if qc_ready else 'LOCKED'}</div></div>",
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("### 1 · Review and approve metadata")
-    st.caption("Review the final title, description and pinned comment here. Titles are normalized to include #shorts and stay within YouTube's 100-character limit.")
+    gate_html = []
+    for gate in gates:
+        passed = bool(gate.get("passed"))
+        gate_class = "pass" if passed else "block"
+        gate_html.append(
+            f"<div class='release-gate {gate_class}'><div class='release-gate-name'>"
+            f"{'✓' if passed else '✕'} {gate.get('label', '')}</div>"
+            f"<div class='release-gate-detail'>{gate.get('detail', '')}</div></div>"
+        )
+    st.markdown("<div class='release-gates'>" + "".join(gate_html) + "</div>", unsafe_allow_html=True)
 
     editing = not bool(st.session_state.get("metadata_approved"))
-    title = st.text_input(
-        "YouTube title",
-        max_chars=100,
-        key="final_title",
-        disabled=not editing,
-    )
-    description = st.text_area(
-        "YouTube description",
-        height=150,
-        key="final_description",
-        disabled=not editing,
-    )
-    comment = st.text_area(
-        "Pinned comment",
-        height=110,
-        key="final_comment",
-        disabled=not editing,
-    )
+    with st.container(border=True):
+        st.markdown("#### 1 · Metadata")
+        st.caption("Approve the exact title, description and pinned comment used for upload.")
 
-    if editing:
-        approve_col, info_col = st.columns([1, 2])
-        with approve_col:
-            if st.button(
-                "✅ Approve title, description & comment",
-                type="primary",
-                width="stretch",
-                key="approve_metadata",
-            ):
-                try:
-                    from final_qc_runtime import validate_final_upload_metadata
-                    clean_title, clean_description, clean_comment = validate_final_upload_metadata(
-                        title, description, comment
-                    )
-                    st.session_state["final_title"] = clean_title
-                    st.session_state["final_description"] = clean_description
-                    st.session_state["final_comment"] = clean_comment
-                    st.session_state["metadata_approved"] = True
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
-        with info_col:
-            st.info("Nothing will be uploaded until the metadata approval above succeeds.")
-        return
+        title = st.text_input("YouTube title", max_chars=100, key="final_title", disabled=not editing)
+        meta_cols = st.columns(2)
+        with meta_cols[0]:
+            description = st.text_area("YouTube description", height=140, key="final_description", disabled=not editing)
+        with meta_cols[1]:
+            comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=not editing)
 
-    st.success("Metadata approved. You can now choose how the Short is published.", icon="✅")
-    if st.button("✏️ Edit metadata", width="stretch", key="edit_metadata"):
-        st.session_state["metadata_approved"] = False
-        st.rerun()
+        if editing:
+            approve_col, note_col = st.columns([1, 2])
+            with approve_col:
+                if st.button("Approve metadata", type="primary", width="stretch", key="approve_metadata"):
+                    try:
+                        from final_qc_runtime import validate_final_upload_metadata
+                        clean_title, clean_description, clean_comment = validate_final_upload_metadata(
+                            title, description, comment
+                        )
+                        st.session_state["final_title"] = clean_title
+                        st.session_state["final_description"] = clean_description
+                        st.session_state["final_comment"] = clean_comment
+                        st.session_state["metadata_approved"] = True
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
+            with note_col:
+                st.caption("Nothing uploads until this approval succeeds.")
+            return
 
+        st.success("Metadata approved.", icon="✅")
+        if st.button("Edit metadata", width="content", key="edit_metadata"):
+            st.session_state["metadata_approved"] = False
+            st.rerun()
 
-    st.markdown("### Final video")
-    if video_path and os.path.isfile(video_path):
-        st.success("The Short is rendered, branded and ready for your review.", icon="✅")
-        st.video(video_path)
-    else:
-        st.error("The dashboard has a final video path, but the file is not accessible from this dashboard process.")
+    if not (video_path and os.path.isfile(video_path)):
+        st.error("The final video path is recorded, but the file is not accessible from the dashboard process.")
         st.code(video_path or "No final video path recorded.", language="text")
         return
 
-    st.markdown("### 2 · Choose upload visibility")
-    st.info("Private keeps the Short hidden on YouTube. Public publishes it immediately after the final confirmation.")
-
-    public_col, private_col = st.columns(2)
-    with public_col:
-        if st.button(
-            "🌐 Upload Publicly",
-            type="primary",
-            width="stretch",
-            key="upload_public",
-            disabled=not qc_ready,
-        ):
+    preview_col, publish_col = st.columns([1.35, .65], gap="large")
+    with preview_col:
+        st.markdown("#### 2 · Watch")
+        st.video(video_path)
+    with publish_col:
+        st.markdown("#### 3 · Publish")
+        st.caption("Private stays hidden. Public needs explicit confirmation.")
+        if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not qc_ready):
             if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                 st.error("Public upload blocked: release QC is no longer passing.")
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
-        st.caption("Public: full release QC + explicit publish confirmation." + (" · BLOCKED by originality policy" if public_blocked else ""))
-    with private_col:
-        if st.button(
-            "🔒 Upload Privately",
-            width="stretch",
-            key="upload_private",
-            disabled=not qc_ready,
-        ):
+        if public_blocked:
+            st.caption("Public publishing is currently blocked by a release policy gate.")
+        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not qc_ready):
             if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
                 st.error("Private upload blocked: release QC is no longer passing.")
             else:
@@ -1327,34 +1461,32 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     st.session_state["final_comment"],
                     "private",
                 )
-        st.caption("Private: the same release QC, without public publishing confirmation.")
 
-    if st.session_state.get("confirm_public_upload"):
-        st.warning("You are about to publish this video publicly. It will become visible on YouTube immediately. Continue?")
-        confirm_col, cancel_col = st.columns(2)
-        with confirm_col:
-            if st.button("✅ Yes, upload publicly", type="primary", width="stretch", key="confirm_upload_public"):
-                if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
-                    st.error("Upload blocked: one or more live QC gates are not passing.")
-                else:
+        if st.session_state.get("confirm_public_upload"):
+            st.warning("You are about to publish this video publicly. Continue?")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button("Yes, publish", type="primary", width="stretch", key="confirm_upload_public"):
+                    if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
+                        st.error("Upload blocked: one or more live QC gates are not passing.")
+                    else:
+                        st.session_state["confirm_public_upload"] = False
+                        _perform_upload(
+                            controller,
+                            snapshot,
+                            st.session_state["final_title"],
+                            st.session_state["final_description"],
+                            st.session_state["final_comment"],
+                            "public",
+                        )
+            with cancel_col:
+                if st.button("Cancel", width="stretch", key="cancel_upload_public"):
                     st.session_state["confirm_public_upload"] = False
-                    _perform_upload(
-                        controller,
-                        snapshot,
-                        st.session_state["final_title"],
-                        st.session_state["final_description"],
-                        st.session_state["final_comment"],
-                        "public",
-                    )
-        with cancel_col:
-            if st.button("← Cancel", width="stretch", key="cancel_upload_public"):
-                st.session_state["confirm_public_upload"] = False
-                st.rerun()
+                    st.rerun()
 
     result = st.session_state.get("upload_result", "")
     if result:
         st.success(f"Last upload completed: {result}")
-
 
 def _perform_upload(
     controller: DashboardWorkflowController,
@@ -1428,53 +1560,69 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     live_blockers = [item for item in problems if "provider key" in item]
     if live_blockers:
         st.warning(
-            "Some live provider keys are not configured. Discovery/production may stop when that provider is required."
+            "Some live provider keys are not configured. Discovery or production may stop when that provider is required."
         )
 
-    st.markdown("<div class='section-kicker'>Step 01 · Discovery</div><h2 style='margin-top:0'>Choose a story</h2>", unsafe_allow_html=True)
-    st.caption(
-        "The factory ranks up to 28 fresh, diverse stories for this section. Repeats from the previous 48 hours are removed before ranking."
+    _render_section_header(
+        "Step 01 · Discovery",
+        "Build a Short",
+        "Choose a ranked story, optionally guide the visual search, then start production.",
     )
 
     if not st.session_state.candidates:
-        if st.button("🚀 Find today's ranked topics", type="primary", width="stretch"):
-            controller.reset()
-            try:
-                controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
-                conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        mode_label = str(config.get("display_format") or config.get("editorial_mode") or "Deep Dive")
+        language_label = str(config.get("language_label") or "English")
+        category_label = str(config.get("category") or "Automatic").replace("_", " ").title()
+        with st.container():
+            st.markdown(
+                "<div class='empty-state'><div class='empty-title'>Ready for a new Short</div>"
+                "<div class='empty-copy'>Search current stories and keep the final story choice in your hands. "
+                "The factory handles the ranking; you handle the decision.</div></div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='meta-row'><span class='meta-chip'>Mode · {mode_label}</span>"
+                f"<span class='meta-chip'>Language · {language_label}</span>"
+                f"<span class='meta-chip'>Category · {category_label}</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.write("")
+            if st.button("Find today's ranked topics", type="primary", width="stretch"):
+                controller.reset()
                 try:
-                    migrate_vault(conn)
-                    if config.get("editorial_mode") == "AI":
-                        candidates = discover_ai_topics(
-                            ultimate_bot,
-                            config,
-                            conn,
-                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
-                        )
-                    else:
-                        candidates = discover_ranked_topics(
-                            ultimate_bot,
-                            config,
-                            conn,
-                            max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
-                        )
-                finally:
-                    conn.close()
-                for candidate in candidates:
-                    candidate["dashboard_discovery_pool"] = True
-                st.session_state.candidates = candidates
-                st.session_state.web_config = config
-                st.session_state.production_started = False
-                st.session_state.final_qc = False
-                st.session_state.upload_result = ""
-                st.session_state.candidate_page = 0
-                st.session_state.discovery_headline_selection = None
-                st.success(
-                    f"Found {len(candidates)} ranked headlines. Choose one below."
-                )
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Topic discovery failed: {type(exc).__name__}: {exc}")
+                    controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
+                    conn = sqlite3.connect(ultimate_bot.DB_PATH)
+                    try:
+                        migrate_vault(conn)
+                        if config.get("editorial_mode") == "AI":
+                            candidates = discover_ai_topics(
+                                ultimate_bot,
+                                config,
+                                conn,
+                                max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                            )
+                        else:
+                            candidates = discover_ranked_topics(
+                                ultimate_bot,
+                                config,
+                                conn,
+                                max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                            )
+                    finally:
+                        conn.close()
+                    for candidate in candidates:
+                        candidate["dashboard_discovery_pool"] = True
+                    st.session_state.candidates = candidates
+                    st.session_state.web_config = config
+                    st.session_state.production_started = False
+                    st.session_state.final_qc = False
+                    st.session_state.upload_result = ""
+                    st.session_state.candidate_page = 0
+                    st.session_state.discovery_headline_selection = None
+                    st.success(f"Found {len(candidates)} ranked headlines. Choose one below.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Topic discovery failed: {type(exc).__name__}: {exc}")
         return
 
     if st.session_state.production_started:
@@ -1483,35 +1631,37 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     pending_candidate = st.session_state.get("pending_candidate")
     if pending_candidate:
-        st.markdown("### Visual search queries (optional)")
-        st.caption(
-            "Enter optional manual visual queries separated by semicolons (;). "
-            "The factory will intelligently assign them to the most relevant slides. "
-            "You can still refine individual slides during script review."
+        headline = str(pending_candidate.get("title") or "Untitled story").strip()
+        source = str(pending_candidate.get("source_label") or "News source").strip()
+        url = str(pending_candidate.get("story_url") or "").strip()
+
+        _render_section_header(
+            "Step 02",
+            "Review your story",
+            "Confirm the headline before the factory spends time producing it.",
         )
-        st.text_input(
-            "Search queries",
-            placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
-            key="visual_search_queries",
-            label_visibility="collapsed",
-        )
-        st.markdown(
-            f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
-            f"<b>{pending_candidate.get('title', '')}</b></div>",
-            unsafe_allow_html=True,
-        )
-        start_col, cancel_col = st.columns(2)
+        with st.container(border=True):
+            st.markdown("<div class='story-rank'>SELECTED HEADLINE</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='story-title' style='font-size:1.35rem'>{headline}</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Source · {source}")
+            if url.startswith(("http://", "https://")):
+                st.link_button("Open source article", url, width="content")
+            with st.expander("Optional visual-search hints", expanded=False):
+                st.caption("Add exact image searches up front. Leave blank to keep automatic visual search.")
+                st.text_input(
+                    "Search queries",
+                    placeholder="e.g. India Afghanistan cricket match; Shubman Gill batting; New Delhi cricket stadium",
+                    key="visual_search_queries",
+                )
+
+        start_col, cancel_col = st.columns([1.5, 1])
         with start_col:
-            if st.button(
-                "🚀 Start production",
-                type="primary",
-                width="stretch",
-                key="start_selected_topic",
-            ):
+            if st.button("Start production", type="primary", width="stretch", key="start_selected_topic"):
                 config = dict(st.session_state.web_config)
-                config["visual_search_queries"] = str(
-                    st.session_state.get("visual_search_queries", "") or ""
-                ).strip()
+                config["visual_search_queries"] = str(st.session_state.get("visual_search_queries", "") or "").strip()
                 if config.get("editorial_mode") == "AI":
                     config["category"] = str(pending_candidate.get("recommended_category") or "national_global_affairs")
                     config["format_mode"] = str(pending_candidate.get("recommended_format") or "regular")
@@ -1521,11 +1671,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 controller.start_production(config, dict(pending_candidate))
                 st.rerun()
         with cancel_col:
-            if st.button(
-                "← Choose another headline",
-                width="stretch",
-                key="cancel_selected_topic",
-            ):
+            if st.button("Choose another headline", width="stretch", key="cancel_selected_topic"):
                 st.session_state.pending_candidate = None
                 st.session_state.visual_search_queries = ""
                 st.rerun()
@@ -1540,84 +1686,71 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     visible = candidates[start_index:start_index + page_size]
 
     st.markdown(
-        f"<div class='panel'><b>Ranked headlines</b>"
-        f"<span class='small-muted' style='float:right'>Showing {start_index + 1}-{start_index + len(visible)} of {total}</span></div>",
+        f"<div class='live-bar'><div class='live-bar-copy'><b>Ranked headlines</b> · "
+        f"Showing {start_index + 1}–{start_index + len(visible)} of {total}</div></div>",
         unsafe_allow_html=True,
     )
 
-    for offset, candidate in enumerate(visible):
-        rank = start_index + offset + 1
-        title = str(candidate.get("title") or "Untitled story").strip()
-        reason = str(candidate.get("discovery_reason") or "").strip()
-        score = float(candidate.get("candidate_score") or 0.0)
-        evidence = build_discovery_evidence(candidate)
-        history_fit = float(evidence.get("channel_history") or 0.0)
+    for row_start in range(0, len(visible), 2):
+        row = visible[row_start:row_start + 2]
+        cols = st.columns(len(row), gap="medium")
+        for local_index, candidate in enumerate(row):
+            absolute_index = start_index + row_start + local_index
+            with cols[local_index]:
+                rank = absolute_index + 1
+                title = str(candidate.get("title") or "Untitled story").strip()
+                reason = str(candidate.get("discovery_reason") or "").strip()
+                score = float(candidate.get("candidate_score") or 0.0)
+                evidence = build_discovery_evidence(candidate)
+                history_fit = float(evidence.get("channel_history") or 0.0)
+                source = str(candidate.get("source_label") or "News source").strip()
+                url = str(candidate.get("story_url") or "").strip()
 
-        with st.container(border=True):
-            st.markdown(f"**{rank:02d}. {title}**")
-            meta = [
-                f"Score {score:.1f}",
-                f"{evidence['articles']} article{'s' if evidence['articles'] != 1 else ''}",
-            ]
-            if evidence["independent_publishers"]:
-                meta.append(f"{evidence['independent_publishers']} publisher{'s' if evidence['independent_publishers'] != 1 else ''}")
-            if candidate.get("ai_recommendation"):
-                meta.append(f"Channel fit {history_fit:.1f}/10")
-            st.caption(" · ".join(meta))
-            if reason:
-                st.write(reason)
-
-            source = str(candidate.get("source_label") or "News source").strip()
-            url = str(candidate.get("story_url") or "").strip()
-            source_col, action_col = st.columns([3, 1])
-            with source_col:
-                st.caption(f"Source: {source}")
-                if url.startswith(("http://", "https://")):
-                    st.link_button("Open source", url)
-            with action_col:
-                if st.button(
-                    "Use headline →",
-                    type="primary",
-                    width="stretch",
-                    key=f"use_candidate_{start_index + offset}",
-                ):
-                    st.session_state.pending_candidate = dict(candidate)
-                    st.session_state.visual_search_queries = ""
-                    st.rerun()
+                with st.container(border=True):
+                    st.markdown(f"<div class='story-rank'>#{rank:02d}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='story-title'>{title}</div>", unsafe_allow_html=True)
+                    article_label = "article" if evidence["articles"] == 1 else "articles"
+                    publisher_label = f" · {evidence['independent_publishers']} publishers" if evidence["independent_publishers"] else ""
+                    fit_label = f" · Channel fit {history_fit:.1f}/10" if candidate.get("ai_recommendation") else ""
+                    st.markdown(
+                        f"<span class='score-chip'>Score {score:.1f}</span> "
+                        f"<span class='story-meta'>{evidence['articles']} {article_label}{publisher_label}{fit_label}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    if reason:
+                        st.markdown(f"<div class='story-reason'>{reason}</div>", unsafe_allow_html=True)
+                    st.caption(f"Source · {source}")
+                    action_cols = st.columns([1, 1])
+                    with action_cols[0]:
+                        if url.startswith(("http://", "https://")):
+                            st.link_button("Open source", url, width="stretch")
+                    with action_cols[1]:
+                        if st.button("Use headline →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
+                            st.session_state.pending_candidate = dict(candidate)
+                            st.session_state.visual_search_queries = ""
+                            st.rerun()
 
     nav_left, nav_center, nav_right = st.columns([1, 2, 1])
     with nav_left:
-        if st.button(
-            "← Previous",
-            disabled=page <= 0,
-            width="stretch",
-            key="candidate_previous",
-        ):
+        if st.button("Previous", disabled=page <= 0, width="stretch", key="candidate_previous"):
             st.session_state.candidate_page = page - 1
             st.rerun()
     with nav_center:
         st.markdown(
-            f"<div style='text-align:center;padding-top:10px' class='small-muted'>"
-            f"Page {page + 1} of {page_count}</div>",
+            f"<div style='text-align:center;padding-top:10px' class='small-muted'>Page {page + 1} of {page_count}</div>",
             unsafe_allow_html=True,
         )
     with nav_right:
-        if st.button(
-            "Next →",
-            disabled=page >= page_count - 1,
-            width="stretch",
-            key="candidate_next",
-        ):
+        if st.button("Next", disabled=page >= page_count - 1, width="stretch", key="candidate_next"):
             st.session_state.candidate_page = page + 1
             st.rerun()
 
-    if not controller.snapshot().get("thread_alive"):
-        st.info("Choose a headline to review its script and set optional per-slide image-search queries.")
-
-
-
 def render_channel_statistics() -> None:
-    st.markdown("<div class='section-kicker'>Analytics</div><h2 style='margin-top:0'>Channel performance</h2>", unsafe_allow_html=True)
+    _render_section_header(
+        "Analytics",
+        "Channel performance",
+        "Recorded factory history and optional live YouTube totals.",
+    )
     try:
         stats = collect_channel_statistics(ultimate_bot.DB_PATH)
     except Exception as exc:
@@ -1633,80 +1766,83 @@ def render_channel_statistics() -> None:
         f"{stats['avg_view_percentage']:.1f}%" if stats["avg_view_percentage"] is not None else "—",
     )
 
-    ctr_col, live_col = st.columns(2)
-    ctr_col.metric("Average title CTR", f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—")
-    with live_col:
-        if st.button("↻ Refresh live YouTube totals", width="stretch", key="refresh_live_channel_stats"):
-            st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
-
+    st.markdown("### Live channel")
     live = st.session_state.get("live_channel_stats") or {}
     if live.get("error"):
         st.warning(f"Live YouTube totals could not be loaded: {live['error']}")
     elif live:
-        st.markdown("### Live YouTube channel totals")
         live_cols = st.columns(4)
         live_cols[0].metric("Channel", live.get("channel_title", "Connected channel"))
-        live_cols[1].metric("Subscribers", "Hidden" if live.get("hidden_subscriber_count") else f"{live.get('subscriber_count', 0):,}")
+        live_cols[1].metric(
+            "Subscribers",
+            "Hidden" if live.get("hidden_subscriber_count") else f"{live.get('subscriber_count', 0):,}",
+        )
         live_cols[2].metric("Videos", f"{live.get('video_count', 0):,}")
         live_cols[3].metric("All-time views", f"{live.get('view_count', 0):,}")
     else:
-        st.caption(
-            "Recorded factory metrics are shown above. Use “Refresh live YouTube totals” "
-            "to query the connected channel account."
-        )
+        st.caption("Recorded metrics are available now. Live totals are optional.")
 
-    st.markdown("### By format")
-    if stats["by_format"]:
-        st.dataframe(stats["by_format"], width="stretch", hide_index=True)
+    if st.button("Refresh live YouTube totals", width="content", key="refresh_live_channel_stats"):
+        st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
+        st.rerun()
 
-    st.markdown("### By language")
-    if stats["by_language"]:
-        st.dataframe(stats["by_language"], width="stretch", hide_index=True)
-
-    st.markdown("### Recent factory history")
-    if stats["recent"]:
-        st.dataframe(stats["recent"], width="stretch", hide_index=True)
-    else:
-        st.info("No recorded factory runs yet.")
-
+    for label, table in (
+        ("By format", stats["by_format"]),
+        ("By language", stats["by_language"]),
+        ("Recent factory history", stats["recent"]),
+    ):
+        with st.expander(label, expanded=(label == "Recent factory history")):
+            if table:
+                st.dataframe(table, width="stretch", hide_index=True)
+            else:
+                st.info(f"No {label.lower()} data yet.")
 
 def render_offline_page() -> None:
-    st.markdown("<div class='section-kicker'>Engineering</div><h2 style='margin-top:0'>Offline diagnostics</h2>", unsafe_allow_html=True)
-    st.caption("These checks are safe to run while coding. They make zero provider/API calls.")
+    _render_section_header(
+        "Engineering",
+        "Offline diagnostics",
+        "Safe checks for the dashboard and factory contracts. No provider/API calls are made.",
+    )
 
-    if st.button("🧪 Run offline diagnostics", type="primary", width="stretch"):
+    if st.button("Run offline diagnostics", type="primary", width="content"):
         with st.spinner("Running offline factory checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
             st.session_state.show_offline_diagnostics = True
+        st.rerun()
 
     report = st.session_state.get("offline_diagnostics") or {}
     if not report:
+        with st.container(border=True):
+            st.info("No diagnostic run yet. Run the checks when you want a fresh contract snapshot.")
         return
 
+    cols = st.columns(3)
+    cols[0].metric("Passed", report.get("passed", 0))
+    cols[1].metric("Failed", report.get("failed", 0))
+    cols[2].metric("API calls", report.get("api_calls", 0))
+
     if report.get("all_passed"):
-        st.success(f"All checks passed: {report.get('passed', 0)}/{report.get('total', 0)}")
+        st.success(f"All {report.get('total', 0)} checks passed.")
     else:
-        st.error(
-            f"Diagnostics found {report.get('failed', 0)} issue(s) out of {report.get('total', 0)}."
-        )
+        st.error(f"{report.get('failed', 0)} check(s) failed.")
 
+    checks = []
     for item in report.get("results", []):
-        icon = "✅" if item.get("status") == "PASS" else "❌"
-        st.markdown(
-            f"<div class='panel'><b>{icon} {item.get('name', '')}</b><br>"
-            f"<span class='small-muted'>{item.get('detail', '')}</span></div>",
-            unsafe_allow_html=True,
+        passed = item.get("status") == "PASS"
+        gate_class = "pass" if passed else "block"
+        checks.append(
+            f"<div class='release-gate {gate_class}'><div class='release-gate-name'>"
+            f"{'✓' if passed else '✕'} {item.get('name', '')}</div>"
+            f"<div class='release-gate-detail'>{item.get('detail', '')}</div></div>"
         )
-
-
+    st.markdown("<div class='release-gates'>" + "".join(checks) + "</div>", unsafe_allow_html=True)
 
 def render_factory_function_coverage() -> None:
-    """Show a complete, read-only map of ultimate_bot callables."""
     report = factory_function_coverage()
-    st.markdown("### Factory function coverage")
-    st.caption(
-        "Every top-level function in ultimate_bot.py is explicitly classified so we can "
-        "distinguish dashboard features from deliberate internal helpers."
+    _render_section_header(
+        "Engineering",
+        "Factory function coverage",
+        "A read-only map of the functions exposed by ultimate_bot.py.",
     )
     if report.get("complete"):
         st.success(f"All {report['total']} factory functions are accounted for.")
@@ -1724,29 +1860,26 @@ def render_factory_function_coverage() -> None:
 
     for label in labels:
         names = buckets.get(label, [])
-        with st.expander(f"{label} ({len(names)})", expanded=(label != "Internal")):
+        with st.expander(f"{label} · {len(names)}", expanded=False):
             st.code("\\n".join(names), language="text") if names else st.caption("None")
 
 def render_final_branding_preview() -> None:
-    """Expose the canonical final branding compositor as a first-class dashboard preview."""
-    st.markdown(
-        "<div class='section-kicker'>Branding approval</div>"
-        "<h2 style='margin-top:0'>Final Branding Preview</h2>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "This preview uses the same canonical branding overlay path as the final compositor. "
-        "It is a synthetic 1080×1920 frame, so it never renders or modifies a production video."
+    _render_section_header(
+        "Branding",
+        "Final branding preview",
+        "A synthetic 1080×1920 frame using the same canonical branding compositor as production.",
     )
 
-    if st.button("▶ Render final branding preview", type="primary", width="stretch"):
+    if st.button("Render final branding preview", type="primary", width="content"):
         with st.spinner("Rendering the canonical branding overlay..."):
             result = run_demo_section("scene_branding")
         st.session_state.last_demo_results["scene_branding"] = result
+        st.rerun()
 
     result = (st.session_state.get("last_demo_results") or {}).get("scene_branding")
     if not result:
-        st.info("Run the preview to inspect the final logo and source overlay.")
+        with st.container(border=True):
+            st.info("Run the preview to inspect the final logo and source overlay.")
         return
 
     if result.get("status") == "PASS":
@@ -1756,14 +1889,14 @@ def render_final_branding_preview() -> None:
 
     preview_path = (result.get("artifacts") or {}).get("final_branding_preview")
     if preview_path and os.path.isfile(preview_path):
-        st.image(preview_path, caption="Canonical final branding compositor · 1080×1920", width="stretch")
-
+        with st.container(border=True):
+            st.image(preview_path, caption="Canonical compositor · 1080×1920", width="stretch")
 
 def render_demo_page() -> None:
-    st.markdown("<div class='section-kicker'>Engineering lab</div><h2 style='margin-top:0'>Demo Factory</h2><h4>Component-by-component factory tests</h4>", unsafe_allow_html=True)
-    st.caption(
-        "Demo mode never performs a production upload and does not need provider calls. "
-        "It exercises existing factory contracts with controlled test inputs."
+    _render_section_header(
+        "Engineering lab",
+        "Demo Factory",
+        "Controlled component checks. These never perform a production upload.",
     )
 
     sections = [
@@ -1781,36 +1914,42 @@ def render_demo_page() -> None:
         ("factory_function_coverage", "Factory function coverage"),
     ]
 
-    if st.button("▶ Run all demo checks", type="primary", width="stretch"):
+    if st.button("Run all demo checks", type="primary", width="content"):
         results = {}
         with st.spinner("Running all demo sections..."):
             for key, _label in sections:
                 results[key] = run_demo_section(key)
         st.session_state.last_demo_results = results
+        st.rerun()
 
-    columns = st.columns(2, gap="medium")
+    columns = st.columns(3, gap="medium")
     for index, (key, label) in enumerate(sections):
-        with columns[index % 2]:
-            st.markdown(f"<div class='panel'><div class='qc-title'>{label}</div></div>", unsafe_allow_html=True)
-            if st.button(f"Test {label}", key=f"demo_{key}", width="stretch"):
-                result = run_demo_section(key)
-                st.session_state.last_demo_results[key] = result
+        with columns[index % 3]:
+            with st.container(border=True):
+                st.markdown(
+                    f"<div class='story-rank'>CHECK {index + 1:02d}</div>"
+                    f"<div class='story-title'>{label}</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button("Run check", key=f"demo_{key}", width="stretch"):
+                    result = run_demo_section(key)
+                    st.session_state.last_demo_results[key] = result
+                    st.rerun()
 
-            result = (st.session_state.get("last_demo_results") or {}).get(key)
-            if result:
-                if result.get("status") == "PASS":
-                    st.success(result.get("detail", "Passed"))
-                else:
-                    st.error(result.get("detail", "Failed"))
-                artifacts = result.get("artifacts") or {}
-                for artifact_name, artifact_path in artifacts.items():
-                    if artifact_path and os.path.isfile(artifact_path):
-                        st.caption(artifact_name.replace("_", " ").title())
-                        st.image(artifact_path, width="stretch")
+                result = (st.session_state.get("last_demo_results") or {}).get(key)
+                if result:
+                    if result.get("status") == "PASS":
+                        st.success(result.get("detail", "Passed"), icon="✅")
+                    else:
+                        st.error(result.get("detail", "Failed"), icon="⛔")
+                    artifacts = result.get("artifacts") or {}
+                    for artifact_name, artifact_path in artifacts.items():
+                        if artifact_path and os.path.isfile(artifact_path):
+                            st.caption(artifact_name.replace("_", " ").title())
+                            st.image(artifact_path, width="stretch")
 
-    st.markdown("---")
+    st.divider()
     render_factory_function_coverage()
-
 
 def main() -> None:
     load_streamlit_secrets_into_runtime()
@@ -1825,31 +1964,29 @@ def main() -> None:
 
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
+    workspace = render_workspace_navigation()
 
-    render_header("Live Factory")
-    config = render_sidebar_controls()
-    render_live_factory(config, controller)
-
-    with st.sidebar.expander("Engineering & analytics", expanded=False):
-        utility = st.selectbox(
-            "Utility",
-            ["None", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory", "Final Branding Preview"],
-            key="dashboard_utility",
-        )
-    if utility == "Channel Statistics":
+    if workspace == "Live Factory":
+        config = render_sidebar_controls()
+        render_header("Live Factory")
+        render_live_factory(config, controller)
+    elif workspace == "Channel Statistics":
+        render_header("Channel Statistics")
         render_channel_statistics()
-    elif utility == "Run Offline Diagnostics":
+    elif workspace == "Run Offline Diagnostics":
+        render_header("Run Offline Diagnostics")
         render_offline_page()
-    elif utility == "Demo Factory":
+    elif workspace == "Demo Factory":
+        render_header("Demo Factory")
         render_demo_page()
-    elif utility == "Final Branding Preview":
+    elif workspace == "Final Branding Preview":
+        render_header("Final Branding Preview")
         render_final_branding_preview()
 
-    st.divider()
-    st.caption(
-        "Viral Shorts Factory · dashboard controls production, visual approval and upload visibility; "
-        "the underlying factory generation logic remains the production source of truth."
+    st.markdown(
+        "<div class='dashboard-footer'>Viral Shorts Factory · dashboard controls the human review gates; "
+        "the underlying factory generation logic remains the production source of truth.</div>",
+        unsafe_allow_html=True,
     )
-
 
 main()
