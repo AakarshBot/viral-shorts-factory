@@ -166,7 +166,9 @@ def test_person_identity_resolver_uses_wikidata_and_caches(monkeypatch):
     first = boundary.resolve_person_identity("Test Person Identity Resolver")
     second = boundary.resolve_person_identity("Test Person Identity Resolver")
     assert first == second == {"qid": "Q123456", "label": "Test Person"}
-    assert len(calls) == 1
+    assert len(calls) == 2
+    assert calls[0][1]["action"] == "wbsearchentities"
+    assert calls[1][1]["action"] == "wbgetentities"
     boundary._PERSON_IDENTITY_CACHE.pop(cache_key, None)
 
 
@@ -236,6 +238,5 @@ if __name__ == "__main__":
     test_commons_candidate_adapter_is_bounded()
     test_person_portrait_intent_is_identity_first()
     test_person_provider_queries_use_canonical_identity_and_structured_commons()
-    test_person_identity_resolver_uses_wikidata_and_caches()
     test_godl_india_is_an_explicit_commercial_license()
     print("Visual provider boundary regression checks passed.")
