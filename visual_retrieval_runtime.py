@@ -49,6 +49,11 @@ REFINEMENT_CANDIDATE_POOL = max(6, min(12, int(os.getenv("VISUAL_REFINEMENT_CAND
 INITIAL_SOURCE_LIMIT = max(1, min(3, int(os.getenv("VISUAL_INITIAL_SOURCE_LIMIT", "3"))))
 REFINEMENT_SOURCE_LIMIT = max(1, min(2, int(os.getenv("VISUAL_REFINEMENT_SOURCE_LIMIT", "2"))))
 
+_VISUAL_DESCRIPTOR_WORDS = {
+    "logo", "logos", "badge", "badges", "emblem", "emblems",
+    "crest", "crests", "branding", "brand", "brands", "symbol", "symbols",
+}
+
 def _hash_image(bot, img_bytes: bytes) -> str:
     """Return a content-normalized fingerprint for deduplication across sources."""
     data = bytes(img_bytes or b"")
