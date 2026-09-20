@@ -219,8 +219,8 @@ def test_same_entity_gets_different_searchable_scene_queries():
     assert second.query.casefold().startswith("vaibhav sooryavanshi")
     assert "young" not in first.query.lower()
     assert "player" not in second.query.lower()
-    assert any(term in first.query.lower() for term in ("batting", "match", "rajasthan"))
-    assert any(term in second.query.lower() for term in ("award", "trophy", "presentation", "ceremony"))
+    assert any(term in first.queries[1].lower() for term in ("batting", "match", "rajasthan"))
+    assert any(term in second.queries[1].lower() for term in ("award", "trophy", "presentation", "ceremony"))
     assert len(first.queries) <= 6
     assert len(second.queries) <= 6
     assert first.queries[0] == "Vaibhav Sooryavanshi"
