@@ -892,6 +892,7 @@ class DashboardWorkflowController(WorkflowController):
                 or ""
             ).strip()
             used_hashes: set[str] = set()
+            used_source_image_urls: set[str] = set()
             packages = snapshot.get("visual_packages") or []
             for package in packages:
                 layer = package[0] if isinstance(package, list) and package else package
@@ -903,6 +904,9 @@ class DashboardWorkflowController(WorkflowController):
                 ):
                     if str(candidate or "").strip():
                         used_hashes.add(str(candidate).strip())
+                source_image_url = str(layer.get("source_image_url") or "").strip()
+                if source_image_url:
+                    used_source_image_urls.add(source_image_url)
                 image_path = str(layer.get("visual_original_path") or layer.get("image") or "").strip()
                 if image_path and os.path.isfile(image_path):
                     try:
@@ -929,6 +933,7 @@ class DashboardWorkflowController(WorkflowController):
                 query,
                 video_title=video_title,
                 used_hashes=used_hashes,
+                used_source_image_urls=used_source_image_urls,
             )
             assets = list(result.get("assets") or [])
             materialized = materialize_manual_visual_pool(
