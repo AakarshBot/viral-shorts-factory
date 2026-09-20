@@ -322,7 +322,7 @@ def bind_dashboard_patches(bot):
         "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
         "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "compile_video",
         "get_trend_signal_bonus", "auto_pilot_selection", "run_analytics_sweep",
-        "token_overlap_ratio", "upload_to_youtube", "generate_karaoke_clip",
+        "upload_to_youtube", "generate_karaoke_clip",
     )
     bound = []
     for name in names:
