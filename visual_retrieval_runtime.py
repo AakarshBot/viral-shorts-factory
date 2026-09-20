@@ -648,15 +648,16 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 else (source_query, local_used_urls, query, video_title)
             )
 
-            raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, query)
+            raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, source_query)
             used_urls.update(local_used_urls)
             sources_queried += 1
+            seg["visual_provider_query_last"] = source_query
             candidates = _candidate_items(raw_data)
 
             if not candidates:
-                _record_visual_rejection(seg, "provider_empty", f"{source}:{query}")
+                _record_visual_rejection(seg, "provider_empty", f"{source}:{source_query}")
                 print(
-                    f"   [Visual Source] {source} | no candidate returned | query='{query}'",
+                    f"   [Visual Source] {source} | no candidate returned | query='{source_query}'",
                     flush=True,
                 )
                 continue
@@ -850,6 +851,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 seg["visual_rescue_reason"] = ""
                 seg["visual_fallback_reason"] = ""
                 seg["visual_query_used"] = query
+                seg["visual_provider_query_used"] = source_query
                 seg["visual_verification_attempts"] = verification_attempts
                 seg["asset_provenance"] = record
                 print(
