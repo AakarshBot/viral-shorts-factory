@@ -55,3 +55,6 @@ def test_array_like_caption_value_is_cleaned():
     assert _clean_word(ArrayLike()) == "Hello world"
 
     assert _clean_word("Lead _arrow_right follow") == "Lead follow"
+    assert _clean_word("Lead _arrow_left follow") == "Lead follow"
+    assert _clean_word("Lead _arrow_up follow") == "Lead follow"
+    assert _clean_word("Lead _arrow_down follow") == "Lead follow"
