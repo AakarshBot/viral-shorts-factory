@@ -312,32 +312,39 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         scene_terms = _scene_terms(scene, subject)
         visual_genre = classify_visual_genre(scene, subject, visual_type)
 
-        # Portraits and explicit identity assets stay identity-first. Do not
-        # let a narrative phrase such as "press conference" outrank the person
-        # identity when the requested visual is a portrait.
-        if visual_genre in {"PERSON_PORTRAIT", "ORG_BRANDING", "TEAM_BRANDING"}:
-            anchor = _genre_hint_anchor(visual_genre, scene_terms)
+        # Portraits are an identity problem, not a scene-description problem.
+        # Search the locked person name first, then allow one provider-friendly
+        # portrait refinement. Do not burn the bounded query budget on narrative
+        # terms such as "conceptual", "tournament" or "single T20".
+        if visual_genre == "PERSON_PORTRAIT":
+            queries = [subject] if subject else []
+            portrait_query = _compose_query(subject, "portrait")
+            if portrait_query and portrait_query.casefold() not in {item.casefold() for item in queries}:
+                queries.append(portrait_query)
         else:
-            anchor = _primary_visual_anchor(scene_terms)
+            if visual_genre in {"ORG_BRANDING", "TEAM_BRANDING"}:
+                anchor = _genre_hint_anchor(visual_genre, scene_terms)
+            else:
+                anchor = _primary_visual_anchor(scene_terms)
 
-        query = _compose_query(subject, anchor)
-        queries = []
+            query = _compose_query(subject, anchor)
+            queries = []
 
-        # Build a bounded, evidence-backed fallback ladder. Each fallback is
-        # derived from a real visual anchor in the scene, then the exact
-        # factual identity is retained as the final identity-only fallback.
-        # This allows rejected/failed searches to keep trying without inventing
-        # unrelated search terms or creating an unbounded query fan-out.
-        for candidate_anchor in ([anchor] + scene_terms):
-            candidate = _compose_query(subject, candidate_anchor)
-            if candidate and candidate.casefold() not in {item.casefold() for item in queries}:
-                queries.append(candidate)
-            if len(queries) >= 5:
-                break
-        if subject and subject.casefold() not in {item.casefold() for item in queries}:
-            queries.append(subject)
-        queries = queries[:6]
-        query = queries[0] if queries else ""
+            # Build a bounded, evidence-backed fallback ladder. Each fallback is
+            # derived from a real visual anchor in the scene, then the exact
+            # factual identity is retained as the final identity-only fallback.
+            # This allows rejected/failed searches to keep trying without inventing
+            # unrelated search terms or creating an unbounded query fan-out.
+            for candidate_anchor in ([anchor] + scene_terms):
+                candidate = _compose_query(subject, candidate_anchor)
+                if candidate and candidate.casefold() not in {item.casefold() for item in queries}:
+                    queries.append(candidate)
+                if len(queries) >= 5:
+                    break
+            if subject and subject.casefold() not in {item.casefold() for item in queries}:
+                queries.append(subject)
+            queries = queries[:6]
+            query = queries[0] if queries else ""
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))
