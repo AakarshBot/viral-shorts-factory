@@ -1055,6 +1055,40 @@ def test_dashboard_pool_replacement_preserves_previous_visual(tmp_path, monkeypa
     assert preserved[-1]["used"] is False
 
 
+def test_dashboard_replaced_pool_visual_becomes_available_again(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+    from visual_retrieval_runtime import _hash_image
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    source = tmp_path / "source.jpg"
+    Image.new("RGB", (900, 1200), (30, 60, 90)).save(source, "JPEG")
+    with open(source, "rb") as fh:
+        image_hash = _hash_image(bot, fh.read())
+
+    controller = DashboardWorkflowController(bot)
+    controller._visual_pool = [{
+        "path": str(source),
+        "original_path": str(source),
+        "hash": image_hash,
+        "used": True,
+        "assigned_slide": 2,
+        "assigned_time": "2026-09-21T00:00:00+00:00",
+        "source": "Pexels",
+        "status": "entity-verified",
+    }]
+    controller._preserve_replaced_visual_in_pool(
+        {"visual_original_path": str(source), "source_type": "Pexels"},
+        str(source),
+    )
+
+    assert len(controller._visual_pool) == 1
+    assert controller._visual_pool[0]["used"] is False
+    assert controller._visual_pool[0]["assigned_slide"] == 0
+    assert controller._visual_pool[0]["preserved_from_replacement"] is True
+
+
 def test_dashboard_crop_keeps_cropped_version_in_shared_pool(tmp_path):
     from PIL import Image
     from dashboard_runtime import DashboardWorkflowController
