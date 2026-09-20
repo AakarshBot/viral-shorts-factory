@@ -735,14 +735,13 @@ def _manual_query_target(query_index: int) -> int:
     return targets[min(rank, len(targets)) - 1]
 
 
-_VISUAL_SEARCH_CACHE_FALLBACK: dict[int, dict] = {}
-
-
 def _visual_search_cache(bot) -> dict:
     cache = getattr(bot, "_visual_source_search_cache", None)
     if isinstance(cache, dict):
         return cache
-    cache = _VISUAL_SEARCH_CACHE_FALLBACK.setdefault(id(bot), {})
+    # Test doubles and immutable compatibility objects may not accept attributes.
+    # Do not persist a fallback cache by object id; Python can reuse ids between tests.
+    cache = {}
     try:
         setattr(bot, "_visual_source_search_cache", cache)
     except Exception:
@@ -1337,6 +1336,8 @@ def collect_manual_visual_options(
     result["minimum_options"] = min(int(min_options or 1), maximum)
     result["available_options"] = len(result["assets"])
     result["enough_options"] = len(result["assets"]) >= result["minimum_options"]
+    result["target"] = maximum
+    result["hard_max"] = maximum
     return result
 
 
