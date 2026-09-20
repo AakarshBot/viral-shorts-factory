@@ -200,3 +200,9 @@ def test_gdelt_is_only_used_as_one_fallback_when_core_intake_is_light(monkeypatc
     assert len(gdelt_calls) == 1
     assert gdelt_calls[0][1]["max_records"] == 75
     assert gdelt_calls[0][1]["timeout"] == 3.0
+
+
+def test_configured_reddit_json_feed_is_routed_to_its_subreddit_social_lane():
+    url = "https://www.reddit.com/r/Damnthatsinteresting/hot.json?limit=20"
+    assert story_ranker._is_reddit_json_url(url)
+    assert story_ranker._reddit_subreddit_from_url(url) == "Damnthatsinteresting"
