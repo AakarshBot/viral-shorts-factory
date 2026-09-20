@@ -362,7 +362,7 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
     try:
         from image_sources_runtime import fetch_openverse_candidates, fetch_pixabay_candidates
     except Exception:
-        fetch_openverse = fetch_pixabay = None
+        fetch_openverse_candidates = fetch_pixabay_candidates = None
 
     plan.append(("Openverse", fetch_openverse_candidates))
     if str(os.getenv("PIXABAY_API_KEY", "")).strip():
