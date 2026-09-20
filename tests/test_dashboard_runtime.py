@@ -1159,15 +1159,17 @@ def test_dashboard_css_never_overrides_streamlit_icon_font():
     for css in css_blocks:
         for match in font_rule_re.finditer(css):
             selectors = match.group("selectors").strip()
-            if (
-                "[class*=\"css\"]" in selectors
-                or re.search(r"(?<![\w-])\*(?![\w-])", selectors)
-                or re.search(r"(?<![\w-])span(?![\w-])", selectors, flags=re.IGNORECASE)
-            ):
+            if "[class*=\"css\"]" in selectors:
+                unsafe_selectors.append(selectors)
+                continue
+            if re.search(r"(?<![\w-])\*(?![\w-])", selectors):
+                unsafe_selectors.append(selectors)
+                continue
+            if re.search(r"(?<![\w-])span(?![\w-])", selectors, flags=re.IGNORECASE):
                 icon_selector = (
                     "stIconMaterial" in selectors
                     or "stExpanderToggleIcon" in selectors
-                    or "material" in selectors.lower()
+                    or "span[class*=\"material\"]" in selectors
                 )
                 if not icon_selector:
                     unsafe_selectors.append(selectors)
