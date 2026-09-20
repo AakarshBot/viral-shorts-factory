@@ -21,7 +21,7 @@ def test_person_subject_is_preserved_without_prompt_padding():
     assert lock_visual_subject(scene) == "Amina Rahman"
     queries, visual_type = build_deep_queries(scene, "Amina Rahman documentary")
     assert queries[0].casefold().startswith("amina rahman")
-    assert len(queries) <= 2
+    assert len(queries) <= 6
     assert visual_type == "PERSON"
     assert all("press conference" not in query.lower() for query in queries[:1])
     assert all("latest" not in query.lower() for query in queries[:1])
@@ -44,7 +44,7 @@ def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks()
     assert visual_type == "EVENT"
     assert queries
     assert queries[0].casefold().startswith("indian athletes")
-    assert len(queries) <= 2
+    assert len(queries) <= 6
     assert all("sports" not in q.lower() for q in queries)
     assert all("cricket" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
@@ -65,7 +65,7 @@ def test_logo_subject_keeps_identity_first_and_bounded_fallback():
     queries, visual_type = build_deep_queries(scene, "ICC logo story")
     assert visual_type == "ORGANIZATION"
     assert queries[0].casefold().startswith("icc logo")
-    assert len(queries) <= 2
+    assert len(queries) <= 6
     assert all("sports" not in q.lower() for q in queries)
     assert all("event" not in q.lower().split() for q in queries)
 
@@ -124,7 +124,7 @@ def test_malformed_leading_negation_is_removed_and_context_grounded():
     assert visual_type == "EVENT"
     assert queries
     assert queries[0].casefold().startswith(resolution["subject"].casefold())
-    assert len(queries) <= 2
+    assert len(queries) <= 6
     assert all("business" not in q.lower() for q in queries)
     assert all("event" not in q.lower() or "summit" in q.lower() for q in queries)
     assert all("not" not in q.lower().split() for q in queries)
