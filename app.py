@@ -84,7 +84,7 @@ st.markdown("""<style>
   --danger:#b64d42;--shadow:0 10px 30px rgba(69,49,31,.07);--shadow-lg:0 18px 48px rgba(69,49,31,.11);
 }
 html,body,[data-testid="stAppViewContainer"]{background:var(--bg);color:var(--text)}
-[data-testid="stHeader"]{background:rgba(243,245,248,.94);border-bottom:1px solid rgba(207,213,223,.7)}
+[data-testid="stHeader"]{background:transparent;border-bottom:none}
 .block-container{max-width:1380px;padding-top:1.45rem;padding-bottom:3rem}
 section[data-testid="stSidebar"]{background:#11151d;border-right:1px solid #252b35;color:#eef2f7}
 section[data-testid="stSidebar"]>div{padding-top:1.15rem}
@@ -1161,6 +1161,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             crop_path = str(crop_asset.get("path") or "").strip()
             if crop_path and os.path.isfile(crop_path):
                 from PIL import Image
+                crop_source_path = str(crop_asset.get("original_path") or crop_path).strip()
+                if crop_source_path and os.path.isfile(crop_source_path):
+                    crop_path = crop_source_path
                 crop_image = Image.open(crop_path).convert("RGB")
                 stored_box = crop_asset.get("crop_box") or {}
                 default_coords = None
@@ -1178,13 +1181,20 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                 else:
                     crop_left, crop_right = st.columns([1.2, 0.8], gap="medium")
                     with crop_left:
+                        crop_mode = st.selectbox(
+                            "Crop shape",
+                            ["Shorts 9:16", "Rectangle (free)"],
+                            key=f"visual_pool_crop_mode_{run_id}_{crop_target[:12]}",
+                            label_visibility="collapsed",
+                        )
+                        crop_is_shorts = crop_mode == "Shorts 9:16"
                         crop_result = st_cropper(
                             img_file=crop_image,
                             realtime_update=True,
                             default_coords=default_coords,
                             box_color="#177fd1",
-                            aspect_ratio=(9, 16),
-                            box_algorithm=_recommended_shorts_crop_box,
+                            aspect_ratio=(9, 16) if crop_is_shorts else None,
+                            box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
                             return_type="both",
                             key=f"visual_pool_cropper_{run_id}_{crop_target[:12]}",
                             should_resize_image=False,
@@ -1198,7 +1208,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         st.markdown("**Shorts preview**")
                         if crop_preview is not None:
                             st.image(crop_preview, width=240)
-                        st.caption("Drag and resize the 9:16 frame. No AI or provider call.")
+                        st.caption("Drag and resize the crop frame. The full original image stays available for another crop.")
                     action_cols = st.columns([1, 1])
                     with action_cols[0]:
                         if isinstance(crop_box, dict) and crop_box and st.button(
@@ -1259,13 +1269,20 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             except (TypeError, ValueError):
                                 default_coords = None
                             if st_cropper is not None:
+                                crop_mode = st.selectbox(
+                                    "Crop shape",
+                                    ["Shorts 9:16", "Rectangle (free)"],
+                                    key=f"chosen_crop_mode_{run_id}_{item['index']}",
+                                    label_visibility="collapsed",
+                                )
+                                crop_is_shorts = crop_mode == "Shorts 9:16"
                                 crop_result = st_cropper(
                                     img_file=original_image,
                                     realtime_update=True,
                                     default_coords=default_coords,
                                     box_color="#177fd1",
-                                    aspect_ratio=(9, 16),
-                                    box_algorithm=_recommended_shorts_crop_box,
+                                    aspect_ratio=(9, 16) if crop_is_shorts else None,
+                                    box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
                                     return_type="both",
                                     key=f"chosen_cropper_{run_id}_{item['index']}",
                                     should_resize_image=False,
