@@ -1485,6 +1485,9 @@ class DashboardWorkflowController(WorkflowController):
             old_path = str(old_layer.get("image") or "").strip() if isinstance(old_layer, dict) else ""
             old_query = str(old_layer.get("manual_visual_query") or "").strip() if isinstance(old_layer, dict) else ""
 
+            if isinstance(old_layer, dict):
+                self._preserve_replaced_visual_in_pool(old_layer, old_path)
+
             if format_mode == "top5" and index == 1:
                 rendered = visual_runtime._render_image_slide(
                     bot,
@@ -1564,6 +1567,56 @@ class DashboardWorkflowController(WorkflowController):
 
         except Exception as exc:
             return False, f"Replacement search failed: {type(exc).__name__}: {exc}"
+
+    def _preserve_replaced_visual_in_pool(self, layer: dict[str, Any], old_path: str) -> None:
+        """Keep the exact previously-chosen visual visible in the shared review pool."""
+        path = str(old_path or "").strip()
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            from visual_retrieval_runtime import _hash_image
+            with open(path, "rb") as fh:
+                image_hash = _hash_image(self.bot, fh.read())
+        except Exception:
+            image_hash = ""
+        if not image_hash:
+            return
+        if any(
+            isinstance(item, dict) and str(item.get("hash") or "").strip() == image_hash
+            for item in self._visual_pool
+        ):
+            return
+        if any(
+            isinstance(item, dict) and str(item.get("hash") or "").strip() == image_hash
+            for group in self._visual_search_groups
+            for item in (group.get("items") or [])
+        ):
+            return
+
+        self._visual_pool.append(
+            {
+                "path": path,
+                "original_path": str(layer.get("visual_original_path") or "").strip() or path,
+                "subject": str(
+                    layer.get("related_subject")
+                    or layer.get("primary_entity")
+                    or ""
+                ).strip(),
+                "hash": image_hash,
+                "source": str(layer.get("source_type") or "visual").strip(),
+                "query": str(
+                    layer.get("visual_query_used")
+                    or layer.get("manual_visual_query")
+                    or ""
+                ).strip(),
+                "visual_type": str(layer.get("visual_type") or "").strip().upper(),
+                "visual_genre": str(layer.get("visual_genre") or "").strip().upper(),
+                "provenance": dict(layer.get("asset_provenance") or {}),
+                "status": "previously-selected",
+                "used": False,
+                "assigned_slide": 0,
+                "preserved_from_replacement": True,
+            }
 
     def replace_visual_from_bank(self, visual_index: int, bank_index: int) -> tuple[bool, str]:
         """Replace one reviewed visual with a previously entity-verified bank image."""
@@ -1662,6 +1715,7 @@ class DashboardWorkflowController(WorkflowController):
                 if str(item.get("path") or "").strip() != selected_path
             ]
             old_original_path = str(layer.get("visual_original_path") or "").strip() or old_path
+            self._preserve_replaced_visual_in_pool(layer, old_path)
             if (
                 old_original_path
                 and os.path.isfile(old_original_path)
@@ -1854,6 +1908,11 @@ class DashboardWorkflowController(WorkflowController):
                 f"scene_{index}_manual_crop_{attempt}.jpg",
             )
             rendered.convert("RGBA").convert("RGB").save(output_path, "JPEG", quality=95)
+
+            cropped_pool_layer = dict(layer)
+            cropped_pool_layer["visual_query_used"] = "manual-crop"
+            cropped_pool_layer["visual_original_path"] = output_path
+            self._preserve_replaced_visual_in_pool(cropped_pool_layer, output_path)
 
             new_layer = dict(layer)
             new_layer.update(
