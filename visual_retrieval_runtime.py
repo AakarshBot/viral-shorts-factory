@@ -780,7 +780,7 @@ def _manual_candidate_from_data(
     visual_genre: str,
     bot,
     seen_hashes: set[str],
-    seen_image_urls: set[str]
+    seen_image_urls: set[str],
     rejected_counts: dict[str, int],
 ) -> dict | None:
     normalized = _as_image_bytes(data)
@@ -800,7 +800,6 @@ def _manual_candidate_from_data(
 
     image_hash = _hash_image(bot, normalized)
     source_image_url = _source_image_key(data)
-    signature = _candidate_signature(normalized)
     candidate = {
         "data": data,
         "bytes": normalized,
@@ -929,7 +928,6 @@ def collect_manual_visual_pool(
                             "search_text": _candidate_search_text(candidate["data"]),
                             "source_page_url": str(candidate.get("source_page_url") or "").strip(),
                             "source_image_url": str(candidate.get("source_image_url") or "").strip(),
-                            "source_asset_key": str(candidate.get("source_asset_key") or "").strip(),
                             "status": status,
                             "manual_query_index": int(query_index or 0),
                             "pool_origin": str(source_label or "manual"),
@@ -1146,7 +1144,6 @@ def collect_manual_visual_pool(
                             bot,
                             local_hashes,
                             local_urls,
-                            local_asset_keys,
                             rejected_counts,
                         )
                         if candidate is not None:
@@ -1219,7 +1216,6 @@ def collect_manual_visual_search(
         for value in (used_source_image_urls or set())
         if str(value or "").strip()
     }
-    seen_asset_keys: set[str] = set()
     rejected_counts = {"monetization": 0, "invalid_image": 0, "duplicate": 0}
     candidates: list[dict] = []
     search_cache = _visual_search_cache(bot)
@@ -1271,7 +1267,7 @@ def collect_manual_visual_search(
                 bot,
                 seen_hashes,
                 seen_urls,
-                seen_asset_keys,
+                set(),
                 rejected_counts,
             )
             if candidate is None:
@@ -1290,7 +1286,6 @@ def collect_manual_visual_search(
             "subject": exact_query,
             "bytes": item["bytes"],
             "hash": item["hash"],
-            "signature": item.get("signature", ""),
             "source": item["source"],
             "query": exact_query,
             "visual_type": item["visual_type"],
