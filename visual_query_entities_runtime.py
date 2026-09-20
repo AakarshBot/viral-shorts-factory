@@ -220,6 +220,7 @@ def search_slide_visual(
             "visual_type",
             "visual_genre",
             "visual_selected_hash",
+            "visual_original_path",
             "visual_provider_query_used",
             "visual_qc_blocked",
             "visual_qc_block_reason",
