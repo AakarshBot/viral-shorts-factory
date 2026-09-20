@@ -122,3 +122,47 @@ def test_discovery_portfolio_rejects_weak_exploratory_padding():
 
     assert story_ranker._discovery_portfolio_pass(story) is False
     assert story["discovery_rejection"] == "Weak editorial importance"
+
+
+
+def test_reddit_is_used_as_interest_signal_not_story_source(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(story_ranker, "_gnews_items", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(story_ranker, "_rss_items", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(story_ranker, "_official_feed_items", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        story_ranker,
+        "_reddit_items",
+        lambda *_args, **_kwargs: [{
+            "title": "Interesting NASA launch discussion",
+            "url": "https://reddit.com/r/worldnews/post",
+            "source": "Reddit r/worldnews",
+            "source_name": "Reddit r/worldnews",
+            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "genre": "national_global_affairs",
+            "collection_source": "reddit",
+        }],
+    )
+
+    def fake_event_pool(**kwargs):
+        captured["articles"] = list(kwargs.get("existing_articles") or [])
+        return {
+            "articles": list(kwargs.get("existing_articles") or []),
+            "events": list(kwargs.get("existing_articles") or []),
+            "article_count": len(kwargs.get("existing_articles") or []),
+            "event_count": len(kwargs.get("existing_articles") or []),
+            "gdelt_article_count": 0,
+        }
+
+    monkeypatch.setattr(story_ranker, "discover_event_pool", fake_event_pool)
+
+    events, social_titles = story_ranker.collect_high_recall_stories(
+        object(),
+        "national_global_affairs",
+        {"gnews_q": "world news", "rss_url": ""},
+    )
+
+    assert social_titles == ["Interesting NASA launch discussion"]
+    assert captured["articles"] == []
+    assert events == []
