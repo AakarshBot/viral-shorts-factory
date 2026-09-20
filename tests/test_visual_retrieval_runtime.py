@@ -992,8 +992,9 @@ def test_retrieval_uses_multiple_candidates_from_one_provider_before_next_query(
     assert used_ai is False
     assert source == "visual-rescue"
     assert calls == [
+        ("ProviderOne", "India match action"),
+        ("ProviderOne", "India match playing"),
         ("ProviderOne", "India match"),
-        ("ProviderOne", "India match update"),
     ]
 
 
