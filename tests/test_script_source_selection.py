@@ -79,3 +79,32 @@ def test_validate_script_accepts_complete_story_without_numeric_limits():
         "regular",
     )
     assert valid is True, reason
+
+
+def test_writer_contract_has_no_numeric_scene_or_word_limits():
+    from pathlib import Path
+    import ultimate_bot
+
+    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
+    assert "Use as many scenes as the story genuinely needs" in source
+    assert "there is no target scene count" not in source.lower()
+    assert "target scene count" not in source.lower()
+    assert "between 8 and 30 words" not in source.lower()
+    assert "strictly between 5 and 8 scenes" not in source.lower()
+
+
+def test_writer_contract_explicitly_bans_retention_bait():
+    from pathlib import Path
+    import ultimate_bot
+
+    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8").lower()
+    for phrase in (
+        "wait till the end",
+        "wait until the end",
+        "wait for it",
+        "stay tuned",
+        "you won't believe",
+        "what happens next",
+        "don't go anywhere",
+    ):
+        assert phrase in source
