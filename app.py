@@ -949,7 +949,12 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     )
 
     def crop_popover(asset: dict, key_suffix: str, apply_crop) -> None:
-        popover = st.popover("Crop", width="content", key=f"{key_suffix}_popover")
+        popover = st.popover(
+            "Crop",
+            width="content",
+            key=f"{key_suffix}_popover",
+            on_change="rerun",
+        )
         if not popover.open:
             return
 
@@ -1016,7 +1021,12 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
             return
 
-        popover = st.popover("Use", width="content", key=f"{key_suffix}_popover")
+        popover = st.popover(
+            "Use",
+            width="content",
+            key=f"{key_suffix}_popover",
+            on_change="rerun",
+        )
         if not popover.open:
             return
 
