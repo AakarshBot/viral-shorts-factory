@@ -1190,15 +1190,14 @@ def render_visual_details(snapshot: Dict[str, Any]) -> None:
     if not items:
         return
     with st.expander("Visual sourcing details", expanded=False):
+        st.caption("Provider, manual-search and rescue details are kept here so the main review stays visual.")
         for item in items:
             details = [f"Visual {item['index']}: {item['visual_type']} · {item['source']}"]
             if item.get("manual_query"):
                 details.append(f"Manual query: {item['manual_query']}")
             if item.get("rescue_reason"):
                 details.append(f"Rescue: {item['rescue_reason']}")
-            st.markdown(" — ".join(details))
-
-
+            st.caption(" — ".join(details))
 
 def render_powershell_output(lines: list[str]) -> None:
     with st.popover(
@@ -1241,11 +1240,10 @@ def render_logs(snapshot: Dict[str, Any]) -> None:
     logs = snapshot.get("dashboard_logs") or []
     if not logs:
         return
-    with st.expander("Technical activity summary", expanded=False):
+    with st.expander("Technical details", expanded=False):
         for index, message in enumerate(logs):
             prefix = "Latest" if index == len(logs) - 1 else "Done"
-            st.markdown(f"**{prefix}:** {message}")
-
+            st.caption(f"{prefix} · {message}")
 
 def render_generated_outputs(snapshot: Dict[str, Any]) -> None:
     """Show a compact output dashboard without duplicating dedicated review sections."""
@@ -1943,31 +1941,29 @@ def main() -> None:
 
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
+    workspace = render_workspace_navigation()
 
-    render_header("Live Factory")
-    config = render_sidebar_controls()
-    render_live_factory(config, controller)
-
-    with st.sidebar.expander("Engineering & analytics", expanded=False):
-        utility = st.selectbox(
-            "Utility",
-            ["None", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory", "Final Branding Preview"],
-            key="dashboard_utility",
-        )
-    if utility == "Channel Statistics":
+    if workspace == "Live Factory":
+        config = render_sidebar_controls()
+        render_header("Live Factory")
+        render_live_factory(config, controller)
+    elif workspace == "Channel Statistics":
+        render_header("Channel Statistics")
         render_channel_statistics()
-    elif utility == "Run Offline Diagnostics":
+    elif workspace == "Run Offline Diagnostics":
+        render_header("Run Offline Diagnostics")
         render_offline_page()
-    elif utility == "Demo Factory":
+    elif workspace == "Demo Factory":
+        render_header("Demo Factory")
         render_demo_page()
-    elif utility == "Final Branding Preview":
+    elif workspace == "Final Branding Preview":
+        render_header("Final Branding Preview")
         render_final_branding_preview()
 
-    st.divider()
-    st.caption(
-        "Viral Shorts Factory · dashboard controls production, visual approval and upload visibility; "
-        "the underlying factory generation logic remains the production source of truth."
+    st.markdown(
+        "<div class='dashboard-footer'>Viral Shorts Factory · dashboard controls the human review gates; "
+        "the underlying factory generation logic remains the production source of truth.</div>",
+        unsafe_allow_html=True,
     )
-
 
 main()
