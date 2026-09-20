@@ -1108,3 +1108,15 @@ def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_p
     snapshot = controller.snapshot()
     assert len(snapshot["visual_search_groups"]) == 1
     assert len(snapshot["visual_search_groups"][0]["items"]) == 5
+
+
+
+def test_dashboard_has_collapsible_live_powershell_widget():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert "def render_powershell_widget(snapshot: Dict[str, Any]) -> None:" in source
+    assert 'with st.sidebar:' in source
+    assert 'st.expander(f"🖥️ PowerShell · {status}"' in source
+    assert 'st.code("\\n".join(visible), language="powershell")' in source
+    assert 'render_powershell_widget(live_snapshot)' in source
+    assert 'render_powershell_output(' not in source
