@@ -750,7 +750,9 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
 
 def test_dashboard_ai_discovery_uses_shared_broad_radar():
     source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
-    assert 'collect_high_recall_stories(bot, "", {}, broad_discovery=True)' in source
+    assert "collect_high_recall_stories(" in source
+    assert "custom_gnews_q=requested_topic or None" in source
+    assert "broad_discovery=True" in source
     assert "_cheap_filter(raw, max_items=120, max_age_hours=48)" in source
     assert "_infer_discovery_category(item)" in source
     assert "diversity_rerank(ranked, max_items=max_candidates)" in source
