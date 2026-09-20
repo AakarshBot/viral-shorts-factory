@@ -5,9 +5,9 @@ identity is mandatory; scene evidence is ranked for searchable visual anchors
 such as named organizations/events, concrete actions, and photographable
 contexts. Manual queries remain exact and authoritative.
 
-Retrieval is intentionally bounded to one primary query plus the exact factual
-identity fallback. Query construction never invents facts or fan-outs into a
-blind ladder.
+Retrieval is intentionally bounded to one primary query plus up to four
+evidence-backed refinements and the exact factual identity fallback. Query
+construction never invents facts or fan-outs into a blind ladder.
 """
 from __future__ import annotations
 
@@ -283,7 +283,7 @@ def _genre_hint_anchor(genre: str, scene_terms: list[str]) -> str:
 
 
 def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSearchIntent:
-    """Resolve one compact visual query plus one exact-identity fallback."""
+    """Resolve one compact visual query plus a bounded identity-preserving fallback ladder."""
     scene = scene if isinstance(scene, dict) else {}
     manual = _clean(scene.get("manual_visual_query", ""))
     base = dict(scene)
