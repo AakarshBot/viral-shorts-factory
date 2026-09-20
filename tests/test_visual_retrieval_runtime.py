@@ -559,7 +559,7 @@ def test_verified_non_action_cache_reuses_without_gemini_and_restores_provenance
     def fail_qa(*_args, **_kwargs):
         raise AssertionError("Gemini should not be called for a verified cache hit")
 
-    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", fail_qa)
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fail_qa)
 
     scene = {
         "primary_entity": "Northstar Labs",
