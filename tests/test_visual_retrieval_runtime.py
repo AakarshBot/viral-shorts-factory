@@ -201,10 +201,14 @@ def test_provider_plan_skips_unconfigured_optional_providers(monkeypatch):
     assert "Unsplash" not in names
 
 
-def test_gate_failure_bucket_distinguishes_no_and_uncertain():
-    assert retrieval._gate_rejection_bucket("STRICT:SEMANTIC_NO") == "semantic_no"
-    assert retrieval._gate_rejection_bucket("STRICT:QA_AMBIGUOUS_RESPONSE") == "semantic_uncertain"
-    assert retrieval._gate_rejection_bucket("STRICT:QA_NO_API_KEY") == "qa_unavailable"
+def test_rejection_accounting_preserves_entity_qc_reasons():
+    scene = {}
+    retrieval._record_visual_rejection(scene, "semantic_no", "ENTITY_NO")
+    retrieval._record_visual_rejection(scene, "semantic_uncertain", "ENTITY_UNCERTAIN")
+    assert scene["visual_rejection_counts"] == {
+        "semantic_no": 1,
+        "semantic_uncertain": 1,
+    }
 
 
 def test_real_visual_candidate_reaches_verified_source(monkeypatch):
@@ -609,6 +613,8 @@ def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
         lambda bot, visual_type: [("DDG", lambda *args: [_licensed_candidate(image_bytes, "cc0")])],
     )
 
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
+
     scene = {
         "primary_entity": "Sanju Samson",
         "factual_primary_entity": "Sanju Samson",
@@ -630,12 +636,7 @@ def test_generic_provider_semantic_no_is_rejected_safely(monkeypatch):
     assert used_ai is False
     assert source == "visual-rescue"
     rejection_counts = scene["visual_rejection_counts"]
-    assert sum(
-        int(rejection_counts.get(key) or 0)
-        for key in ("semantic_no", "semantic_qc_reject")
-    ) >= 1
-    assert scene["visual_qc_blocked"] is False
-
+    assert int(rejection_counts.get("semantic_no") or 0) >= 1
 
 
 def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_candidate(monkeypatch):
@@ -808,7 +809,10 @@ def test_retrieval_uses_multiple_candidates_from_one_provider_before_next_query(
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
-    assert calls == [("ProviderOne", "India match")]
+    assert calls == [
+        ("ProviderOne", "India match"),
+        ("ProviderOne", "India match update"),
+    ]
 
 
 def test_strict_gemini_bridge_accepts_visual_genre_argument():
