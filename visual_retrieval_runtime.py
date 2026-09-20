@@ -1012,76 +1012,129 @@ def collect_manual_visual_pool(
         except TypeError:
             source_plan = _source_plan(bot, visual_type)
 
+        team_context = bool(
+            re.search(r"\bnational\s+team\b", exact_query, flags=re.IGNORECASE)
+            or re.search(r"\b(?:xi|squad)\b", exact_query, flags=re.IGNORECASE)
+        )
+        query_tokens = {
+            token.casefold()
+            for token in re.findall(r"[\w-]+", exact_query, flags=re.UNICODE)
+        }
+        sports_context = bool(query_tokens & _SPORTS_CONTEXT_TERMS)
+        branding_or_portrait = visual_genre in {"TEAM_BRANDING", "ORG_BRANDING", "PERSON_PORTRAIT"}
+        action_search = (
+            visual_genre in ACTION_VISUAL_GENRES
+            or ((sports_context or team_context) and not branding_or_portrait)
+        )
+
+        if action_search:
+            action_provider_order = {
+                "serpapi": -1,
+                "openverse": 0,
+                "pexels": 1,
+                "pixabay": 2,
+                "commons": 3,
+                "unsplash": 4,
+            }
+            source_plan = sorted(
+                source_plan,
+                key=lambda item: (
+                    action_provider_order.get(str(item[0] or "").strip().casefold(), 99),
+                    str(item[0] or "").casefold(),
+                ),
+            )
+
+        search_variants = [exact_query]
+        if action_search:
+            for suffix in _ACTION_SEARCH_SUFFIXES.get(
+                visual_genre,
+                ("action", "match action", "celebration"),
+            )[:2]:
+                variant = f"{exact_query} {suffix}".strip()
+                if variant.casefold() != exact_query.casefold():
+                    search_variants.append(variant)
+
         target = _manual_query_target(query_index)
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
-        source_attempts = 0
         qa_requests = 0
         verified_for_query = 0
+        query_before_assets = len(assets)
 
-        for source_name, fetcher in source_plan:
-            if not callable(fetcher) or source_attempts >= 3 or verified_for_query >= target:
+        for variant_index, search_variant in enumerate(search_variants, 1):
+            if len(assets) >= requested_max or verified_for_query >= target:
                 break
-            source_key = str(source_name or "").strip().casefold()
-            if not source_key:
-                continue
-            cache_key = ("query", source_key, exact_query.casefold())
-            raw_data = search_cache.get(cache_key)
-            if raw_data is None:
-                try:
-                    raw_data = runtime._call_fetcher_with_timeout(
-                        fetcher,
-                        (
-                            exact_query,
-                            fetch_used_urls,
-                            exact_query,
-                            video_title,
-                            visual_type,
-                            visual_genre,
-                            True,
-                        ),
-                        str(source_name),
-                        exact_query,
-                    )
-                except Exception as exc:
-                    print(
-                        f"   [Manual Visual Pool] {source_name} failed safely: "
-                        f"{type(exc).__name__}: {exc}",
-                        flush=True,
-                    )
-                    raw_data = []
-                search_cache[cache_key] = list(_raw_items(raw_data))
-            source_attempts += 1
 
-            for data in search_cache.get(cache_key) or []:
-                candidate = _manual_candidate_from_data(
-                    str(source_name),
-                    data,
-                    exact_query,
-                    visual_type,
-                    visual_genre,
-                    bot,
-                    query_seen_hashes,
-                    query_seen_urls,
-                    rejected_counts,
-                )
-                if candidate is None:
+            variant_candidates: list[dict] = []
+            for source_name, fetcher in source_plan[:2]:
+                if not callable(fetcher):
                     continue
-                query_candidates.append(candidate)
-                if len(query_candidates) >= target * 2:
+                source_key = str(source_name or "").strip().casefold()
+                if not source_key:
+                    continue
+                cache_key = ("query", source_key, search_variant.casefold())
+                raw_data = search_cache.get(cache_key)
+                if raw_data is None:
+                    try:
+                        raw_data = runtime._call_fetcher_with_timeout(
+                            fetcher,
+                            (
+                                search_variant,
+                                fetch_used_urls,
+                                search_variant,
+                                video_title,
+                                visual_type,
+                                visual_genre,
+                                True,
+                            ),
+                            str(source_name),
+                            search_variant,
+                        )
+                    except Exception as exc:
+                        print(
+                            f"   [Manual Visual Pool] {source_name} failed safely: "
+                            f"{type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+                        raw_data = []
+                    search_cache[cache_key] = list(_raw_items(raw_data))
+
+                for data in search_cache.get(cache_key) or []:
+                    candidate = _manual_candidate_from_data(
+                        str(source_name),
+                        data,
+                        search_variant,
+                        visual_type,
+                        visual_genre,
+                        bot,
+                        query_seen_hashes,
+                        query_seen_urls,
+                        rejected_counts,
+                    )
+                    if candidate is None:
+                        continue
+                    candidate["search_variant_index"] = variant_index
+                    candidate["action_search"] = action_search
+                    variant_candidates.append(candidate)
+                    if len(variant_candidates) >= target * 2:
+                        break
+
+                if len(variant_candidates) >= target * 2:
                     break
 
-            if not query_candidates:
+            if not variant_candidates:
                 continue
 
-            # Verify the strongest current candidates before paying for another source.
+            query_candidates.extend(variant_candidates)
             query_candidates.sort(
                 key=lambda item: (
                     -float(item.get("priority") or 0.0),
                     str(item.get("source") or "").casefold(),
+                    int(item.get("search_variant_index") or 1),
                 )
             )
+
             before = len(assets)
             added, requests_made = _verify(
                 query_candidates,
@@ -1091,14 +1144,27 @@ def collect_manual_visual_pool(
                 f"manual:{query_index}",
             )
             qa_requests += requests_made
-            verified_for_query = len(assets) - before
+            verified_for_query = len(assets) - query_before_assets
+            if verified_for_query >= target:
+                break
 
-            if verified_for_query < target and source_attempts < 3:
-                continue
-            break
+            # The accepted candidates have already been folded into the run-wide
+            # dedupe set by _manual_candidate_from_data. Keep only the remaining
+            # unverified candidates for the next action variant.
+            if len(assets) > before:
+                query_candidates = [
+                    item
+                    for item in query_candidates
+                    if str(item.get("hash") or "").strip()
+                    not in {
+                        str(asset.get("hash") or "").strip()
+                        for asset in assets
+                        if int(asset.get("manual_query_index") or 0) == query_index
+                    }
+                ]
 
-        # Carry forward the actual accepted identity-approved candidates into the
-        # run-wide dedupe sets. Multiple distinct images from one article are allowed.
+        verified_for_query = len(assets) - query_before_assets
+
         for asset in assets:
             if int(asset.get("manual_query_index") or 0) != query_index:
                 continue
