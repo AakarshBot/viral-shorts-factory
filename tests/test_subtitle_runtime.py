@@ -53,3 +53,5 @@ def test_array_like_caption_value_is_cleaned():
     from subtitle_runtime import _clean_word
 
     assert _clean_word(ArrayLike()) == "Hello world"
+
+    assert _clean_word("Lead _arrow_right follow") == "Lead follow"
