@@ -18,10 +18,11 @@ def test_default_provider_plan_excludes_unlicensed_sources(monkeypatch):
     assert "news_source" not in names
 
 
-def test_unlicensed_provider_plan_is_explicit_opt_in(monkeypatch):
+def test_unlicensed_provider_is_not_part_of_active_plan(monkeypatch):
     monkeypatch.setenv("ALLOW_UNLICENSED_VISUALS", "true")
     names = {name.casefold() for name, _fetcher in build_raw_source_plan("GENERAL_CONTEXT", "GENERAL_CONTEXT")}
-    assert "ddg" in names
+    assert "ddg" not in names
+    assert "duckduckgo" not in names
 
 
 def test_open_license_allowlist_rejects_nc_and_nd():
