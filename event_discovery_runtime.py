@@ -101,6 +101,14 @@ def _tokens(value: object) -> set[str]:
     text = re.sub(r"[^a-z0-9%]+", " ", _clean(value).lower())
     return {token for token in text.split() if len(token) >= 3 and token not in STOPWORDS}
 
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else default
+    except (TypeError, ValueError):
+        return default
+
+
 
 def _token_overlap(left: object, right: object) -> float:
     a = _tokens(left)
@@ -412,6 +420,15 @@ def cluster_news_events(
         ]
         first_seen = min(published_times) if published_times else None
         latest_seen = max(published_times) if published_times else None
+        trend_queries = sorted({
+            str(item.get("trend_query") or "").strip()
+            for item in cluster
+            if str(item.get("trend_query") or "").strip()
+        })
+        trend_bonus = max(
+            (_safe_float(item.get("trend_bonus")) for item in cluster),
+            default=0.0,
+        )
         gdelt_count = sum(
             1 for item in cluster
             if _clean(item.get("collection_source")).lower() == "gdelt"
@@ -481,6 +498,8 @@ def cluster_news_events(
             "event_gdelt_article_count": gdelt_count,
             "event_non_gdelt_article_count": non_gdelt_count,
             "event_discovery_gap": bool(gdelt_count and not non_gdelt_count),
+            "trend_queries": trend_queries,
+            "trend_bonus": round(min(4.0, trend_bonus), 3),
         })
         events.append(representative)
 
@@ -506,7 +525,7 @@ def fetch_gdelt_articles(
     """Fetch one bounded supplemental GDELT pool without blocking discovery."""
     global _GDELT_FAILURE_UNTIL, _GDELT_FAILURE_LOGGED
 
-    query = _clean(query)
+    query = str(query or "").strip()[:600]
     if not query:
         return []
 
@@ -520,7 +539,7 @@ def fetch_gdelt_articles(
             params={
                 "query": query,
                 "mode": "artlist",
-                "maxrecords": max(1, min(100, int(max_records))),
+                "maxrecords": max(1, min(250, int(max_records))),
                 "timespan": timespan,
                 "sort": "datedesc",
                 "format": "json",
