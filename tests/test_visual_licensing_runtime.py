@@ -6,6 +6,8 @@ from visual_licensing_runtime import (
     is_allowed_license,
     normalize_license_code,
     provenance,
+    provenance_is_retainable,
+    provenance_status,
 )
 from visual_provider_boundary_runtime import build_raw_source_plan
 
@@ -23,6 +25,25 @@ def test_unlicensed_provider_is_not_part_of_active_plan(monkeypatch):
     names = {name.casefold() for name, _fetcher in build_raw_source_plan("GENERAL_CONTEXT", "GENERAL_CONTEXT")}
     assert "ddg" not in names
     assert "duckduckgo" not in names
+
+
+def test_unknown_provenance_is_retained_for_review_but_not_approved():
+    unknown = provenance("DDG", "https://example.test/image.jpg", "Unknown", "", "")
+    assert provenance_is_retainable(unknown) is True
+    assert provenance_status(unknown) == "provenance-review"
+    assert is_allowed_license(unknown["license"]) is False
+
+
+def test_explicitly_restrictive_provenance_is_not_retained():
+    restricted = provenance(
+        "Openverse",
+        "https://example.test/image.jpg",
+        "Example",
+        "CC BY-NC-SA 4.0",
+        "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+    )
+    assert provenance_is_retainable(restricted) is False
+    assert provenance_status(restricted) == "rights-restricted"
 
 
 def test_open_license_allowlist_rejects_nc_and_nd():
