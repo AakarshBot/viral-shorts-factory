@@ -1075,7 +1075,7 @@ class DashboardWorkflowController(WorkflowController):
         origin, position, asset = self._locate_visual_pool_asset(asset_hash)
         if asset is None:
             return False, "That image is no longer available."
-        source_path = str(asset.get("path") or "").strip()
+        source_path = str(asset.get("original_path") or asset.get("path") or "").strip()
         if not source_path or not os.path.isfile(source_path):
             return False, "That image is no longer available on the dashboard host."
 
@@ -1094,7 +1094,6 @@ class DashboardWorkflowController(WorkflowController):
             if width < 2 or height < 2 or left < 0 or top < 0 or right > source.width or bottom > source.height:
                 return False, "The selected crop area is outside the image."
             cropped = source.crop((left, top, right, bottom))
-            cropped = cropped.resize((1080, 1920), Image.Resampling.LANCZOS)
             crop_key = hashlib.sha1(f"{asset.get('hash','')}:{left}:{top}:{width}:{height}".encode("utf-8")).hexdigest()[:16]
             target_path = os.path.join(self.bot.ASSETS_DIR, f"visual_pool_crop_{crop_key}.jpg")
             cropped.save(target_path, "JPEG", quality=95)
@@ -1107,6 +1106,7 @@ class DashboardWorkflowController(WorkflowController):
             else:
                 group_index = int(str(origin).split(":", 1)[1])
                 live_item = self._visual_search_groups[group_index]["items"][position]
+            live_item["original_path"] = source_path
             live_item["path"] = target_path
             live_item["cropped"] = True
             live_item["crop_box"] = {
