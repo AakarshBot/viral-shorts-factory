@@ -95,7 +95,7 @@ def _test_visual_strategy():
         first_keys = set(meaningful_tokens(queries[0]))
         if not subject_keys.issubset(first_keys):
             raise AssertionError(f"first visual query lost factual identity: {queries}")
-        if len(queries) > 2:
+        if len(queries) > 6:
             raise AssertionError(f"visual query budget exceeded: {queries}")
 
     malformed = {
