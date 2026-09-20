@@ -45,16 +45,22 @@ def test_strict_fallback_uses_only_source_words():
     source = (
         "India announced a new policy today. The ministry said the measure will begin next month. "
         "Officials described the change as a response to recent developments. The first phase covers major cities. "
-        "The government said more details will be published before implementation."
+        "The government said more details will be published before implementation. Independent agencies are reviewing "
+        "the policy's expected administrative effects, while officials publish additional guidance for affected regions. "
+        "The latest documents describe how the change will be introduced and what agencies must prepare before implementation. "
+        "The decision remains subject to the published rules and the timetable already announced by the responsible ministry."
     )
-    result = strict_fallback({"title": "India announces new policy", "text": source}, genre_key="national_global_affairs")
+    result = strict_fallback(
+        {"title": "India announces new policy", "text": source},
+        genre_key="national_global_affairs",
+        format_mode="regular",
+    )
     assert result["fallback_mode"] == "strict_source_only"
-    assert len(result["script"]) == 5
+    assert 6 <= len(result["script"]) <= 8
+    assert result["editorial_angle"]
     for scene in result["script"]:
-        assert 8 <= len(scene["voiceover"].split()) <= 30
-        assert "nbsp" not in scene["voiceover"].lower()
+        assert 12 <= len(scene["voiceover"].split()) <= 48
         assert scene["scene_source"] == "validated_source_fallback"
-
 
 def test_strict_fallback_refuses_thin_source_instead_of_inventing_text():
     try:
@@ -69,12 +75,26 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
     bot = _Bot()
 
     def dirty_writer(story_data, language_cfg, genre_key, conn, format_mode):
+        base = (
+            "Officials explained the immediate implementation details and described how the new measure "
+            "will affect several regions while departments prepare for the rollout."
+        )
         return {
+            "editorial_angle": "The script explains the practical consequence and context beyond the headline.",
             "script": [
                 {
-                    "voiceover": "India&nbsp;announced <b>a new plan</b> today. https://example.com\u200b",
+                    "voiceover": (
+                        "India&nbsp;announced <b>a new plan</b> today. https://example.com​ "
+                        "Officials explained the immediate implementation details and described its effect on regions."
+                    ),
                     "primary_entity": "India&nbsp;",
                 }
+            ] + [
+                {
+                    "voiceover": base,
+                    "primary_entity": "India",
+                }
+                for _ in range(5)
             ]
         }
 
@@ -86,11 +106,10 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
     assert result["authoritative_narration"] is True
     assert result["integrity_version"]
     assert scene["narration_source"] == "validated_script"
-    assert scene["voiceover"] == "India announced a new plan today."
+    assert scene["voiceover"].startswith("India announced a new plan today.")
     assert "http" not in scene["voiceover"].lower()
     assert "<b>" not in scene["voiceover"].lower()
     assert "nbsp" not in scene["voiceover"].lower()
-
 
 def test_provider_garbage_falls_back_without_leaking_into_script():
     bot = _Bot()
@@ -109,16 +128,24 @@ def test_provider_garbage_falls_back_without_leaking_into_script():
     source = (
         "India announced a new policy today. The ministry said the measure will begin next month. "
         "Officials described the change as a response to recent developments. The first phase covers major cities. "
-        "The government said more details will be published before implementation."
+        "The government said more details will be published before implementation. Independent agencies are reviewing "
+        "the policy's expected administrative effects, while officials publish additional guidance for affected regions. "
+        "The latest documents describe how the change will be introduced and what agencies must prepare before implementation."
     )
-    result = bot.write_script({"title": "India announces new policy", "text": source}, {}, "news", None, "regular")
+    result = bot.write_script(
+        {"title": "India announces new policy", "text": source},
+        {},
+        "news",
+        None,
+        "regular",
+    )
 
     assert result["fallback_mode"] == "strict_source_only"
     assert result["authoritative_narration"] is True
     assert all("Groq" not in scene["voiceover"] for scene in result["script"])
     assert all("JSON schema" not in scene["voiceover"] for scene in result["script"])
     assert all(scene["narration_source"] == "validated_script" for scene in result["script"])
-
+    assert all(12 <= len(scene["voiceover"].split()) <= 48 for scene in result["script"])
 
 def test_content_density_marker_survives_integrity_wrapper_order():
     bot = _Bot()
