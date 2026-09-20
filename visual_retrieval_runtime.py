@@ -839,10 +839,18 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         bank_assets = list(deduped.values())[:MAX_ENTITY_BANK_PER_QUERY]
         seg["_verified_subject_assets"] = bank_assets
 
-        selected = bank_assets[0]
-        selected_hash = str(selected.get("hash") or "")
-        selected_bytes = selected.get("bytes")
-        if selected_bytes and selected_hash and selected_hash not in used_hashes:
+        selected = next(
+            (
+                asset
+                for asset in bank_assets
+                if str(asset.get("hash") or "").strip()
+                and str(asset.get("hash") or "").strip() not in used_hashes
+            ),
+            None,
+        )
+        selected_hash = str(selected.get("hash") or "").strip() if selected else ""
+        selected_bytes = selected.get("bytes") if selected else None
+        if selected_bytes and selected_hash:
             try:
                 cache_path = runtime.save_to_cache(
                     bot, selected_bytes, cache_entity, visual_type,
