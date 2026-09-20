@@ -400,7 +400,7 @@ def _article_url_is_plausible(story):
 
 def _title_is_story_like(title):
     """Reject navigation/section headlines that have no actual story shape."""
-    clean_title = re.sub(r"s+", " ", str(title or "").strip())
+    clean_title = re.sub(r"\s+", " ", str(title or "").strip())
     if not clean_title:
         return False
 
