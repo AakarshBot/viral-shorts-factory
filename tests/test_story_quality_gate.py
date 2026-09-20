@@ -103,12 +103,13 @@ def test_deduplicate_stage_removes_same_entity_same_action_repeats():
 
 def test_discovery_portfolio_rejects_weak_exploratory_padding():
     story = {
-        "title": "Generic current headline about a local update",
-        "url": "https://example.com/story/local-update",
+        "title": "Local council announces minor road update",
+        "url": "https://example.com/story/local-road-update",
         "source": "Example News",
-        "description": "A brief report with some details about the local update.",
-        "event_non_gdelt_count": 1,
-        "event_article_count": 1,
+        "description": "The local council announced a minor road update on Thursday, with officials describing the change as a routine adjustment to existing plans.",
+        "event_non_gdelt_count": 2,
+        "event_article_count": 2,
+        "event_source_count": 2,
         "candidate_score": 15.0,
         "discovery_dimensions": {
             "freshness": 5.0,
