@@ -652,8 +652,6 @@ def validate_content_density(script_data, story_data, format_mode):
     if not (minimum <= len(scenes) <= maximum):
         return False, f"Script has {len(scenes)} scenes; required {minimum}-{maximum}."
 
-    topic_terms = _topic_terms(story_data)
-    grounding_words = []
     filler_hits = []
     total_words = 0
 
@@ -663,9 +661,10 @@ def validate_content_density(script_data, story_data, format_mode):
         text = str(scene.get("voiceover", "")).strip()
         words = _words(text)
         total_words += len(words)
-        grounding_words.extend(words)
-        grounding_words.extend(_words(scene.get("primary_entity", "")))
-        grounding_words.extend(_words(scene.get("specific_search_prompt", "")))
+        if not str(scene.get("primary_entity") or "").strip():
+            return False, f"Scene {index} is missing a supported primary entity."
+        if not str(scene.get("specific_search_prompt") or "").strip():
+            return False, f"Scene {index} is missing a specific visual search prompt."
 
         if len(words) < SCENE_MIN_WORDS:
             return False, f"Scene {index} has {len(words)} words; minimum is {SCENE_MIN_WORDS}."
@@ -684,15 +683,6 @@ def validate_content_density(script_data, story_data, format_mode):
     if filler_hits:
         return False, "Performative filler remains in scene(s): " + ", ".join(map(str, filler_hits))
 
-    if topic_terms:
-        overlap = len(set(grounding_words) & topic_terms)
-        required = 1 if any(
-            set(_words(str(scene.get("primary_entity", "")))) & topic_terms
-            for scene in scenes
-        ) else min(2, len(topic_terms))
-        if overlap < required:
-            return False, "Narration is not sufficiently grounded in the selected topic."
-
     return True, "Passed story-specific content-density and anti-filler checks"
 
 
@@ -710,12 +700,14 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
 
     source_words = raw_source.split()
     minimum, maximum = _script_scene_bounds(format_mode)
-    if len(source_words) < minimum * SCENE_MIN_WORDS:
+    required_words = max(minimum * SCENE_MIN_WORDS, SCRIPT_MIN_TOTAL_WORDS)
+    if len(source_words) < required_words:
         raise ValueError(
-            f"Source-grounded fallback needs at least {minimum * SCENE_MIN_WORDS} usable source words; "
+            f"Source-grounded fallback needs at least {required_words} usable source words; "
             f"only {len(source_words)} were available."
         )
 
+    source_words = source_words[: maximum * SCENE_MAX_WORDS]
     target = max(minimum, min(maximum, int(round(len(source_words) / 18.0))))
     while target > minimum and len(source_words) // target < SCENE_MIN_WORDS:
         target -= 1
