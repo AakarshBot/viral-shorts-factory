@@ -1694,6 +1694,56 @@ def test_pexels_search_requests_requested_page(monkeypatch):
     assert requested["params"]["page"] == 3
 
 
+def test_commons_search_requests_requested_page(monkeypatch):
+    monkeypatch.setattr(provider_boundary, "_api_json", lambda *args, **kwargs: {
+        "query": {
+            "pages": {
+                "1": {
+                    "title": "File:Cricket.jpg",
+                    "imageinfo": [{
+                        "thumburl": "https://example.com/cricket.jpg",
+                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Cricket.jpg",
+                        "extmetadata": {
+                            "LicenseShortName": {"value": "CC BY 4.0"},
+                            "Artist": {"value": "Tester"},
+                            "LicenseUrl": {"value": "https://creativecommons.org/licenses/by/4.0/"},
+                        },
+                    }],
+                    "categories": [],
+                }
+            }
+        }
+    })
+    requested = {}
+
+    original = provider_boundary._api_json
+    def capture(url, *, params=None, headers=None):
+        requested["params"] = dict(params or {})
+        return original(url, params=params, headers=headers)
+
+    monkeypatch.setattr(provider_boundary, "_api_json", capture)
+
+    monkeypatch.setattr(
+        provider_boundary,
+        "_bounded_downloads",
+        lambda urls, used_urls, limit=provider_boundary.MAX_PROVIDER_CANDIDATES: [],
+    )
+
+    result = provider_boundary.fetch_commons_candidates(
+        "cricket team",
+        set(),
+        "cricket team",
+        "",
+        "ORGANIZATION",
+        "TEAM_ACTION",
+        True,
+        3,
+    )
+
+    assert result == []
+    assert requested["params"]["gsroffset"] == (3 - 1) * provider_boundary.MAX_PROVIDER_CANDIDATES
+
+
 def test_serpapi_recent_discovery_accepts_only_known_stock_hosts(monkeypatch, tmp_path):
     import image_sources_runtime as sources
 
