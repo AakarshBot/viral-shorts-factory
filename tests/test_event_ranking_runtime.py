@@ -199,21 +199,21 @@ def test_candidate_quality_floor_keeps_current_supported_topic():
     assert story_ranker._candidate_quality_pass(story) is True
 
 
-def test_discovery_portfolio_keeps_current_niche_topic_but_marks_it_exploratory():
+def test_discovery_portfolio_keeps_current_supported_topic():
     story = {
         "candidate_score": 11.5,
         "discovery_dimensions": {
             "freshness": 6.0,
             "event_momentum": 1.25,
-            "importance": 3.0,
-            "shorts_viability": 2.5,
+            "importance": 4.0,
+            "shorts_viability": 3.5,
             "corroboration": 2.0,
             "source_quality": 1.0,
         },
     }
 
     assert story_ranker._discovery_portfolio_pass(story) is True
-    assert story["discovery_tier"] == "exploratory"
+    assert story["discovery_tier"] == "production-ready"
 
 
 def test_discovery_portfolio_still_rejects_stale_low_signal_topic():
