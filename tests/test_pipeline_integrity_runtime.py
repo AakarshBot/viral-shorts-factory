@@ -48,7 +48,9 @@ def test_strict_fallback_uses_only_source_words():
         "The government said more details will be published before implementation. Independent agencies are reviewing "
         "the policy's expected administrative effects, while officials publish additional guidance for affected regions. "
         "The latest documents describe how the change will be introduced and what agencies must prepare before implementation. "
-        "The decision remains subject to the published rules and the timetable already announced by the responsible ministry."
+        "The decision remains subject to the published rules and the timetable already announced by the responsible ministry. "
+        "Implementation teams are expected to publish additional guidance and clarify responsibilities before the policy takes effect. "
+        "The current documents describe the immediate administrative process but do not establish any broader outcome beyond the published timetable."
     )
     result = strict_fallback(
         {"title": "India announces new policy", "text": source},
