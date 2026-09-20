@@ -93,37 +93,6 @@ def _sentences(text: str) -> list[str]:
     return result
 
 
-def _contiguous_chunks(text: str, target: int, minimum_words: int = 8, maximum_words: int = 30) -> list[str]:
-    """Partition source words contiguously; never add filler words."""
-    words = clean_narration(text).split()
-    if len(words) < target * minimum_words:
-        return []
-    target = max(1, target)
-    chunks = []
-    remaining = len(words)
-    cursor = 0
-    for index in range(target):
-        slots_left = target - index
-        ideal = max(minimum_words, min(maximum_words, round(remaining / slots_left)))
-        end = min(len(words), cursor + ideal)
-        if slots_left > 1:
-            max_end = len(words) - minimum_words * (slots_left - 1)
-            end = min(end, max_end)
-        chunk = " ".join(words[cursor:end]).strip()
-        if len(chunk.split()) < minimum_words:
-            return []
-        chunks.append(chunk)
-        cursor = end
-        remaining = len(words) - cursor
-    if cursor < len(words):
-        tail = " ".join(words[cursor:]).strip()
-        if len(chunks[-1].split()) + len(tail.split()) <= maximum_words:
-            chunks[-1] = f"{chunks[-1]} {tail}".strip()
-        else:
-            return []
-    return chunks
-
-
 def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode="regular"):
     """Delegate emergency script recovery to the canonical semantic fallback."""
     from script_runtime import _extractive_script_fallback
@@ -217,43 +186,12 @@ def _wrap_script_writer(bot):
         bot.run_robot.__globals__["write_script"] = guarded_write_script
 
 
-def _prepare_audio_handoff(script_data):
-    """Normalize the one known source-grounded scene-count repair handoff."""
-    if not isinstance(script_data, dict):
-        return script_data
-    if script_data.get("authoritative_narration") is True:
-        return script_data
-    if script_data.get("fallback_reason") != "scene_count_contract":
-        return script_data
-    candidate = dict(script_data)
-    scenes = candidate.get("script")
-    if not isinstance(scenes, list) or not scenes:
-        return script_data
-    normalized = []
-    for index, scene in enumerate(scenes, 1):
-        if not isinstance(scene, dict):
-            return script_data
-        voiceover = clean_narration(scene.get("voiceover", ""))
-        if not voiceover or is_noise(voiceover):
-            return script_data
-        copy = dict(scene)
-        copy["voiceover"] = voiceover
-        copy["scene_id"] = index
-        copy["narration_source"] = "validated_script"
-        normalized.append(copy)
-    candidate["script"] = normalized
-    candidate["authoritative_narration"] = True
-    candidate["integrity_version"] = VERSION
-    return candidate
-
-
 def _wrap_audio(bot):
     current = getattr(bot, "generate_voiceover_and_timestamps", None)
     if not callable(current) or getattr(current, "_pipeline_script_source_bound", False):
         return
 
     async def script_bound_audio(script_data, language_cfg):
-        script_data = _prepare_audio_handoff(script_data)
         scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
         if not isinstance(script_data, dict) or not script_data.get("authoritative_narration") is True:
             raise ValueError("Audio refused: narration must come from the validated generated script.")
