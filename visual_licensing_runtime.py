@@ -15,12 +15,13 @@ from typing import Any
 
 ALLOW_UNLICENSED_ENV = "ALLOW_UNLICENSED_VISUALS"
 UNLICENSED_PROVIDERS = {"ddg", "duckduckgo", "news_source", "article_source"}
-ALLOW_LISTED_OPEN_LICENSES = {"cc0", "pdm", "by", "by-sa"}
+ALLOW_LISTED_OPEN_LICENSES = {"cc0", "pdm", "by", "by-sa", "godl-india"}
 LICENSE_URLS = {
     "cc0": "https://creativecommons.org/publicdomain/zero/1.0/",
     "pdm": "https://creativecommons.org/publicdomain/mark/1.0/",
     "by": "https://creativecommons.org/licenses/by/4.0/",
     "by-sa": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "godl-india": "https://data.gov.in/sites/default/files/Gazette_Notification_OGDL.pdf",
 }
 PROVIDER_DEFAULTS = {
     "pexels": ("Pexels", "Pexels License", "https://www.pexels.com/license/"),
@@ -47,6 +48,8 @@ def normalize_license_code(value: Any) -> str:
     if text.startswith("cc-"):
         text = text[3:]
     text = re.sub(r"-[0-9]+(?:-[0-9]+)?$", "", text)
+    if text in {"godl", "government-open-data-license-india"}:
+        return "godl-india"
     return text
 
 
@@ -126,7 +129,7 @@ def provenance_is_usable(record: dict[str, Any]) -> bool:
 
 def attribution_required(record: dict[str, Any]) -> bool:
     code = normalize_license_code(record.get("license"))
-    return code in {"by", "by-sa"}
+    return code in {"by", "by-sa", "godl-india"}
 
 
 def append_image_credits(description: str, records: list[dict[str, Any]], max_bytes: int = 5000) -> str:
