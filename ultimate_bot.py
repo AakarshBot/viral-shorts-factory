@@ -550,7 +550,7 @@ def fetch_trending_topics(target="india", query_filter=None):
     if query_filter:
         terms = [
             token.strip()
-            for token in re.split(r"\\s+(?:OR|AND)\\s+", str(query_filter), flags=re.IGNORECASE)
+            for token in re.split(r"\s+(?:OR|AND)\s+", str(query_filter), flags=re.IGNORECASE)
             if token.strip()
         ]
         filtered = [
