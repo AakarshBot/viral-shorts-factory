@@ -106,6 +106,52 @@ def test_license_is_checked_before_semantic_qa(monkeypatch):
     assert FakeRuntime.qa_calls == 0
 
 
+def test_provenance_review_candidate_is_kept_for_dashboard_pool():
+    image_bytes = _jpeg_bytes()
+    candidate = {
+        "bytes": image_bytes,
+        "provenance": {
+            "provider": "DDG",
+            "url": "https://example.test/image.jpg",
+            "author": "Example",
+            "license": "",
+            "license_url": "",
+        },
+    }
+    counts = {}
+    built = retrieval._manual_candidate_from_data(
+        "DDG",
+        candidate,
+        "Example person",
+        "PERSON",
+        "PERSON_PORTRAIT",
+        object(),
+        set(),
+        set(),
+        counts,
+    )
+    assert built is not None
+    assert built["provenance_status"] == "provenance-review"
+    assert counts.get("monetization", 0) == 0
+
+
+def test_provenance_review_candidate_is_not_auto_selected():
+    image_bytes = _jpeg_bytes()
+    review = {
+        "hash": "review-only",
+        "status": "entity-verified",
+        "provenance_status": "provenance-review",
+        "priority": 100,
+        "query": "Example person",
+        "source": "DDG",
+    }
+    assert retrieval.select_manual_visual_candidate(
+        [review],
+        {"primary_entity": "Example person", "visual_genre": "PERSON_PORTRAIT"},
+        set(),
+    ) is None
+
+
 def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
     image_bytes = _jpeg_bytes()
 
