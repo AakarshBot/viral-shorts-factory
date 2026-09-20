@@ -7,9 +7,13 @@ fetches and verifies the resulting image.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from collections import Counter
 from typing import Any
+
+import requests
 
 
 _STOPWORDS = {
@@ -93,6 +97,158 @@ def parse_manual_visual_queries(raw: Any) -> list[str]:
 
     add(text)
     return values
+
+
+def _local_query_fallback(title: str, body: str, max_queries: int = 5) -> list[dict[str, str]]:
+    """Produce useful deterministic visual terms when the single AI planning call is unavailable."""
+    text = re.sub(r"\s+", " ", f"{title} {body}".strip())
+    candidates: list[str] = []
+    seen: set[str] = set()
+    patterns = [
+        r"\b[A-Z][A-Za-z.'-]{2,}(?:\s+[A-Z][A-Za-z.'-]{2,}){0,3}\b",
+        r"\b[A-Z]{2,8}\b",
+    ]
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            value = re.sub(r"\s+", " ", match).strip(" ,.;:!?()[]{}\"'")
+            key = value.casefold()
+            if len(value) < 3 or key in seen:
+                continue
+            seen.add(key)
+            candidates.append(value)
+            if len(candidates) >= max_queries:
+                break
+        if len(candidates) >= max_queries:
+            break
+    if not candidates and title:
+        candidates.append(re.sub(r"\s+", " ", str(title)).strip()[:180])
+    return [
+        {
+            "query": value,
+            "source_hint": "Commons / configured image source",
+            "reason": "Deterministic fallback from named entities in the selected story.",
+        }
+        for value in candidates[:max(1, int(max_queries))]
+    ]
+
+
+def _parse_query_planner_response(raw_text: str, max_queries: int) -> list[dict[str, str]]:
+    text = str(raw_text or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            return []
+        try:
+            parsed = json.loads(match.group(0))
+        except Exception:
+            return []
+    rows = parsed.get("queries") if isinstance(parsed, dict) else parsed
+    if not isinstance(rows, list):
+        return []
+    output: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if isinstance(item, dict):
+            query = str(item.get("query") or "").strip()
+            source_hint = str(item.get("source_hint") or "Commons / configured image source").strip()
+            reason = str(item.get("reason") or "").strip()
+        else:
+            query = str(item or "").strip()
+            source_hint = "Commons / configured image source"
+            reason = ""
+        query = re.sub(r"\s+", " ", query).strip(" ,.;:!?")
+        words = re.findall(r"[\w&.'-]+", query, flags=re.UNICODE)
+        if not query or not words or len(words) > 8:
+            continue
+        key = query.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(
+            {
+                "query": query[:180],
+                "source_hint": source_hint[:80],
+                "reason": reason[:180],
+            }
+        )
+        if len(output) >= max(1, int(max_queries)):
+            break
+    return output
+
+
+def generate_visual_query_suggestions(
+    story_title: str,
+    story_text: str = "",
+    category: str = "",
+    max_queries: int = 5,
+) -> list[dict[str, str]]:
+    """Make one text-AI call for ranked image-search terms; never starts an image search."""
+    title = re.sub(r"\s+", " ", str(story_title or "")).strip()
+    body = re.sub(r"\s+", " ", str(story_text or "")).strip()
+    limit = max(1, min(8, int(max_queries or 5)))
+    system_prompt = (
+        "You are the visual-search query planner for a monetized YouTube Shorts factory. "
+        "Audit the selected story and return a small ranked set of concrete image-search phrases. "
+        "These are SEARCH TERMS ONLY, not image results. Prioritize exact named people, organizations, "
+        "logos, teams, places, products, events, landmarks or other concrete entities that are likely "
+        "to have usable files in Wikimedia Commons or the factory's other configured image sources. "
+        "For a person, prefer the person's exact name; for a logo, use the organization name plus logo; "
+        "for a team or event, use the exact team/event/entity plus one useful contextual noun only when "
+        "the story supports it. Do not invent facts. Avoid generic phrases such as 'news', 'latest update', "
+        "'editorial photo', or 'interesting image'. Keep every query concise and directly searchable. "
+        "Return JSON only: {\"queries\":[{\"query\":\"...\",\"source_hint\":\"...\",\"reason\":\"...\"}]}. "
+        "Rank the most likely-to-return result first."
+    )
+    user_prompt = json.dumps(
+        {
+            "title": title,
+            "story": body[:7000],
+            "category": str(category or "").strip(),
+            "max_queries": limit,
+        },
+        ensure_ascii=False,
+    )
+    groq_key = str(os.getenv("GROQ_API_KEY") or "").strip()
+    gemini_key = str(os.getenv("GEMINI_API_KEY") or "").strip()
+    raw = ""
+    if groq_key:
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "openai/gpt-oss-120b",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=20,
+            )
+            if response.status_code == 200:
+                raw = str(response.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "")
+        except Exception:
+            raw = ""
+    elif gemini_key:
+        try:
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={gemini_key}",
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": system_prompt + "\n\nSTORY:\n" + user_prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json"},
+                },
+                timeout=20,
+            )
+            if response.status_code == 200:
+                raw = str(response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "") or "")
+        except Exception:
+            raw = ""
+    return _parse_query_planner_response(raw, limit) or _local_query_fallback(title, body, limit)
 
 
 def _scene_text(scene: dict[str, Any]) -> str:
