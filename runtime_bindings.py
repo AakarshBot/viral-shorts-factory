@@ -90,8 +90,8 @@ def _install_visual_cache_safety():
                 _VISUAL_CACHE_STATE.allow_write = False
             return result
 
-        def verified_only_save(bot, img_bytes, entity, visual_type, source_type, context=""):
-            allowed = bool(getattr(_VISUAL_CACHE_STATE, "allow_write", False))
+        def verified_only_save(bot, img_bytes, entity, visual_type, source_type, context="", verified=False):
+            allowed = bool(verified) or bool(getattr(_VISUAL_CACHE_STATE, "allow_write", False))
             _VISUAL_CACHE_STATE.allow_write = False
             if not allowed:
                 print("   [Visual Cache] Skipping cache write: asset was not semantically verified.", flush=True)
