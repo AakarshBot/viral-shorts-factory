@@ -1167,6 +1167,7 @@ class DashboardWorkflowController(WorkflowController):
             ):
                 old_entry = {
                     "path": old_original_path,
+                    "original_path": old_original_path,
                     "subject": str(
                         layer.get("related_subject")
                         or scene.get("primary_entity")
@@ -1180,6 +1181,7 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_genre": str(layer.get("visual_genre") or "").strip().upper(),
                     "provenance": dict(layer.get("asset_provenance") or {}),
                     "status": "previously-selected",
+                    "original_path": old_original_path,
                     "used": False,
                 }
                 if not any(str(item.get("path") or "") == old_path for item in new_bank):
@@ -1200,6 +1202,7 @@ class DashboardWorkflowController(WorkflowController):
             new_layer.update(
                 {
                     "image": replacement_path,
+                    "visual_original_path": selected_path,
                     "source_type": "verified-bank",
                     "visual_verified": True,
                     "visual_qc_blocked": low_resolution_manual_qc,
