@@ -744,7 +744,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": verified and not missing' in app_source
-    assert 'disabled=bool(qc_blocked)' in app_source
+    assert 'disabled=bool(attention_count)' in app_source
     assert 'Visual QC blocked:' in app_source
 
 
@@ -772,9 +772,9 @@ def test_dashboard_manual_crop_returns_shorts_frame():
 def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert "Shared manual pool:" in source
-    assert "Entity verified but factory-rejected for resolution" in source
-    assert "Apply manual crop" in source
+    assert "Shared pool</b>" in source
+    assert "Subject verified, but the image is below the normal resolution target." in source
+    assert "Apply crop" in source
     assert "controller.crop_visual(" in source
 
 
