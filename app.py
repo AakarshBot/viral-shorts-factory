@@ -594,7 +594,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "source": str(layer.get("source_type") or "visual"),
                 "visual_type": str(layer.get("visual_type") or "visual"),
                 "verified": verified,
-                "qc_passed": verified and not missing,
+                "qc_passed": verified and not missing and not bool(layer.get("visual_qc_blocked", False)),
                 "qc_reason": (
                     "Rendered image file is missing from the dashboard host."
                     if missing
