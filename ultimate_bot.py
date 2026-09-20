@@ -1836,12 +1836,18 @@ def run_robot(web_config=None):
                 should_sync = True
 
         if should_sync:
-            run_analytics_sweep(conn)
-            try:
-                with open(sync_file, "w", encoding="utf-8") as f:
-                    f.write(datetime.now().isoformat())
-            except OSError:
-                pass
+            analytics_result = run_analytics_sweep(conn)
+            # Only advance the cooldown after the exact-video sync has actually
+            # completed without analytics errors. The dashboard used to replace
+            # this function with a no-op, which could falsely mark stale data fresh.
+            if not isinstance(analytics_result, dict) or not int(
+                analytics_result.get("analytics_errors", 0) or 0
+            ):
+                try:
+                    with open(sync_file, "w", encoding="utf-8") as f:
+                        f.write(datetime.now().isoformat())
+                except OSError:
+                    pass
 
         safe_cleanup(ASSETS_DIR)
         os.makedirs(ASSETS_DIR, exist_ok=True)
