@@ -291,9 +291,9 @@ def _licensed_candidate(image_bytes, license_name="cc0"):
     }
 
 
-def _jpeg_bytes(size=(900, 1200)):
+def _jpeg_bytes(size=(900, 1200), color=(80, 90, 100)):
     buffer = io.BytesIO()
-    Image.new("RGB", size, (80, 90, 100)).save(buffer, format="JPEG", quality=95)
+    Image.new("RGB", size, color).save(buffer, format="JPEG", quality=95)
     return buffer.getvalue()
 
 
@@ -1128,7 +1128,7 @@ def test_manual_visual_options_returns_three_unique_choices_without_backfill(mon
     assert len(result["query_stats"]) == 1
 
 
-def test_manual_pool_allows_only_one_image_per_source_page(monkeypatch):
+def test_manual_pool_allows_multiple_images_from_same_source_article(monkeypatch):
     image_candidates = []
     for index, page in enumerate(("https://example.com/article-a", "https://example.com/article-a", "https://example.com/article-b")):
         buffer = io.BytesIO()
@@ -1174,7 +1174,7 @@ def test_manual_pool_allows_only_one_image_per_source_page(monkeypatch):
     )
 
     assets = result["assets"]
-    assert len(assets) == 2
+    assert len(assets) == 3
     assert len({item["source_page_url"] for item in assets}) == 2
 
 
@@ -1388,7 +1388,7 @@ def test_manual_pool_uses_descending_rank_targets(monkeypatch):
         values = []
         for index in range(target):
             values.append({
-                "bytes": _jpeg_bytes((900 + index, 1200)),
+                "bytes": _jpeg_bytes((900 + index, 1200), color=(40 + index * 15, 70, 100)),
                 "provenance": {
                     "provider": "Commons",
                     "url": f"https://commons.wikimedia.org/wiki/File:{query_index}_{index}.jpg",
