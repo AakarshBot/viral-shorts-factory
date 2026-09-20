@@ -1423,7 +1423,7 @@ def test_manual_pool_uses_descending_rank_targets(monkeypatch):
     )
 
     result = retrieval.collect_manual_visual_pool(
-        visual_runtime,
+        FakeRuntime(),
         FakeBot(),
         [],
         ["rank 1", "rank 2", "rank 3"],
