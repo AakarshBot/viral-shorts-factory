@@ -320,7 +320,6 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
         else:
             anchor = _primary_visual_anchor(scene_terms)
 
-        scene_terms = _scene_terms(scene, subject)
         query = _compose_query(subject, anchor)
         queries = []
 
