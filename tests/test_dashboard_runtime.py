@@ -1202,3 +1202,16 @@ def test_public_release_policy_cannot_be_bypassed_by_ui():
     source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
     assert 'if str(publish_mode or "").strip().lower() == "public":' in source
     assert 'if bool(gate.get("public_blocked"))' in source
+
+
+def test_dashboard_progress_uses_latest_known_progress_line():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert "for latest in reversed(lines[-100:]):" in source
+    assert 'operation_label = "YouTube upload"' in source
+    assert 'operation_label = "Final video render"' in source
+
+
+def test_dashboard_output_summary_reports_visual_qc_readiness():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert 'ready_visuals = sum(1 for item in visuals if item.get("qc_passed"))' in source
+    assert 'f"{ready_visuals}/{len(visuals)} ready"' in source
