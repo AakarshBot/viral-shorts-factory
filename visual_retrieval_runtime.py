@@ -1572,7 +1572,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         if not query_candidates:
             continue
 
-        query_candidates.sort(key=lambda item: (-float(item[4]), str(item[6]).casefold(), int(item[0])))
+        query_candidates.sort(key=lambda item: (-float(item[4]), str(item[7]).casefold(), int(item[0])))
         # First inspect only the strongest 10 in one batch. If that does not
         # produce at least three entity-approved images, inspect the next 10.
         # This normally costs one Gemini call per search term and never requires
