@@ -815,10 +815,6 @@ def validate_script(script_data, source_text, format_mode):
         return False, f"Script has {len(scenes)} scenes. Must be between {min_scenes} and {max_scenes} scenes."
 
     total_words = 0
-    source_keywords = {
-        w.casefold()
-        for w in re.findall(r"\b[A-Za-z0-9]{5,}\b|\b\d+\b", str(source_text or ""))
-    }
 
     for i, scene in enumerate(scenes):
         words = scene.get("voiceover", "").split()
