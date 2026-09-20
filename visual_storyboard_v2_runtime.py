@@ -38,6 +38,11 @@ _NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 _YEAR_RE = re.compile(r"(?<!\d)(?:19\d{2}|20\d{2}|21\d{2})(?!\d)")
+_YEAR_RANGE_RE = re.compile(
+    r"\b(?:from\s+)?(?:19\d{2}|20\d{2}|21\d{2})\s*(?:to|[-–])\s*"
+    r"(?:19\d{2}|20\d{2}|21\d{2})\b",
+    re.IGNORECASE,
+)
 _SCORE_RE = re.compile(r"(?<!\d)(\d{1,3})\s*[-–:]\s*(\d{1,3})(?!\d)")
 _QUOTE_RE = re.compile(r"[\"“”']([^\"“”']{8,180})[\"“”']")
 
@@ -194,10 +199,15 @@ def _deterministic_mode(scene: dict[str, Any], index: int) -> str:
         return "QUOTE"
     if _score(text) and any(token in lower for token in ("score", "won", "beat", "defeat", "match", "final")):
         return "SCORECARD"
-    if any(token in lower for token in (
-        "timeline", "since", "before", "after", "in 2019", "in 2020",
-        "in 2021", "in 2022", "in 2023", "in 2024", "in 2025", "in 2026",
-    )) and len(_years(text)) >= 2:
+    if (
+        (_YEAR_RANGE_RE.search(text) or any(
+            token in lower for token in (
+                "timeline", "since", "before", "after", "in 2019", "in 2020",
+                "in 2021", "in 2022", "in 2023", "in 2024", "in 2025", "in 2026",
+            )
+        ))
+        and len(_years(text)) >= 2
+    ):
         return "TIMELINE"
     if any(token in lower for token in ("compared", "versus", " vs ", "against", "more than", "less than")):
         return "COMPARE"
