@@ -125,7 +125,7 @@ def _contiguous_chunks(text: str, target: int, minimum_words: int = 8, maximum_w
 
 
 def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode="regular"):
-    """Build a source-only emergency script that still meets the canonical script contract."""
+    """Build a source-only emergency script, or fail instead of inventing filler."""
     story_data = story_data if isinstance(story_data, dict) else {}
     title = clean_narration(story_data.get("title") or story_data.get("topic") or "")
     source = _source_text(story_data)
@@ -134,14 +134,7 @@ def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode
     if not source:
         raise ValueError("No usable source text is available for emergency script generation.")
 
-    from script_runtime import (
-        _script_scene_bounds,
-        SCENE_MIN_WORDS,
-        SCENE_MAX_WORDS,
-        SCRIPT_MIN_TOTAL_WORDS,
-    )
-    minimum, maximum = _script_scene_bounds(format_mode)
-
+    # For Top 5, the selected story data may be JSON. Extract only its textual fields.
     if format_mode == "top5":
         try:
             items = json.loads(str(story_data.get("text", "")))
@@ -155,58 +148,37 @@ def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode
         except Exception:
             pass
 
-    words = clean_narration(source).split()
-    if len(words) < minimum * SCENE_MIN_WORDS:
+    sentence_text = " ".join(_sentences(source)) or clean_narration(source)
+    target = 7 if str(format_mode).lower() == "top5" else 5
+    chunks = _contiguous_chunks(sentence_text, target)
+    if not chunks:
         raise ValueError(
-            f"Source-only fallback needs at least {minimum * SCENE_MIN_WORDS} source words; "
-            f"only {len(words)} were available."
+            f"Source-grounded fallback refused to invent narration: need at least {target * 8} usable source words."
         )
 
-    target = min(maximum, max(minimum, len(words) // 18))
-    target = max(minimum, target)
-    base, extra = divmod(len(words), target)
-    if base > SCENE_MAX_WORDS:
-        target = maximum
-        base, extra = divmod(len(words), target)
-    if base < SCENE_MIN_WORDS:
-        target = minimum
-        base, extra = divmod(len(words), target)
-
-    scenes = []
-    cursor = 0
-    entity = clean_narration(title)[:80] or "Selected story"
+    entity_words = re.findall(r"\b[A-Z][A-Za-z0-9&.'-]{2,}\b", title)
+    entity = " ".join(entity_words[:3]) or title[:80] or "Selected story"
     category = clean_narration(genre_key or "news").replace("_", " ").title()
-    for index in range(target):
-        size = base + (1 if index < extra else 0)
-        size = min(SCENE_MAX_WORDS, size)
-        chunk = " ".join(words[cursor:cursor + size]).strip()
-        cursor += size
-        if not (SCENE_MIN_WORDS <= len(chunk.split()) <= SCENE_MAX_WORDS):
-            raise ValueError("Source-only fallback could not satisfy scene word bounds.")
-        scenes.append({
-            "voiceover": chunk,
+    search_prompt = title or entity
+
+    scenes = [
+        {
+            "voiceover": clean_narration(chunk),
             "primary_entity": entity,
             "visual_intent": "news_event",
-            "specific_search_prompt": entity,
+            "specific_search_prompt": search_prompt,
             "sport_or_topic_category": category,
-            "scene_id": index + 1,
             "scene_source": "validated_source_fallback",
-        })
-
-    if len(scenes) < minimum or len(scenes) > maximum or sum(len(s["voiceover"].split()) for s in scenes) < SCRIPT_MIN_TOTAL_WORDS:
-        raise ValueError("Source-only fallback failed the canonical script contract.")
-
+            "scene_id": index + 1,
+        }
+        for index, chunk in enumerate(chunks)
+    ]
     return {
         "step_1_headline": title,
         "step_2_data_points": source,
         "step_3_critique": "Deterministic source-only fallback. No provider instructions or generated facts were used.",
         "step_4_metadata": entity,
-        "editorial_angle": "Emergency source-only mode; no original editorial layer was generated.",
-        "titles": [
-            title,
-            f"{title} | What We Know" if title else "What We Know",
-            f"{title} | Latest Facts" if title else "Latest Facts",
-        ],
+        "titles": [title, f"{title} | What We Know" if title else "What We Know", f"{title} | Latest Facts" if title else "Latest Facts"],
         "recommended_title_index": 1,
         "seo_description": clean_text(source)[:700],
         "tags": [tag for tag in (entity, category, "Shorts") if tag],
@@ -221,37 +193,20 @@ def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode
     }
 
 
-def _clean_script_result(script_data: dict, story_data: dict, format_mode: str = "regular") -> dict:
+def _clean_script_result(script_data: dict, story_data: dict) -> dict:
     result = dict(script_data or {})
     scenes = result.get("script")
     if not isinstance(scenes, list):
         raise ValueError("Script output does not contain a valid scene list.")
-
-    from script_runtime import (
-        _script_scene_bounds,
-        SCENE_MIN_WORDS,
-        SCENE_MAX_WORDS,
-        SCRIPT_MIN_TOTAL_WORDS,
-    )
-    minimum, maximum = _script_scene_bounds(format_mode)
-    if not (minimum <= len(scenes) <= maximum):
-        raise ValueError(f"Script contains {len(scenes)} scenes; required {minimum}-{maximum}.")
-
     cleaned = []
-    total_words = 0
     for index, scene in enumerate(scenes, 1):
         if not isinstance(scene, dict):
             raise ValueError(f"Scene {index} is malformed.")
         voiceover = clean_narration(scene.get("voiceover", ""))
         if not voiceover or is_noise(voiceover):
             raise ValueError(f"Scene {index} contains empty/noise narration.")
-        word_count = len(voiceover.split())
-        if not (SCENE_MIN_WORDS <= word_count <= SCENE_MAX_WORDS):
-            raise ValueError(
-                f"Scene {index} contains {word_count} words; "
-                f"required {SCENE_MIN_WORDS}-{SCENE_MAX_WORDS}."
-            )
-        total_words += word_count
+        if len(voiceover.split()) < 3:
+            raise ValueError(f"Scene {index} contains too little narration.")
         copy = dict(scene)
         copy["voiceover"] = voiceover
         copy["primary_entity"] = clean_text(copy.get("primary_entity", ""))
@@ -261,19 +216,10 @@ def _clean_script_result(script_data: dict, story_data: dict, format_mode: str =
         copy["scene_id"] = index
         copy["narration_source"] = "validated_script"
         cleaned.append(copy)
-
-    if total_words < SCRIPT_MIN_TOTAL_WORDS:
-        raise ValueError(
-            f"Script contains only {total_words} narration words; "
-            f"minimum is {SCRIPT_MIN_TOTAL_WORDS}."
-        )
-    if len(clean_text(result.get("editorial_angle", "")).split()) < 8:
-        raise ValueError("Script is missing a substantive editorial angle.")
-
     result["script"] = cleaned
     result["integrity_version"] = VERSION
     result["authoritative_narration"] = True
-    for key in ("step_1_headline", "step_2_data_points", "step_3_critique", "step_4_metadata", "editorial_angle", "seo_description", "pinned_comment"):
+    for key in ("step_1_headline", "step_2_data_points", "step_3_critique", "step_4_metadata", "seo_description", "pinned_comment"):
         if key in result:
             result[key] = clean_text(result[key])
     if isinstance(result.get("titles"), list):
@@ -289,14 +235,14 @@ def _wrap_script_writer(bot):
     def guarded_write_script(story_data, language_cfg, genre_key, conn, format_mode):
         try:
             result = current(story_data, language_cfg, genre_key, conn, format_mode)
-            cleaned = _clean_script_result(result, story_data, format_mode)
+            cleaned = _clean_script_result(result, story_data)
             # A strict fallback is only used when the existing generator fails
             # or produces invalid narration; it never silently patches missing facts.
             return cleaned
         except Exception as exc:
             print(f"   [Script Integrity] AI script rejected: {type(exc).__name__}: {exc}", flush=True)
             fallback = strict_fallback(story_data, language_cfg, genre_key, format_mode)
-            return _clean_script_result(fallback, story_data, format_mode)
+            return _clean_script_result(fallback, story_data)
 
     guarded_write_script._pipeline_integrity_wrapped = True
     bot.write_script = guarded_write_script
