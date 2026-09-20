@@ -1658,7 +1658,16 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
         except OSError:
             pass
 
-def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_keyword=None):
+def upload_to_youtube(
+    video_path,
+    script_data,
+    genre_cfg,
+    publish_mode,
+    trend_keyword=None,
+    title_override=None,
+    description_override=None,
+    comment_override=None,
+):
     print("\n🚀 Initializing Live YouTube Upload...")
     try:
         import googleapiclient.discovery
@@ -1673,7 +1682,7 @@ def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_ke
         )
 
         raw_title = safe_text(
-            script_data.get("title"), genre_cfg.get("label", "Shorts")
+            title_override or script_data.get("title"), genre_cfg.get("label", "Shorts")
         )
         if trend_keyword and trend_keyword.lower() not in raw_title.lower():
             raw_title = f"{trend_keyword}: {raw_title}"
@@ -1682,7 +1691,7 @@ def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_ke
         if not title:
             title = "Shorts"
 
-        desc_body = safe_text(script_data.get("seo_description"), "")
+        desc_body = safe_text(description_override or script_data.get("seo_description"), "")
         if trend_keyword and trend_keyword.lower() not in desc_body.lower():
             desc_body = f"Trending now: {trend_keyword}. {desc_body}"
 
@@ -1764,6 +1773,50 @@ def upload_to_youtube(video_path, script_data, genre_cfg, publish_mode, trend_ke
             raise RuntimeError("YouTube upload completed without a video ID.")
 
         print(f"   [+] Successfully uploaded to YouTube! Video ID: {vid_id}")
+
+        # Public publishing uses the dashboard-approved pinned-comment text.
+        # YouTube exposes top-level comment creation through commentThreads.insert;
+        # the existing OAuth scope already includes youtube.force-ssl.
+        if privacy == "public":
+            public_comment = safe_text(
+                comment_override or script_data.get("pinned_comment"), ""
+            ).strip()
+            if public_comment:
+                try:
+                    comment_body = {
+                        "snippet": {
+                            "channelId": response.get("snippet", {}).get("channelId", ""),
+                            "videoId": vid_id,
+                            "topLevelComment": {
+                                "snippet": {
+                                    "textOriginal": public_comment[:10000],
+                                }
+                            },
+                        }
+                    }
+                    comment_response = youtube.commentThreads().insert(
+                        part="snippet",
+                        body=comment_body,
+                    ).execute()
+                    comment_id = str(
+                        (comment_response.get("snippet") or {}).get("topLevelComment", {}).get("id")
+                        or comment_response.get("id")
+                        or ""
+                    ).strip()
+                    if comment_id:
+                        print(f"   [+] Public comment posted successfully. Comment ID: {comment_id}")
+                    else:
+                        print("   [!] Public upload succeeded, but YouTube returned no comment ID.")
+                except Exception as comment_exc:
+                    # Never turn a successful video upload into a failed upload
+                    # solely because the follow-up comment could not be posted.
+                    print(
+                        f"   [!] Public upload succeeded, but the comment could not be posted: "
+                        f"{type(comment_exc).__name__}: {comment_exc}"
+                    )
+            else:
+                print("   [!] Public upload succeeded without a comment because the approved comment was empty.")
+
         return vid_id
     except Exception as exc:
         print(f"   [!] YouTube upload failed: {exc}")
