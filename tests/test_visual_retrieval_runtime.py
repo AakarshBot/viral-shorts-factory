@@ -751,13 +751,20 @@ def test_commons_person_search_uses_structured_depicts(monkeypatch):
     monkeypatch.setattr(provider_boundary, "_api_json", fake_api_json)
     monkeypatch.setattr(provider_boundary, "_download_image", fake_download)
 
-    candidates = provider_boundary.fetch_commons_candidates("Smriti Mandhana action")
+    candidates = provider_boundary.fetch_commons_candidates(
+        "Smriti Mandhana action",
+        set(),
+        "",
+        "",
+        "PERSON",
+        "PERSON_ACTION",
+    )
 
     assert calls
     assert calls[0]["gsrsearch"] == "haswbstatement:P180=Q16224802"
     assert calls[1]["gsrsearch"] == "Smriti Mandhana action"
     assert candidates
-    assert candidates[0]["commons_match_mode"] == "structured-depicts"
+    assert candidates[0]["commons_match_mode"] == "structured-depicts-person"
     assert candidates[0]["commons_matched_entity"] == "Smriti Mandhana"
     assert "India Women v Australia Women" in candidates[0]["search_tags"]
     assert downloads
