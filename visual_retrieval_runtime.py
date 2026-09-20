@@ -628,6 +628,52 @@ def materialize_visual_bank(bot, seg: dict, scene_index: int = 0) -> list[dict]:
 
 
 
+
+def _manual_query_visual_context(query: str, scenes: list[dict]) -> tuple[str, str]:
+    """Infer provider ordering only; never rewrite the exact manual query."""
+    from visual_semantic_guard_runtime import resolve_subject
+    from visual_taxonomy_runtime import classify_visual_genre
+
+    query_text = str(query or "").strip()
+    query_tokens = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", query_text, flags=re.UNICODE)
+        if len(token) > 2
+    }
+    best_scene = None
+    best_overlap = -1
+    for scene in scenes or []:
+        if not isinstance(scene, dict):
+            continue
+        scene_text = _manual_scene_text(scene)
+        scene_tokens = {
+            token.casefold()
+            for token in re.findall(r"[\w-]+", scene_text, flags=re.UNICODE)
+            if len(token) > 2
+        }
+        overlap = len(query_tokens & scene_tokens)
+        if overlap > best_overlap:
+            best_scene = scene
+            best_overlap = overlap
+
+    context = dict(best_scene or {})
+    context.update(
+        {
+            "manual_visual_query": query_text,
+            "primary_entity": query_text,
+            "factual_primary_entity": query_text,
+            "specific_search_prompt": query_text,
+            "visual_intent": query_text,
+        }
+    )
+    resolution = resolve_subject(context, "")
+    visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
+    visual_genre = str(
+        classify_visual_genre(context, query_text, visual_type) or "GENERAL_CONTEXT"
+    ).upper()
+    return visual_type, visual_genre
+
+
 def collect_manual_visual_pool(
     runtime,
     bot,
