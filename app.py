@@ -585,7 +585,7 @@ def render_header(action_mode: str) -> None:
         st.markdown(
             f"<div class='brand-card'><span class='brand-pill'>{title}</span>"
             f"<div class='brand-title'>Viral Shorts Factory</div>"
-            f"<div class='brand-sub'>{subtitle}</div></div>",
+            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>",
             unsafe_allow_html=True,
         )
     with right:
