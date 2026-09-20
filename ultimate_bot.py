@@ -9,7 +9,6 @@ import textwrap
 import re
 import time
 import random
-import warnings
 import difflib
 import sys
 import urllib.parse
@@ -23,7 +22,7 @@ import subprocess
 
 load_dotenv()
 
-from visual_licensing_runtime import allow_unlicensed_visuals, append_image_credits
+from visual_licensing_runtime import append_image_credits
 from script_runtime import append_research_sources
 
 
@@ -42,8 +41,6 @@ try:
 except ImportError:
     cv2 = None
 
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="duckduckgo_search")
-
 IMAGEMAGICK_BINARY_PATH = ""  
 if IMAGEMAGICK_BINARY_PATH:
     os.environ["IMAGEMAGICK_BINARY"] = IMAGEMAGICK_BINARY_PATH
@@ -55,10 +52,6 @@ try:
     import edge_tts
 except ImportError:
     edge_tts = None
-
-try:
-    except ImportError:
-    DDGS = None
 
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = getattr(PIL.Image, "Resampling", PIL.Image).LANCZOS
