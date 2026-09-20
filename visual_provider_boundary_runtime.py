@@ -769,6 +769,7 @@ __all__ = [
     "MAX_PROVIDER_CANDIDATES",
     "build_raw_source_plan",
     "resolve_person_identity",
+    "resolve_wikidata_entity",
     "fetch_commons_candidates",
     "fetch_pexels_candidates",
     "fetch_unsplash_candidates",
