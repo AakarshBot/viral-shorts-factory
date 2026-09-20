@@ -831,6 +831,11 @@ def test_commons_entity_search_uses_structured_depicts_for_named_non_people(monk
     assert candidates[0]["commons_match_mode"] == "structured-depicts-entity"
 
 
+def test_commons_search_query_normalizes_match_operators():
+    assert provider_boundary._commons_search_query("India women versus Australia") == "India women v Australia"
+    assert provider_boundary._commons_search_query("India women vs Australia") == "India women v Australia"
+
+
 def test_commons_query_ladder_is_bounded_and_keeps_exact_search(monkeypatch):
     monkeypatch.setattr(
         provider_boundary,
