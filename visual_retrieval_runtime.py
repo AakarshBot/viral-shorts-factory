@@ -870,7 +870,7 @@ def _manual_candidate_from_data(
         candidate,
         seen_hashes,
         seen_image_urls,
-        seen_signatures,
+        seen_asset_keys,
     ):
         rejected_counts["duplicate"] += 1
         return None
