@@ -85,6 +85,12 @@ _ACTION_SEARCH_SUFFIXES = {
     "EVENT_SCENE": ("live action", "at event", "on stage"),
 }
 
+_SPORTS_CONTEXT_TERMS = {
+    "cricket", "football", "soccer", "basketball", "tennis", "hockey",
+    "rugby", "baseball", "volleyball", "badminton", "golf", "boxing",
+    "wrestling", "racing", "motorsport", "athletics", "swimming",
+}
+
 _VISUAL_DESCRIPTOR_WORDS = {
     "logo", "logos", "badge", "badges", "emblem", "emblems",
     "crest", "crests", "branding", "brand", "brands", "symbol", "symbols",
@@ -1297,9 +1303,24 @@ def collect_manual_visual_search(
         except Exception:
             pass
 
+    query_tokens = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", exact_query, flags=re.UNICODE)
+    }
+    sports_context = bool(query_tokens & _SPORTS_CONTEXT_TERMS)
+    branding_or_portrait = visual_genre in {"TEAM_BRANDING", "ORG_BRANDING", "PERSON_PORTRAIT"}
+    action_search = (
+        visual_genre in ACTION_VISUAL_GENRES
+        or (sports_context and not branding_or_portrait)
+    )
+
     action_variants = [exact_query]
-    if visual_genre in ACTION_VISUAL_GENRES:
-        for suffix in _ACTION_SEARCH_SUFFIXES.get(visual_genre, ("action",)):
+    if action_search:
+        suffixes = _ACTION_SEARCH_SUFFIXES.get(
+            visual_genre,
+            ("action", "match action", "celebration"),
+        )
+        for suffix in suffixes:
             variant = f"{exact_query} {suffix}".strip()
             if variant.casefold() != exact_query.casefold():
                 action_variants.append(variant)
@@ -1359,7 +1380,7 @@ def collect_manual_visual_search(
                         continue
                     candidate["status"] = "new-search"
                     candidate["search_variant_index"] = variant_index
-                    candidate["action_search"] = bool(visual_genre in ACTION_VISUAL_GENRES)
+                    candidate["action_search"] = action_search
                     candidates.append(candidate)
                     if len(candidates) - variant_start >= variant_target or len(candidates) >= 5:
                         break
