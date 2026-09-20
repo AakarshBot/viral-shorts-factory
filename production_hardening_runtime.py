@@ -7,14 +7,6 @@ import re
 from typing import Any
 
 
-_MIN_SCENES = {"regular": 5, "trending": 5, "tech_reviews": 5, "top5": 7, "cricket": 5}
-_MAX_SCENES = {"regular": 8, "trending": 8, "tech_reviews": 8, "top5": 7, "cricket": 8}
-
-
-def _scene_count(format_mode: str) -> tuple[int, int]:
-    mode = str(format_mode or "regular").lower()
-    return _MIN_SCENES.get(mode, 5), _MAX_SCENES.get(mode, 8)
-
 
 def _resolve_story_visual_entity(story_data: dict[str, Any], candidate: str) -> str:
     """Resolve a candidate visual entity against the actual story headline.
@@ -154,67 +146,36 @@ def _enrich_emergency_story(bot, story_data: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
-def _repair_scene_count(bot, result: dict[str, Any], story_data: dict[str, Any], language_cfg: dict[str, Any], genre_key: str, format_mode: str) -> dict[str, Any]:
-    """Never let a cleaned script reach rendering below the production minimum."""
-    minimum, maximum = _scene_count(format_mode)
-    result = _repair_visual_identity(result, story_data)
-    scenes = result.get("script") if isinstance(result, dict) else None
-    if isinstance(scenes, list) and minimum <= len(scenes) <= maximum:
-        return result
+def _ensure_script_ready(bot, result: dict[str, Any], story_data: dict[str, Any], language_cfg: dict[str, Any], genre_key: str, format_mode: str) -> dict[str, Any]:
+    """Require semantic narrative completeness before rendering; no scene/word quotas."""
+    from script_runtime import assess_narrative_completeness, clean_script_data, validate_content_density, _extractive_script_fallback
 
+    result = _repair_visual_identity(result, story_data)
+    cleaned, _diag = clean_script_data(result, story_data, format_mode)
+    valid, reason = validate_content_density(cleaned, story_data, format_mode)
+    if valid:
+        return cleaned
+
+    assessment = assess_narrative_completeness(cleaned)
     print(
-        f"   [Script Hardening] Scene contract failed: got {len(scenes) if isinstance(scenes, list) else 0}; "
-        f"required {minimum}-{maximum}. Rebuilding from source-grounded fallback.",
+        f"   [Script Hardening] Narrative completeness failed: {reason}. "
+        f"Roles={assessment.get('roles', {})}. Trying source-grounded fallback.",
         flush=True,
     )
-    try:
-        from script_runtime import _extractive_script_fallback, clean_script_data, validate_content_density, repair_script_structure
 
-        repaired, structure_diag = repair_script_structure(result, format_mode)
-        if repaired is not None and structure_diag.get("changed"):
-            repaired = _repair_visual_identity(repaired, story_data)
-            repaired, _diag = clean_script_data(repaired, story_data, format_mode)
-            ok, repair_reason = validate_content_density(repaired, story_data, format_mode)
-            repaired_scenes = repaired.get("script") if isinstance(repaired, dict) else None
-            if (
-                ok
-                and isinstance(repaired_scenes, list)
-                and minimum <= len(repaired_scenes) <= maximum
-            ):
-                repaired["fallback_reason"] = "scene_count_local_repair"
-                repaired["fallback_source_enrichment"] = False
-                print(
-                    "   [Script Hardening] Local structural repair succeeded before deterministic fallback.",
-                    flush=True,
-                )
-                return repaired
-            print(
-                f"   [Script Hardening] Local repair did not pass final cleanup/content gate: {repair_reason}",
-                flush=True,
-            )
+    repair_story = _enrich_emergency_story(bot, story_data)
+    fallback = _extractive_script_fallback(repair_story, language_cfg, genre_key, format_mode)
+    fallback = _repair_visual_identity(fallback, repair_story)
+    fallback, _fallback_diag = clean_script_data(fallback, repair_story, format_mode)
+    valid, fallback_reason = validate_content_density(fallback, repair_story, format_mode)
+    if not valid:
+        raise ValueError(f"Production script rejected after semantic fallback: {fallback_reason}")
 
-        repair_story = _enrich_emergency_story(bot, story_data)
-        fallback = _extractive_script_fallback(repair_story, language_cfg, genre_key, format_mode)
-        fallback = _repair_visual_identity(fallback, repair_story)
-        fallback, _diag = clean_script_data(fallback, repair_story, format_mode)
-        ok, reason = validate_content_density(fallback, story_data, format_mode)
-        if not ok:
-            raise ValueError(reason)
-        fallback_scenes = list(fallback.get("script") or [])
-        if len(fallback_scenes) >= minimum:
-            if len(fallback_scenes) > maximum:
-                fallback_scenes = fallback_scenes[:maximum]
-            fallback["script"] = fallback_scenes
-            fallback["fallback_reason"] = "scene_count_contract"
-            fallback["fallback_source_enrichment"] = bool(repair_story.get("research_sources"))
-            return fallback
-    except Exception as exc:
-        print(f"   [Script Hardening] Source-grounded repair failed: {type(exc).__name__}: {exc}", flush=True)
+    fallback["fallback_reason"] = "narrative_completeness"
+    fallback["fallback_source_enrichment"] = bool(repair_story.get("research_sources"))
+    fallback["public_publish_blocked"] = True
+    return fallback
 
-    raise ValueError(
-        f"Production script rejected: {len(scenes) if isinstance(scenes, list) else 0} scenes after cleanup; "
-        f"required {minimum}-{maximum}. Refusing to render a one-scene Short."
-    )
 
 
 def _patch_script_pipeline(bot) -> None:
@@ -228,8 +189,8 @@ def _patch_script_pipeline(bot) -> None:
         result = current(story_data, language_cfg, genre_key, conn, format_mode)
         if not isinstance(result, dict):
             raise ValueError("Script generation returned no usable dictionary.")
-        repaired = _repair_scene_count(bot, result, story_data, language_cfg, genre_key, format_mode)
-        print(f"   [Script Hardening] Final scene count: {len(repaired.get('script') or [])}", flush=True)
+        repaired = _ensure_script_ready(bot, result, story_data, language_cfg, genre_key, format_mode)
+        print(f"   [Script Hardening] Narration package: {len(repaired.get('script') or [])}", flush=True)
         return repaired
 
     guarded_write._scene_contract_bound = True
