@@ -1863,3 +1863,13 @@ def test_serpapi_recent_discovery_accepts_only_known_stock_hosts(monkeypatch, tm
     assert requested["params"]["licenses"] == "fmc"
     assert requested["params"]["start_date"].endswith("0101")
     assert len(requested["params"]["end_date"]) == 8
+
+
+def test_verified_asset_preserves_provider_source_name():
+    candidate = {
+        "source": "Commons",
+        "query": "Sanju Samson",
+        "provenance_status": "commercial-verified",
+    }
+    assert candidate["source"] == "Commons"
+    assert candidate["provenance_status"] == "commercial-verified"
