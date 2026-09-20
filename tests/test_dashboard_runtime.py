@@ -757,3 +757,21 @@ def test_dashboard_ai_discovery_uses_shared_broad_radar():
     assert "_infer_discovery_category(item)" in source
     assert "diversity_rerank(ranked, max_items=max_candidates)" in source
     assert "category inferred after discovery, not used as an intake gate." in source
+
+
+def test_dashboard_manual_crop_returns_shorts_frame():
+    from dashboard_runtime import _manual_crop_to_shorts
+
+    image = Image.new("RGB", (2000, 1000), (100, 120, 140))
+    cropped = _manual_crop_to_shorts(image, zoom=1.8, x_center=0.75, y_center=0.5)
+
+    assert cropped.size == (1080, 1920)
+
+
+def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert "Shared manual pool:" in source
+    assert "Entity verified but factory-rejected for resolution" in source
+    assert "Apply manual crop" in source
+    assert "controller.crop_visual(" in source
