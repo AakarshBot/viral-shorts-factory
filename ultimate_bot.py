@@ -61,7 +61,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-SHEET_ID = "1WMJYZvwTZJi-_tLm87l0qO8BVJpa4M7Ee5hSm3UUiYw"
 
 PALETTE = {
     "bg": (15, 20, 35),
@@ -101,7 +100,6 @@ BRAND_SAFETY_KEYWORDS = [
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
-    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
 
