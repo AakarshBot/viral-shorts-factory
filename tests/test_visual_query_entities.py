@@ -259,5 +259,4 @@ def test_runtime_guard_uses_canonical_exact_query_not_legacy_query_ladder(monkey
     assert len(queries) <= 6
     assert queries[0] == "Rishabh Pant"
     assert queries[-1] == "Rishabh Pant press conference"
-    assert queries[-1] == "Rishabh Pant"
     assert visual_type == "PERSON"
