@@ -35,6 +35,21 @@ def _clean_query(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:240]
 
 
+def _provider_page(args: tuple[Any, ...] | list[Any] | None) -> int:
+    """Read the optional trailing provider page without changing legacy call signatures."""
+    try:
+        values = list(args or ())
+        if values:
+            candidate = values[-1]
+            if isinstance(candidate, bool):
+                return 1
+            page = int(candidate)
+            return max(1, min(25, page))
+    except (TypeError, ValueError):
+        pass
+    return 1
+
+
 
 def _provider_host(url: str) -> str:
     try:
@@ -421,6 +436,7 @@ def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int =
 def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     """Resolve near-exact Wikipedia person pages with one search + one batched metadata call."""
     entity = _clean_query(query)
+    page = _provider_page(_args)
     if not entity:
         return []
     payload = _api_json(
@@ -428,6 +444,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
         params={
             "action": "query", "generator": "search", "gsrsearch": entity,
             "redirects": 1, "gsrnamespace": 0, "gsrlimit": MAX_PROVIDER_CANDIDATES,
+            "gsroffset": (page - 1) * MAX_PROVIDER_CANDIDATES,
             "prop": "pageimages|pageprops", "piprop": "name|original|thumbnail",
             "ppprop": "wikibase_item", "pilicense": "free", "pithumbsize": 1600,
             "format": "json",
@@ -698,6 +715,7 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
     visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
     manual_mode = bool(_args[4]) if len(_args) > 4 else False
+    page = _provider_page(_args)
     searches = (
         [(_commons_search_query(query), "text", "")]
         if manual_mode
@@ -717,6 +735,7 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
                 "gsrsearch": search_query,
                 "gsrnamespace": 6,
                 "gsrlimit": MAX_PROVIDER_CANDIDATES,
+                "gsroffset": (page - 1) * MAX_PROVIDER_CANDIDATES,
                 "prop": "imageinfo|categories",
                 "iiprop": "url|mime|extmetadata",
                 "iiurlwidth": 1600,
@@ -775,7 +794,7 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
                 "search_title": page_title,
                 "search_description": description,
                 "search_tags": categories,
-                "search_position": page_position,
+                "search_position": ((page - 1) * MAX_PROVIDER_CANDIDATES) + page_position,
                 "commons_match_mode": match_mode,
                 "commons_matched_entity": matched_entity,
             }
@@ -795,12 +814,17 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
 
 def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("PEXELS_API_KEY", "")).strip()
+    page = _provider_page(_args)
     q = _clean_query(query)
     if not key or not q:
         return []
     payload = _api_json(
         "https://api.pexels.com/v1/search",
-        params={"query": q, "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2)},
+        params={
+            "query": q,
+            "page": page,
+            "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2),
+        },
         headers={"Authorization": key, "User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
     )
     urls: list[str] = []
@@ -828,12 +852,19 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
 
 def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip()
+    page = _provider_page(_args)
     q = _clean_query(query)
     if not key or not q:
         return []
     payload = _api_json(
         "https://api.unsplash.com/search/photos",
-        params={"query": q, "orientation": "portrait", "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2), "client_id": key},
+        params={
+            "query": q,
+            "page": page,
+            "orientation": "portrait",
+            "per_page": max(8, MAX_PROVIDER_CANDIDATES * 2),
+            "client_id": key,
+        },
         headers={"User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
     )
     urls: list[str] = []
