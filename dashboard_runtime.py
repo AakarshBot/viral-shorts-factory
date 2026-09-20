@@ -762,6 +762,10 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_packages = packages
         script_data = self.state.script_data if isinstance(self.state.script_data, dict) else {}
         manual_pool = script_data.get("visual_manual_pool") if isinstance(script_data, dict) else []
+        if not manual_pool:
+            first_package = packages[0][0] if isinstance(packages[0], list) and packages[0] else packages[0]
+            if isinstance(first_package, dict):
+                manual_pool = first_package.get("visual_manual_pool") or []
         self._visual_pool = [
             dict(item) for item in (manual_pool or [])
             if isinstance(item, dict) and str(item.get("path") or "").strip()
