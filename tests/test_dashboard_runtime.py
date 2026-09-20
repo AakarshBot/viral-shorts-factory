@@ -745,7 +745,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": verified and not missing' in app_source
     assert 'disabled=bool(qc_blocked)' in app_source
-    assert 'Visual entity QC blocked:' in app_source
+    assert 'Visual QC blocked:' in app_source
 
 
 def test_dashboard_ai_discovery_uses_shared_broad_radar():
