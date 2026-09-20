@@ -440,6 +440,7 @@ def _provider_search_query(
     visual_type: str,
     visual_genre: str,
     identity_qid: str = "",
+    identity_label: str = "",
     query_index: int = 1,
 ) -> str:
     """Translate canonical intent into the vocabulary each provider searches best."""
@@ -448,6 +449,7 @@ def _provider_search_query(
     genre_l = str(visual_genre or "").strip().upper()
     identity = str(identity or "").strip()
     query = str(query or "").strip()
+    identity_label = str(identity_label or "").strip()
 
     # Wikipedia is an identity resolver, not a scene search engine. Keep its
     # query anchored to the locked person on every intent round.
@@ -461,7 +463,13 @@ def _provider_search_query(
         if query_index == 1 and identity_qid:
             return f"haswbstatement:P180={identity_qid}"
         if identity:
-            return identity
+            base = identity_label or identity
+            return base if query_index == 1 else f"{base} portrait"
+
+    if visual_l == "PERSON" and genre_l == "PERSON_PORTRAIT" and identity_label:
+        if query_index == 1:
+            return identity_label
+        return f"{identity_label} portrait"
 
     return query or identity
 
@@ -577,6 +585,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             from visual_provider_boundary_runtime import resolve_person_identity
             identity_context = resolve_person_identity(cache_entity)
             identity_qid = str(identity_context.get("qid") or "").strip()
+            identity_label = str(identity_context.get("label") or "").strip()
             if identity_qid:
                 print(
                     f"   [Visual Identity] Wikidata identity resolved: {cache_entity} -> {identity_qid}",
@@ -633,6 +642,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 visual_type,
                 visual_genre,
                 identity_qid,
+                identity_label,
                 query_index,
             )
             source_key = (str(source or "").strip().casefold(), str(source_query or "").strip().casefold())
