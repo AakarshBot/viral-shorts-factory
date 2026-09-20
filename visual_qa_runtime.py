@@ -1,10 +1,10 @@
-"""Strict visual QA for the Shorts factory.
+"""Entity-only visual QA for the Shorts factory.
 
-QA verifies identity and visual intent when the verification service is
-available. A genuine NO is a hard rejection; service unavailability or an
-ambiguous answer is an uncertain candidate, so retrieval can continue and the
-factory can still choose a real image rather than treating infrastructure
-failure as a content failure.
+QA verifies whether a requested visual subject is visibly represented. It does
+not judge the exact scene, action, composition, narration, or search phrase.
+A genuine NO is a hard rejection; service unavailability or ambiguity leaves
+the candidate uncertain so infrastructure failure is never treated as content
+failure.
 """
 import hashlib
 import io
@@ -298,5 +298,5 @@ def install_visual_qa_bridge(visual_runtime_module):
     visual_runtime_module.start_visual_qa_scene = start_visual_qa_scene
     visual_runtime_module.get_visual_qa_calls_used = get_visual_qa_calls_used
     visual_runtime_module._visual_qa_bridge_version = VISUAL_QA_RUNTIME_VERSION
-    print(f"[Visual QA] Strict identity-aware gate installed | runtime={VISUAL_QA_RUNTIME_VERSION}", flush=True)
+    print(f"[Visual QA] Entity-only gate installed | runtime={VISUAL_QA_RUNTIME_VERSION}", flush=True)
     return True
