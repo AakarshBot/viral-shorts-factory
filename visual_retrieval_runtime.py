@@ -757,24 +757,18 @@ def _source_image_key(data: Any) -> str:
 def _append_unique_candidate(
     candidate: dict,
     seen_hashes: set[str],
-    seen_image_urls: set[str],
-    seen_asset_keys: set[str],
+    seen_image_urls: set[str]
 ) -> bool:
     image_hash = str(candidate.get("hash") or "").strip()
     image_url = str(candidate.get("source_image_url") or "").strip().casefold().rstrip("/")
-    source_asset_key = str(candidate.get("source_asset_key") or "").strip().casefold()
     if image_hash and image_hash in seen_hashes:
         return False
     if image_url and image_url in seen_image_urls:
-        return False
-    if source_asset_key and source_asset_key in seen_asset_keys:
         return False
     if image_hash:
         seen_hashes.add(image_hash)
     if image_url:
         seen_image_urls.add(image_url)
-    if source_asset_key:
-        seen_asset_keys.add(source_asset_key)
     return True
 
 
@@ -786,8 +780,7 @@ def _manual_candidate_from_data(
     visual_genre: str,
     bot,
     seen_hashes: set[str],
-    seen_image_urls: set[str],
-    seen_asset_keys: set[str],
+    seen_image_urls: set[str]
     rejected_counts: dict[str, int],
 ) -> dict | None:
     normalized = _as_image_bytes(data)
@@ -830,24 +823,11 @@ def _manual_candidate_from_data(
             data.get("source_page_url") if isinstance(data, dict) else ""
         ).strip(),
         "source_image_url": source_image_url,
-        "source_asset_key": (
-            "|".join(
-                [
-                    str(source_name or "").strip().casefold(),
-                    str(data.get("source_page_url") if isinstance(data, dict) else "").strip().casefold(),
-                    str(data.get("search_title") if isinstance(data, dict) else "").strip().casefold(),
-                ]
-            ).strip("|")
-            if isinstance(data, dict) and str(data.get("search_title") or "").strip()
-            else ""
-        ),
-
     }
     if not _append_unique_candidate(
         candidate,
         seen_hashes,
         seen_image_urls,
-        seen_asset_keys,
     ):
         rejected_counts["duplicate"] += 1
         return None
@@ -881,7 +861,6 @@ def collect_manual_visual_pool(
     assets: list[dict] = []
     seen_hashes = set(used_hashes)
     seen_image_urls: set[str] = set()
-    seen_asset_keys: set[str] = set()
     query_stats: list[dict] = []
     rejected_counts = {
         "entity_no": 0,
@@ -941,7 +920,6 @@ def collect_manual_visual_pool(
                             "subject": entity_anchor,
                             "bytes": candidate["bytes"],
                             "hash": candidate["hash"],
-                            "signature": candidate.get("signature", ""),
                             "source": candidate["source"],
                             "query": candidate["query"],
                             "visual_type": candidate["visual_type"],
@@ -983,7 +961,6 @@ def collect_manual_visual_pool(
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
-        query_seen_asset_keys: set[str] = set(seen_asset_keys)
         source_attempts = 0
         qa_requests = 0
         verified_for_query = 0
@@ -1032,7 +1009,6 @@ def collect_manual_visual_pool(
                     bot,
                     query_seen_hashes,
                     query_seen_urls,
-                    query_seen_asset_keys,
                     rejected_counts,
                 )
                 if candidate is None:
@@ -1077,20 +1053,6 @@ def collect_manual_visual_pool(
             image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
             if image_url:
                 seen_image_urls.add(image_url)
-            asset_key = str(
-                asset.get("source_asset_key")
-                or "|".join(
-                    [
-                        str(asset.get("source") or "").strip().casefold(),
-                        str(asset.get("source_page_url") or "").strip().casefold(),
-                    ]
-                )
-            ).strip("|")
-            if asset_key:
-                seen_asset_keys.add(asset_key)
-            signature = str(asset.get("signature") or "").strip()
-            if signature:
-                seen_signatures.append(signature)
 
         query_stats.append(
             {
