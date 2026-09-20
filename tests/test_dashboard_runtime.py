@@ -760,6 +760,7 @@ def test_dashboard_ai_discovery_uses_shared_broad_radar():
 
 
 def test_dashboard_manual_crop_returns_shorts_frame():
+    from PIL import Image
     from dashboard_runtime import _manual_crop_to_shorts
 
     image = Image.new("RGB", (2000, 1000), (100, 120, 140))
