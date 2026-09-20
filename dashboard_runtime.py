@@ -1944,12 +1944,12 @@ class DashboardWorkflowController(WorkflowController):
                     or (data.get("selected_story") or {}).get("format_mode")
                     or "regular"
                 ).strip().lower(),
-                    "script_review_required": data.get("stage") == "script_review",
-                    "script_visual_queries": list(self._script_visual_queries),
-                    "visual_packages": list(self._visual_packages),
-                    "visual_review_required": data.get("stage") == "visual_approval",
-                    "visual_review_approved": self._visual_approved,
-                    "visual_search_options": {
+                "script_review_required": data.get("stage") == "script_review",
+                "script_visual_queries": list(self._script_visual_queries),
+                "visual_packages": list(self._visual_packages),
+                "visual_review_required": data.get("stage") == "visual_approval",
+                "visual_review_approved": self._visual_approved,
+                "visual_search_options": {
                         key: [dict(item) for item in value]
                         for key, value in self._visual_search_options.items()
                     },
