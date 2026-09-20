@@ -63,10 +63,11 @@ def _manual_entity_from_query(manual: str, resolved_subject: str) -> str:
     if resolved:
         query_tokens = set(tokens(query))
         resolved_tokens = set(tokens(resolved))
-        meaningful_tokens = query_tokens or resolved_tokens
-        if (
-            query_tokens & resolved_tokens
-            and len(resolved_tokens) >= max(1, int(len(meaningful_tokens) * 0.6))
+        overlap = query_tokens & resolved_tokens
+        if overlap and (
+            len(resolved_tokens) == 1
+            or len(overlap) >= 2
+            or len(overlap) >= len(resolved_tokens)
         ):
             return resolved
 
