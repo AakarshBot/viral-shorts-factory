@@ -348,6 +348,12 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
         ],
     )
 
+    batch_payloads = []
+    def fake_batch(images, *args, **kwargs):
+        batch_payloads.append(list(images))
+        return {index: False for index in range(len(images))}
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", fake_batch)
+
     image, used_ai, source = retrieval.run_visual_retrieval(
         FakeRuntime(),
         FakeBot(),
@@ -364,9 +370,13 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
         "India match",
     )
 
-    assert image.size == (900, 1200)
+    assert image.size == (1080, 1920)
     assert used_ai is False
-    assert source == "ProviderTwo"
+    assert batch_payloads
+    assert len(batch_payloads[0]) == 8
+    assert any(candidate == candidates_one[0] for candidate in batch_payloads[0])
+    assert any(candidate == candidates_two[0] for candidate in batch_payloads[0])
+    assert source == "visual-rescue"
 
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
