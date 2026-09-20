@@ -561,6 +561,24 @@ def test_verified_non_action_cache_reuses_without_gemini_and_restores_provenance
 
     monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fail_qa)
 
+    from visual_search_intent_runtime import VisualSearchIntent
+
+    monkeypatch.setattr(
+        visual_search_intent_runtime,
+        "resolve_visual_search_intent",
+        lambda *_args, **_kwargs: VisualSearchIntent(
+            subject="Northstar Labs",
+            visual_type="ORGANIZATION",
+            visual_genre="ORG_HEADQUARTERS",
+            query="Northstar Labs",
+            queries=("Northstar Labs",),
+            intent="headquarters",
+            context="Northstar Labs headquarters",
+            confidence=1.0,
+            manual=False,
+        ),
+    )
+
     scene = {
         "primary_entity": "Northstar Labs",
         "factual_primary_entity": "Northstar Labs",
