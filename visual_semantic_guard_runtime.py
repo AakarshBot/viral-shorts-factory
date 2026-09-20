@@ -174,8 +174,12 @@ def _subject_role_hint(value: str) -> str:
     if not core_words:
         return ""
     core_text = clean_text(core)
-    if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,12}(?:\\s+[A-Z][A-Z0-9&.-]{1,12})*", core_text):
-        return "ORGANIZATION"
+    if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,12}(?:\s+[A-Z][A-Z0-9&.-]{1,12})*", core_text):
+        # Uppercase alphanumeric tokens are often formats, model names or
+        # technical abbreviations (for example T20/5G/F1), not organizations.
+        # Preserve the organization heuristic only for alphabetic acronyms.
+        if not any(char.isdigit() for char in core_text) and sum(char.isalpha() for char in core_text) >= 3:
+            return "ORGANIZATION"
 
     # Bare manual visual identities often arrive without an explicit semantic
     # role (for example, "Kapil Dev" or "Mohammad Rizwan"). Resolve the role

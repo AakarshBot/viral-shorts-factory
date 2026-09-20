@@ -50,6 +50,16 @@ def test_descriptive_visual_subject_gets_bounded_identity_preserving_fallbacks()
     assert all("event" not in q.lower().split() for q in queries)
 
 
+
+def test_alphanumeric_format_is_not_inferred_as_organization():
+    resolution = resolve_subject({
+        "primary_entity": "T20",
+        "visual_intent": "cricket format",
+    })
+    assert resolution["visual_type"] != "ORGANIZATION"
+
+
+
 def test_logo_subject_keeps_identity_first_and_bounded_fallback():
     scene = {
         "primary_entity": "ICC logo",

@@ -59,6 +59,31 @@ def test_phase2_evidence_pack_supports_valid_person_identity():
 
 
 
+
+def test_person_spelling_variant_is_repaired_from_story_evidence():
+    story = {
+        "title": "Smriti Mandhana continues for India",
+        "research_bundle": "Smriti Mandhana is an Indian cricketer and opener for India.",
+        "research_sources": [
+            {"title": "Smriti Mandhana continues for India", "snippet": "Smriti Mandhana remains a key player for India."}
+        ],
+    }
+    scene = {
+        "primary_entity": "Smriti Mandana",
+        "visual_intent": "person portrait",
+        "specific_search_prompt": "Smriti Mandana",
+    }
+
+    grounded = apply_grounding(scene, story)
+
+    assert grounded["primary_entity"] == "Smriti Mandhana"
+    assert grounded["factual_primary_entity"] == "Smriti Mandhana"
+    assert grounded["visual_search_subject"] == "Smriti Mandhana"
+    assert grounded["specific_search_prompt"] == "Smriti Mandhana"
+    assert grounded["visual_entity_grounded"] is True
+    assert grounded["visual_entity_original"] == "Smriti Mandana"
+    assert "spelling variant" in grounded["visual_entity_grounding_reason"]
+
 def test_supported_person_is_preserved():
     scene = {
         'primary_entity': 'Harmanpreet Kaur',

@@ -96,8 +96,98 @@ _PERSON_IDENTITY_CACHE: dict[str, dict[str, str]] = {}
 _PERSON_IDENTITY_CACHE_MAX = 128
 
 
+def _verify_wikidata_human(candidate_ids: list[str], labels: dict[str, str]) -> tuple[str, str, bool]:
+    """Return the first verified human QID, its label, and whether detail lookup succeeded."""
+    ids = [str(qid or "").strip() for qid in candidate_ids if re.fullmatch(r"Q\d+", str(qid or "").strip())]
+    if not ids:
+        return "", "", False
+
+    detail_payload = _api_json(
+        "https://www.wikidata.org/w/api.php",
+        params={
+            "action": "wbgetentities",
+            "ids": "|".join(ids[:5]),
+            "props": "claims|labels",
+            "languages": "en",
+            "format": "json",
+        },
+    )
+    entities = detail_payload.get("entities", {}) if detail_payload else {}
+    detail_succeeded = isinstance(entities, dict) and bool(entities)
+    if not detail_succeeded:
+        return "", "", False
+
+    for qid in ids[:5]:
+        entity = entities.get(qid)
+        claims = entity.get("claims", {}) if isinstance(entity, dict) else {}
+        p31 = claims.get("P31", []) if isinstance(claims, dict) else []
+        for claim in p31 if isinstance(p31, list) else []:
+            main_snak = claim.get("mainsnak", {}) if isinstance(claim, dict) else {}
+            value = main_snak.get("datavalue", {}).get("value", {}) if isinstance(main_snak, dict) else {}
+            if isinstance(value, dict) and str(value.get("id") or "").strip() == "Q5":
+                label = labels.get(qid, "")
+                label_data = entity.get("labels", {}).get("en", {}) if isinstance(entity, dict) else {}
+                if isinstance(label_data, dict):
+                    label = str(label_data.get("value") or label).strip()
+                return qid, label, True
+    return "", "", True
+
+
+def _wikipedia_identity_candidates(query: str) -> tuple[list[str], dict[str, str]]:
+    """Use Wikipedia's fuzzy search as a bounded spelling/alias fallback."""
+    payload = _api_json(
+        "https://en.wikipedia.org/w/api.php",
+        params={
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": _clean_query(query),
+            "redirects": 1,
+            "gsrnamespace": 0,
+            "gsrlimit": 5,
+            "prop": "pageprops",
+            "ppprop": "wikibase_item",
+            "format": "json",
+        },
+    )
+    pages = payload.get("query", {}).get("pages", {}) if payload else {}
+    if not isinstance(pages, dict):
+        return [], {}
+
+    ordered_pages = sorted(
+        (page for page in pages.values() if isinstance(page, dict)),
+        key=lambda page: int(page.get("index") or 10**9),
+    )
+    candidate_ids: list[str] = []
+    labels: dict[str, str] = {}
+    for page in ordered_pages:
+        qid = str((page.get("pageprops") or {}).get("wikibase_item") or "").strip()
+        title = str(page.get("title") or "").strip()
+        if not re.fullmatch(r"Q\d+", qid):
+            continue
+        if qid not in candidate_ids:
+            candidate_ids.append(qid)
+        if title:
+            labels[qid] = title
+    return candidate_ids[:5], labels
+
+
+def _cache_person_identity(cache_key: str, resolved: dict[str, str]) -> None:
+    key = str(cache_key or "").strip().casefold()
+    if not key or not resolved:
+        return
+    if key in _PERSON_IDENTITY_CACHE:
+        _PERSON_IDENTITY_CACHE[key] = dict(resolved)
+        return
+    if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
+        oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
+        if oldest_key:
+            _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
+    _PERSON_IDENTITY_CACHE[key] = dict(resolved)
+
+
+
 def resolve_person_identity(entity: str) -> dict[str, str]:
-    """Resolve a person name to a Wikidata item so identity survives spelling/query variants."""
+    """Resolve a person name through Wikidata, with Wikipedia spelling/alias fallback."""
     normalized = _clean_query(entity)
     if not normalized:
         return {}
@@ -120,7 +210,7 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
     )
     results = payload.get("search", []) if payload else []
     if not isinstance(results, list):
-        return {}
+        results = []
 
     candidate_ids: list[str] = []
     labels: dict[str, str] = {}
@@ -135,62 +225,37 @@ def resolve_person_identity(entity: str) -> dict[str, str]:
         if label:
             labels[qid] = label
 
-    # wbsearchentities is intentionally relevance-ranked but does not itself
-    # guarantee that the top item is a human. Verify the candidate type through
-    # P31=Q5 (human) when structured entity data is available. If the detail
-    # request itself is unavailable, preserve the search result as a bounded
-    # compatibility fallback and let the downstream semantic-QA gate decide.
-    verified_qid = ""
-    detail_succeeded = False
-    if candidate_ids:
-        detail_payload = _api_json(
-            "https://www.wikidata.org/w/api.php",
-            params={
-                "action": "wbgetentities",
-                "ids": "|".join(candidate_ids[:5]),
-                "props": "claims|labels",
-                "languages": "en",
-                "format": "json",
-            },
-        )
-        entities = detail_payload.get("entities", {}) if detail_payload else {}
-        detail_succeeded = isinstance(entities, dict) and bool(entities)
-        if detail_succeeded:
-            for qid in candidate_ids[:5]:
-                entity = entities.get(qid)
-                claims = entity.get("claims", {}) if isinstance(entity, dict) else {}
-                p31 = claims.get("P31", []) if isinstance(claims, dict) else []
-                for claim in p31 if isinstance(p31, list) else []:
-                    main_snak = claim.get("mainsnak", {}) if isinstance(claim, dict) else {}
-                    value = main_snak.get("datavalue", {}).get("value", {}) if isinstance(main_snak, dict) else {}
-                    if isinstance(value, dict) and str(value.get("id") or "").strip() == "Q5":
-                        verified_qid = qid
-                        break
-                if verified_qid:
-                    break
-
-    if detail_succeeded:
-        if not verified_qid:
-            return {}
-        qid = verified_qid
+    verified_qid, verified_label, detail_succeeded = _verify_wikidata_human(candidate_ids, labels)
+    if verified_qid:
+        resolved = {"qid": verified_qid, "label": verified_label}
     else:
-        qid = candidate_ids[0] if candidate_ids else ""
-    if not qid:
-        return {}
-    label = labels.get(qid, "")
-    if detail_succeeded:
-        detail_entities = detail_payload.get("entities", {}) if isinstance(detail_payload, dict) else {}
-        if isinstance(detail_entities, dict) and isinstance(detail_entities.get(qid), dict):
-            entity = detail_entities[qid]
-            label_data = entity.get("labels", {}).get("en", {}) if isinstance(entity.get("labels"), dict) else {}
-            label = str(label_data.get("value") or label).strip()
+        # Wikipedia search is deliberately a fallback rather than an acceptance
+        # boundary: its job is to recover canonical spellings/aliases. The QID is
+        # still type-checked through Wikidata when structured data is available.
+        fallback_ids, fallback_labels = _wikipedia_identity_candidates(normalized)
+        fallback_qid, fallback_label, fallback_detail_succeeded = _verify_wikidata_human(
+            fallback_ids,
+            fallback_labels,
+        )
+        if fallback_qid:
+            resolved = {"qid": fallback_qid, "label": fallback_label}
+        elif not fallback_detail_succeeded and fallback_ids:
+            # Bounded compatibility fallback when the verification lookup is
+            # unavailable; semantic visual QA remains mandatory downstream.
+            fallback_qid = fallback_ids[0]
+            resolved = {"qid": fallback_qid, "label": fallback_labels.get(fallback_qid, "")}
+        elif not detail_succeeded and candidate_ids:
+            # Preserve the previous bounded fallback when Wikidata itself is
+            # reachable only through search results.
+            qid = candidate_ids[0]
+            resolved = {"qid": qid, "label": labels.get(qid, "")}
+        else:
+            return {}
 
-    resolved = {"qid": qid, "label": label}
-    if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
-        oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
-        if oldest_key:
-            _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
-    _PERSON_IDENTITY_CACHE[cache_key] = resolved
+    _cache_person_identity(cache_key, resolved)
+    canonical_label = str(resolved.get("label") or "").strip()
+    if canonical_label:
+        _cache_person_identity(canonical_label, resolved)
     return dict(resolved)
 
 
@@ -243,16 +308,6 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
         if not isinstance(page, dict):
             continue
         title = str(page.get("title", "")).strip()
-        qid = str((page.get("pageprops") or {}).get("wikibase_item") or "").strip()
-        if qid and re.fullmatch(r"Q\d+", qid):
-            cache_key = entity.casefold()
-            if cache_key not in _PERSON_IDENTITY_CACHE:
-                resolved = {"qid": qid, "label": title}
-                if len(_PERSON_IDENTITY_CACHE) >= _PERSON_IDENTITY_CACHE_MAX:
-                    oldest_key = next(iter(_PERSON_IDENTITY_CACHE), "")
-                    if oldest_key:
-                        _PERSON_IDENTITY_CACHE.pop(oldest_key, None)
-                _PERSON_IDENTITY_CACHE[cache_key] = resolved
         # Wikipedia's search engine is the relevance filter. Do not impose a
         # brittle token-level name match here: legitimate pages commonly use
         # compacted names, punctuation, initials, aliases, transliterations or
