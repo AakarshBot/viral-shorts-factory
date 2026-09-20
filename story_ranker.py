@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 
@@ -52,6 +52,43 @@ SPORTS_NICHE_TERMS = {
 }
 
 CRICKET_TERMS = {"cricket", "icc", "bcci", "pcb", "test cricket", "t20", "odi", "ipl", "psl"}
+
+# Intake-quality gates. These are deliberately conservative: the discovery pool
+# should contain real stories, not section pages, search results, tag pages,
+# live indexes, or social headlines masquerading as source material.
+NON_ARTICLE_PATH_SEGMENTS = {
+    "search", "results", "tag", "tags", "topic", "topics", "category",
+    "categories", "author", "authors", "archive", "archives", "page",
+    "pages", "section", "sections", "index", "home", "feed", "feeds",
+}
+NON_ARTICLE_QUERY_KEYS = {
+    "q", "query", "search", "tag", "topic", "category", "section",
+    "page", "page_num", "page_no", "filter", "sort",
+}
+GENERIC_PAGE_TITLES = {
+    "latest news", "breaking news", "top stories", "top story", "news headlines",
+    "news updates", "latest headlines", "today's headlines", "todays headlines",
+    "india news", "world news", "sports news", "business news",
+    "technology news", "entertainment news", "latest updates", "live updates",
+    "live news", "all news", "news", "headlines", "home", "homepage",
+    "search results", "search", "latest stories", "top news",
+}
+STORY_SIGNAL_TERMS = {
+    "announce", "announced", "announcement", "approve", "approved", "ban", "banned",
+    "launch", "launched", "release", "released", "reveal", "reveals", "revealed",
+    "unveil", "unveils", "unveiled", "sign", "signed", "deal", "acquire", "acquired",
+    "appoint", "appointed", "resign", "resigned", "return", "returns", "returned",
+    "comeback", "record", "records", "price", "pricing", "earnings", "revenue",
+    "study", "research", "trial", "warning", "forecast", "discovery", "breakthrough",
+    "review", "reviews", "trailer", "release", "released", "cast", "casting",
+    "movie", "film", "album", "song", "episode", "match", "result", "results",
+    "score", "scores", "tournament", "qualify", "qualified", "ranking", "ranked",
+    "award", "awards", "speech", "interview", "hearing", "ruling", "verdict",
+    "court", "policy", "law", "bill", "plan", "plans", "proposal", "protest",
+    "storm", "earthquake", "fire", "flood", "warning", "incident",
+    "explained", "explainer", "how", "why", "what", "amid", "after", "following",
+    "despite", "before", "joins", "joined", "wins", "won", "loses", "lost",
+}
 
 # A temporary network problem should not make every GNews query wait for the
 # full timeout. After one connection-level failure, discovery skips additional
@@ -305,6 +342,136 @@ def _canonical_url(value):
         return f"{parsed.netloc.removeprefix('www.')}" + parsed.path.rstrip("/")
     except Exception:
         return raw
+
+
+def _article_url_is_plausible(story):
+    """Reject obvious section/search/index URLs before they become candidates."""
+    raw = _source_url_from_item(story)
+    if not raw:
+        return False
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return False
+
+    domain = parsed.netloc.lower().removeprefix("www.")
+    if not domain or domain in {
+        "news.google.com",
+        "google.com",
+        "reddit.com",
+        "old.reddit.com",
+    }:
+        return False
+
+    segments = [
+        segment.strip().lower()
+        for segment in parsed.path.split("/")
+        if segment.strip()
+    ]
+    if not segments:
+        return False
+    if any(segment in NON_ARTICLE_PATH_SEGMENTS for segment in segments):
+        return False
+
+    query_keys = {
+        key_name.strip().lower()
+        for key_name, _value in parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+        )
+    }
+    if query_keys & NON_ARTICLE_QUERY_KEYS:
+        return False
+
+    last_segment = segments[-1]
+    if last_segment in NON_ARTICLE_PATH_SEGMENTS:
+        return False
+
+    # A bare one-segment path that is itself a section name is almost always
+    # a landing page rather than a story.
+    if len(segments) == 1 and last_segment in {
+        "news", "sports", "business", "technology", "entertainment",
+        "world", "india", "latest", "trending", "videos", "photos",
+    }:
+        return False
+
+    return True
+
+
+def _title_is_story_like(title):
+    """Reject navigation/section headlines that have no actual story shape."""
+    clean_title = re.sub(r"\s+", " ", str(title or "").strip())
+    if not clean_title:
+        return False
+
+    normalized = re.sub(r"[^a-z0-9']+", " ", clean_title.casefold()).strip()
+    if normalized in GENERIC_PAGE_TITLES:
+        return False
+
+    words = [word for word in normalized.split() if word]
+    if len(words) < 5:
+        return False
+
+    action_signal = bool(_event_actions(clean_title))
+    story_signal = bool(set(words) & STORY_SIGNAL_TERMS)
+    numeric_signal = bool(re.search(r"\b\d+(?:\.\d+)?\b|[$€£₹]|%", clean_title))
+    question_signal = bool(re.search(r"\b(?:how|why|what|when|where)\b", clean_title.casefold()))
+    navigation_shape = bool(
+        re.search(
+            r"^(?:latest|top|breaking|today'?s|all)\s+(?:news|stories|headlines|updates)\b",
+            normalized,
+        )
+    )
+
+    if navigation_shape and not (action_signal or story_signal or numeric_signal or question_signal):
+        return False
+
+    return bool(action_signal or story_signal or numeric_signal or question_signal)
+
+
+def _article_evidence_length(story):
+    evidence_text = " ".join(
+        str(story.get(field) or "")
+        for field in ("description", "snippet", "summary", "content", "text")
+    )
+    evidence_text = re.sub(r"\s+", " ", evidence_text).strip()
+    return len(evidence_text)
+
+
+def _story_intake_quality_pass(story):
+    """Fail closed on non-story pages and thin headline-only candidates."""
+    title = str(story.get("title") or "").strip()
+    if not _title_is_story_like(title):
+        story["discovery_rejection"] = "Not a story-shaped headline"
+        return False
+
+    if not _article_url_is_plausible(story):
+        story["discovery_rejection"] = "Source URL looks like a section/search/index page"
+        return False
+
+    evidence_chars = _article_evidence_length(story)
+    official = _clean(story.get("collection_source")) == "official"
+    source_quality = _source_quality(story)
+    event_article_count = int(story.get("event_article_count") or 1)
+    non_gdelt_count = int(story.get("event_non_gdelt_count") or 0)
+
+    # GDELT is discovery radar, not evidence. A GDELT-only event must have
+    # an independently recognised high-quality source before it can enter
+    # the human-facing story pool.
+    if non_gdelt_count == 0 and not official and source_quality < 1.5:
+        story["discovery_rejection"] = "Radar-only event without a recognised source"
+        return False
+
+    # A single thin headline with no article text is not enough for a Shorts
+    # story. Multi-source/official events can survive because the event itself
+    # supplies corroboration.
+    if evidence_chars < 80 and event_article_count < 2 and not official and source_quality < 1.5:
+        story["discovery_rejection"] = "Insufficient article evidence"
+        return False
+
+    story["story_shape_pass"] = True
+    story["article_evidence_chars"] = evidence_chars
+    return True
 
 
 def _source_quality(story):
@@ -802,7 +969,7 @@ def _reddit_items(genre_key):
 
 
 def _cheap_filter(stories, max_items=30, max_age_hours=72):
-    """Apply freshness/safety eligibility before truncating the intake."""
+    """Apply story-shape, provenance, freshness and safety eligibility before truncating the intake."""
     survivors = []
     seen_urls = set()
     for story in stories:
@@ -810,6 +977,8 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
             continue
         title = str(story.get("title") or "").strip()
         if len(title) < 12:
+            continue
+        if not _story_intake_quality_pass(story):
             continue
         safe, hits = _safety_gate(story)
         if not safe:
@@ -845,7 +1014,7 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
 
 
 def _deduplicate_stage(stories, max_items=15):
-    """Remove residual duplicate articles without collapsing clustered events."""
+    """Remove duplicate or near-identical story candidates before ranking."""
     selected = []
     for story in sorted(
         stories,
@@ -856,15 +1025,36 @@ def _deduplicate_stage(stories, max_items=15):
         ),
         reverse=True,
     ):
-        if story.get("event_clustered"):
-            selected.append(story)
-            story["dedupe_pass"] = True
-        else:
-            title = story.get("title", "")
-            if any(_topic_overlap(title, old.get("title", "")) >= 0.82 for old in selected):
-                continue
-            story["dedupe_pass"] = True
-            selected.append(story)
+        title = story.get("title", "")
+        duplicate = False
+        for old in selected:
+            title_overlap = _topic_overlap(title, old.get("title", ""))
+            if title_overlap >= 0.82:
+                duplicate = True
+                break
+
+            left_entities = set(story.get("event_entities") or [])
+            right_entities = set(old.get("event_entities") or [])
+            shared_entities = len(left_entities & right_entities)
+            left_actions = set(story.get("event_actions") or [])
+            right_actions = set(old.get("event_actions") or [])
+            shared_actions = left_actions & right_actions
+
+            if (
+                title_overlap >= 0.62
+                and shared_entities >= 1
+                and shared_actions
+                and story.get("event_id") != old.get("event_id")
+            ):
+                duplicate = True
+                break
+
+        if duplicate:
+            story["discovery_rejection"] = "Duplicate or near-duplicate event"
+            continue
+
+        story["dedupe_pass"] = True
+        selected.append(story)
         if len(selected) >= max_items:
             break
     return selected
@@ -1069,7 +1259,10 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
 
 
 def _discovery_source_pass(story):
-    """Require minimum provenance for dashboard discovery without requiring corroboration."""
+    """Require an identifiable, article-like source with usable evidence."""
+    if not _story_intake_quality_pass(story):
+        return False
+
     url = _source_url_from_item(story)
     evidence = [
         item for item in (story.get("event_evidence") or [])
@@ -1087,12 +1280,21 @@ def _discovery_source_pass(story):
         for item in evidence
         if isinstance(item, dict)
     )
+
     if not (url or has_evidence_url):
         story["discovery_rejection"] = "No source URL/evidence"
         return False
     if not (publisher or has_evidence_publisher):
         story["discovery_rejection"] = "No identifiable publisher"
         return False
+
+    event_source_count = int(story.get("event_source_count") or 0)
+    if event_source_count <= 1 and _article_evidence_length(story) < 80:
+        source_quality = _source_quality(story)
+        if source_quality < 1.5 and _clean(story.get("collection_source")) != "official":
+            story["discovery_rejection"] = "Single-source candidate lacks article evidence"
+            return False
+
     story["discovery_source_backed"] = True
     return True
 
@@ -1128,27 +1330,33 @@ def _candidate_quality_pass(story):
 
 
 def _discovery_portfolio_pass(story):
-    """Keep the dashboard broad without weakening the production selection gate.
-
-    The dashboard is a human exploration surface, so niche but current,
-    source-supported stories should remain visible even when they are not
-    strong enough for automatic production selection.
-    """
+    """Apply portfolio scoring after the upstream intake-quality gate."""
     dimensions = story.get("discovery_dimensions") or {}
     freshness = _safe_float(dimensions.get("freshness")) or 0.0
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
+    importance = _safe_float(dimensions.get("importance")) or 0.0
+    shorts = _safe_float(dimensions.get("shorts_viability")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
+    corroboration = _safe_float(dimensions.get("corroboration")) or 0.0
+    source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
 
-    if freshness < 1.0 and momentum < 1.0:
+    if freshness < 2.0 and momentum < 2.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
-    if score < 6.0:
-        story["discovery_rejection"] = "Below exploration quality floor"
+    if importance < 4.0:
+        story["discovery_rejection"] = "Weak editorial importance"
+        return False
+    if shorts < 3.5:
+        story["discovery_rejection"] = "Weak Shorts viability"
+        return False
+    if score < 10.0:
+        story["discovery_rejection"] = "Below discovery quality floor"
+        return False
+    if source_quality < 1.0 and corroboration < 2.0:
+        story["discovery_rejection"] = "Insufficient source support"
         return False
 
-    story["discovery_tier"] = (
-        "production-ready" if _candidate_quality_pass(story) else "exploratory"
-    )
+    story["discovery_tier"] = "production-ready"
     return True
 
 
@@ -1347,8 +1555,9 @@ def collect_high_recall_stories(bot, genre_key, genre_cfg, trend_keyword=None, c
         raw.extend(official_future.result())
         social_rows = reddit_future.result()
 
+    # Reddit is an audience-interest signal only. Its headlines are not treated
+    # as factual story-source records and therefore cannot enter the candidate pool.
     social_titles = [row.get("title", "") for row in social_rows]
-    raw.extend(social_rows)
 
     # One bounded adaptive lane: if public-interest signals surface a
     # genuinely new vocabulary not covered by the base query, let GNews

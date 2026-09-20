@@ -26,16 +26,46 @@ def test_cheap_filter_evaluates_full_intake_before_truncating(monkeypatch):
     )
 
     stories = [
-        {"title": "Older weak event story", "url": "https://example.com/1", "age_hours": 2, "freshness": 1, "source_quality": 1, "event_corroboration_score": 1},
-        {"title": "Strong event story one", "url": "https://example.com/2", "age_hours": 3, "freshness": 8, "source_quality": 8, "event_corroboration_score": 8},
-        {"title": "Strong event story two", "url": "https://example.com/3", "age_hours": 4, "freshness": 7, "source_quality": 7, "event_corroboration_score": 7},
+        {
+            "title": "Older weak event story launches today",
+            "url": "https://example.com/1",
+            "age_hours": 2,
+            "freshness": 1,
+            "source_quality": 1,
+            "event_corroboration_score": 1,
+            "source": "Reuters",
+            "description": "Current reporting with verified details.",
+            "event_article_count": 1,
+        },
+        {
+            "title": "Strong event story one launches today",
+            "url": "https://example.com/2",
+            "age_hours": 3,
+            "freshness": 8,
+            "source_quality": 8,
+            "event_corroboration_score": 8,
+            "source": "Reuters",
+            "description": "Current reporting with verified details.",
+            "event_article_count": 1,
+        },
+        {
+            "title": "Strong event story two launches today",
+            "url": "https://example.com/3",
+            "age_hours": 4,
+            "freshness": 7,
+            "source_quality": 7,
+            "event_corroboration_score": 7,
+            "source": "Reuters",
+            "description": "Current reporting with verified details.",
+            "event_article_count": 1,
+        },
     ]
 
     result = _cheap_filter(stories, max_items=2, max_age_hours=48)
 
     assert [item["title"] for item in result] == [
-        "Strong event story one",
-        "Strong event story two",
+        "Strong event story one launches today",
+        "Strong event story two launches today",
     ]
 
 
