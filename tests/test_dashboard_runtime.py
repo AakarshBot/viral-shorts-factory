@@ -541,7 +541,7 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
             "title": f"{title} launches into the {subject} market",
             "url": f"https://reuters.example/story-{index}",
             "source": "Reuters",
-            "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
+            "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
             "description": f"Current reporting about {subject} with verified details.",
             "genre": "technology",
             "event_actions": ["launch"],
@@ -558,7 +558,7 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
                     "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),
                 },
                 {
-                    "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
+                    "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),
                 },
             ],
             "velocity_score": 5.0,
