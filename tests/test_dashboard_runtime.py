@@ -1056,6 +1056,35 @@ def test_dashboard_pool_replacement_preserves_previous_visual(tmp_path, monkeypa
     assert preserved[-1]["used"] is False
 
 
+def test_dashboard_reset_restores_canonical_factory_bindings():
+    from dashboard_runtime import DashboardWorkflowController
+
+    def run_robot():
+        return None
+
+    bot = _Bot()
+    bot.run_robot = run_robot
+    canonical = {
+        "write_script": lambda: "canonical-script",
+        "generate_voiceover_and_timestamps": lambda: "canonical-audio",
+        "process_visuals_async": lambda: "canonical-visuals",
+        "compile_video": lambda: "canonical-compile",
+    }
+    bot._canonical_dashboard_runtime_bindings = canonical
+    namespace = bot.run_robot.__globals__
+    for name in canonical:
+        stale = lambda name=name: f"stale-{name}"
+        setattr(bot, name, stale)
+        namespace[name] = stale
+
+    controller = DashboardWorkflowController(bot)
+    controller.reset()
+
+    for name, expected in canonical.items():
+        assert getattr(bot, name) is expected
+        assert namespace[name] is expected
+
+
 def test_dashboard_replaced_pool_visual_becomes_available_again(tmp_path):
     from PIL import Image
     from dashboard_runtime import DashboardWorkflowController
