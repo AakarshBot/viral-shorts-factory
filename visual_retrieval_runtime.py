@@ -1917,8 +1917,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         selected_bytes = selected.get("bytes") if selected else None
         if selected_bytes and selected_hash:
             try:
-                # save_to_cache() already persists the verified-cache marker.
-                # Do not pass unsupported kwargs through runtime wrappers.
+                # Entity-batch QA is the verification boundary for this asset.
+                # Tell the cache-safety wrapper explicitly that this write is verified.
                 cache_path = runtime.save_to_cache(
                     bot,
                     selected_bytes,
@@ -1926,6 +1926,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     visual_type,
                     selected.get("source", "visual"),
                     context,
+                    verified=True,
                 )
                 if cache_path:
                     import json
