@@ -1304,39 +1304,6 @@ def diversity_rerank(stories, max_items=28):
 
 
 
-DISCOVERY_SOURCE_WAIT_SECONDS = 12.0
-
-
-def _resolve_discovery_futures(future_sources, timeout=DISCOVERY_SOURCE_WAIT_SECONDS):
-    """Resolve completed discovery workers without allowing one source to block the newsroom."""
-    if not future_sources:
-        return {}
-
-    futures = list(future_sources)
-    done, pending = wait(futures, timeout=max(1.0, float(timeout)))
-
-    resolved = {}
-    for future in done:
-        label = future_sources.get(future, "discovery source")
-        try:
-            resolved[future] = future.result()
-        except Exception as exc:
-            print(
-                f"   [Discovery] {label} failed ({type(exc).__name__}); continuing with the other sources.",
-                flush=True,
-            )
-
-    for future in pending:
-        label = future_sources.get(future, "discovery source")
-        future.cancel()
-        print(
-            f"   [Discovery] {label} exceeded the {float(timeout):g}s discovery wait; continuing without it.",
-            flush=True,
-        )
-
-    return resolved
-
-
 def _google_news_query_from_url(url):
     """Extract a Google News RSS search query so it is not fetched twice."""
     try:
