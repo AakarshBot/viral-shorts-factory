@@ -988,6 +988,8 @@ def collect_manual_visual_pool(
                             "status": status,
                             "manual_query_index": int(query_index or 0),
                             "pool_origin": str(source_label or "manual"),
+                            "action_search": bool(candidate.get("action_search")),
+                            "search_variant_index": int(candidate.get("search_variant_index") or 1),
                             "used": False,
                         }
                     )
@@ -1126,8 +1128,7 @@ def collect_manual_visual_pool(
             if not variant_candidates:
                 continue
 
-            query_candidates.extend(variant_candidates)
-            query_candidates.sort(
+            variant_candidates.sort(
                 key=lambda item: (
                     -float(item.get("priority") or 0.0),
                     str(item.get("source") or "").casefold(),
@@ -1135,9 +1136,8 @@ def collect_manual_visual_pool(
                 )
             )
 
-            before = len(assets)
             added, requests_made = _verify(
-                query_candidates,
+                variant_candidates,
                 entity_anchor,
                 query_index,
                 target,
@@ -1147,21 +1147,6 @@ def collect_manual_visual_pool(
             verified_for_query = len(assets) - query_before_assets
             if verified_for_query >= target:
                 break
-
-            # The accepted candidates have already been folded into the run-wide
-            # dedupe set by _manual_candidate_from_data. Keep only the remaining
-            # unverified candidates for the next action variant.
-            if len(assets) > before:
-                query_candidates = [
-                    item
-                    for item in query_candidates
-                    if str(item.get("hash") or "").strip()
-                    not in {
-                        str(asset.get("hash") or "").strip()
-                        for asset in assets
-                        if int(asset.get("manual_query_index") or 0) == query_index
-                    }
-                ]
 
         verified_for_query = len(assets) - query_before_assets
 
