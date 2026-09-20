@@ -160,6 +160,8 @@ def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
         ],
     )
 
+    monkeypatch.setattr(retrieval, "strict_gemini_check_batch", lambda images, *args, **kwargs: {index: False for index in range(len(images))})
+
     scene = {
         "primary_entity": "Sanju Samson",
         "factual_primary_entity": "Sanju Samson",
