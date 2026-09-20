@@ -776,6 +776,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             rejected = item.get("factory_rejected") or []
             if rejected:
                 st.markdown(f"**Rejected by resolution · retained for manual QC · {len(rejected)}**")
+                st.caption("Entity verified but factory-rejected for resolution; retained for manual QC.")
                 reject_cols = st.columns(2, gap="small")
                 for rejected_index, rejected_item in enumerate(rejected[:19], 1):
                     with reject_cols[(rejected_index - 1) % 2]:
