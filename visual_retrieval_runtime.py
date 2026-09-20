@@ -440,8 +440,8 @@ def _provider_search_query(
     visual_type: str,
     visual_genre: str,
     identity_qid: str = "",
-    identity_label: str = "",
     query_index: int = 1,
+    identity_label: str = "",
 ) -> str:
     """Translate canonical intent into the vocabulary each provider searches best."""
     source_l = str(source or "").strip().casefold()
@@ -642,8 +642,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 visual_type,
                 visual_genre,
                 identity_qid,
-                identity_label,
                 query_index,
+                identity_label=identity_label,
             )
             source_key = (str(source or "").strip().casefold(), str(source_query or "").strip().casefold())
             if not source_query or source_key in attempted_source_queries:
