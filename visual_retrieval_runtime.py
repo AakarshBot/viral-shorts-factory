@@ -127,7 +127,13 @@ def _build_action_variants(base_query: str, visual_genre: str, *, limit: int = 2
         ]
         if suffix_tokens and all(token in existing_terms for token in suffix_tokens):
             continue
-        variant = f"{query} {suffix}".strip()
+        suffix_text = " ".join(suffix.split())
+        query_words = query.split()
+        suffix_words = suffix_text.split()
+        if query_words and suffix_words and query_words[-1].casefold() == suffix_words[0].casefold():
+            variant = " ".join([*query_words, *suffix_words[1:]]).strip()
+        else:
+            variant = f"{query} {suffix_text}".strip()
         if variant.casefold() != query.casefold() and variant.casefold() not in {
             item.casefold() for item in variants
         }:
@@ -1662,106 +1668,151 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
 
     query_rounds = []
     if action_search:
-        query_rounds.extend(_build_action_variants(base_query, visual_genre, limit=2))
-        if base_query.casefold() not in {item.casefold() for item in query_rounds}:
-            query_rounds.append(base_query)
+        action_round = _build_action_variants(base_query, visual_genre, limit=2)
+        if action_round:
+            query_rounds.append(action_round)
+        query_rounds.append([base_query])
     else:
-        query_rounds.append(base_query)
+        first_round = [base_query]
         refinement = _scene_refinement_query(seg, visual_anchor)
         if refinement and refinement.casefold() != base_query.casefold():
-            query_rounds.append(refinement)
+            query_rounds.append(first_round)
+            query_rounds.append([refinement])
+        else:
+            query_rounds.append(first_round)
 
-    for round_index, query in enumerate(query_rounds[:3], 1):
+    for round_index, query_group in enumerate(query_rounds[:2], 1):
+        queries = [str(query or "").strip() for query in query_group if str(query or "").strip()]
+        if not queries:
+            continue
         raw_target = INITIAL_CANDIDATE_POOL if round_index == 1 else REFINEMENT_CANDIDATE_POOL
         source_limit = INITIAL_SOURCE_LIMIT if round_index == 1 else REFINEMENT_SOURCE_LIMIT
         query_candidates = []
         attempted_for_round = set()
 
         print(
-            f"   [Visual Search] round {round_index}/{min(3, len(query_rounds))} | "
-            f"'{query}' | raw_target={raw_target} | sources={source_limit}",
+            f"   [Visual Search] round {round_index}/{min(2, len(query_rounds))} | "
+            f"queries='{ ' | '.join(queries) }' | raw_target={raw_target} | sources={source_limit}",
             flush=True,
         )
 
-        for source_index, (source, fetcher) in enumerate(source_plan):
-            if source_index >= source_limit:
-                break
-            if not callable(fetcher) or len(query_candidates) >= raw_target:
-                break
-
-            source_query = _provider_search_query(
-                source,
-                query,
-                cache_entity,
-                visual_type,
-                visual_genre,
-                "",
-                round_index,
-                identity_label="",
-            )
-            if manual_query and round_index == 1 and str(source or "").strip().casefold() != "wikipedia":
-                source_query = str(query or "").strip()
-            source_key = (str(source or "").strip().casefold(), str(source_query or "").strip().casefold())
-            if not source_query or source_key in attempted_for_round:
-                continue
-            attempted_for_round.add(source_key)
-
-            fetch_entity = cache_entity if str(source).casefold() == "wikipedia" else source_query
-            local_used_urls = set(used_urls)
-            args = (
-                (fetch_entity, local_used_urls, query, video_title, visual_type, visual_genre)
-                if str(source).casefold() == "wikipedia"
-                else (source_query, local_used_urls, query, video_title, visual_type, visual_genre)
-            )
-            raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, source_query)
-            used_urls.update(local_used_urls)
-            candidates = _candidate_items(raw_data)
-            if not candidates:
-                _record_visual_rejection(seg, "provider_empty", f"{source}:{source_query}")
-                continue
-
-            for candidate_index, data in enumerate(candidates, 1):
-                valid, reason, normalized = _preflight_image(data)
-                if not valid:
-                    bucket = (
-                        "resolution"
-                        if reason.startswith("resolution-too-low")
-                        else "invalid_image"
-                        if reason == "invalid-image"
-                        else "provider_payload"
-                        if reason.startswith("provider-returned-")
-                        else "preflight_reject"
-                    )
-                    _record_visual_rejection(seg, bucket, f"{source}:candidate {candidate_index}:{reason}")
-                    continue
-
-                image_hash = _hash_image(bot, normalized)
-                if image_hash in used_hashes or any(item[3] == image_hash for item in query_candidates):
-                    _record_visual_rejection(seg, "duplicate", f"{source}:candidate {candidate_index}")
-                    continue
-
-                record = candidate_provenance(data)
-                if not provenance_is_usable(record):
-                    _record_visual_rejection(seg, "licensing_provenance", f"{source}:candidate {candidate_index}")
-                    continue
-
-                priority = _candidate_priority(
-                    source, normalized, visual_type, query, visual_genre, data=data
-                )
-                query_candidates.append(
-                    (candidate_index, data, normalized, image_hash, priority, record, str(source), str(query))
-                )
-                if len(query_candidates) >= raw_target:
+        for query in queries:
+            for source_index, (source, fetcher) in enumerate(source_plan):
+                if source_index >= source_limit:
                     break
+                if not callable(fetcher) or len(query_candidates) >= raw_target:
+                    break
+
+                source_query = _provider_search_query(
+                    source,
+                    query,
+                    cache_entity,
+                    visual_type,
+                    visual_genre,
+                    "",
+                    round_index,
+                    identity_label="",
+                )
+                if manual_query and round_index == 1 and str(source or "").strip().casefold() != "wikipedia":
+                    source_query = str(query or "").strip()
+                source_key = (
+                    str(source or "").strip().casefold(),
+                    str(source_query or "").strip().casefold(),
+                )
+                if not source_query or source_key in attempted_for_round:
+                    continue
+                attempted_for_round.add(source_key)
+
+                fetch_entity = cache_entity if str(source).casefold() == "wikipedia" else source_query
+                local_used_urls = set(used_urls)
+                args = (
+                    (fetch_entity, local_used_urls, query, video_title, visual_type, visual_genre)
+                    if str(source).casefold() == "wikipedia"
+                    else (source_query, local_used_urls, query, video_title, visual_type, visual_genre)
+                )
+                raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, source_query)
+                used_urls.update(local_used_urls)
+                candidates = _candidate_items(raw_data)
+                if not candidates:
+                    _record_visual_rejection(seg, "provider_empty", f"{source}:{source_query}")
+                    continue
+
+                for candidate_index, data in enumerate(candidates, 1):
+                    valid, reason, normalized = _preflight_image(data)
+                    if not valid:
+                        bucket = (
+                            "resolution"
+                            if reason.startswith("resolution-too-low")
+                            else "invalid_image"
+                            if reason == "invalid-image"
+                            else "provider_payload"
+                            if reason.startswith("provider-returned-")
+                            else "preflight_reject"
+                        )
+                        _record_visual_rejection(
+                            seg,
+                            bucket,
+                            f"{source}:candidate {candidate_index}:{reason}",
+                        )
+                        continue
+
+                    image_hash = _hash_image(bot, normalized)
+                    if image_hash in used_hashes or any(
+                        item[3] == image_hash for item in query_candidates
+                    ):
+                        _record_visual_rejection(
+                            seg,
+                            "duplicate",
+                            f"{source}:candidate {candidate_index}",
+                        )
+                        continue
+
+                    record = candidate_provenance(data)
+                    if not provenance_is_usable(record):
+                        _record_visual_rejection(
+                            seg,
+                            "licensing_provenance",
+                            f"{source}:candidate {candidate_index}",
+                        )
+                        continue
+
+                    priority = _candidate_priority(
+                        source,
+                        normalized,
+                        visual_type,
+                        query,
+                        visual_genre,
+                        data=data,
+                    )
+                    query_candidates.append(
+                        (
+                            candidate_index,
+                            data,
+                            normalized,
+                            image_hash,
+                            priority,
+                            record,
+                            str(source),
+                            str(query),
+                        )
+                    )
+                    if len(query_candidates) >= raw_target:
+                        break
+
+            if len(query_candidates) >= raw_target:
+                break
 
         if not query_candidates:
             continue
 
-        query_candidates.sort(key=lambda item: (-float(item[4]), str(item[6]).casefold(), int(item[0])))
-        # First inspect only the strongest 10 in one batch. If that does not
-        # produce at least three entity-approved images, inspect the next 10.
-        # This normally costs one Gemini call per search term and never requires
-        # scene-level verification.
+        query_candidates.sort(
+            key=lambda item: (
+                -float(item[4]),
+                str(item[6]).casefold(),
+                int(item[0]),
+            )
+        )
+
         check_candidates = query_candidates[:raw_target]
         primary_count = min(ENTITY_CHECK_PRIMARY_POOL, len(check_candidates))
         batches = [check_candidates[:primary_count]]
@@ -1791,12 +1842,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     break
             if verification_attempts >= 4:
                 break
-
-            # Three usable alternatives are enough to keep every slide healthy.
-            # Ten is the bank target, not a reason to spend another AI call.
-            if len(
-                [value for value in local_results.values() if value is True]
-            ) >= 3:
+            if len([value for value in local_results.values() if value is True]) >= 3:
                 break
 
         round_verified = 0
@@ -1822,13 +1868,21 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 if len(verified_assets) > before:
                     round_verified += 1
             elif verdict is False:
-                _record_visual_rejection(seg, "semantic_no", f"{item[6]}:candidate {item[0]}:ENTITY_NO")
+                _record_visual_rejection(
+                    seg,
+                    "semantic_no",
+                    f"{item[6]}:candidate {item[0]}:ENTITY_NO",
+                )
             elif local_index in local_results:
-                _record_visual_rejection(seg, "semantic_uncertain", f"{item[6]}:candidate {item[0]}:ENTITY_UNCERTAIN")
+                _record_visual_rejection(
+                    seg,
+                    "semantic_uncertain",
+                    f"{item[6]}:candidate {item[0]}:ENTITY_UNCERTAIN",
+                )
 
-        last_round = str(query)
+        last_round = " | ".join(queries)
         print(
-            f"   [Visual QA] entity batch complete | query='{query}' | "
+            f"   [Visual QA] entity batch complete | query='{last_round}' | "
             f"verified={round_verified} | bank={len(verified_assets)}",
             flush=True,
         )
