@@ -739,6 +739,11 @@ def patch_content_first_visuals(bot):
                 "visual_manual_pool_mode": bool(seg.get("visual_manual_pool_mode", False)),
                 "visual_manual_pool_size": len(manual_pool_materialized) if seg.get("visual_manual_pool_mode") else 0,
                 "visual_manual_pool_query_stats": list((manual_pool_result or {}).get("query_stats") or []) if seg.get("visual_manual_pool_mode") else [],
+                "visual_manual_pool": (
+                    [dict(item) for item in manual_available_pool]
+                    if idx == 0 and seg.get("visual_manual_pool_mode")
+                    else []
+                ),
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
