@@ -1057,11 +1057,11 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
         "Test story",
     )
 
-    assert len(result["assets"]) == 10
-    assert len({item["hash"] for item in result["assets"]}) == 10
-    assert result["hard_max"] == 10
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5]
-    assert len(result["query_stats"]) == 2
+    assert len(result["assets"]) == 19
+    assert len({item["hash"] for item in result["assets"]}) == 19
+    assert result["hard_max"] == 19
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 4]
+    assert len(result["query_stats"]) == 4
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
 
@@ -1438,7 +1438,7 @@ def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
     values = []
     for index in range(4):
         values.append({
-            "bytes": _jpeg_bytes((900 + index, 1200)),
+            "bytes": _jpeg_bytes((900 + index, 1200), color=(40 + index * 20, 70, 100)),
             "provenance": {
                 "provider": "Commons",
                 "url": f"https://commons.wikimedia.org/wiki/File:Article_image_{index}.jpg",
