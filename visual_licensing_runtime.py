@@ -126,11 +126,34 @@ def candidate_provenance(value: Any) -> dict[str, str]:
 
 
 def provenance_is_usable(record: dict[str, Any]) -> bool:
+    """Return True only when commercial-use provenance is explicitly established."""
     provider = str(record.get("provider") or "").strip().casefold()
     license_name = str(record.get("license") or "").strip().casefold()
     if provider in {"pexels", "unsplash", "pixabay"}:
         return bool(license_name) and "-nc" not in license_name and "-nd" not in license_name
     return is_allowed_license(record.get("license"))
+
+
+def provenance_is_retainable(record: dict[str, Any]) -> bool:
+    """Keep uncertain provenance for human review unless metadata is explicitly restrictive.
+
+    This is not an approval. Unknown provenance stays out of automatic selection.
+    """
+    license_name = str(record.get("license") or "").strip().casefold()
+    code = normalize_license_code(record.get("license"))
+    if "-nc" in license_name or "-nd" in license_name:
+        return False
+    if code in {"by-nc", "by-nc-sa", "by-nd", "by-sa-nd"}:
+        return False
+    return True
+
+
+def provenance_status(record: dict[str, Any]) -> str:
+    if provenance_is_usable(record):
+        return "commercial-verified"
+    if provenance_is_retainable(record):
+        return "provenance-review"
+    return "rights-restricted"
 
 
 def attribution_required(record: dict[str, Any]) -> bool:
@@ -213,6 +236,8 @@ __all__ = [
     "normalize_license_code",
     "provider_allowed",
     "provenance_is_usable",
+    "provenance_is_retainable",
+    "provenance_status",
     "provenance",
     "rescue_provenance",
     "ai_provenance",
