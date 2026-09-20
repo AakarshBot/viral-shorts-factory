@@ -107,6 +107,7 @@ def _download_image(url: str, used_urls: set[str] | None = None, metadata: dict[
             return None
         meta = dict(metadata or {})
         meta.setdefault("url", response.url or url)
+        meta.setdefault("source_image_url", response.url or url)
         return licensed_candidate(accepted, meta)
     except Exception:
         return None
@@ -696,7 +697,12 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     """Search Commons with topic-aware structured/text discovery and open-license filtering."""
     visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
     visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
-    searches = _commons_search_queries(query, visual_type, visual_genre)
+    manual_mode = bool(_args[4]) if len(_args) > 4 else False
+    searches = (
+        [(_commons_search_query(query), "text", "")]
+        if manual_mode
+        else _commons_search_queries(query, visual_type, visual_genre)
+    )
     if not searches:
         return []
 
