@@ -842,15 +842,13 @@ def test_manual_queries_build_one_shared_twenty_image_pool(monkeypatch):
                 (900, 1200),
                 (20 + query_index * 40, 40 + image_index * 20, 80),
             ).save(buffer, format="JPEG", quality=95)
-            items.append(
-                _licensed_candidate(
-                    buffer.getvalue(),
-                    "cc0",
-                ) | {
-                    "search_title": f"{query} image {image_index + 1}",
-                    "search_position": image_index + 1,
-                }
+            candidate = _licensed_candidate(
+                buffer.getvalue(),
+                "cc0",
             )
+            candidate["search_title"] = f"{query} image {image_index + 1}"
+            candidate["search_position"] = image_index + 1
+            items.append(candidate)
         image_candidates[query] = items
 
     class FakeBot:
