@@ -129,12 +129,13 @@ def _build_action_variants(base_query: str, visual_genre: str, *, limit: int = 2
         if suffix_tokens and all(token in existing_terms for token in suffix_tokens):
             continue
         suffix_text = " ".join(suffix.split())
-        query_words = query.split()
-        suffix_words = suffix_text.split()
-        if query_words and suffix_words and query_words[-1].casefold() == suffix_words[0].casefold():
-            variant = " ".join([*query_words, *suffix_words[1:]]).strip()
-        else:
-            variant = f"{query} {suffix_text}".strip()
+        suffix_words = [
+            word for word in suffix_text.split()
+            if word.casefold() not in existing_terms
+        ]
+        if not suffix_words:
+            continue
+        variant = f"{query} {' '.join(suffix_words)}".strip()
         if variant.casefold() != query.casefold() and variant.casefold() not in {
             item.casefold() for item in variants
         }:
