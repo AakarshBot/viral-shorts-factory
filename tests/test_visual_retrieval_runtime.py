@@ -1058,7 +1058,8 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
     assert len(result["assets"]) == 10
     assert len({item["hash"] for item in result["assets"]}) == 10
     assert result["hard_max"] == 10
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5]
+    assert len(result["query_stats"]) == 2
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
 
