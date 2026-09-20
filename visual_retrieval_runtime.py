@@ -752,7 +752,7 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             try:
                 cache_path = runtime.save_to_cache(
                     bot, selected_bytes, cache_entity, visual_type,
-                    selected.get("source", "visual"), context
+                    selected.get("source", "visual"), context, verified=True
                 )
                 if cache_path:
                     import json
