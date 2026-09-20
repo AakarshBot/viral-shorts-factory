@@ -393,6 +393,7 @@ def patch_content_first_visuals(bot):
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import fit_visual_image, install as install_visual_quality
         from visual_retrieval_runtime import (
+            classify_manual_pool_for_scene,
             collect_manual_visual_pool,
             make_visual_rescue,
             materialize_manual_visual_pool,
@@ -542,11 +543,23 @@ def patch_content_first_visuals(bot):
             category = str(seg.get("sport_or_topic_category", "")).lower()
 
             manual_selected = None
+            manual_classified_pool = []
             if manual_pool_materialized:
+                manual_classified_pool = classify_manual_pool_for_scene(
+                    manual_pool_materialized,
+                    seg,
+                )
                 manual_selected = select_manual_visual_candidate(
                     manual_pool_materialized,
                     seg,
                     used_hashes,
+                )
+                manual_classified_pool = classify_manual_pool_for_scene(
+                    manual_pool_materialized,
+                    seg,
+                    selected_hash=str(manual_selected.get("hash") or "").strip()
+                    if manual_selected
+                    else "",
                 )
 
             if manual_selected:
@@ -568,9 +581,18 @@ def patch_content_first_visuals(bot):
                 seg["visual_original_path"] = selected_path
                 seg["visual_asset_bank"] = [
                     dict(item)
-                    for item in manual_pool_materialized
+                    for item in manual_classified_pool
                     if str(item.get("hash") or "").strip() != selected_hash
                 ]
+                selected_scene_score = next(
+                    (
+                        float(item.get("scene_score") or 0.0)
+                        for item in manual_classified_pool
+                        if str(item.get("hash") or "").strip() == selected_hash
+                    ),
+                    0.0,
+                )
+                seg["visual_selected_scene_score"] = selected_scene_score
                 seg["visual_manual_pool_mode"] = True
                 seg["visual_rejection_counts"] = dict(
                     (manual_pool_result or {}).get("rejection_counts") or {}
@@ -604,9 +626,9 @@ def patch_content_first_visuals(bot):
                 seg["visual_fallback_reason"] = ""
                 seg["visual_query_used"] = ""
                 seg["visual_original_path"] = ""
-                seg["visual_asset_bank"] = list(
-                    manual_pool_materialized
-                )
+                seg["visual_asset_bank"] = [
+                    dict(item) for item in manual_classified_pool
+                ]
             elif idx == news_source_scene_index and isinstance(news_source_candidate, dict):
                 bg_img = news_source_candidate["image"]
                 used_ai = False
