@@ -569,6 +569,13 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
         path = str(layer.get("image") or "").strip()
         missing = not path or not os.path.isfile(path)
         verified = bool(layer.get("visual_verified", False))
+        bank = []
+        for bank_item in layer.get("visual_asset_bank") or []:
+            if not isinstance(bank_item, dict):
+                continue
+            bank_path = str(bank_item.get("path") or "").strip()
+            if bank_path and os.path.isfile(bank_path):
+                bank.append(dict(bank_item))
         items.append(
             {
                 "index": index,
@@ -584,7 +591,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                     else str(
                         layer.get("visual_qc_block_reason")
                         or layer.get("visual_rescue_reason")
-                        or "Visual has no verified semantic QC verdict."
+                        or "Visual has no verified entity QC verdict."
                     ).strip()
                 ),
                 "qc_attempts": int(layer.get("visual_verification_attempts") or 0),
@@ -592,6 +599,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "manual_query": str(layer.get("manual_visual_query") or "").strip(),
                 "query_used": str(layer.get("visual_query_used") or "").strip(),
                 "rescue_reason": str(layer.get("visual_rescue_reason") or "").strip(),
+                "bank": bank,
             }
         )
     return items
@@ -605,74 +613,97 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     run_id = str(snapshot.get("run_id") or "active")
     history = snapshot.get("visual_replacement_history") or {}
 
-    st.markdown("<div class='section-kicker'>Approval gate</div><h2 style='margin-top:0'>Visual review</h2>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-kicker'>Approval gate</div>"
+        "<h2 style='margin-top:0'>Visual review</h2>",
+        unsafe_allow_html=True,
+    )
     st.caption(
-        f"{len(items)} visuals are ready. Approve the set when it is correct. "
-        "If one image is wrong, reject only that visual and give it a new search term."
+        f"{len(items)} visuals are ready. Each current visual has already passed entity-level AI verification. "
+        "Review the active image or swap it directly with another verified image from its bank."
     )
 
     columns = st.columns(3, gap="medium")
     for offset, item in enumerate(items):
         with columns[offset % 3]:
+            st.markdown(f"### Visual {item['index']}")
             if item.get("missing"):
-                st.error(
-                    "No rendered image file is available for this slide.",
-                    icon="⛔",
-                )
+                st.error("No rendered image file is available for this slide.", icon="⛔")
             else:
-                st.image(item["path"], use_container_width=True)
-            status = "QC PASS" if item["qc_passed"] else "QC BLOCKED"
-            replacement_history = history.get(str(item["index"])) or history.get(item["index"]) or []
-            replacement_count = len(replacement_history)
-            query = item["manual_query"] or item["query_used"] or "automatic query"
+                st.image(item["path"], width=320)
+
+            status = "ENTITY QC PASS" if item["qc_passed"] else "ENTITY QC BLOCKED"
             st.markdown(
-                f"**Visual {item['index']}** · {item['visual_type']}  \\n"
                 f"<span class='small-muted'>{item['source']} · {status}</span>",
                 unsafe_allow_html=True,
             )
             if item["qc_passed"]:
                 attempts = item.get("qc_attempts", 0)
                 st.success(
-                    f"Visual semantic QC passed{f' after {attempts} QA check(s)' if attempts else ''}.",
+                    f"Entity verification passed{f' after {attempts} batched QA request(s)' if attempts else ''}.",
                     icon="✅",
                 )
             else:
-                reason = item.get("qc_reason") or "Visual has no verified semantic QC verdict."
-                st.error(f"Visual semantic QC blocked: {reason}", icon="⛔")
+                reason = item.get("qc_reason") or "Visual has no verified entity QC verdict."
+                st.error(f"Visual QC blocked: {reason}", icon="⛔")
+
+            query = item["manual_query"] or item["query_used"] or "automatic entity search"
             st.caption(f"Search: {query}")
-            rejection_counts = item.get("rejection_counts") or {}
-            if rejection_counts and not item["qc_passed"]:
-                summary = ", ".join(f"{key.replace('_', ' ')}={value}" for key, value in list(rejection_counts.items())[:4])
-                st.caption(f"Automatic QC: {summary}")
+
+            bank = item.get("bank") or []
+            if bank:
+                st.markdown(f"**Verified image bank · {len(bank)} unused**")
+                bank_cols = st.columns(2, gap="small")
+                for bank_index, bank_item in enumerate(bank[:10], 1):
+                    with bank_cols[(bank_index - 1) % 2]:
+                        bank_path = str(bank_item.get("path") or "").strip()
+                        if bank_path and os.path.isfile(bank_path):
+                            st.image(bank_path, width=165)
+                        source = str(bank_item.get("source") or "verified").strip()
+                        bank_query = str(bank_item.get("query") or "").strip()
+                        st.caption(
+                            f"{source}" + (f" · {bank_query}" if bank_query else "")
+                        )
+                        if st.button(
+                            "Use this image",
+                            use_container_width=True,
+                            key=f"use_bank_{run_id}_{item['index']}_{bank_index}",
+                        ):
+                            ok, message = controller.replace_visual_from_bank(
+                                item["index"],
+                                bank_index,
+                            )
+                            if ok:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+            else:
+                st.caption("No additional entity-verified bank images were available for this visual.")
+
+            replacement_count = len(
+                history.get(str(item["index"]))
+                or history.get(item["index"])
+                or []
+            )
             if replacement_count:
-                st.caption(f"Replacement attempt: {replacement_count}")
+                st.caption(f"Replacement changes: {replacement_count}")
 
-            replace_key = f"replace_visual_{run_id}_{item['index']}"
-            if st.button(
-                "⛔ Reject & replace this visual",
-                use_container_width=True,
-                key=replace_key,
-            ):
-                st.session_state[f"{replace_key}_active"] = True
-                st.rerun()
-
-            if st.session_state.get(f"{replace_key}_active", False):
-                query_key = f"{replace_key}_query"
+            with st.expander("Need another image? Search", expanded=False):
+                query_key = f"replace_visual_{run_id}_{item['index']}_query"
                 replacement_query = st.text_input(
                     "New search term",
                     placeholder="e.g. Rishabh Pant press conference",
                     key=query_key,
                 )
                 if st.button(
-                    "🔎 Search replacement",
+                    "Search another visual",
                     type="secondary",
                     use_container_width=True,
-                    key=f"{replace_key}_search",
+                    key=f"replace_visual_{run_id}_{item['index']}_search",
                 ):
                     ok, message = controller.replace_visual(item["index"], replacement_query)
                     if ok:
-                        st.session_state[f"{replace_key}_active"] = False
-                        st.session_state.pop(query_key, None)
                         st.success(message)
                         st.rerun()
                     else:
@@ -693,8 +724,8 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             st.rerun()
         if qc_blocked:
             st.caption(
-                f"Approval is locked until {len(qc_blocked)} visual(s) pass semantic QC. "
-                "Use Reject & replace on the blocked visual(s)."
+                f"Approval is locked until {len(qc_blocked)} visual(s) pass entity QC. "
+                "Use a verified bank image or the optional search fallback on the affected slide."
             )
     with reject_col:
         if st.button(
@@ -704,7 +735,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         ):
             controller.reject_visuals()
             st.rerun()
-
 
 def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
     events = snapshot.get("activity_events") or []
