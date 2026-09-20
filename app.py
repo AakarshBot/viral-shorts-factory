@@ -1098,8 +1098,23 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         dict(group) for group in (snapshot.get("visual_search_groups") or [])
         if isinstance(group, dict)
     ]
-    available = [item for item in pool if not bool(item.get("used")) and str(item.get("status") or "") != "factory-rejected-resolution"]
-    rejected = [item for item in pool if not bool(item.get("used")) and str(item.get("status") or "") == "factory-rejected-resolution"]
+    available = [
+        item for item in pool
+        if not bool(item.get("used"))
+        and str(item.get("status") or "") != "factory-rejected-resolution"
+        and str(item.get("provenance_status") or "commercial-verified") == "commercial-verified"
+    ]
+    provenance_review = [
+        item for item in pool
+        if not bool(item.get("used"))
+        and str(item.get("status") or "") != "factory-rejected-resolution"
+        and str(item.get("provenance_status") or "") == "provenance-review"
+    ]
+    rejected = [
+        item for item in pool
+        if not bool(item.get("used"))
+        and str(item.get("status") or "") == "factory-rejected-resolution"
+    ]
 
     ready_count = sum(1 for item in items if item.get("qc_passed"))
     active_search_count = sum(
@@ -1121,7 +1136,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     metric_cols = st.columns(4, gap="small")
     metric_cols[0].metric("Slides", len(items))
     metric_cols[1].metric("Ready", ready_count)
-    metric_cols[2].metric("Pool images", len(available) + len(rejected))
+    metric_cols[2].metric("Pool images", len(available) + len(provenance_review) + len(rejected))
     metric_cols[3].metric("New search", active_search_count)
 
     crop_target = str(st.session_state.get("visual_pool_crop_target") or "").strip()
@@ -1342,6 +1357,18 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         "Images that passed monetization and identity checks but are not currently assigned to a slide.",
         available,
         "verified",
+    )
+
+    st.markdown("### Provenance review images")
+    st.caption(
+        "These images passed identity checks but their commercial-use licence could not be verified automatically. "
+        "They remain available for your manual choice, but the factory will not auto-select them."
+    )
+    render_pool_section(
+        "Provenance review",
+        "Identity-verified alternatives retained instead of being discarded. Confirm the usage rights yourself before choosing one.",
+        provenance_review,
+        "provenance-review",
     )
 
     st.markdown("### Identity-verified, lower-resolution images")
