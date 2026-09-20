@@ -32,6 +32,7 @@ STOPWORDS = {
 GDELT_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_TIMEOUT_SECONDS = 4.0
 GDELT_FAILURE_COOLDOWN_SECONDS = 120.0
+MAX_EVENT_CLUSTER_ARTICLES = 800
 _GDELT_FAILURE_UNTIL = 0.0
 _GDELT_FAILURE_LOGGED = False
 
@@ -101,13 +102,13 @@ def _tokens(value: object) -> set[str]:
     text = re.sub(r"[^a-z0-9%]+", " ", _clean(value).lower())
     return {token for token in text.split() if len(token) >= 3 and token not in STOPWORDS}
 
+
 def _safe_float(value: object, default: float = 0.0) -> float:
     try:
         number = float(value)
         return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
-
 
 
 def _token_overlap(left: object, right: object) -> float:
@@ -354,6 +355,14 @@ def cluster_news_events(
         or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
+
+    if len(normalised) > MAX_EVENT_CLUSTER_ARTICLES:
+        print(
+            f"   [Discovery] Capping event-clustering intake at {MAX_EVENT_CLUSTER_ARTICLES} newest articles "
+            f"(received {len(normalised)}).",
+            flush=True,
+        )
+        normalised = normalised[:MAX_EVENT_CLUSTER_ARTICLES]
 
     clusters: list[list[dict]] = []
     for article in normalised:
