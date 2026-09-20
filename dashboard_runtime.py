@@ -377,11 +377,6 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         web_config.get("trend_keyword"),
         custom_q,
         custom_rss,
-        ai_cricket=(
-            genre_key == "sports_stories_of_day"
-            and str(web_config.get("cricket_category", ""))
-            == "AI-assisted top story in cricket"
-        ),
         broad_discovery=True,
     )
 
