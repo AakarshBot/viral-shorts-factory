@@ -695,6 +695,8 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 round_index,
                 identity_label="",
             )
+            if manual_query and round_index == 1 and str(source or "").strip().casefold() != "wikipedia":
+                source_query = str(query or "").strip()
             source_key = (str(source or "").strip().casefold(), str(source_query or "").strip().casefold())
             if not source_query or source_key in attempted_for_round:
                 continue
