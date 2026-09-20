@@ -111,9 +111,9 @@ def _preflight_image(data: Any) -> tuple[bool, str, bytes | None]:
         width, height = image.size
         if min(width, height) < 540:
             return False, f"resolution-too-low:{width}x{height}", None
-        ratio = width / max(1, height)
-        if not 0.25 <= ratio <= 4.0:
-            return False, f"extreme-aspect:{ratio:.2f}", None
+        # Aspect ratio is intentionally not a rejection criterion. The existing
+        # Shorts crop/fit stage can handle portrait, landscape and other usable
+        # source shapes without throwing away a valid entity visual.
         return True, "image-decodable", normalized
     except Exception:
         return False, "invalid-image", None
@@ -559,7 +559,7 @@ def materialize_visual_bank(bot, seg: dict, scene_index: int = 0) -> list[dict]:
             "hash": image_hash,
             "source": str(asset.get("source") or "").strip(),
             "query": str(asset.get("query") or "").strip(),
-            "visual_type": str(asset.get("visual_type") or visual_type if "visual_type" in locals() else "").strip().upper(),
+            "visual_type": str(asset.get("visual_type") or "").strip().upper(),
             "visual_genre": str(asset.get("visual_genre") or "").strip().upper(),
             "provenance": dict(asset.get("provenance") or {}),
             "status": "entity-verified-unused",
