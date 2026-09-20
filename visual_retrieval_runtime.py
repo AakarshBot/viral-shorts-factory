@@ -44,6 +44,11 @@ REAL_SOURCE_SCORES = {
 MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_SOURCE", "10"))))
 MAX_ENTITY_BANK_PER_QUERY = max(3, min(10, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "10"))))
 INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
+MANUAL_QUERY_VERIFIED_TARGET = max(2, min(5, int(os.getenv("VISUAL_MANUAL_QUERY_VERIFIED_TARGET", "5"))))
+MANUAL_POOL_MAX = max(5, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))))
+MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
+HARD_MIN_IMAGE_SIDE = max(240, min(540, int(os.getenv("VISUAL_HARD_MIN_IMAGE_SIDE", "360"))))
+SOFT_MIN_IMAGE_SIDE = max(HARD_MIN_IMAGE_SIDE, min(900, int(os.getenv("VISUAL_SOFT_MIN_IMAGE_SIDE", "540"))))
 ENTITY_CHECK_PRIMARY_POOL = 10
 REFINEMENT_CANDIDATE_POOL = max(6, min(12, int(os.getenv("VISUAL_REFINEMENT_CANDIDATE_POOL", "10"))))
 INITIAL_SOURCE_LIMIT = max(1, min(3, int(os.getenv("VISUAL_INITIAL_SOURCE_LIMIT", "3"))))
@@ -115,12 +120,18 @@ def _preflight_image(data: Any) -> tuple[bool, str, bytes | None]:
         image.load()
         image = image.convert("RGB")
         width, height = image.size
-        if min(width, height) < 540:
+        short_side = min(width, height)
+        if short_side < HARD_MIN_IMAGE_SIDE:
             return False, f"resolution-too-low:{width}x{height}", None
+        resolution_note = (
+            f"resolution-soft:{width}x{height}"
+            if short_side < SOFT_MIN_IMAGE_SIDE
+            else "image-decodable"
+        )
         # Aspect ratio is intentionally not a rejection criterion. The existing
         # Shorts crop/fit stage can handle portrait, landscape and other usable
         # source shapes without throwing away a valid entity visual.
-        return True, "image-decodable", normalized
+        return True, resolution_note, normalized
     except Exception:
         return False, "invalid-image", None
 
