@@ -175,7 +175,7 @@ def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
         "Sanju Samson story",
     )
 
-    assert image.size == (900, 1200)
+    assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
     assert scene["visual_qc_blocked"] is False
