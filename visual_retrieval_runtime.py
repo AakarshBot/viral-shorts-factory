@@ -972,8 +972,20 @@ manual queries are not enough, the existing automatic identity + compact scene
             if not isinstance(scene, dict):
                 continue
 
+            auto_scene = dict(scene)
+            auto_entity = str(
+                scene.get("factual_primary_entity")
+                or scene.get("visual_search_subject")
+                or scene.get("primary_entity")
+                or ""
+            ).strip()
+            auto_scene["manual_visual_query"] = ""
+            auto_scene["manual_visual_query_source"] = ""
+            if auto_entity:
+                auto_scene["primary_entity"] = auto_entity
+                auto_scene["visual_search_subject"] = auto_entity
             try:
-                intent = resolve_visual_search_intent(scene, video_title)
+                intent = resolve_visual_search_intent(auto_scene, video_title)
             except Exception:
                 continue
             queries = [str(item).strip() for item in (intent.queries or ()) if str(item).strip()][:2]
