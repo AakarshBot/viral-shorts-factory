@@ -264,6 +264,7 @@ def strict_gemini_check_batch(
             config=types.GenerateContentConfig(
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             ),
+            timeout=45,
         )
         raw_text = str(getattr(response, "text", "") or "").strip()
         verdicts = _parse_batch_verdicts(raw_text, len(uncached))
@@ -286,7 +287,7 @@ def strict_gemini_check_batch(
             token in msg
             for token in ("503", "unavailable", "deadline expired", "deadline exceeded")
         )
-        if transient_503 and len(uncached) > 2:
+        if transient_503 and len(uncached) >= 4:
             midpoint = max(1, len(uncached) // 2)
             retry_groups = (uncached[:midpoint], uncached[midpoint:])
             print(
