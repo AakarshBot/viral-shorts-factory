@@ -47,6 +47,7 @@ INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE
 MANUAL_POOL_MAX = max(10, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))))
 MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "10"))))
 AUTO_POOL_QUERY_LIMIT = max(1, min(8, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "6"))))
+MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
 MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
 HARD_MIN_IMAGE_SIDE = max(240, min(540, int(os.getenv("VISUAL_HARD_MIN_IMAGE_SIDE", "360"))))
 SOFT_MIN_IMAGE_SIDE = max(HARD_MIN_IMAGE_SIDE, min(900, int(os.getenv("VISUAL_SOFT_MIN_IMAGE_SIDE", "540"))))
@@ -507,7 +508,7 @@ def select_manual_visual_candidate(
     scene: dict,
     used_hashes: set[str] | None = None,
 ):
-    """Choose the strongest unused manual-pool image; soft-resolution assets are last resort."""
+    """Choose a scene-suitable unused pool image without another AI call."""
     used_hashes = used_hashes or set()
     candidates = [
         asset
@@ -520,8 +521,18 @@ def select_manual_visual_candidate(
     if not candidates:
         return None
 
-    normal = [asset for asset in candidates if asset.get("status") != "factory-rejected-resolution"]
-    pool = normal or candidates
+    normal = [
+        asset
+        for asset in candidates
+        if str(asset.get("status") or "").strip() != "factory-rejected-resolution"
+    ]
+    scene_good = [
+        asset
+        for asset in normal
+        if _manual_candidate_scene_score(asset, scene) >= MANUAL_SCENE_GOOD_SCORE
+    ]
+    pool = scene_good or normal or candidates
+
     return sorted(
         pool,
         key=lambda asset: (
@@ -546,7 +557,7 @@ def classify_manual_pool_for_scene(assets: list[dict], scene: dict, selected_has
             item["scene_status"] = "chosen"
         elif str(item.get("status") or "").strip() == "factory-rejected-resolution":
             item["scene_status"] = "resolution-rejected"
-        elif float(item.get("scene_score") or 0.0) >= 30.0:
+        elif float(item.get("scene_score") or 0.0) >= MANUAL_SCENE_GOOD_SCORE:
             item["scene_status"] = "good-unused"
         else:
             item["scene_status"] = "scene-rejected"
