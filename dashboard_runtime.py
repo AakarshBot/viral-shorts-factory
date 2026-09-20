@@ -104,7 +104,13 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
         and all(str(item.get("image") or "").strip() and os.path.isfile(str(item.get("image") or "").strip()) for item in visual_items)
     )
     visual_verified_ok = visual_package_ok and all(
-        bool(item.get("visual_verified")) or bool(item.get("human_visual_approved"))
+        (
+            bool(item.get("human_visual_approved"))
+            or (
+                bool(item.get("visual_verified"))
+                and not bool(item.get("visual_qc_blocked"))
+            )
+        )
         for item in visual_items
     )
     video_path = str(snapshot.get("video_path") or "").strip()
