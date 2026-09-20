@@ -13,7 +13,6 @@ import warnings
 import difflib
 import sys
 import urllib.parse
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -67,7 +66,6 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GNEWS_API_KEY = os.getenv("GNEWS_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
@@ -576,37 +574,29 @@ def auto_pilot_selection(conn):
     return format_choice, cat_choice, LANGUAGES[lang_choice], combo_key
 
 def fetch_trending_topics(target="india", query_filter=None):
-    print(f"\n🔥 Fetching Trending Searches ({target})...")
-    trends = []
-    try:
-        from pytrends.request import TrendReq
-        pytrends = TrendReq(hl='en-US', tz=330)
-        trending_df = pytrends.trending_searches(pn=target)
-        if not trending_df.empty:
-            trends = trending_df[0].tolist()[:15]
-    except Exception as e:
-        pass
-    
-    if not trends:
-        try:
-            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_filter)}&hl=en-IN&gl=IN&ceid=IN:en" if query_filter else "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en"
-            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                for item in root.findall('.//item')[:10]:
-                    title_elem = item.find('title')
-                    if title_elem is not None and title_elem.text:
-                        trends.append(title_elem.text.split(" - ")[0])
-        except Exception as e:
-            pass
-            
-    if query_filter and trends:
-        keywords = query_filter.lower().replace(' or ', '|').replace(' and ', '|')
-        filtered = [t for t in trends if re.search(keywords, t.lower())]
-        if filtered: trends = filtered
-        else: trends = [query_filter.split(" OR ")[0]]
-        
-    return trends if trends else ["India Tech", "Bollywood Box Office", "Cricket Highlights", "Stock Market", "AI Breakthrough"]
+    from story_ranker import fetch_google_trending_topics
+    geo = {
+        "india": "IN",
+        "us": "US",
+        "united states": "US",
+        "uk": "GB",
+        "great britain": "GB",
+    }.get(str(target or "").strip().lower(), "IN")
+    trends = fetch_google_trending_topics((geo,), max_terms=30)
+    if query_filter:
+        terms = [
+            token.strip()
+            for token in re.split(r"\s+(?:OR|AND)\s+", str(query_filter), flags=re.IGNORECASE)
+            if token.strip()
+        ]
+        filtered = [
+            trend for trend in trends
+            if any(term.casefold() in trend.casefold() for term in terms)
+        ]
+        if filtered:
+            trends = filtered
+    return trends or ["India Tech", "Bollywood", "Cricket", "Stock Market", "AI"]
+
 
 def manual_prompts(conn):
     scores = get_smart_metrics(conn, "format_used", metric_col="avg_view_percentage")
@@ -810,107 +800,40 @@ def token_overlap_ratio(text1, text2):
     return len(tokens1.intersection(tokens2)) / len(tokens1.union(tokens2))
 
 def get_trend_signal_bonus(keyword):
-    keyword = safe_text(keyword)
-    if not keyword:
-        return 0.0
-    try:
-        from pytrends.request import TrendReq
-        pytrends = TrendReq(hl="en-US", tz=330)
-        trend_values = pytrends.trending_searches(pn="india")
-        trends = [safe_text(v).lower() for v in trend_values[0].tolist()]
-        keyword_lower = keyword.lower()
-        return 2.5 if any(t and t in keyword_lower for t in trends) else 0.0
-    except Exception:
-        return 0.0
+    """Compatibility shim; trend strength is attached during the discovery pass."""
+    return 0.0
 
-def gather_and_filter_stories(conn, genre_key, genre_cfg, trend_keyword=None, custom_gnews_q=None, custom_rss_url=None):
-    query_str = trend_keyword if trend_keyword else (custom_gnews_q if custom_gnews_q else genre_cfg['gnews_q'])
-    print(f"\n📡 Gathering Velocity-Based Stories for Query: '{query_str}'...")
-    c = conn.cursor()
-    c.execute("SELECT topic FROM vault WHERE date_used >= ?", (datetime.now() - timedelta(days=30),))
-    vault_recent_topics = [row[0] for row in c.fetchall()]
 
-    genre_stories = []
-    
-    try:
-        gnews_url = "https://api.gnews.io/api/v4/search"
-        resp = requests.get(gnews_url, params={"q": query_str, "lang": "en", "country": "in", "max": 20, "apikey": GNEWS_API_KEY}, timeout=8)
-        if resp.status_code == 200:
-            for article in resp.json().get('articles', []):
-                if article.get('title'): 
-                    genre_stories.append({"title": article['title'], "text": article.get('description', ''), "source": "GNews", "genre": genre_key, "publishedAt": article.get('publishedAt')})
-        else:
-            print(f"   [!] GNews API returned status code {resp.status_code}. Falling back to RSS.")
-    except Exception as e:
-        pass
+def gather_and_filter_stories(
+    conn,
+    genre_key,
+    genre_cfg,
+    trend_keyword=None,
+    custom_gnews_q=None,
+    custom_rss_url=None,
+):
+    """Compatibility entry point backed by the canonical free discovery funnel."""
+    from story_ranker import collect_high_recall_stories, rank_story_candidates
 
-    rss_target_url = custom_rss_url if custom_rss_url else genre_cfg.get('rss_url')
-    if rss_target_url:
-        try:
-            resp = requests.get(rss_target_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=10)
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                for item in root.findall('.//item')[:30]:
-                    title = item.find('title')
-                    description = item.find('description')
-                    pubdate = item.find('pubDate')
-                    t_text = title.text if title is not None else ""
-                    d_text = description.text if description is not None else t_text
-                    p_text = pubdate.text if pubdate is not None else None
-                    if t_text:
-                        genre_stories.append({"title": t_text, "text": d_text, "source": "GoogleRSS", "genre": genre_key, "publishedAt": p_text})
-        except Exception as e:
-            pass
+    events, social_titles = collect_high_recall_stories(
+        None,
+        genre_key,
+        genre_cfg,
+        trend_keyword=trend_keyword,
+        custom_gnews_q=custom_gnews_q,
+        custom_rss_url=custom_rss_url,
+        broad_discovery=False,
+    )
+    return rank_story_candidates(
+        events,
+        conn=conn,
+        target_category=genre_key,
+        target_format="regular",
+        target_language="english",
+        social_titles=social_titles,
+        ai_cricket=(genre_key == "sports_stories_of_day"),
+    )
 
-    total_scraped = len(genre_stories)
-    surviving_stories = []
-    word_count_dropped = 0
-    duplicate_dropped = 0
-    safety_dropped = 0
-
-    for s in genre_stories:
-        combined_text = f"{s['title']} {s['text']}"
-        if len(combined_text.split()) < 8:
-            word_count_dropped += 1
-            continue
-        if s['title'] in vault_recent_topics:
-            duplicate_dropped += 1
-            continue
-        if any(token_overlap_ratio(s['title'], v) > 0.70 for v in vault_recent_topics):
-            duplicate_dropped += 1
-            continue
-        if any(kw in combined_text.lower() for kw in BRAND_SAFETY_KEYWORDS):
-            safety_dropped += 1
-            continue
-            
-        try:
-            pub_str = s.get('publishedAt')
-            if pub_str:
-                pub_date = datetime.strptime(pub_str.replace('Z', '+0000'), "%Y-%m-%dT%H:%M:%S%z") if 'T' in pub_str else datetime.fromisoformat(pub_str)
-                hours_ago = (datetime.now(timezone.utc) - pub_date).total_seconds() / 3600.0
-                s['recency_penalty'] = min(hours_ago * 0.05, 3.0)
-                s['velocity_score'] = max(0.0, 5.0 - (hours_ago * 0.5)) if hours_ago <= 10 else 0.0
-            else:
-                s['recency_penalty'] = 1.0 
-                s['velocity_score'] = 1.0
-        except Exception:
-            s['velocity_score'] = 1.0
-            
-        surviving_stories.append(s)
-
-    print(f"   [Filter Diagnostics] Total Scraped: {total_scraped}")
-    print(f"      -> Dropped by Word Count (<8 words): {word_count_dropped}")
-    print(f"      -> Dropped by Duplicate/Recent Check: {duplicate_dropped}")
-    print(f"      -> Dropped by Safety Keyword Filter: {safety_dropped}")
-    print(f"      -> Final Surviving Stories: {len(surviving_stories)}")
-
-    if not surviving_stories and trend_keyword:
-        surviving_stories.append({"title": trend_keyword, "text": f"Breaking news update regarding {trend_keyword} unfolding across India today.", "source": "TrendFallback", "genre": genre_key, "recency_penalty": 0.0, "velocity_score": 5.0})
-
-    for s in surviving_stories:
-        s['corroboration_bonus'] = 1.0 if sum(1 for x in surviving_stories if x['title'] == s['title']) > 1 else 0.0
-        
-    return surviving_stories
 
 def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
     if not stories: 
