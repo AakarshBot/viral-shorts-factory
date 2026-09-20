@@ -1474,6 +1474,7 @@ def render_demo_page() -> None:
         ("environment", "Environment"),
         ("database", "Database"),
         ("visual_strategy", "Visual strategy & identity"),
+        ("visual_queries", "Visual queries"),
         ("scene_branding", "Scene overlay"),
         ("script_audio", "Script cleaning & audio timing"),
         ("runtime_bindings", "Runtime bindings"),
