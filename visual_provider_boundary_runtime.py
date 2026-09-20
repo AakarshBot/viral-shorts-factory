@@ -607,7 +607,7 @@ def _commons_search_queries(
                     else ""
                 )
                 resolved_variants.append(f"{entity_label}{scene_suffix}".strip())
-            team_variants = list(dict.fromkeys(resolved_variants + team_variants))[:3]
+            team_variants = list(dict.fromkeys(resolved_variants + team_variants))[:2]
 
     for variant in team_variants:
         searches.append((variant, "normalized-team", team_core))
