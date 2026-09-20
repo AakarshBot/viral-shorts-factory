@@ -39,8 +39,7 @@ def test_independent_corroboration_ignores_raw_article_volume():
     assert story_ranker._independent_corroboration_score(event) == 5.0
 
 
-def test_editorial_score_exposes_event_level_dimensions(monkeypatch):
-    monkeypatch.setattr(story_ranker, "_trend_signal", lambda value: 0.0)
+def test_editorial_score_exposes_event_level_dimensions():
     story = {
         "title": "NASA launches Artemis mission",
         "event_search_text": (
@@ -75,8 +74,7 @@ def test_editorial_score_exposes_event_level_dimensions(monkeypatch):
     assert ranked["discovery_dimensions"]["event_momentum"] == ranked["event_momentum_score"]
     assert ranked["discovery_dimensions"]["independent_corroboration"] == 7.5
 
-def test_editorial_score_exposes_separate_editorial_audience_and_shorts_dimensions(monkeypatch):
-    monkeypatch.setattr(story_ranker, "_trend_signal", lambda value: 2.0)
+def test_editorial_score_exposes_separate_editorial_audience_and_shorts_dimensions():
     story = {
         "title": "NASA launches Artemis mission after historic countdown",
         "event_search_text": "NASA launches Artemis mission after historic countdown",
@@ -115,33 +113,49 @@ def test_editorial_score_exposes_separate_editorial_audience_and_shorts_dimensio
     assert ranked["shorts_viability_score"] == dimensions["shorts_viability"]
 
 
-def test_adaptive_discovery_query_requires_repeated_social_novelty():
-    assert story_ranker._adaptive_discovery_query(
-        "technology news",
-        [
-            "OpenAI unveils a new product",
-            "OpenAI product launch draws attention",
-            "OpenAI dominates discussion today",
+def test_editorial_score_uses_event_trend_bonus_directly():
+    story = {
+        "title": "NASA launches Artemis mission",
+        "event_search_text": "NASA launches Artemis mission",
+        "event_clustered": True,
+        "event_source_count": 3,
+        "event_source_domains": ["nasa.gov", "reuters.com", "bbc.com"],
+        "event_evidence_publishers": ["NASA", "Reuters", "BBC"],
+        "event_corroboration_score": 6.0,
+        "event_article_count": 3,
+        "event_evidence": [
+            {"publishedAt": _iso(0.5), "publisher": "NASA"},
+            {"publishedAt": _iso(1.5), "publisher": "Reuters"},
+            {"publishedAt": _iso(2.5), "publisher": "BBC"},
         ],
-    ) == "openai product"
+        "trend_bonus": 3.5,
+        "originality_score": 8.0,
+    }
 
-    assert story_ranker._adaptive_discovery_query(
-        "technology news",
-        ["single unrelated topic"],
-    ) == ""
-
-
-
-def test_discovery_query_lanes_are_bounded_and_category_aware():
-    lanes = story_ranker._discovery_query_lanes(
-        "Cricket OR BCCI",
-        genre_key="sports_stories_of_day",
-        ai_cricket=True,
+    ranked = story_ranker._editorial_score(
+        story,
+        rows=[],
+        target_category="technology",
+        target_format="regular",
+        target_language="english",
+        social_titles=[],
     )
-    assert lanes[0] == "Cricket OR BCCI"
-    assert len(lanes) == 4
-    assert any("record" in query for query in lanes[1:])
-    assert any("latest" in query for query in lanes[1:])
+
+    assert ranked["google_trends_signal"] == 3.5
+    assert ranked["discovery_dimensions"]["google_trends"] == 3.5
+    assert ranked["candidate_score"] > 0
+
+
+def test_broad_discovery_uses_shared_free_radar_contract():
+    import inspect
+
+    signature = inspect.signature(story_ranker.collect_high_recall_stories)
+    assert "discover_lanes" not in signature.parameters
+    assert len(story_ranker.GOOGLE_NEWS_RADAR_QUERIES) == 8
+    assert story_ranker.GOOGLE_TRENDS_GEOS == ("IN", "US", "GB")
+    assert story_ranker.REDDIT_RADAR_SUBREDDITS == (
+        "news", "worldnews", "india", "technology", "sports", "movies"
+    )
 
 
 def test_updated_timestamp_can_make_a_currently_updated_story_fresh():
