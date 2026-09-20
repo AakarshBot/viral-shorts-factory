@@ -60,9 +60,18 @@ html,body,[data-testid="stAppViewContainer"],.stApp{
   padding-top:1.15rem!important;
   padding-bottom:2.4rem!important;
 }
-*{
+html,body,.stApp{
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif!important;
   letter-spacing:-.008em;
+}
+[data-testid="stIconMaterial"],
+[data-testid="stExpanderToggleIcon"],
+span[class*="material"]{
+  font-family:"Material Symbols Rounded","Material Symbols Outlined","Material Icons"!important;
+  font-feature-settings:"liga"!important;
+  -webkit-font-feature-settings:"liga"!important;
+  letter-spacing:normal!important;
+  text-transform:none!important;
 }
 h1,h2,h3,h4{
   color:var(--vsf-ink)!important;
