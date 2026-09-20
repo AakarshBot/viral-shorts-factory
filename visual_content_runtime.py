@@ -283,8 +283,8 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, acti
 
 
 
-_RELATED_POOL_LIMIT_PER_SUBJECT = 3
-_RELATED_REUSE_LIMIT_PER_SUBJECT = 2
+_RELATED_POOL_LIMIT_PER_SUBJECT = 10
+_RELATED_REUSE_LIMIT_PER_SUBJECT = 10
 
 
 def _related_subject_key(value) -> str:
@@ -392,7 +392,7 @@ def patch_content_first_visuals(bot):
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import fit_visual_image, install as install_visual_quality
-        from visual_retrieval_runtime import make_visual_rescue
+        from visual_retrieval_runtime import make_visual_rescue, materialize_visual_bank
         from visual_entity_grounding_runtime import apply_grounding
     except Exception as exc:
         print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
@@ -504,9 +504,7 @@ def patch_content_first_visuals(bot):
                 or scene.get("primary_entity")
                 or scene.get("visual_search_subject")
             )
-            scene["_related_asset_rescue_eligible"] = bool(
-                subject_key and subject_counts.get(subject_key, 0) >= 2
-            )
+            scene["_related_asset_rescue_eligible"] = bool(subject_key)
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
         news_source_candidate = await _load_verified_news_source_candidate(
@@ -565,7 +563,7 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
-            if seg.get("_related_asset_rescue_eligible"):
+            if seg.get("_verified_subject_assets"):
                 _register_related_assets(
                     related_pool,
                     seg.get("_verified_subject_assets") or [],
@@ -631,6 +629,7 @@ def patch_content_first_visuals(bot):
                 "source_credit": source_credit,
                 "source_image_url": news_source_candidate.get("image_url", "") if source_type == "news_source" and isinstance(news_source_candidate, dict) else "",
                 "asset_provenance": dict(seg.get("asset_provenance") or {}),
+                "visual_asset_bank": materialize_visual_bank(bot, seg, idx + 1),
             }]
             seg["visual_type"] = visual_type
             seg["visual_verified"] = scene_verified
