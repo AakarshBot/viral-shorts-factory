@@ -56,18 +56,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 
-<style>
-.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 22px}
-.qc-guide-step{border:1px solid rgba(190,140,255,.14);background:rgba(255,255,255,.025);border-radius:14px;padding:13px 14px}
-.qc-guide-step b{display:block;font-size:.9rem;margin-bottom:4px}
-.qc-guide-step span{color:#9da9bf;font-size:.8rem;line-height:1.4}
-.qc-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:.72rem;font-weight:800;letter-spacing:.06em}
-.qc-status.ready{color:#b7f7df;background:rgba(45,212,191,.11);border:1px solid rgba(45,212,191,.24)}
-.qc-status.attention{color:#ffd7ad;background:rgba(251,146,60,.11);border:1px solid rgba(251,146,60,.24)}
-.qc-meta{color:#9da9bf;font-size:.8rem;line-height:1.45}
-.qc-card-title{font-size:1.05rem;font-weight:800;margin-bottom:8px}
-@media(max-width:900px){.qc-guide{grid-template-columns:1fr}}
-</style>
+st.markdown("<style>\n.qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 22px}\n.qc-guide-step{border:1px solid rgba(190,140,255,.14);background:rgba(255,255,255,.025);border-radius:14px;padding:13px 14px}\n.qc-guide-step b{display:block;font-size:.9rem;margin-bottom:4px}\n.qc-guide-step span{color:#9da9bf;font-size:.8rem;line-height:1.4}\n.qc-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:.72rem;font-weight:800;letter-spacing:.06em}\n.qc-status.ready{color:#b7f7df;background:rgba(45,212,191,.11);border:1px solid rgba(45,212,191,.24)}\n.qc-status.attention{color:#ffd7ad;background:rgba(251,146,60,.11);border:1px solid rgba(251,146,60,.24)}\n.qc-meta{color:#9da9bf;font-size:.8rem;line-height:1.45}\n.qc-card-title{font-size:1.05rem;font-weight:800;margin-bottom:8px}\n@media(max-width:900px){.qc-guide{grid-template-columns:1fr}}\n</style>", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
@@ -1060,6 +1049,15 @@ def render_visual_details(snapshot: Dict[str, Any]) -> None:
             st.markdown(" — ".join(details))
 
 
+
+@st.dialog("PowerShell output", width="large")
+def render_powershell_output(lines: list[str]) -> None:
+    st.caption("Exact stdout/stderr captured from the active factory worker.")
+    if lines:
+        st.code("\n".join(lines), language="powershell")
+    else:
+        st.info("No factory console output has been captured yet.")
+
 def render_console(snapshot: Dict[str, Any]) -> None:
     lines = snapshot.get("console_lines") or []
     if not lines:
@@ -1077,13 +1075,17 @@ def render_console(snapshot: Dict[str, Any]) -> None:
         operation_percent = int(render_match.group(1))
         operation_label = "Final video render"
 
-    st.markdown("### Live factory console")
-    st.caption("Live output from the factory worker, presented here without replacing the underlying PowerShell console.")
+    st.markdown("### Live factory activity")
     if operation_percent is not None:
         st.markdown(f"**{operation_label}** · {operation_percent}%")
         st.progress(max(0.0, min(1.0, operation_percent / 100)))
-    with st.container(border=True):
-        st.code("\n".join(lines[-80:]), language="text")
+    if st.button(
+        "🖥️ Open exact PowerShell output",
+        type="secondary",
+        width="stretch",
+        key="open_powershell_output",
+    ):
+        render_powershell_output(lines)
 
 
 def render_logs(snapshot: Dict[str, Any]) -> None:
