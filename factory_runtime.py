@@ -1,8 +1,6 @@
 """Dashboard runtime upgrades: data-driven scoring, semantic deduplication and visual design."""
-import io, random, re, sys, traceback, urllib.parse, xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+import random, re, sys, traceback
 import numpy as np
-import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 
 _FITTED_WEIGHTS = None
@@ -16,128 +14,6 @@ def install_safe_exception_hook():
         print("💥 UNCAUGHT EXCEPTION DETECTED:")
         traceback.print_exception(exctype, value, tb)
     sys.excepthook = hook
-
-
-def normalise_publish_mode(value):
-    return "public" if str(value).strip().lower() == "public" else "private"
-
-
-def fit_retention_weights(conn, min_samples=30, refit_every=20):
-    """Fit editorial dimensions against normalized observed retention."""
-    global _FITTED_WEIGHTS, _FITTED_SAMPLE_COUNT
-    if conn is None: return None
-    try:
-        rows = conn.execute("""SELECT hook_strength,narrative_completeness,audience_fit,
-            monetization_risk,shelf_life,avg_view_percentage FROM vault
-            WHERE video_id NOT IN ('PENDING_QC','REJECTED')
-            AND hook_strength IS NOT NULL AND narrative_completeness IS NOT NULL
-            AND audience_fit IS NOT NULL AND monetization_risk IS NOT NULL
-            AND shelf_life IS NOT NULL AND avg_view_percentage IS NOT NULL""").fetchall()
-        n = len(rows)
-        if n < min_samples: return None
-        if _FITTED_WEIGHTS is not None and n - _FITTED_SAMPLE_COUNT < refit_every:
-            return _FITTED_WEIGHTS
-        x = np.asarray([r[:5] for r in rows], dtype=float)
-        y0 = np.asarray([r[5] for r in rows], dtype=float)
-        if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y0)) or y0.max() == y0.min(): return None
-        y = (y0-y0.min())/(y0.max()-y0.min())
-        std = x.std(axis=0); std[std < 1e-9] = 1.0
-        design = np.column_stack([np.ones(n),(x-x.mean(axis=0))/std])
-        coeffs,_,_,_ = np.linalg.lstsq(design,y,rcond=None)
-        raw = coeffs[1:]; denom=float(np.abs(raw).sum())
-        if denom < 1e-9: return None
-        names=["hook_strength","narrative_completeness","audience_fit","monetization_risk","shelf_life"]
-        _FITTED_WEIGHTS={k:float(v/denom) for k,v in zip(names,raw)}
-        _FITTED_SAMPLE_COUNT=n
-        print("   [Retention Model] Fitted from %d videos: %s" % (n,", ".join(f"{k}={v:+.3f}" for k,v in _FITTED_WEIGHTS.items())))
-        return _FITTED_WEIGHTS
-    except Exception as exc:
-        print(f"   [Retention Model] Fit unavailable: {exc}")
-        return None
-
-
-def _get_semantic_model():
-    global _SEMANTIC_MODEL, _SEMANTIC_ERROR
-    if _SEMANTIC_MODEL is not None: return _SEMANTIC_MODEL
-    if _SEMANTIC_ERROR: return None
-    try:
-        from sentence_transformers import SentenceTransformer
-        print("   [Semantic Dedup] Loading all-MiniLM-L6-v2 on CPU (first run only)...")
-        _SEMANTIC_MODEL=SentenceTransformer("all-MiniLM-L6-v2",device="cpu")
-        return _SEMANTIC_MODEL
-    except Exception as exc:
-        _SEMANTIC_ERROR=str(exc)
-        print(f"   [Semantic Dedup] Model unavailable: {exc}")
-        return None
-
-
-def semantic_duplicate_filter(stories, vault_topics, threshold=0.82):
-    """Remove semantically duplicate titles using cosine similarity."""
-    if not stories: return stories
-    model=_get_semantic_model()
-    if model is None:
-        seen={re.sub(r"\W+"," ",str(x).lower()).strip() for x in vault_topics}
-        return [s for s in stories if re.sub(r"\W+"," ",str(s.get("title","")).lower()).strip() not in seen]
-    titles=[str(s.get("title","")).strip() for s in stories]
-    refs=[str(x).strip() for x in vault_topics if str(x).strip()]
-    emb=model.encode(titles+refs,normalize_embeddings=True,convert_to_numpy=True,show_progress_bar=False)
-    cand,ref=emb[:len(titles)],emb[len(titles):]
-    kept=[]; kept_emb=[]; dropped=0
-    for story,e in zip(stories,cand):
-        dup=bool(len(ref) and float(np.max(ref@e))>=threshold)
-        if not dup and kept_emb: dup=float(np.max(np.asarray(kept_emb)@e))>=threshold
-        if dup: dropped+=1
-        else: kept.append(story); kept_emb.append(e)
-    if dropped: print(f"   [Semantic Dedup] Removed {dropped} duplicates (cosine >= {threshold:.2f}).")
-    return kept
-
-
-def get_trend_signal_bonus(bot, keyword):
-    """Return graded 0..10 Google Trends interest instead of binary 2.5/0."""
-    keyword=bot.safe_text(keyword)
-    if not keyword: return 0.0
-    try:
-        from pytrends.request import TrendReq
-        stop={"the","and","for","with","from","this","that","into","after","before","over","under","what","how","why","world","news","latest","today","just"}
-        terms=list(dict.fromkeys(t for t in re.findall(r"[A-Za-z][A-Za-z0-9'-]{2,}",keyword) if t.lower() not in stop))[:5]
-        if not terms: return 0.0
-        p=TrendReq(hl="en-US",tz=330,retries=1,backoff_factor=0.2)
-        p.build_payload(terms,timeframe="now 7-d",geo="IN")
-        df=p.interest_over_time()
-        vals=[float(v) for t in terms if t in df.columns for v in df[t].tolist() if np.isfinite(v)] if df is not None and not df.empty else []
-        return round(max(0,min(10,(max(vals)/10 if vals else 0))),2)
-    except Exception: return 0.0
-
-
-def _cheap_score(s):
-    return float(s.get("corroboration_bonus",0))*2+float(s.get("velocity_score",0))-float(s.get("recency_penalty",0))+float(s.get("trend_bonus",0))
-
-
-def preselect_candidates(stories, limit=15):
-    """Rank a wider source pool cheaply, then send only the best 15 to the LLM."""
-    return sorted(stories,key=_cheap_score,reverse=True)[:limit]
-
-
-def genre_aware_epsilon_selection(options_dict,scores_dict,epsilon=0.2,strong_sample_threshold=8):
-    keys=list(options_dict.keys())
-    under=[k for k in keys if k not in scores_dict or scores_dict[k].get("score") is None or scores_dict[k].get("count",0)<5]
-    strong=sum(1 for k in keys if scores_dict.get(k,{}).get("count",0)>=strong_sample_threshold and scores_dict.get(k,{}).get("score") is not None)
-    eps=0.1 if strong>=max(1,len(keys)//2) else epsilon
-    if under and random.random()<eps: return random.choice(under)
-    scored=[(k,scores_dict.get(k,{}).get("score")) for k in keys if scores_dict.get(k,{}).get("score") is not None]
-    return max(scored,key=lambda x:x[1])[0] if scored else random.choice(keys)
-
-
-def auto_pilot_selection(bot,conn):
-    fs=bot.get_smart_metrics(conn,"format_used","avg_view_percentage")
-    fmt=genre_aware_epsilon_selection({"regular":1,"top5":1,"trending":1},fs)
-    cs=bot.get_smart_metrics(conn,"genre","avg_view_percentage")
-    cats={k:v for k,v in bot.CONTENT_CATEGORIES.items() if (v["usable_regular"] if fmt in ["regular","trending"] else v["usable_top5"]) and k!="tech_reviews"}
-    cat=genre_aware_epsilon_selection(cats,cs)
-    ls=bot.get_smart_metrics(conn,"language_used","avg_view_percentage")
-    lang=genre_aware_epsilon_selection(bot.LANGUAGES,ls)
-    print(f"   [Auto-Pilot] Genre-aware selection: {cat}; format={fmt}; language={lang}")
-    return fmt,cat,bot.LANGUAGES[lang],f"{fmt}|{cat}|{lang}"
 
 
 # ----------------------------- visual system -----------------------------
@@ -198,8 +74,6 @@ def render_top5_card(bot,bg_img,item_number,total_items,summary_text,width=1080,
 
 def patch_dashboard_runtime(bot):
     """Apply requested improvements to Streamlit execution."""
-    bot.get_trend_signal_bonus=lambda keyword:get_trend_signal_bonus(bot,keyword)
-
     bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.render_top5_card=lambda bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None:render_top5_card(bot,bg_img,item_number,total_items,summary_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
