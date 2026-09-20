@@ -57,7 +57,6 @@ st.markdown("""<style>
 
 
 <style>
-.qc-summary{margin:8px 0 18px}
 .qc-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 22px}
 .qc-guide-step{border:1px solid rgba(190,140,255,.14);background:rgba(255,255,255,.025);border-radius:14px;padding:13px 14px}
 .qc-guide-step b{display:block;font-size:.9rem;margin-bottom:4px}
@@ -66,9 +65,7 @@ st.markdown("""<style>
 .qc-status.ready{color:#b7f7df;background:rgba(45,212,191,.11);border:1px solid rgba(45,212,191,.24)}
 .qc-status.attention{color:#ffd7ad;background:rgba(251,146,60,.11);border:1px solid rgba(251,146,60,.24)}
 .qc-meta{color:#9da9bf;font-size:.8rem;line-height:1.45}
-.qc-section-label{font-size:.8rem;font-weight:800;letter-spacing:.01em;margin:2px 0 7px}
 .qc-card-title{font-size:1.05rem;font-weight:800;margin-bottom:8px}
-.qc-empty{color:#8f9bb1;font-size:.8rem}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}}
 </style>
 
@@ -682,7 +679,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
     summary_cols = st.columns(3, gap="small")
     summary_cols[0].metric("Slides", len(items))
-    summary_cols[1].metric("Ready", passed_count)
+    summary_cols[1].metric("Verified", passed_count)
     summary_cols[2].metric("Needs attention", attention_count)
 
     st.markdown(
@@ -711,7 +708,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             with right:
                 if item["qc_passed"]:
                     st.markdown(
-                        "<span class='qc-status ready'>✓ READY</span>",
+                        "<span class='qc-status ready'>✓ VERIFIED</span>",
                         unsafe_allow_html=True,
                     )
                     st.caption("Subject verified. This image can move forward.")
@@ -737,13 +734,11 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     )
 
                 good = item.get("bank") or []
-                with st.expander(
-                    f"✅ Good alternatives · {len(good)}",
-                    expanded=False,
-                ):
-                    if not good:
-                        st.caption("No additional scene-compatible images are available.")
-                    else:
+                if good:
+                    with st.expander(
+                        f"✅ Good alternatives · {len(good)}",
+                        expanded=False,
+                    ):
                         alt_cols = st.columns(3, gap="small")
                         for bank_index, bank_item in enumerate(good[:19], 1):
                             with alt_cols[(bank_index - 1) % 3]:
@@ -785,13 +780,11 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                             st.error(message)
 
                 scene_rejected = item.get("scene_rejected") or []
-                with st.expander(
-                    f"↔ Scene-mismatch backups · {len(scene_rejected)}",
-                    expanded=False,
-                ):
-                    if not scene_rejected:
-                        st.caption("No scene-mismatch backups are being held.")
-                    else:
+                if scene_rejected:
+                    with st.expander(
+                        f"↔ Scene-mismatch backups · {len(scene_rejected)}",
+                        expanded=False,
+                    ):
                         reject_cols = st.columns(3, gap="small")
                         for rejected_index, rejected_item in enumerate(scene_rejected[:19], 1):
                             with reject_cols[(rejected_index - 1) % 3]:
@@ -832,14 +825,12 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                             st.error(message)
 
                 resolution_rejected = item.get("factory_rejected") or []
-                with st.expander(
-                    f"⚠️ Low-resolution backups · {len(resolution_rejected)}",
-                    expanded=False,
-                ):
-                    if not resolution_rejected:
-                        st.caption("No low-resolution backups are being held.")
-                    else:
-                        st.caption("These passed subject verification but were kept aside because the image is smaller than the normal quality target.")
+                if resolution_rejected:
+                    with st.expander(
+                        f"⚠️ Low-resolution backups · {len(resolution_rejected)}",
+                        expanded=False,
+                    ):
+                        st.caption("Subject verified, but the image is below the normal resolution target.")
                         lowres_cols = st.columns(3, gap="small")
                         for rejected_index, rejected_item in enumerate(resolution_rejected[:19], 1):
                             with lowres_cols[(rejected_index - 1) % 3]:
