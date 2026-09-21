@@ -552,7 +552,7 @@ class WorkflowController:
         except Exception as exc:
             if type(exc).__name__ == "YouTubePublicVisibilityError":
                 message = str(exc)
-                match = re.search(r"accepted video\\s+([A-Za-z0-9_-]+)", message)
+                match = re.search(r"accepted video\s+([A-Za-z0-9_-]+)", message)
                 video_id = str(getattr(exc, "video_id", "") or (match.group(1) if match else "")).strip()
                 if video_id:
                     with self._lock:
