@@ -376,6 +376,9 @@ REQUIRED_SECRET_NAMES = (
     "HF_TOKEN",
     "PEXELS_API_KEY",
     "OPENROUTER_API_KEY",
+    "SERPAPI_API_KEY",
+    "PIXABAY_API_KEY",
+    "OPENALEX_API_KEY",
     # Remote-only controls/credentials. These are loaded only when present
     # in Streamlit Secrets; the local .env/file-based paths remain untouched.
     "YOUTUBE_TOKEN_JSON",
@@ -2006,7 +2009,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with publish_col:
         st.markdown("#### 3 · Publish")
         st.caption("Private stays hidden. Public always requires a second confirmation.")
-        upload_unlocked = metadata_approved
+        upload_unlocked = metadata_approved and not bool(st.session_state.get("upload_result")) and not bool(snapshot.get("uploaded_video_id"))
         public_ready = upload_unlocked and not public_blocked
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
