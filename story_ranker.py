@@ -1170,7 +1170,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + topic_actionability * 0.65
         + originality * 0.45
         + visual * 0.20
-        + india_relevance * 0.55
+        + india_relevance * INDIA_FOCUS_SCORE_WEIGHT
         + channel_history * 0.70
         + channel_fit * 0.45
         + niche * 0.20
@@ -1269,6 +1269,9 @@ def _candidate_quality_pass(story):
     if importance < 3.5:
         story["discovery_rejection"] = "Insufficient editorial importance"
         return False
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Insufficient story substance behind headline"
+        return False
     if shorts < 3.0:
         story["discovery_rejection"] = "Weak Shorts viability"
         return False
@@ -1306,8 +1309,8 @@ def _discovery_portfolio_pass(story):
     if actionability < 3.0:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
         return False
-    if event_sources <= 1 and len(body) < 50 and not (story.get("event_actions") or _event_actions(story.get("title") or "")):
-        story["discovery_rejection"] = "Insufficient story detail behind headline"
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Headline lacks enough story substance behind the event"
         return False
     if score < 6.0:
         story["discovery_rejection"] = "Below exploration quality floor"
@@ -1558,6 +1561,8 @@ INDIA_SIGNAL_TERMS = {
     "modi", "government of india",
 }
 
+INDIA_FOCUS_SCORE_WEIGHT = 0.90
+
 CLICKBAIT_TITLE_TERMS = {
     "you won't believe", "you will not believe", "what happens next", "watch this",
     "shocking", "craziest", "insane", "unbelievable", "must see", "viral video",
@@ -1576,6 +1581,24 @@ def _india_relevance_score(story):
     ):
         score += 1.0
     return _clamp_score(score)
+
+def _story_substance_pass(story, minimum_body_chars=120):
+    """Reject headline-only candidates unless the event is independently corroborated."""
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).strip()
+    body_chars = len(re.sub(r"\s+", " ", body))
+    source_count = int(story.get("event_source_count") or 0)
+    article_count = int(story.get("event_article_count") or 0)
+
+    story["story_substance_chars"] = body_chars
+    if body_chars >= max(40, int(minimum_body_chars)):
+        return True
+    if source_count >= 2 and article_count >= 2:
+        return True
+    return False
+
 
 def _topic_actionability(story):
     text = _text_blob(story)
