@@ -240,6 +240,13 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 }
 .story-title,.output-card{line-height:1.5}
 .story-reason{max-height:7.5rem;overflow:auto;padding-right:4px}
+.topic-card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:17px 17px 15px;box-shadow:var(--shadow);height:100%}
+.topic-kicker{display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--accent);font-size:.64rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+.topic-title{font-size:1.08rem;font-weight:850;line-height:1.34;color:var(--text);overflow-wrap:anywhere}
+.topic-subtitle{font-size:.76rem;line-height:1.45;color:var(--muted)}
+.topic-chips{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 3px}
+.topic-chip{display:inline-flex;align-items:center;border:1px solid var(--line);background:#f7f1e9;border-radius:999px;padding:4px 7px;color:#625b52;font-size:.64rem;font-weight:800}
+.topic-chip.strong{background:#eaf2f1;border-color:#c8dedd;color:#31565a}
 .release-gate-detail,.timeline-message{line-height:1.5}
 [data-testid="stMarkdownContainer"],[data-testid="stCaptionContainer"],
 [data-testid="stTextArea"],[data-testid="stTextInput"]{min-width:0}
@@ -567,7 +574,8 @@ TOP_FIVE_TOPICS = (
 
 
 def category_options(format_mode: str, editorial_mode: str = "Deep Dive") -> Dict[str, str]:
-    keys = TOP_FIVE_TOPICS if editorial_mode == "Top Five" else DEEP_DIVE_TOPICS
+    mode = re.sub(r"[^a-z0-9]+", " ", str(editorial_mode or "").strip().lower()).strip()
+    keys = TOP_FIVE_TOPICS if mode in {"top five", "top 5"} else DEEP_DIVE_TOPICS
     output: Dict[str, str] = {}
     for key in keys:
         cfg = ultimate_bot.CONTENT_CATEGORIES.get(key)
@@ -2325,9 +2333,18 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     start_index = page * page_size
     visible = candidates[start_index:start_index + page_size]
 
+    event_backed = sum(
+        1 for item in candidates
+        if float(item.get("topic_actionability_score") or 0.0) >= 3.0
+    )
+    india_led = sum(
+        1 for item in candidates
+        if float(item.get("india_relevance_score") or 0.0) >= 5.0
+    )
     st.markdown(
-        f"<div class='live-bar'><div class='live-bar-copy'><b>Ranked headlines</b> · "
-        f"Showing {start_index + 1}–{start_index + len(visible)} of {total}</div></div>",
+        f"<div class='live-bar'><div class='live-bar-copy'><b>Event radar</b> · "
+        f"Showing {start_index + 1}–{start_index + len(visible)} of {total} · "
+        f"{event_backed} event-backed · {india_led} India-led</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -2346,19 +2363,33 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 source = str(candidate.get("source_label") or "News source").strip()
                 url = str(candidate.get("story_url") or "").strip()
 
-                with st.container(border=True):
-                    st.markdown(f"<div class='story-rank'>#{rank:02d}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='story-title'>{_ui_html(title)}</div>", unsafe_allow_html=True)
-                    article_label = "article" if evidence["articles"] == 1 else "articles"
-                    publisher_label = f" · {evidence['independent_publishers']} publishers" if evidence["independent_publishers"] else ""
-                    fit_label = f" · Channel fit {history_fit:.1f}/10" if candidate.get("ai_recommendation") else ""
+                actionability = float(candidate.get("topic_actionability_score") or 0.0)
+                shorts_viability = float(candidate.get("shorts_viability_score") or 0.0)
+                india_focus = float(candidate.get("india_relevance_score") or 0.0)
+                development = _ui_text(candidate.get("event_development_state") or "event", "event")
+                source_count = int(evidence.get("independent_publishers") or evidence.get("independent_domains") or 0)
+                topic_descriptor = (
+                    f"{source_count} independent publisher(s) · "
+                    f"{evidence['articles']} supporting article(s)"
+                )
+                with st.container():
                     st.markdown(
-                        f"<span class='score-chip'>Score {score:.1f}</span> "
-                        f"<span class='story-meta'>{evidence['articles']} {_ui_html(article_label)}{_ui_html(publisher_label)}{_ui_html(fit_label)}</span>",
+                        "<div class='topic-card'>"
+                        f"<div class='topic-kicker'><span>TOPIC #{rank:02d}</span>"
+                        f"<span>{_ui_html(development.upper())}</span></div>"
+                        f"<div class='topic-title'>{_ui_html(title)}</div>"
+                        f"<div class='topic-subtitle'>{_ui_html(topic_descriptor)}</div>"
+                        f"<div class='topic-chips'>"
+                        f"<span class='topic-chip strong'>Event {actionability:.1f}/10</span>"
+                        f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}/10</span>"
+                        f"<span class='topic-chip'>India focus {india_focus:.1f}/10</span>"
+                        f"<span class='topic-chip'>Rank {score:.1f}</span>"
+                        f"</div>"
+                        "</div>",
                         unsafe_allow_html=True,
                     )
                     if reason:
-                        with st.expander("Why this story", expanded=False):
+                        with st.expander("Why this topic", expanded=False):
                             st.caption(_ui_text(reason))
                     st.caption(f"Source · {_ui_text(source)}")
                     action_cols = st.columns([1, 1])
@@ -2366,7 +2397,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         if url.startswith(("http://", "https://")):
                             st.link_button("Open source", url, width="stretch")
                     with action_cols[1]:
-                        if st.button("Use headline →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
+                        if st.button("Use topic →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
                             st.session_state.pending_candidate = dict(candidate)
                             st.session_state.visual_search_queries = ""
                             st.session_state.visual_query_story_key = ""
