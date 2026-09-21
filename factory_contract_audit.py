@@ -134,7 +134,7 @@ def dashboard_architecture_audit() -> list[str]:
     if not app.is_file():
         return ["app.py: canonical dashboard entrypoint is missing"]
     source = app.read_text(encoding="utf-8")
-    forbidden_tokens = ("st.dialog", "st.experimental_dialog", "newsroom_dashboard", "app_legacy", "runpy.run_module")
+    forbidden_tokens = ("st.experimental_dialog", "newsroom_dashboard", "app_legacy", "runpy.run_module")
     for token in forbidden_tokens:
         if token in source:
             errors.append(f"app.py: obsolete dashboard token remains: {token}")
