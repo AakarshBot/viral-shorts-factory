@@ -51,6 +51,7 @@ OBSOLETE_REPOSITORY_ARTIFACTS = (
     "test_phase_patches.py",
     "test_history_runtime.py",
     "pipeline_integrity_loader.py",
+    "diagnostic_visual_guard.py",
 )
 
 
