@@ -1225,8 +1225,6 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
         # as metadata for the human reviewer. Context suitability and soft
         # resolution are deliberately not display filters.
         unused_verified = [dict(item) for item in bank]
-        factory_rejected = []
-        scene_rejected = []
         items.append(
             {
                 "index": index,
@@ -1272,8 +1270,6 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                     and str(option.get("path") or "").strip()
                     and os.path.isfile(str(option.get("path") or "").strip())
                 ],
-                "factory_rejected": factory_rejected,
-                "scene_rejected": scene_rejected,
                 "bank": unused_verified,
                 "all_bank": bank,
             }
@@ -1468,9 +1464,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         item for item in pool
         if not bool(item.get("used"))
     ]
-    provenance_review = []
-    rejected = []
-
     ready_count = sum(1 for item in items if item.get("qc_passed"))
     active_search_count = sum(
         1 for group in search_groups
@@ -1491,7 +1484,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     metric_cols = st.columns(4, gap="small")
     metric_cols[0].metric("Slides", len(items))
     metric_cols[1].metric("Ready", ready_count)
-    metric_cols[2].metric("Pool images", len(available) + len(provenance_review) + len(rejected))
+    metric_cols[2].metric("Pool images", len(available))
     metric_cols[3].metric("New search", active_search_count)
 
     crop_target = str(st.session_state.get("visual_crop_target") or "").strip()
@@ -1530,7 +1523,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             st.rerun()
 
 
-    def render_pool_section(title: str, description: str, assets: list[dict], section_key: str, rejected_section: bool = False) -> None:
+    def render_pool_section(title: str, description: str, assets: list[dict], section_key: str) -> None:
         st.markdown(
             f"<div class='qc-pool-heading'><b>{_ui_html(title)}</b><span>{_ui_html(description)}</span></div>",
             unsafe_allow_html=True,
@@ -1554,8 +1547,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if query:
                             caption += f" · {query}"
                         st.caption(caption)
-                        if rejected_section:
-                            st.caption("Identity confirmed · low resolution")
                         choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
                         target_key = f"pool_target_{run_id}_{section_key}_{asset_hash[:12]}"
                         target = st.selectbox(
