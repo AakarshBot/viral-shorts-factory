@@ -872,7 +872,8 @@ def test_dashboard_ai_discovery_uses_shared_broad_radar():
     assert "_cheap_filter(raw, max_items=120, max_age_hours=48)" in source
     assert "_infer_discovery_category(item)" in source
     assert "diversity_rerank(ranked, max_items=max_candidates)" in source
-    assert "category inferred after discovery, not used as an intake gate." in source
+    assert 'category = "sports" if ai_sports_mode else _infer_discovery_category(item)' in source
+    assert "category inferred after discovery." in source
 
 
 def test_dashboard_manual_crop_returns_shorts_frame():
