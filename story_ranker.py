@@ -1839,7 +1839,7 @@ def rank_discovery_candidates(
     used_topics = _load_used_topics(conn)
     social_titles = social_titles or []
 
-    stage120 = _cheap_filter(stories, max_items=120, max_age_hours=72)
+    stage120 = _cheap_filter(stories, max_items=120, max_age_hours=48)
     stage100 = _recent_topic_cooldown(conn, stage120, hours=36)
     stage80 = _deduplicate_stage(stage100, max_items=80)
     stage60 = [
