@@ -316,9 +316,20 @@ def _test_dashboard_architecture():
         and "Use headline →" in source
         and "candidate_page" in source
     )
-    if not (legacy_paging_ui or ranked_headline_ui):
+    event_topic_ui = (
+        "Event radar" in source
+        and "TOPIC #" in source
+        and "Use topic →" in source
+        and "candidate_page" in source
+    )
+    if not (legacy_paging_ui or ranked_headline_ui or event_topic_ui):
         raise AssertionError("topic-selection UI is missing from the canonical dashboard")
-    surface = "legacy paging" if legacy_paging_ui else "ranked headline cards"
+    if event_topic_ui:
+        surface = "event topic cards"
+    elif ranked_headline_ui:
+        surface = "ranked headline cards"
+    else:
+        surface = "legacy paging"
     return f"Single-dashboard architecture and {surface} surface passed"
 
 
