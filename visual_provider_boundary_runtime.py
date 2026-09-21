@@ -448,7 +448,9 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             "redirects": 1, "gsrnamespace": 0, "gsrlimit": MAX_PROVIDER_CANDIDATES,
             "gsroffset": (provider_page - 1) * MAX_PROVIDER_CANDIDATES,
             "prop": "pageimages|pageprops", "piprop": "name|original|thumbnail",
-            "ppprop": "wikibase_item", "pilicense": "free", "pithumbsize": 1600,
+            "ppprop": "wikibase_item",
+            **({"pilicense": "free"} if not manual_mode else {}),
+            "pithumbsize": 1600,
             "format": "json",
         },
     )
