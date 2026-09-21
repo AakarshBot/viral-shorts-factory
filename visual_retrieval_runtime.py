@@ -1222,7 +1222,7 @@ def collect_manual_visual_search(
     """Fetch up to ten new images from every available manual source with identity AI checks.
 
     The dashboard search intentionally has no scene/context acceptance gate.
-    The exact user query is preserved, restrictive monetization is rejected,
+    The exact user query is preserved, licensing/provenance remains metadata,
     and the same identity AI gate used by the production visual pool decides
     which candidates are shown.
     """
