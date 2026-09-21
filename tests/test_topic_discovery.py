@@ -159,3 +159,30 @@ def test_used_topic_history_contains_only_posted_runs(tmp_path):
 
     assert "Posted cricket story" in topics
     assert "Clicked cricket story" not in topics
+
+
+def test_explicit_genre_standard_discovery_does_not_add_generic_radar():
+    cfg = {
+        "india_gnews_q": "(India OR Indian) (technology OR AI)",
+        "global_gnews_q": "(global OR worldwide) (AI OR technology) (launch OR breakthrough)",
+        "gnews_q": "(India OR Indian) technology",
+    }
+    queries = story_ranker._build_discovery_google_queries(
+        "technology",
+        cfg,
+        broad_discovery=False,
+    )
+    assert story_ranker.GOOGLE_NEWS_RADAR_QUERIES[0] not in queries
+    assert cfg["india_gnews_q"] in queries
+    assert cfg["global_gnews_q"] in queries
+
+
+def test_discovery_category_gate_blocks_cross_genre_fallback_signal():
+    assert story_ranker._discovery_category_allowed(
+        "technology",
+        {"title": "Cricket team wins major match"},
+    ) is False
+    assert story_ranker._discovery_category_allowed(
+        "technology",
+        {"title": "Indian AI startup launches new model"},
+    ) is True
