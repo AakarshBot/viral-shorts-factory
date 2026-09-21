@@ -523,25 +523,6 @@ def get_genre_bonuses(conn):
         bonuses[g] = round((scores[g]['score'] / max_score) * 2.0, 1) if g in scores and scores[g]['score'] is not None else 0.0
     return bonuses, last_genre
 
-def infer_genre_from_title(title):
-    t_lower = title.lower()
-    if any(k in t_lower for k in ["cricket", "match", "goal", "isl", "premier league", "tennis", "sport", "squad", "debut", "odi", "test"]):
-        return "sports"
-    if any(k in t_lower for k in ["smartphone", "launch", "review", "gadget", "laptop", "processor", "pixel", "iphone"]):
-        return "tech_reviews"
-    if any(k in t_lower for k in ["movie", "bollywood", "tollywood", "gossip", "box office", "review", "trailer"]):
-        return "entertainment"
-    if any(k in t_lower for k in ["ai", "artificial intelligence", "tech", "gadgets", "startup", "launch", "software"]):
-        return "technology"
-    if any(k in t_lower for k in ["stock", "finance", "business", "market", "economy", "wealth"]):
-        return "business_finance"
-    if any(k in t_lower for k in ["health", "fitness", "wellness", "nutrition", "diet"]):
-        return "health_lifestyle"
-    if any(k in t_lower for k in ["telangana", "hyderabad", "andhra", "amaravati", "ora"]):
-        return "regional_state_news"
-    if any(k in t_lower for k in ["viral", "trend", "phenomenon", "challenge"]):
-        return "viral_phenomenon"
-    return "national_global_affairs"
 
 def calculate_smart_score(records):
     """Return a recency-weighted trimmed mean for (value, days_ago) records."""
