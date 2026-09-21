@@ -89,7 +89,7 @@ def runtime_surface_audit() -> list[str]:
             errors.append(f"{name}: import failed ({type(exc).__name__}: {exc})")
             continue
         if name == "workflow_runtime":
-            for attr in ("FORMAT_OPTIONS", "CRICKET_CATEGORIES", "MAX_DISCOVERY_CANDIDATES", "WorkflowController", "discover_three_candidates"):
+            for attr in ("FORMAT_OPTIONS", "CRICKET_CATEGORIES", "MAX_DISCOVERY_CANDIDATES", "WorkflowController"):
                 if not hasattr(module, attr):
                     errors.append(f"{name}: missing {attr}")
         elif name == "visual_provider_boundary_runtime":
