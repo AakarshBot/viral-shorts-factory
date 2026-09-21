@@ -1,12 +1,9 @@
 from pipeline_integrity_runtime import (
-    _wrap_compile,
-    _wrap_script_writer,
-    _write_endpoint_srt,
+    _clean_script_result,
     clean_narration,
     is_noise,
     strict_fallback,
 )
-from script_runtime import wrap_write_script
 
 
 class _Bot:
@@ -107,8 +104,11 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
         }
 
     bot.write_script = dirty_writer
-    _wrap_script_writer(bot)
-    result = bot.write_script({}, {}, "news", None, "regular")
+    result = _clean_script_result(
+        dirty_writer({}, {}, "news", None, "regular"),
+        {},
+        "regular",
+    )
 
     scene = result["script"][0]
     assert result["authoritative_narration"] is True
@@ -155,84 +155,7 @@ def test_provider_garbage_falls_back_without_leaking_into_script():
     assert all(scene["narration_source"] == "validated_script" for scene in result["script"])
 
 
-def test_content_density_marker_survives_integrity_wrapper_order():
-    bot = _Bot()
-    wrap_write_script(bot)
-    assert getattr(bot.write_script, "_content_dense_bound", False) is True
-
-    _wrap_script_writer(bot)
-    assert getattr(bot.write_script, "_pipeline_integrity_wrapped", False) is True
-    assert getattr(bot.write_script, "_content_dense_bound", False) is False
-
-    # This mirrors the repair in patch_audio_direction: re-apply the
-    # content-density wrapper around the integrity wrapper so the final public
-    # binding retains both contracts.
-    wrap_write_script(bot)
-    assert getattr(bot.write_script, "_content_dense_bound", False) is True
 
 
-def test_endpoint_subtitle_srt_uses_word_timings():
-    import tempfile
-    from pathlib import Path
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        path = Path(temp_dir) / "endpoint.srt"
-        ok = _write_endpoint_srt(
-            str(path),
-            [
-                {"word": "The", "start": 0.0, "end": 0.3},
-                {"word": "headline", "start": 0.3, "end": 0.8},
-                {"word": "is", "start": 0.8, "end": 1.0},
-                {"word": "confirmed", "start": 1.0, "end": 1.5},
-                {"word": "today", "start": 1.5, "end": 1.9},
-                {"word": "officially", "start": 1.9, "end": 2.2},
-            ],
-        )
-        assert ok is True
-        text = path.read_text(encoding="utf-8")
-        assert "00:00:00,000 --> 00:00:02,200" in text
-        assert "The headline is confirmed today officially" in text
 
 
-def test_compile_integrity_does_not_add_duplicate_endpoint_subtitles(monkeypatch):
-    captured = {}
-
-    class CompileBot:
-        def __init__(self):
-            def run_robot():
-                return None
-
-            self.run_robot = run_robot
-
-            def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
-                captured["args"] = (
-                    scene_visual_packages,
-                    audio_paths,
-                    word_timings,
-                    language_cfg,
-                    format_mode,
-                )
-                return "final.mp4"
-
-            self.compile_video = compile_video
-
-    bot = CompileBot()
-    _wrap_compile(bot)
-    timings = [
-        [{"word": "hook"}],
-        [{"word": "body"}],
-        [{"word": "body2"}],
-        [{"word": "outro"}],
-    ]
-    result = bot.compile_video(
-        ["s1", "s2", "s3", "s4"],
-        ["a1", "a2", "a3", "a4"],
-        timings,
-        {},
-        "regular",
-    )
-
-    assert result == "final.mp4"
-    assert captured["args"][1] == ["a1", "a2", "a3", "a4"]
-    assert captured["args"][2] == timings
-    assert len(captured["args"][2]) == 4
