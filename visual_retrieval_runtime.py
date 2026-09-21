@@ -1332,9 +1332,31 @@ def collect_manual_visual_search(
 
             provider_items.extend(normalized)
             if normalized:
-                # Preserve the old bounded behavior: only ask for page 2 when
-                # page 1 produced no usable raw candidates.
-                break
+                # Preserve the old bounded behavior: page 2 is needed only
+                # when page 1 contains no candidate that is actually new to
+                # this dashboard search.
+                page_has_new = False
+                for item in normalized:
+                    raw_bytes = _as_image_bytes(item)
+                    if not raw_bytes:
+                        continue
+                    image_hash = _hash_image(bot, raw_bytes)
+                    image_url = _source_image_key(item)
+                    if (
+                        image_hash not in (used_hashes or set())
+                        and (
+                            not image_url
+                            or image_url.casefold().rstrip("/") not in {
+                                str(value or "").casefold().rstrip("/")
+                                for value in (used_source_image_urls or set())
+                            }
+                        )
+                    ):
+                        page_has_new = True
+                        break
+                if page_has_new:
+                    break
+                continue
 
         return source_index, source_name, provider_items, local_used_urls, cache_updates
 
