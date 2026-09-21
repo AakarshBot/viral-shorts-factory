@@ -165,7 +165,6 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _deduplicate_stage,
         _editorial_score,
         _infer_discovery_category,
-        _discovery_category_allowed,
         _load_history,
         _load_used_topics,
         _originality_stage,
@@ -202,12 +201,10 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         broad_discovery=True,
     )
 
-    if ai_sports_mode:
-        raw = [
-            item for item in raw
-            if _discovery_category_allowed("sports", item)
-        ]
-
+    # Sports-AI already receives category-scoped Google News/RSS/Trends/GDELT
+    # intake from the canonical collector. Do not run a second keyword-only
+    # inference gate here; it can reject valid sports headlines whose titles
+    # omit words such as "match" or "tournament".
     stage30 = _cheap_filter(raw, max_items=120, max_age_hours=48)
     stage20 = _deduplicate_stage(stage30, max_items=90)
     stage20 = _recent_topic_cooldown(conn, stage20, hours=36)
