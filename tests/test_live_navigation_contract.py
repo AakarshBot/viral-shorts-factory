@@ -66,3 +66,12 @@ def test_live_navigation_shows_selected_path_only_when_ready():
     assert ready < path_parts < production
     assert '"Selected path"' in source
     assert 'path_text = " · ".join(part for part in path_parts if part)' in source
+
+def test_dashboard_theme_uses_the_refreshed_cool_light_palette():
+    theme_source = Path(__file__).resolve().parents[1].joinpath("dashboard_theme.py").read_text(encoding="utf-8")
+
+    assert "--vsf-bg:#f2f5f4;" in theme_source
+    assert "--vsf-surface:#ffffff;" in theme_source
+    assert "--vsf-teal:#256b6d;" in theme_source
+    assert "background:#e7efed!important;" in theme_source
+    assert "background:linear-gradient(135deg,#ffffff,#eef5f4)!important;" in theme_source
