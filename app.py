@@ -2386,8 +2386,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         with st.container():
             st.markdown(
                 "<div class='empty-state'><div class='empty-title'>Ready for a new Short</div>"
-                "<div class='empty-copy'>Choose a current story. 
-                "Ranking is automatic; the final choice is yours.</div></div>",
+                "<div class='empty-copy'>Choose a current story. Ranking is automatic; the final choice is yours.</div></div>",
                 unsafe_allow_html=True,
             )
             st.markdown(
@@ -2409,6 +2408,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                                 config,
                                 conn,
                                 max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                                retained_candidates=st.session_state.get("retained_topics", []),
                             )
                         else:
                             candidates = discover_ranked_topics(
@@ -2552,7 +2552,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     )
 
     for row_start in range(0, len(visible), 3):
-        row = visible[row_start:row_start + 2]
+        row = visible[row_start:row_start + 3]
         cols = st.columns(len(row), gap="medium")
         for local_index, candidate in enumerate(row):
             absolute_index = start_index + row_start + local_index
@@ -2596,11 +2596,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         + (
                             f"<span class='topic-chip learning-chip'>Held · previous run</span>"
                             if candidate.get("retained_from_previous_run")
-                            else ""
-                        )
-                        + (
-                            f"<span class='topic-chip learning-chip'>Learning {channel_fit:.1f} · {channel_fit_samples}</span>"
-                            if channel_fit_samples > 0
                             else ""
                         )
                         f"</div>"
