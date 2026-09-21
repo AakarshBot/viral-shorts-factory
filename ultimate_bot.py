@@ -555,11 +555,27 @@ def calculate_smart_score(records):
 def get_smart_metrics(conn, dimension_col, metric_col="views"):
     try:
         c = conn.cursor()
-        c.execute("SELECT date_used, views, avg_view_percentage FROM vault WHERE video_id NOT IN ('PENDING_QC', 'REJECTED')")
+        c.execute(
+            "SELECT date_used, views, avg_view_percentage FROM vault "
+            "WHERE video_id IS NOT NULL "
+            "AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+        )
         all_videos = c.fetchall()
         if not all_videos: return {}
         
-        c.execute(f"SELECT {dimension_col}, date_used, {metric_col}, views FROM vault WHERE {dimension_col} IS NOT NULL AND video_id NOT IN ('PENDING_QC', 'REJECTED')")
+        allowed_dimensions = {
+            "genre", "format_used", "language_used", "hook_style_used", "trend_keyword"
+        }
+        if dimension_col not in allowed_dimensions:
+            return {}
+        c.execute(
+            f"SELECT {dimension_col}, date_used, {metric_col}, views FROM vault "
+            f"WHERE {dimension_col} IS NOT NULL "
+            "AND video_id IS NOT NULL "
+            "AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+        )
         target_data = c.fetchall()
         
         grouped_records = {}
