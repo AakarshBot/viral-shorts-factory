@@ -159,3 +159,65 @@ def test_content_categories_keep_an_explicit_india_discovery_lane():
         str(config.get("india_gnews_q") or "").strip()
         for config in ultimate_bot.CONTENT_CATEGORIES.values()
     )
+
+
+
+def test_non_event_headline_is_rejected_even_when_fresh():
+    story = {
+        "title": "Live updates: what you need to know about today's announcement",
+        "candidate_score": 20.0,
+        "discovery_dimensions": {
+            "freshness": 8.0,
+            "event_momentum": 4.0,
+            "importance": 7.0,
+            "shorts_viability": 6.0,
+            "corroboration": 4.0,
+            "source_quality": 3.0,
+        },
+        "topic_actionability_score": 6.0,
+        "event_source_count": 3,
+        "event_article_count": 4,
+        "description": "A detailed report describing the event, its participants, what changed, and the immediate consequences for the public.",
+    }
+
+    assert story_ranker._discovery_portfolio_pass(story) is False
+    assert story["discovery_rejection"] == "Non-event/SEO headline"
+    assert story["headline_noise_pass"] is False
+
+
+def test_single_source_event_needs_real_body_substance():
+    story = {
+        "title": "India launches a new technology project",
+        "event_source_count": 1,
+        "event_article_count": 1,
+        "description": "Brief headline summary only.",
+    }
+
+    assert story_ranker._story_substance_pass(story) is False
+
+
+def test_single_source_event_with_real_body_substance_is_allowed():
+    story = {
+        "title": "India launches a new technology project",
+        "event_source_count": 1,
+        "event_article_count": 1,
+        "description": (
+            "India launched a new technology project after months of preparation. "
+            "Officials said the program will expand access, with the first phase "
+            "starting this week and further locations scheduled to follow."
+        ),
+    }
+
+    assert story_ranker._story_substance_pass(story) is True
+
+
+def test_real_video_event_is_not_rejected_by_headline_noise_filter():
+    story = {
+        "title": "AI video generation platform launches in India",
+        "description": (
+            "The company launched a new video generation platform in India, "
+            "adding a new capability for creators and businesses."
+        ),
+    }
+
+    assert story_ranker._headline_noise_pass(story) is True
