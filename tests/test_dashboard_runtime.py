@@ -1078,11 +1078,10 @@ def test_dashboard_manual_visual_search_releases_operation_lock_after_failure(mo
 
 def test_dashboard_manual_visual_search_ui_uses_one_shot_form_without_forced_rerun():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    start = source.index('st.markdown("### Find 10 more images")')
-    end = source.index('st.markdown("---")', start)
+    start = source.index("with st.form(", source.index('st.markdown("### Find 10 more images")'))
+    end = source.index("for group in search_groups:", start)
     block = source[start:end]
 
-    assert "with st.form(" in block
     assert "clear_on_submit=True" in block
     assert "search_submitted = st.form_submit_button(" in block
     assert "controller.search_visual_pool(search_query)" in block
