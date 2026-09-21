@@ -1586,14 +1586,17 @@ def _build_discovery_google_queries(
     india_query = str(genre_cfg.get("india_gnews_q") or "").strip()
     global_query = str(genre_cfg.get("global_gnews_q") or "").strip()
 
-    for value in (
-        india_query,
-        trend_keyword,
-        custom_gnews_q,
-        global_query,
-        genre_cfg.get("gnews_q"),
-        rss_query,
-    ):
+    # When explicit India + global lanes exist, the broad category query is
+    # usually redundant. Keep it only when a lane is missing, or when the caller
+    # supplied a targeted trend/custom query that benefits from the extra context.
+    values = [india_query, trend_keyword, custom_gnews_q, global_query]
+    has_dual_geo_lanes = bool(india_query and global_query)
+    base_query = str(genre_cfg.get("gnews_q") or "").strip()
+    if not has_dual_geo_lanes or str(trend_keyword or "").strip() or str(custom_gnews_q or "").strip():
+        values.append(base_query)
+    values.append(rss_query)
+
+    for value in values:
         text_value = str(value or "").strip()
         if text_value:
             candidates.append(text_value)
