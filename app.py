@@ -2698,7 +2698,7 @@ def render_channel_statistics() -> None:
             st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
             st.rerun()
     with sync_col:
-        if st.button("Refresh factory analytics", width="stretch", key="refresh_factory_analytics"):
+        if st.button("Refresh analytics", width="stretch", key="refresh_factory_analytics"):
             try:
                 from learning_runtime import sync_factory_analytics
                 conn = sqlite3.connect(ultimate_bot.DB_PATH)
@@ -2710,7 +2710,7 @@ def render_channel_statistics() -> None:
                 st.session_state.analytics_refresh_result = result
                 st.rerun()
             except Exception as exc:
-                st.error(f"Factory analytics refresh failed: {type(exc).__name__}: {exc}")
+                st.error(f"Analytics refresh failed: {type(exc).__name__}: {exc}")
 
     refresh_result = st.session_state.get("analytics_refresh_result")
     if isinstance(refresh_result, dict):
