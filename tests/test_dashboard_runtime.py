@@ -1532,6 +1532,24 @@ def test_offline_dashboard_diagnostic_recognizes_event_topic_cards():
 
 
 
+def test_dashboard_first_render_has_no_streamlit_exception(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.delenv("VSF_REMOTE_MODE", raising=False)
+    app_path = Path(__file__).resolve().parents[1] / "app.py"
+
+    at = AppTest.from_file(str(app_path))
+    at.run(timeout=30)
+
+    assert not at.exception, "\n".join(str(item) for item in at.exception)
+    assert any(
+        "Shorts Studio" in str(element.value)
+        for element in at.markdown
+        if getattr(element, "value", None) is not None
+    )
+
+
+
 def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
