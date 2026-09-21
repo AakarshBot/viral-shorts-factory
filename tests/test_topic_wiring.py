@@ -97,3 +97,16 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
     global_cfg = captured[-1]
     assert global_cfg["india_gnews_q"] == ""
     assert "ICC" in global_cfg["global_gnews_q"]
+
+
+def test_dual_geo_genre_query_budget_skips_redundant_base_lane():
+    cfg = ultimate_bot.CONTENT_CATEGORIES["technology"]
+    queries = story_ranker._build_discovery_google_queries(
+        "technology",
+        cfg,
+        broad_discovery=True,
+    )
+    assert cfg["india_gnews_q"] in queries
+    assert cfg["global_gnews_q"] in queries
+    assert cfg["gnews_q"] not in queries
+    assert len(queries) <= story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_BROAD
