@@ -37,7 +37,9 @@ def post_creator_comment(youtube, video_id, script_data, video_title, genre_labe
     YouTube's public Data API can create the comment but does not expose a
     pin/unpin operation, so the comment must be pinned once in YouTube Studio.
     """
-    comment_text = build_pinned_comment(script_data, video_title, genre_label)
+    comment_text = _clean_comment(script_data.get("pinned_comment", ""))
+    if not comment_text:
+        comment_text = build_pinned_comment(script_data, video_title, genre_label)
     body = {
         "snippet": {
             "videoId": video_id,
@@ -186,7 +188,11 @@ def patch_youtube_upload(bot):
             return video_id
         except Exception as exc:
             print(f"   [!] YouTube upload failed: {type(exc).__name__}: {exc}", flush=True)
-            if type(exc).__name__ == "YouTubePublicVisibilityError":
+            try:
+                from ultimate_bot import YouTubePublicVisibilityError
+            except Exception:
+                YouTubePublicVisibilityError = None
+            if YouTubePublicVisibilityError is not None and isinstance(exc, YouTubePublicVisibilityError):
                 raise
             return None
 
