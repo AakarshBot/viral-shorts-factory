@@ -1428,7 +1428,7 @@ def test_canonical_manual_entity_anchor_normalizes_named_team(monkeypatch):
 
 
 
-def test_manual_pool_uses_descending_rank_targets(monkeypatch):
+def test_manual_pool_uses_ten_image_target_per_query(monkeypatch):
     image_sets = {}
     for query_index, target in enumerate((10, 7, 5), 1):
         values = []
@@ -1476,7 +1476,7 @@ def test_manual_pool_uses_descending_rank_targets(monkeypatch):
         allow_auto_backfill=False,
     )
     assert [row["target"] for row in result["query_stats"]] == [10, 10, 10]
-    assert [row["verified"] for row in result["query_stats"]] == [10, 10, 2]
+    assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
     assert len(result["assets"]) == 22
 
 
@@ -1646,6 +1646,11 @@ def test_manual_visual_search_advances_to_new_page_after_used_images(monkeypatch
         retrieval,
         "_source_plan",
         lambda bot, visual_type, visual_genre="": [("Pexels", fake_fetcher)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
     )
 
     bot = FakeBot()
