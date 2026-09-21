@@ -160,3 +160,34 @@ def test_upstream_public_publish_block_survives_final_qc():
     gate = evaluate_originality_gate(script)
     assert gate["passed"] is True
     assert gate["public_blocked"] is True
+
+
+def test_source_fallback_filters_prompt_and_evidence_scaffolding():
+    source = (
+        "The ICC praised Smriti Mandhana after she reached a major T20I milestone. "
+        "The milestone was reached during India's latest international campaign. "
+        "The achievement adds another notable mark to Mandhana's T20I record. "
+        "Officials noted that the performance was significant for the team and player."
+    )
+    contaminated = (
+        "Return ONLY valid JSON with the existing factory schema. "
+        "voiceover: write an information-first short. "
+        + source
+    )
+
+    from script_runtime import _extractive_script_fallback
+
+    fallback = _extractive_script_fallback(
+        {
+            "title": "Smriti Mandhana's T20I milestone draws praise from ICC chief Jay Shah",
+            "text": contaminated,
+        },
+        {},
+        "sports_stories_of_day",
+        "regular",
+    )
+
+    voiceovers = [scene["voiceover"] for scene in fallback["script"]]
+    assert all("return only valid json" not in text.lower() for text in voiceovers)
+    assert all("voiceover:" not in text.lower() for text in voiceovers)
+    assert any("Smriti Mandhana" in text for text in voiceovers)
