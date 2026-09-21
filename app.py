@@ -536,7 +536,6 @@ section[data-testid="stSidebar"] .stRadio label{
   pointer-events:none;
 }
 .timeline{
-  backdrop-filter:blur(8px);
 }
 .dashboard-footer{
   border-top:1px solid #e7ddd1;
@@ -607,23 +606,6 @@ body{
     transparent!important;
   position:relative;
 }
-.stApp::before{
-  content:"";
-  position:fixed;
-  inset:-18% -8% auto;
-  height:48vh;
-  pointer-events:none;
-  z-index:0;
-  background:
-    radial-gradient(ellipse at 22% 30%,rgba(79,145,136,.10),transparent 42%),
-    radial-gradient(ellipse at 76% 22%,rgba(132,111,208,.08),transparent 40%);
-  filter:blur(12px);
-  animation:studio-drift 18s ease-in-out infinite alternate;
-}
-@keyframes studio-drift{
-  from{transform:translate3d(-1%,0,0) scale(1)}
-  to{transform:translate3d(1.4%,1.5%,0) scale(1.035)}
-}
 [data-testid="stAppViewContainer"] .main{position:relative;z-index:1}
 .block-container{padding-top:1.2rem!important}
 .brand-card{
@@ -632,8 +614,6 @@ body{
     conic-gradient(from 210deg,#5d958e,#b9c9ff,#e7ca96,#78aaa0,#5d958e) border-box!important;
   border:1px solid transparent!important;
   box-shadow:var(--studio-shadow),inset 0 1px 0 rgba(255,255,255,.92)!important;
-  backdrop-filter:blur(22px) saturate(1.08);
-  -webkit-backdrop-filter:blur(22px) saturate(1.08);
   min-height:100px!important;
 }
 .brand-card::before{
@@ -763,8 +743,6 @@ body{
 section[data-testid="stSidebar"]{
   background:
     linear-gradient(180deg,rgba(247,240,230,.92),rgba(233,224,212,.82))!important;
-  backdrop-filter:blur(18px) saturate(1.05);
-  -webkit-backdrop-filter:blur(18px) saturate(1.05);
 }
 section[data-testid="stSidebar"]>div{
   position:relative;
@@ -780,7 +758,6 @@ section[data-testid="stSidebar"]>div{
   border-radius:16px;
   background:rgba(255,253,249,.50);
   box-shadow:0 12px 28px rgba(74,52,34,.05),inset 0 1px 0 rgba(255,255,255,.9);
-  backdrop-filter:blur(14px);
   overflow:visible;
 }
 .sidebar-brand-mark{
@@ -857,8 +834,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
   background:
     linear-gradient(180deg,rgba(255,253,249,.74),rgba(252,247,240,.58))!important;
   box-shadow:0 13px 34px rgba(69,49,31,.06),inset 0 1px 0 rgba(255,255,255,.84)!important;
-  backdrop-filter:blur(13px) saturate(1.02);
-  -webkit-backdrop-filter:blur(13px) saturate(1.02);
 }
 [data-testid="stVerticalBlockBorderWrapper"] > div{
   border-radius:inherit;
@@ -867,8 +842,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
   box-shadow:var(--studio-shadow),inset 0 1px 0 rgba(255,255,255,.75)!important;
   background:
     linear-gradient(145deg,rgba(255,253,249,.84),rgba(247,240,232,.66))!important;
-  backdrop-filter:blur(15px) saturate(1.04);
-  -webkit-backdrop-filter:blur(15px) saturate(1.04);
 }
 .topic-card:hover,.story-card:hover,.output-card:hover,.release-card:hover,.panel:hover{
   transform:translateY(-3px)!important;
@@ -918,7 +891,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
     conic-gradient(from 120deg,#e58d92,#e7cc83,#82b99f,#79a9db,#a49be0,#e58d92) border-box!important;
   border:1.5px solid transparent!important;
   box-shadow:0 14px 30px rgba(69,49,31,.09),inset 0 1px 0 rgba(255,255,255,.88)!important;
-  backdrop-filter:blur(16px) saturate(1.08)!important;
 }
 .st-key-live_format_menu button::after,
 .st-key-live_topic_menu button::after,
@@ -976,7 +948,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
     linear-gradient(145deg,rgba(255,253,249,.86),rgba(241,247,245,.66))!important;
   border-color:rgba(205,213,207,.78)!important;
   box-shadow:0 13px 30px rgba(47,93,98,.065),inset 0 1px 0 rgba(255,255,255,.88)!important;
-  backdrop-filter:blur(15px);
 }
 [data-testid="stMetricValue"]{letter-spacing:-.055em!important}
 [data-testid="stProgress"] div[role="progressbar"]{
@@ -1050,12 +1021,15 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
 }
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
-  .stApp::before,.status-orb.running,.progress-hero::after{animation:none!important}
+  .status-orb.running,.progress-hero::after{animation:none!important}
   .topic-card,.story-card,.output-card,.release-card,.panel,
   .stButton>button,.stLinkButton>a,.brand-signature::after{transition:none!important}
 }
 
 /* Final composition pass: shared rails, section rhythm and tactile focus states. */
+.stApp{
+  isolation:isolate;
+}
 .section-title{
   position:relative;
   display:inline-block;
@@ -1079,7 +1053,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
   background:rgba(255,253,249,.34)!important;
   border:1px solid rgba(210,197,183,.46)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important;
-  backdrop-filter:blur(11px);
   -webkit-backdrop-filter:blur(11px);
 }
 [data-testid="stPills"] button{
