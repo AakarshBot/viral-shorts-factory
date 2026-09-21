@@ -50,7 +50,7 @@ jobs:
           import editorial_runtime, factory_runtime, final_qc_runtime, learning_runtime
           import image_sources_runtime, provider_runtime, quality_runtime, research_runtime
           import runtime_bindings, runtime_hardener, production_hardening_runtime
-          import script_guard_runtime, script_runtime, story_ranker
+          import script_guard_runtime, script_router_runtime, script_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
           import visual_runtime, visual_safety_runtime, visual_strategy_runtime
           import visual_semantic_guard_runtime, visual_query_entities_runtime

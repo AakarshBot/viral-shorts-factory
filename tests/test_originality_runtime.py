@@ -92,27 +92,26 @@ def test_originality_rewrite_falls_through_to_openrouter_free(monkeypatch):
     assert calls[1].startswith("https://openrouter.ai/")
 
 
-def test_emergency_enrichment_reuses_phase2_evidence_pack():
-    from production_hardening_runtime import _enrich_emergency_story
+def test_extractive_fallback_reuses_phase2_evidence_text():
+    from script_runtime import _extractive_script_fallback
 
-    result = _enrich_emergency_story(
-        None,
+    result = _extractive_script_fallback(
         {
             "title": "Rinku Singh signing",
             "text": "Rinku Singh joined a new cricket organization.",
-            "research_evidence_pack": {
-                "claims": [
-                    {"status": "corroborated", "text": "Rinku Singh became the first cricket signing for EMW Global."},
-                    {"status": "conflicted", "text": "This disputed claim must not enter fallback narration."},
-                ],
-                "sources": [
-                    {"clean_text_preview": "The organization announced its expansion into India through cricket."}
-                ],
-            },
+            "research_evidence_text": (
+                "Rinku Singh became the first cricket signing for EMW Global. "
+                "The organization announced its expansion into India through cricket. "
+                "The signing was part of the organization's newly published regional expansion plan. "
+                "The move gives the organization a named player for its first cricket-focused initiative."
+            ),
         },
+        {},
+        "news",
+        "regular",
     )
 
-    assert "Rinku Singh became the first cricket signing for EMW Global." in result["text"]
-    assert "This disputed claim must not enter fallback narration." not in result["text"]
-    assert "expansion into India through cricket" in result["text"]
+    narration = " ".join(scene["voiceover"] for scene in result["script"])
+    assert "Rinku Singh became the first cricket signing for EMW Global." in narration
+    assert "expansion into India through cricket" in narration
 

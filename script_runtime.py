@@ -497,6 +497,24 @@ def _rewrite_for_originality_once(script_data, story_data, overlap):
     rewritten["originality_rewrite_attempted"] = True
     return rewritten
 
+def assess_release_structure(script_data, format_mode="regular"):
+    """Check production-ready narrative structure without word/character quotas."""
+    assessment = assess_narrative_completeness(script_data)
+    if not assessment.get("passed"):
+        return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
+
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    count = len(scenes)
+    # Four distinct newsroom beats are the smallest coherent story: hook,
+    # development, context and consequence. This prevents 1–3 scene stubs
+    # without imposing a word or character target.
+    if count < 4:
+        return False, "Script is too compressed: it lacks enough distinct narrative beats.", assessment
+    if str(format_mode or "").lower() == "top5" and count < 5:
+        return False, "Top-5 script is too compressed to present the list structure.", assessment
+    return True, "Narrative structure is production-ready.", assessment
+
+
 def validate_content_density(script_data, story_data, format_mode):
     """Semantic script gate; no scene-count or word-count quotas."""
     if not isinstance(script_data, dict):
@@ -621,12 +639,18 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category = str(genre_key or "news").replace("_", " ").title()
     scenes = []
-    for index, sentence in enumerate(sentences, 1):
+    fallback_sentences = list(sentences)
+    # The emergency path should still open with the concrete story headline,
+    # not with source boilerplate or a generic setup sentence. Replace the
+    # first source beat rather than adding a new scene.
+    if title and fallback_sentences:
+        fallback_sentences[0] = title
+    for index, sentence in enumerate(fallback_sentences, 1):
         role = (
             "hook" if index == 1
             else "development" if index == 2
             else "context" if index == 3
-            else "consequence" if index == len(sentences)
+            else "consequence" if index == len(fallback_sentences)
             else ""
         )
         scenes.append({
@@ -662,74 +686,3 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     if not valid:
         raise ValueError(f"Source-grounded fallback refused to invent narration: {reason}")
     return result
-
-
-
-def wrap_write_script(bot):
-    current = getattr(bot, "write_script", None)
-    if current is None or getattr(current, "_content_dense_bound", False):
-        return current
-
-    def write_script(story_data, language_cfg, genre_key, conn, format_mode):
-        result = current(story_data, language_cfg, genre_key, conn, format_mode)
-        cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
-
-        if diagnostics["changed_scenes"] or diagnostics["removed_scenes"]:
-            print(
-                "   [Script QC] Cleanup: "
-                f"{diagnostics['changed_scenes']} scene(s) edited, {diagnostics['removed_scenes']} scene(s) removed.",
-                flush=True,
-            )
-
-        valid, reason = validate_content_density(cleaned, story_data, format_mode)
-        if not valid:
-            print(
-                f"   [Script QC] Generated script rejected: {reason}. "
-                "Trying source-grounded fallback.",
-                flush=True,
-            )
-            fallback = _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode)
-            cleaned, fallback_diag = clean_script_data(fallback, story_data, format_mode)
-            valid, reason = validate_content_density(cleaned, story_data, format_mode)
-            if not valid:
-                raise ValueError(f"Script completeness gate failed after fallback: {reason}")
-            cleaned["fallback_diagnostics"] = fallback_diag
-            cleaned["public_publish_blocked"] = True
-            return cleaned
-
-        originality = check_script_originality(cleaned, story_data)
-        if not originality["passed"]:
-            print(
-                f"   [Script Originality] Meaningful source overlap detected in "
-                f"{len(originality['failures'])} scene(s); requesting one rewrite.",
-                flush=True,
-            )
-            rewritten = _rewrite_for_originality_once(cleaned, story_data, originality)
-            if rewritten is None:
-                cleaned["public_publish_blocked"] = True
-                cleaned["originality_overlap"] = originality
-                return cleaned
-
-            cleaned, rewrite_diag = clean_script_data(rewritten, story_data, format_mode)
-            valid, reason = validate_content_density(cleaned, story_data, format_mode)
-            if not valid:
-                raise ValueError(f"Originality rewrite failed script validation: {reason}")
-            originality = check_script_originality(cleaned, story_data)
-            cleaned["originality_rewrite_diagnostics"] = rewrite_diag
-            if not originality["passed"]:
-                cleaned["public_publish_blocked"] = True
-                cleaned["originality_overlap"] = originality
-                return cleaned
-
-        cleaned["originality_overlap"] = originality
-        critique = _run_real_critique(cleaned, story_data)
-        cleaned["originality_critique"] = critique
-        if critique.get("unsupported_claims"):
-            cleaned["public_publish_blocked"] = True
-
-        return cleaned
-
-    write_script._content_dense_bound = True
-    write_script._research_layer_live = bool(getattr(current, "_research_wrapped", False))
-    bot.write_script = write_script
-    return write_script

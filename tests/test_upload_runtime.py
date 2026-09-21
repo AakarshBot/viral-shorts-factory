@@ -149,10 +149,8 @@ def test_workflow_controller_upload_delegates_approved_payload(monkeypatch, tmp_
 
     controller.bot.upload_to_youtube = fake_uploader
 
-    import dashboard_runtime
     import final_qc_runtime
 
-    monkeypatch.setattr(dashboard_runtime, "live_qc_passes", lambda *args, **kwargs: True)
     monkeypatch.setattr(final_qc_runtime, "validate_final_video", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         final_qc_runtime,

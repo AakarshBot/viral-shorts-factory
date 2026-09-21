@@ -848,8 +848,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Add evidence-backed context, comparison, mechanism, timeline, limitation, implication, or consequence wherever supported. Never invent motives, predictions, quotes, statistics, opinions presented as facts, or unsupported causal claims.\n"
         "- The result should feel authored through selection, order and explanation of the evidence. Do not produce a source-article readout.\n\n"
         "STORY SHAPE:\n"
-        "- Preserve every distinct narrative beat as its own scene. Keep the full explanatory arc intact and never pad with scenes whose only purpose is length.\n"
-        "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. The completed script must contain all four roles in meaningfully distinct scenes.\n"
+        "- Preserve every distinct narrative beat as its own scene. Do not cram multiple important developments into one overloaded scene, and never add filler solely to make the video longer. Let the story's real complexity determine how many scenes it needs.\n"
+        "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep those beats meaningfully distinct.\n"
+        "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through a specific fact, change, consequence, or tension that is already supported by the evidence. Never manufacture suspense by withholding the actual information.\n"
+        "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs.\n"
         "- Start with a factual hook. Build through the important development and relevant context. End with the most useful consequence, implication, limitation, comparison, or final fact.\n\n"
         "RETENTION-BAIT BAN:\n"
         "- Never use phrases such as 'wait till the end', 'wait until the end', 'wait for it', 'stay tuned', 'keep watching', "
@@ -1320,7 +1322,10 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 audio = AudioFileClip(audio_paths[idx])
                 audio_clips.append(audio)
 
-            scene_duration = max(0.1, (audio.duration + 0.25) if audio else 4.0)
+            # Visual scene boundaries must not create artificial narration gaps.
+            # Audio is already encoded at its natural duration, so concatenate
+            # scene clips without an extra silence tail.
+            scene_duration = max(0.1, audio.duration if audio else 4.0)
             bg_image_file = layer_paths[0]["image"]
             scene_source_type = layer_paths[0].get("source_type", "bg")
             segment_count = _scene_visual_segment_count(scene_duration)

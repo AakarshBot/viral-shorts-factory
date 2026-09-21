@@ -80,8 +80,7 @@ def patch_dashboard_runtime(bot):
     bot.render_hook_card=lambda bg_img,hook_text,width=1080,height=1920,font_choice=None:render_hook_card(bot,bg_img,hook_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.create_branded_slide=lambda title_text,subtitle_text,is_outro=False,width=1080,height=1920,font_choice=None:create_branded_slide(bot,title_text,subtitle_text,is_outro,width,height,font_choice,getattr(bot,"_active_script_data",{}))
     bot.render_top5_card=lambda bg_img,item_number,total_items,summary_text,width=1080,height=1920,font_choice=None:render_top5_card(bot,bg_img,item_number,total_items,summary_text,width,height,font_choice,getattr(bot,"_active_script_data",{}))
-    old_write=bot.write_script
-    def write(*a,**kw):
-        result=old_write(*a,**kw); bot._active_script_data=result or {}; return result
-    bot.write_script=write
+    # Script state is now owned by script_router_runtime. Do not wrap
+    # write_script here: dashboard initialization must not create a second
+    # writer layer around the production pipeline.
     return bot

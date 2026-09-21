@@ -3,7 +3,6 @@ import inspect
 import numpy as np
 
 from dashboard_runtime import upload_ready_for_manual_decision
-from pipeline_integrity_runtime import _wrap_compile
 from branding_runtime import build_scene_branding_overlays
 
 
@@ -26,8 +25,9 @@ def test_pipeline_integrity_no_longer_has_endpoint_subtitle_layer():
 
     assert not hasattr(pipeline_integrity_runtime, "_add_endpoint_subtitles")
 
-    source = inspect.getsource(_wrap_compile)
+    source = inspect.getsource(pipeline_integrity_runtime)
     assert "_add_endpoint_subtitles" not in source
+    assert "_wrap_compile" not in source
 
 
 def test_upload_gate_only_opens_for_completed_idle_render():

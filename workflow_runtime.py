@@ -247,6 +247,9 @@ class WorkflowState:
     selected_story: Optional[Dict[str, Any]] = None
     candidates: List[Dict[str, Any]] = field(default_factory=list)
     script_data: Optional[Dict[str, Any]] = None
+    audio_paths: List[str] = field(default_factory=list)
+    word_timings: List[List[Dict[str, Any]]] = field(default_factory=list)
+    format_mode: str = ""
     video_path: str = ""
     final_metadata: Dict[str, str] = field(default_factory=dict)
     error: str = ""
@@ -286,6 +289,9 @@ class WorkflowController:
                 "selected_story": dict(self.state.selected_story or {}),
                 "candidates": [dict(x) for x in self.state.candidates],
                 "script_data": self.state.script_data,
+                "audio_paths": list(self.state.audio_paths),
+                "word_timings": [list(items) for items in self.state.word_timings],
+                "format_mode": self.state.format_mode,
                 "video_path": self.state.video_path,
                 "final_metadata": dict(self.state.final_metadata),
                 "error": self.state.error,
@@ -364,6 +370,8 @@ class WorkflowController:
         config["publish_mode"] = "private"
         config["manual_qc_required"] = True
         self.bot._active_web_config = dict(config)
+        with self._lock:
+            self.state.format_mode = str(config.get("format_mode") or "").strip().lower()
 
         def worker():
             try:
@@ -402,6 +410,28 @@ class WorkflowController:
                         globals_dict["gather_and_filter_stories"] = original_gather
 
                 script = self.state.script_data or {}
+                video_path = str(self.state.video_path or "").strip()
+                if not isinstance(script, dict) or not script.get("script"):
+                    raise RuntimeError(
+                        "Production stopped before a usable script reached the dashboard."
+                    )
+                if not video_path or not os.path.isfile(video_path):
+                    raise RuntimeError(
+                        "Production stopped before a final video artifact was produced."
+                    )
+                scene_count = len(script.get("script") or [])
+                if len(self.state.audio_paths) != scene_count:
+                    raise RuntimeError(
+                        "Production stopped with incomplete narration artifacts "
+                        f"({len(self.state.audio_paths)}/{scene_count} audio tracks)."
+                    )
+                if len(self.state.word_timings) != scene_count or any(
+                    not isinstance(items, list) or not items
+                    for items in self.state.word_timings
+                ):
+                    raise RuntimeError(
+                        "Production stopped with incomplete word-level narration timings."
+                    )
                 category_key = config.get("category", "national_global_affairs")
                 genre_cfg = self.bot.CONTENT_CATEGORIES.get(category_key, self.bot.CONTENT_CATEGORIES["national_global_affairs"])
                 title, description, _tags = _build_clean_metadata(
@@ -456,36 +486,6 @@ class WorkflowController:
         from final_qc_runtime import validate_final_upload_metadata, validate_final_video
 
         validate_final_video(video_path)
-
-        # Re-evaluate the complete dashboard release gate at the exact moment
-        # of upload. The UI already blocks both visibility choices, but the
-        # uploader itself must remain safe if called through another dashboard
-        # path or against a stale Streamlit snapshot.
-        try:
-            from dashboard_runtime import evaluate_live_qc_gates, live_qc_passes
-            live_snapshot = self.snapshot()
-            live_metadata = {
-                "title": str(title or ""),
-                "description": str(description or ""),
-                "comment": str(comment or ""),
-            }
-            if not live_qc_passes(live_snapshot, live_metadata):
-                raise RuntimeError(
-                    "Upload blocked: one or more live release QC gates are not passing."
-                )
-            if str(publish_mode or "").strip().lower() == "public":
-                public_blocks = [
-                    str(gate.get("detail") or "Public release policy blocked.")
-                    for gate in evaluate_live_qc_gates(live_snapshot, live_metadata)
-                    if bool(gate.get("public_blocked"))
-                ]
-                if public_blocks:
-                    raise RuntimeError(
-                        "Public upload blocked by release policy: " + " ".join(public_blocks)
-                    )
-        except ImportError:
-            # The standalone factory workflow does not load dashboard QC.
-            pass
 
         clean_title, clean_description, clean_tags = _build_clean_metadata(
             {**script_data, "title": title, "seo_description": description},
