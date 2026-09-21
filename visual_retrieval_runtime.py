@@ -1271,15 +1271,28 @@ def collect_manual_visual_search(
         except TypeError:
             source_plan = _source_plan(bot, visual_type)
 
-    # Keep this cheap: at most two providers and at most ten raw candidates per
-    # provider page. If the first page contains only images already used by the
-    # dashboard, advance once so a replacement search can actually return new
-    # choices without turning this into an open-ended crawl.
-    for source_name, fetcher in source_plan:
-        if len(candidates) >= 20 or not callable(fetcher):
+    # Search each available provider concurrently. Each worker owns its URL
+    # set and performs the same bounded two-page fallback as the old serial path.
+    # Results are merged on the main thread in provider-plan order, preserving
+    # deterministic ranking/deduplication while removing cumulative provider waits.
+    provider_jobs = []
+    for source_index, (source_name, fetcher) in enumerate(source_plan):
+        if not callable(fetcher):
             continue
         source_key = str(source_name or "").strip().casefold()
+        if not source_key:
+            continue
+        provider_jobs.append((source_index, str(source_name), fetcher, source_key))
+
+    provider_results: dict[int, tuple[list, set[str], dict[tuple, list]]] = {}
+
+    def _fetch_manual_provider(job):
+        source_index, source_name, fetcher, source_key = job
+        local_used_urls = set(used_source_image_urls or set())
+        cache_updates: dict[tuple, list] = {}
+        provider_items: list = []
         provider_added = 0
+
         for page in (1, 2):
             cache_key = ("dashboard-query", source_key, exact_query.casefold(), page)
             raw_data = search_cache.get(cache_key)
@@ -1289,7 +1302,7 @@ def collect_manual_visual_search(
                         fetcher,
                         (
                             exact_query,
-                            fetch_used_urls,
+                            local_used_urls,
                             exact_query,
                             video_title,
                             visual_type,
@@ -1297,7 +1310,7 @@ def collect_manual_visual_search(
                             True,
                             page,
                         ),
-                        str(source_name),
+                        source_name,
                         exact_query,
                     )
                 except Exception as exc:
@@ -1307,32 +1320,63 @@ def collect_manual_visual_search(
                         flush=True,
                     )
                     raw_data = []
-                search_cache[cache_key] = list(raw_data or [])
+                normalized = list(raw_data or [])
+                cache_updates[cache_key] = normalized
+            else:
+                normalized = list(raw_data or [])
 
-            page_added = 0
-            for data in search_cache.get(cache_key) or []:
-                candidate = _manual_candidate_from_data(
-                    str(source_name),
-                    data,
-                    exact_query,
-                    visual_type,
-                    visual_genre,
-                    bot,
-                    seen_hashes,
-                    seen_urls,
-                    rejected_counts,
+            provider_items.extend(normalized)
+            if normalized:
+                # Preserve the old bounded behavior: only ask for page 2 when
+                # page 1 produced no usable raw candidates.
+                break
+            if provider_added:
+                break
+
+        return source_index, source_name, provider_items, local_used_urls, cache_updates
+
+    if provider_jobs:
+        with ThreadPoolExecutor(
+            max_workers=len(provider_jobs),
+            thread_name_prefix="manual-visual-provider",
+        ) as executor:
+            futures = [executor.submit(_fetch_manual_provider, job) for job in provider_jobs]
+            for future in futures:
+                source_index, source_name, provider_items, local_used_urls, cache_updates = future.result()
+                provider_results[source_index] = (
+                    provider_items,
+                    local_used_urls,
+                    cache_updates,
                 )
-                if candidate is None:
-                    continue
-                candidates.append(candidate)
-                page_added += 1
-                provider_added += 1
-                if len(candidates) >= 20:
-                    break
-            if len(candidates) >= 20 or provider_added:
+
+    for source_index, source_name, fetcher, source_key in provider_jobs:
+        provider_items, local_used_urls, cache_updates = provider_results.get(
+            source_index,
+            ([], set(), {}),
+        )
+        for cache_key, raw_items in cache_updates.items():
+            search_cache[cache_key] = list(raw_items)
+        fetch_used_urls.update(local_used_urls)
+
+        for data in provider_items:
+            candidate = _manual_candidate_from_data(
+                source_name,
+                data,
+                exact_query,
+                visual_type,
+                visual_genre,
+                bot,
+                seen_hashes,
+                seen_urls,
+                rejected_counts,
+            )
+            if candidate is None:
+                continue
+            candidates.append(candidate)
+            if len(candidates) >= 20:
                 break
-            if not search_cache.get(cache_key):
-                break
+        if len(candidates) >= 20:
+            break
 
     candidates.sort(
         key=lambda item: (
