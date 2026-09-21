@@ -858,7 +858,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Curiosity is allowed only when the same sentence also gives substantive information.\n\n"
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
-        "- No spoken like/share/subscribe/follow CTA.\n"
+        "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"\n        "- No spoken like/share/subscribe/follow CTA.\n"
         "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
         "VISUAL DATA:\n"
         "- Every scene needs one primary_entity supported by the evidence and a grounded specific_search_prompt. Never invent identities.\n\n"
