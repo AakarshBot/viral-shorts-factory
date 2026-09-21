@@ -1172,7 +1172,7 @@ class DashboardWorkflowController(WorkflowController):
 
 
     def search_visual_options(self, visual_index: int, replacement_query: str) -> tuple[bool, str]:
-        """Search the exact manual query and present at least three verified choices before replacement."""
+        """Search the exact manual query and retain up to ten AI-checked choices with no minimum."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -1268,26 +1268,18 @@ class DashboardWorkflowController(WorkflowController):
                 video_title=video_title,
                 used_hashes=used_hashes,
                 used_source_pages=used_source_pages,
-                min_options=3,
-                max_options=3,
+                min_options=0,
+                max_options=10,
             )
             assets = list(result.get("assets") or [])
-            if len(assets) < 3:
+            # Zero is a valid result. There is no minimum threshold for a
+            # dashboard search; useful images are retained up to the ten-image cap.
+            if not assets:
                 with self._lock:
-                    live_packages = self._visual_packages
-                    if 1 <= index <= len(live_packages):
-                        live_layer = (
-                            live_packages[index - 1][0]
-                            if isinstance(live_packages[index - 1], list) and live_packages[index - 1]
-                            else live_packages[index - 1]
-                        )
-                        if isinstance(live_layer, dict):
-                            live_layer.pop("visual_search_options", None)
                     self._visual_search_options.pop(index, None)
                 return (
-                    False,
-                    f"Only {len(assets)} verified image(s) were found for '{query}'. "
-                    "Refine the query; the current visual was kept.",
+                    True,
+                    f"No AI-checked images were found for '{query}'. Try a different query.",
                 )
 
             pool_id = hashlib.sha256(
@@ -1295,14 +1287,13 @@ class DashboardWorkflowController(WorkflowController):
             ).hexdigest()[:16]
             options = materialize_manual_visual_pool(
                 self.bot,
-                assets[:3],
+                assets[:10],
                 pool_id=pool_id,
             )
-            if len(options) < 3:
+            if not options:
                 return (
-                    False,
-                    f"Only {len(options)} usable image(s) could be prepared for '{query}'. "
-                    "The current visual was kept.",
+                    True,
+                    f"No AI-checked images could be prepared for '{query}'. Try a different query.",
                 )
 
             with self._lock:
