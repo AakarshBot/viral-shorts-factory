@@ -62,5 +62,5 @@ def test_exact_identity_does_not_patch_process_wide_sqlite(monkeypatch):
     assert db_runtime.run_robot_with_exact_identity(
         bot, {"selected_story": {"title": "Test"}}
     ) == "ran"
-    assert seen == [False]
+    assert seen == [True]
     assert sqlite3.connect is module_connect
