@@ -491,6 +491,7 @@ def _init_state() -> None:
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
+        "metadata_pending_values": None,
         "workspace_mode": "Live",
         "live_format_selection": "",
         "live_topic_selection": "",
@@ -516,9 +517,8 @@ def reset_run() -> None:
         "upload_result": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
-        "final_title": "",
-        "final_description": "",
-        "final_comment": "",
+        # final_title/final_description/final_comment belong to Streamlit widgets.
+        # They are repopulated safely before widget instantiation on the next rerun.
         "pending_candidate": None,
         "visual_search_queries": "",
         "visual_query_story_key": "",
@@ -526,6 +526,7 @@ def reset_run() -> None:
         "visual_query_field_count": 0,
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
+        "metadata_pending_values": None,
     }.items():
         st.session_state[key] = value
 
