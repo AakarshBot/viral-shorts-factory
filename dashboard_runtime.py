@@ -576,6 +576,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_search_options: dict[int, list[dict[str, Any]]] = {}
         self._visual_pool: list[dict[str, Any]] = []
         self._visual_search_groups: list[dict[str, Any]] = []
+        self._visual_search_operation_lock = threading.Lock()
         self._visual_pool_crop_target: str = ""
         self._manual_gate_state = None
         self._manual_visual_review_complete_id = None
@@ -917,6 +918,8 @@ class DashboardWorkflowController(WorkflowController):
         query = str(replacement_query or "").strip()
         if not query:
             return False, "Enter a search term."
+        if not self._visual_search_operation_lock.acquire(blocking=False):
+            return False, "A visual search is already running. Please wait for that search to finish."
         try:
             from visual_retrieval_runtime import collect_manual_visual_search, materialize_manual_visual_pool
             script_data = snapshot.get("script_data") or {}
@@ -1002,6 +1005,8 @@ class DashboardWorkflowController(WorkflowController):
             return True, message
         except Exception as exc:
             return False, f"New visual search failed safely: {type(exc).__name__}: {exc}"
+        finally:
+            self._visual_search_operation_lock.release()
 
     def assign_visual_pool_asset(self, asset_hash: str, visual_index: int) -> tuple[bool, str]:
         """Assign one unused pool image to exactly one slide; it cannot be reused elsewhere."""
