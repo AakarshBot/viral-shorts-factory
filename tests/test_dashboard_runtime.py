@@ -1234,6 +1234,29 @@ def test_final_artifact_qc_export_is_available():
     assert "missing" in detail.lower()
 
 
+def test_dashboard_reset_does_not_mutate_metadata_widget_state():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def reset_run")
+    end = source.index("\ndef category_options", start)
+    reset = source[start:end]
+    assert '"final_title": ""' not in reset
+    assert '"final_description": ""' not in reset
+    assert '"final_comment": ""' not in reset
+    assert '"metadata_approved": False' in reset
+    assert '"metadata_loaded_run_id": ""' in reset
+    assert '"metadata_pending_values": None' in reset
+
+
+def test_dashboard_metadata_widget_keys_are_not_reassigned_after_instantiation():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    render_start = source.index("def render_upload_panel")
+    panel = source[render_start:source.index("\ndef _perform_upload", render_start)]
+    for key in ("final_title", "final_description", "final_comment"):
+        widget_pos = panel.index(f'key="{key}"')
+        after_widget = panel[widget_pos:]
+        assert f'st.session_state["{key}"] =' not in after_widget
+
+
 def test_dashboard_metadata_approval_defers_widget_value_updates_until_rerun():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     render_start = source.index("def render_upload_panel")
