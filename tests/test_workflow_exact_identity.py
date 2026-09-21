@@ -29,11 +29,6 @@ def _qc_ready_controller(controller):
             "validate_final_upload_metadata",
             lambda title, description, comment: (title, description, comment),
         ),
-        patch.object(
-            final_qc_runtime,
-            "evaluate_originality_gate",
-            lambda _data: {"passed": True, "public_blocked": False},
-        ),
     )
 
 def test_ready_for_upload_updates_exact_run_not_latest_topic():
@@ -61,8 +56,8 @@ def test_ready_for_upload_updates_exact_run_not_latest_topic():
         controller.bot._last_run_row_id = first_id
         controller.bot._last_run_run_id = "run-old"
 
-        final_video_patch, metadata_patch, originality_patch = _qc_ready_controller(controller)
-        with final_video_patch, metadata_patch, originality_patch:
+        final_video_patch, metadata_patch = _qc_ready_controller(controller)
+        with final_video_patch, metadata_patch:
             with patch.object(ultimate_bot, "DB_PATH", path):
                 controller._mark_latest_run_ready_for_qc("Repeated topic")
 
@@ -88,8 +83,8 @@ def test_ready_for_upload_fails_closed_on_run_id_mismatch(tmp_path):
     controller.bot._last_run_row_id = row_id
     controller.bot._last_run_run_id = "run-wrong"
 
-    final_video_patch, metadata_patch, originality_patch = _qc_ready_controller(controller)
-    with final_video_patch, metadata_patch, originality_patch:
+    final_video_patch, metadata_patch = _qc_ready_controller(controller)
+    with final_video_patch, metadata_patch:
         with patch.object(ultimate_bot, "DB_PATH", path):
             try:
                 controller._mark_latest_run_ready_for_qc("Repeated topic")
