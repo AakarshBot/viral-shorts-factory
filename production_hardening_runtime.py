@@ -215,7 +215,21 @@ def install_production_wrappers(controller) -> None:
             controller._reporter("audio", 42, "Generating narration and word timings…")
             result = await original_audio(*args, **kwargs) if inspect.iscoroutinefunction(original_audio) else original_audio(*args, **kwargs)
             audio_paths = result[0] if isinstance(result, tuple) and result else []
-            controller._reporter("audio", 53, f"Narration complete — {len(audio_paths) if isinstance(audio_paths, list) else 0} scene audio files ready.")
+            word_timings = result[1] if isinstance(result, tuple) and len(result) > 1 else []
+            with controller._lock:
+                controller.state.audio_paths = [
+                    str(path) for path in audio_paths
+                    if str(path or "").strip()
+                ] if isinstance(audio_paths, list) else []
+                controller.state.word_timings = [
+                    list(items) if isinstance(items, list) else []
+                    for items in (word_timings if isinstance(word_timings, list) else [])
+                ]
+            controller._reporter(
+                "audio",
+                53,
+                f"Narration complete — {len(controller.state.audio_paths)} scene audio files ready.",
+            )
             return result
         globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
 
