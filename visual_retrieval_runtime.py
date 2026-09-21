@@ -948,6 +948,9 @@ def collect_manual_visual_pool(
                             "visual_type": candidate["visual_type"],
                             "visual_genre": candidate["visual_genre"],
                             "provenance": dict(candidate["provenance"]),
+                            "provenance_status": str(
+                                candidate.get("provenance_status") or "commercial-verified"
+                            ),
                             "priority": float(candidate["priority"]),
                             "search_text": _candidate_search_text(candidate["data"]),
                             "source_page_url": str(candidate.get("source_page_url") or "").strip(),
