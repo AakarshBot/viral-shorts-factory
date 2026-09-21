@@ -710,6 +710,19 @@ def _infer_discovery_category(story):
     return winner[0] if winner[1] > 0 else "national_global_affairs"
 
 
+def _discovery_category_allowed(genre_key, story):
+    """Keep fallback/trend signals inside the explicitly selected genre lane."""
+    genre_key = _clean(genre_key)
+    if not genre_key:
+        return True
+    inferred = _infer_discovery_category(story)
+    if genre_key == "sports_stories_of_day":
+        return inferred == "sports"
+    if genre_key == "tech_reviews":
+        return inferred == "technology"
+    return inferred == genre_key
+
+
 def _social_signal(title, social_titles):
     tokens = _tokens(title)
     if not tokens or not social_titles:
@@ -1580,14 +1593,18 @@ def _build_discovery_google_queries(
     )
     has_category_query = bool(str(genre_cfg.get("gnews_q") or "").strip())
 
+    if genre_key and (india_query or global_query or has_category_query):
+        # An explicitly selected genre must stay inside its own discovery lanes
+        # in both dashboard and production discovery. The generic radar is only
+        # for the intentionally broad AI/general-news mode.
+        budget = (
+            DISCOVERY_MAX_GOOGLE_QUERIES_BROAD
+            if broad_discovery
+            else DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD
+        )
+        return _dedupe_discovery_queries(candidates, budget)
+
     if broad_discovery:
-        # Explicit dashboard genres already have India-first + global + category
-        # lanes. Generic radar queries would leak unrelated genres into the pool.
-        if genre_key and (india_query or global_query or has_category_query):
-            return _dedupe_discovery_queries(
-                candidates,
-                DISCOVERY_MAX_GOOGLE_QUERIES_BROAD,
-            )
         radar_budget = 4 if targeted else len(GOOGLE_NEWS_RADAR_QUERIES)
         candidates.extend(GOOGLE_NEWS_RADAR_QUERIES[:radar_budget])
         return _dedupe_discovery_queries(candidates, DISCOVERY_MAX_GOOGLE_QUERIES_BROAD)
@@ -1765,18 +1782,8 @@ def collect_high_recall_stories(
         # act as a license to leak unrelated headlines into a genre.
         for future in trend_futures:
             trend_rows = resolved_signals.get(future) or []
-            if not genre_key:
-                raw.extend(trend_rows)
-                continue
             for row in trend_rows:
-                inferred = _infer_discovery_category(row)
-                if genre_key == "sports_stories_of_day":
-                    allowed = inferred == "sports"
-                elif genre_key == "tech_reviews":
-                    allowed = inferred == "technology"
-                else:
-                    allowed = inferred == genre_key
-                if allowed:
+                if _discovery_category_allowed(genre_key, row):
                     raw.append(row)
 
         compacted = []
@@ -1810,6 +1817,8 @@ def collect_high_recall_stories(
                 timeout=3.0,
             )
             for row in gdelt_rows:
+                if not _discovery_category_allowed(genre_key, row):
+                    continue
                 key = _canonical_url(_source_url_from_item(row))
                 if not key:
                     key = "title:" + " ".join(sorted(_tokens(row.get("title", ""))))
