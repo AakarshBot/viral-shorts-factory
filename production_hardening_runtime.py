@@ -211,6 +211,23 @@ def install_production_wrappers(controller) -> None:
         raise RuntimeError("Legacy run_robot() is not available.")
     globals_dict = getattr(run_robot, "__globals__", {})
 
+    original_editorial = globals_dict.get("editorial_gate_batch")
+    if callable(original_editorial):
+        def editorial_wrapper(*args, **kwargs):
+            controller._reporter(
+                "research",
+                19,
+                "Scoring the selected story for editorial fit and production safety…",
+            )
+            result = original_editorial(*args, **kwargs)
+            controller._reporter(
+                "research",
+                26,
+                "Editorial scoring complete. Preparing the script…",
+            )
+            return result
+        globals_dict["editorial_gate_batch"] = editorial_wrapper
+
     original_write = globals_dict.get("write_script")
     if callable(original_write):
         def write_wrapper(*args, **kwargs):
