@@ -63,51 +63,6 @@ def quality_gate(img_bytes: bytes) -> tuple[bool, str, float]:
     return True, "quality-ok", round(min(100.0, score), 1)
 
 
-def _estimate_crop_focus(img: Image.Image) -> tuple[float, float, float]:
-    """Find a cheap visual focal point using only PIL edge information."""
-    try:
-        gray = img.convert("L")
-        max_side = 256
-        scale = min(1.0, max_side / max(gray.width, gray.height))
-        probe = gray.resize(
-            (
-                max(32, int(round(gray.width * scale))),
-                max(32, int(round(gray.height * scale))),
-            ),
-            Image.Resampling.BILINEAR,
-        )
-        edges = probe.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=1.2))
-        pixels = list(edges.getdata())
-        if not pixels:
-            return 0.5, 0.5, 0.0
-
-        ranked = sorted(pixels)
-        threshold = ranked[int(len(ranked) * 0.72)]
-        weights = [float(value) if value >= threshold else 0.0 for value in pixels]
-        total = sum(weights)
-        if total <= 1.0:
-            return 0.5, 0.5, 0.0
-
-        width, height = edges.size
-        weighted_x = 0.0
-        weighted_y = 0.0
-        index = 0
-        for y in range(height):
-            for x in range(width):
-                weight = weights[index]
-                index += 1
-                weighted_x += x * weight
-                weighted_y += y * weight
-
-        return (
-            weighted_x / total / max(1, width - 1),
-            weighted_y / total / max(1, height - 1),
-            min(1.0, total / max(1.0, width * height * 35.0)),
-        )
-    except Exception:
-        return 0.5, 0.5, 0.0
-
-
 def fit_visual_image(img: Image.Image, size=(1080, 1920), visual_genre="") -> Image.Image:
     """Fit branding assets without cutting the logo/crest off the canvas."""
     genre = str(visual_genre or "").strip().upper()
