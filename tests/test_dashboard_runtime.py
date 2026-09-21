@@ -1265,6 +1265,12 @@ def test_dashboard_output_summary_reports_visual_qc_readiness():
     assert 'f"{ready_visuals}/{len(visuals)} ready"' in source
 
 
+def test_dashboard_search_result_crop_uses_active_dialog_target():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert 'st.session_state["visual_crop_target"] = f"asset:{asset_hash}"' in source
+    assert 'st.session_state.visual_pool_crop_target = asset_hash' not in source
+
+
 def test_dashboard_crop_editor_has_free_rectangle_mode_and_full_source():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert '"Rectangle (free)"' in source

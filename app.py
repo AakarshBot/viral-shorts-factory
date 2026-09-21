@@ -1662,7 +1662,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                     width="stretch",
                                     key=f"crop_search_{run_id}_{group_id}_{asset_hash[:12]}",
                                 ):
-                                    st.session_state.visual_pool_crop_target = asset_hash
+                                    st.session_state["visual_crop_target"] = f"asset:{asset_hash}"
                                     st.rerun()
 
     st.markdown("---")
