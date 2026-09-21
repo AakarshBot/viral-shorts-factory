@@ -969,6 +969,84 @@ def test_workflow_error_message_is_dashboard_neutral():
     assert 'self.state.message = "Run stopped with an error."' in source
 
 
+def test_dashboard_replacement_returns_used_pool_asset_without_duplicate():
+    from dashboard_runtime import DashboardWorkflowController
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._visual_pool = [{
+        "path": "/tmp/selected.jpg",
+        "original_path": "/tmp/selected.jpg",
+        "hash": "selected-hash",
+        "source": "Commons",
+        "used": True,
+        "assigned_slide": 2,
+    }]
+    controller._return_slide_visual_to_pool(
+        {
+            "image": "/tmp/selected.jpg",
+            "visual_original_path": "/tmp/selected.jpg",
+            "visual_selected_hash": "selected-hash",
+            "visual_verified": True,
+            "source_type": "Commons",
+        },
+        {"primary_entity": "Subject"},
+    )
+
+    assert len(controller._visual_pool) == 1
+    assert controller._visual_pool[0]["hash"] == "selected-hash"
+    assert controller._visual_pool[0]["used"] is False
+    assert controller._visual_pool[0]["assigned_slide"] == 0
+
+
+def test_dashboard_retained_topic_is_revalidated_before_reappearing(monkeypatch):
+    import story_ranker
+    from dashboard_runtime import _merge_retained_topics
+
+    retained = {
+        "title": "Retained current story",
+        "story_url": "https://example.com/retained",
+        "story_key": "retained-current-story",
+        "discovery_dimensions": {
+            "freshness": 8,
+            "event_momentum": 5,
+            "importance": 7,
+            "shorts_viability": 7,
+            "corroboration": 2,
+            "source_quality": 2,
+        },
+        "candidate_score": 18,
+        "topic_actionability_score": 7,
+    }
+    fresh = {
+        "title": "Fresh story",
+        "story_url": "https://example.com/fresh",
+        "story_key": "fresh-story",
+    }
+
+    monkeypatch.setattr(
+        story_ranker,
+        "rank_discovery_candidates",
+        lambda candidates, **_kwargs: [dict(item) for item in candidates],
+    )
+    bot = type(
+        "Bot",
+        (),
+        {"CONTENT_CATEGORIES": {"national_global_affairs": {}}},
+    )()
+    merged = _merge_retained_topics(
+        bot,
+        {"category": "national_global_affairs", "format_mode": "regular", "language": "english"},
+        object(),
+        [fresh],
+        [retained],
+        max_candidates=2,
+    )
+
+    assert merged[0]["story_key"] == "retained-current-story"
+    assert merged[0]["retained_from_previous_run"] is True
+    assert merged[1]["story_key"] == "fresh-story"
+
+
 def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, tmp_path):
     from PIL import Image
     from dashboard_runtime import DashboardWorkflowController
