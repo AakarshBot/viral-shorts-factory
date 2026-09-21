@@ -99,28 +99,36 @@ OAUTH_SCOPES = [
 CONTENT_CATEGORIES = {
     "entertainment": {
         "label": "Movie Gossips & Entertainment",
-        "gnews_q": "Bollywood OR Tollywood OR Showbiz OR Box Office",
+        "gnews_q": "(Bollywood OR Tollywood OR Indian cinema OR Indian actor OR Indian music OR box office)",
+        "india_gnews_q": "(India OR Indian OR Bollywood OR Tollywood) (film OR movie OR actor OR actress OR trailer OR release OR box office OR music OR streaming)",
+        "global_gnews_q": "(Hollywood OR global cinema OR film OR streaming OR music) (launch OR release OR award OR controversy OR box office OR announcement)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "24", "hashtags": ["#Entertainment", "#MovieGossip", "#Trending"],
         "usable_regular": True, "usable_top5": True
     },
     "national_global_affairs": {
         "label": "National & Global Affairs",
-        "gnews_q": "India AND (Economy OR Geopolitics OR Tech) OR World News",
+        "gnews_q": "(India OR Indian) (economy OR geopolitics OR government OR policy OR technology OR business) OR (world OR global) (major OR crisis OR decision OR summit)",
+        "india_gnews_q": "(India OR Indian) (government OR policy OR economy OR geopolitics OR courts OR diplomacy OR technology OR major decision OR major development)",
+        "global_gnews_q": "(world OR global OR international) (major development OR summit OR conflict OR economy OR policy OR breakthrough OR crisis)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/NATION?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "25", "hashtags": ["#News", "#GlobalAffairs", "#CurrentEvents"],
         "usable_regular": True, "usable_top5": True
     },
     "viral_phenomenon": {
         "label": "Viral Trends & Internet Phenomena",
-        "gnews_q": "Viral Video OR Internet Trend India",
+        "gnews_q": "(India OR Indian) (viral OR internet trend OR social media OR creator OR meme) OR (global internet trend OR viral phenomenon)",
+        "india_gnews_q": "(India OR Indian) (viral OR trending OR social media OR creator OR meme OR internet phenomenon)",
+        "global_gnews_q": "(global OR worldwide) (viral OR internet trend OR social media trend OR creator OR platform)",
         "rss_url": "https://www.reddit.com/r/Damnthatsinteresting/hot.json?limit=20",
         "category_id": "24", "hashtags": ["#Viral", "#TrendingNow", "#MindBlown"],
         "usable_regular": True, "usable_top5": True
     },
     "sports": {
         "label": "Asian & Global Sports Highlights",
-        "gnews_q": "Cricket OR Tennis OR Football",
+        "gnews_q": "(India OR Indian) (cricket OR tennis OR football OR badminton OR hockey OR athletics) OR (global sports major)",
+        "india_gnews_q": "(India OR Indian) (cricket OR football OR tennis OR badminton OR hockey OR athletics OR ISL OR kabaddi OR Olympics)",
+        "global_gnews_q": "(global OR world) (sports major OR tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "17", 
         "hashtags": ["#Cricket", "#Tennis", "#BGMI", "#Badminton", "#Football", "#SportsHighlights"],
@@ -129,7 +137,9 @@ CONTENT_CATEGORIES = {
     },
     "sports_stories_of_day": {
         "label": "Sports Stories of the Day",
-        "gnews_q": "Cricket OR IPL OR BCCI OR Tennis OR East Bengal OR ISL OR Indian Football",
+        "gnews_q": "(India OR Indian OR BCCI OR IPL OR WPL OR ISL OR Indian Football) (cricket OR football OR tournament OR match OR record OR squad OR result)",
+        "india_gnews_q": "(India OR Indian OR BCCI OR IPL OR WPL OR India Women) (cricket OR match OR result OR squad OR selection OR injury OR record OR series OR final OR win OR loss)",
+        "global_gnews_q": "(ICC OR Australia Cricket OR England Cricket OR South Africa Cricket OR New Zealand Cricket OR West Indies Cricket OR T20 Cricket OR Test Cricket) (match OR result OR squad OR series OR final OR record OR win OR loss)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "17", 
         "hashtags": ["#SportsNews", "#Cricket", "#Football", "#TrendingSports", "#SportsHighlights"],
@@ -138,35 +148,45 @@ CONTENT_CATEGORIES = {
     },
     "technology": {
         "label": "Tech & AI News",
-        "gnews_q": "Artificial Intelligence OR Gadgets OR Startups OR Tech Launch",
+        "gnews_q": "(India OR Indian) (AI OR technology OR startup OR smartphone OR semiconductor OR software OR gadget OR launch) OR (global AI OR technology)",
+        "india_gnews_q": "(India OR Indian) (AI OR technology OR startup OR smartphone OR semiconductor OR software OR gadget OR launch OR research OR policy)",
+        "global_gnews_q": "(global OR worldwide) (AI OR technology OR semiconductor OR smartphone OR space OR software) (launch OR breakthrough OR regulation OR deal)" ,
         "rss_url": "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "28", "hashtags": ["#TechNews", "#AI", "#Gadgets"],
         "usable_regular": True, "usable_top5": True
     },
     "tech_reviews": {
         "label": "Tech & Gadget Reviews",
-        "gnews_q": "smartphone launch review OR laptop launch review OR gadget review India",
+        "gnews_q": "(India OR Indian) (smartphone review OR laptop launch OR gadget review OR tech launch) OR (global gadget review OR major device launch)",
+        "india_gnews_q": "(India OR Indian) (smartphone review OR laptop review OR gadget review OR device launch OR pricing)",
+        "global_gnews_q": "(global) (major smartphone launch OR laptop launch OR gadget review OR consumer tech)",
         "rss_url": "https://news.google.com/rss/search?q=gadget+review+smartphone+launch&hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "28", "hashtags": ["#TechReview", "#Gadgets", "#Smartphone", "#TechUnboxing"],
         "usable_regular": True, "usable_top5": False
     },
     "business_finance": {
         "label": "Business & Finance",
-        "gnews_q": "Stock Market OR Startups OR Economy OR Business",
+        "gnews_q": "(India OR Indian) (stock market OR startups OR economy OR business OR RBI OR rupee OR budget) OR (global markets OR economy)",
+        "india_gnews_q": "(India OR Indian) (stock market OR economy OR business OR startup OR RBI OR rupee OR budget OR investment OR IPO)",
+        "global_gnews_q": "(global OR worldwide) (markets OR economy OR business OR central bank OR trade OR major deal OR earnings OR investment)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "27", "hashtags": ["#Finance", "#Business", "#Investing"],
         "usable_regular": True, "usable_top5": True
     },
     "health_lifestyle": {
         "label": "Health & Lifestyle",
-        "gnews_q": "Fitness OR Health Tips OR Nutrition OR Wellness",
+        "gnews_q": "(India OR Indian) (health OR medicine OR healthcare OR nutrition OR wellness OR public health) OR (global health OR science)",
+        "india_gnews_q": "(India OR Indian) (healthcare OR medicine OR public health OR disease OR nutrition OR wellness OR medical research OR health policy)",
+        "global_gnews_q": "(global OR worldwide) (health OR medicine OR science OR public health) (study OR approval OR outbreak OR breakthrough OR guidance)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "26", "hashtags": ["#Health", "#Wellness", "#FitnessTips"],
         "usable_regular": True, "usable_top5": True
     },
     "regional_state_news": {
         "label": "Telangana & AP Updates",
-        "gnews_q": "Telangana OR Hyderabad OR Andhra Pradesh OR Amaravati",
+        "gnews_q": "(Telangana OR Hyderabad OR Andhra Pradesh OR Amaravati) (development OR government OR business OR infrastructure OR politics OR technology OR culture)",
+        "india_gnews_q": "(Telangana OR Hyderabad OR Andhra Pradesh OR Amaravati) (government OR development OR business OR infrastructure OR technology OR major decision OR major event)",
+        "global_gnews_q": "",
         "rss_url": "https://news.google.com/rss/search?q=Telangana+OR+Hyderabad&hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "25", "hashtags": ["#Telangana", "#Hyderabad", "#TeluguNews"],
         "usable_regular": True, "usable_top5": True
