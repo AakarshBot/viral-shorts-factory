@@ -227,23 +227,22 @@ def test_legacy_ai_category_is_normalized_before_production_lookup():
 
 @pytest.mark.parametrize(
     "category,format_mode",
-    sorted(
-        {
-            "national_global_affairs": "regular",
-            "technology": "regular",
-            "business_finance": "regular",
-            "entertainment": "regular",
-            "viral_phenomenon": "regular",
-            "health_lifestyle": "regular",
-            "regional_state_news": "regular",
-            "national_global_affairs": "top5",
-            "technology": "top5",
-            "business_finance": "top5",
-            "entertainment": "top5",
-            "viral_phenomenon": "top5",
-        }.items()
-    ),
+    [
+        ("national_global_affairs", "regular"),
+        ("technology", "regular"),
+        ("business_finance", "regular"),
+        ("entertainment", "regular"),
+        ("viral_phenomenon", "regular"),
+        ("health_lifestyle", "regular"),
+        ("regional_state_news", "regular"),
+        ("national_global_affairs", "top5"),
+        ("technology", "top5"),
+        ("business_finance", "top5"),
+        ("entertainment", "top5"),
+        ("viral_phenomenon", "top5"),
+    ],
 )
+
 def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, category, format_mode):
     import dashboard_runtime
 
