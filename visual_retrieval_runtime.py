@@ -1373,11 +1373,9 @@ def collect_manual_visual_search(
             if candidate is None:
                 continue
             candidates.append(candidate)
-            if len(candidates) >= 20:
-                break
-        if len(candidates) >= 20:
-            break
 
+    # Only cap after all providers have contributed so ranking can choose the
+    # strongest image regardless of which provider returned it.
     candidates.sort(
         key=lambda item: (
             -float(item.get("priority") or 0.0),
