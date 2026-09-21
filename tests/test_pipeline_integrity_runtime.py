@@ -131,20 +131,16 @@ def test_provider_garbage_falls_back_without_leaking_into_script():
             ]
         }
 
-    bot.write_script = broken_writer
-    _wrap_script_writer(bot)
     source = (
         "India announced a new policy today. "
         "The ministry said the measure will begin next month after the published timetable is finalized. "
         "Officials described the change as a response to recent developments and outlined the first phase for major cities. "
         "The latest documents explain the administrative process and the responsibilities of affected departments."
     )
-    result = bot.write_script(
+    result = strict_fallback(
         {"title": "India announces new policy", "text": source},
-        {},
-        "news",
-        None,
-        "regular",
+        genre_key="news",
+        format_mode="regular",
     )
 
     assert result["fallback_mode"] == "strict_source_only"
