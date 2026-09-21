@@ -1054,6 +1054,57 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
   .topic-card,.story-card,.output-card,.release-card,.panel,
   .stButton>button,.stLinkButton>a,.brand-signature::after{transition:none!important}
 }
+
+/* Final composition pass: shared rails, section rhythm and tactile focus states. */
+.section-title{
+  position:relative;
+  display:inline-block;
+  padding-bottom:7px;
+}
+.section-title::after{
+  content:"";
+  position:absolute;
+  left:0;bottom:0;
+  width:46px;height:2px;
+  border-radius:999px;
+  background:linear-gradient(90deg,#4c8882,#8c82c5,transparent);
+}
+[data-testid="stPills"]{
+  margin-top:3px;
+}
+[data-testid="stPills"] [role="group"]{
+  padding:5px!important;
+  gap:8px!important;
+  border-radius:21px!important;
+  background:rgba(255,253,249,.34)!important;
+  border:1px solid rgba(210,197,183,.46)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important;
+  backdrop-filter:blur(11px);
+  -webkit-backdrop-filter:blur(11px);
+}
+[data-testid="stPills"] button{
+  min-height:48px!important;
+  border-radius:15px!important;
+}
+[data-testid="stPills"] button[aria-pressed="true"]{
+  transform:translateY(-1px)!important;
+  border-color:rgba(70,112,110,.28)!important;
+  background:linear-gradient(135deg,rgba(237,247,243,.90),rgba(235,234,249,.84))!important;
+  box-shadow:0 11px 23px rgba(47,93,98,.10),inset 0 1px 0 rgba(255,255,255,.94)!important;
+}
+.brand-card:hover,.factory-status:hover{
+  transform:translateY(-1px);
+  box-shadow:0 28px 76px rgba(40,31,22,.12),inset 0 1px 0 rgba(255,255,255,.94)!important;
+}
+.stButton>button:disabled,.stLinkButton>a[aria-disabled="true"]{
+  opacity:.58!important;
+  filter:saturate(.72);
+  box-shadow:none!important;
+}
+[data-testid="stAlert"]{
+  border-radius:15px!important;
+  box-shadow:0 10px 28px rgba(69,49,31,.055)!important;
+}
 </style>""", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
@@ -1522,7 +1573,7 @@ def render_workspace_navigation() -> str:
         options,
         index=options.index(current),
         key="workspace_mode",
-        label_visibility="visible",
+        label_visibility="collapsed",
     )
     return selected
 
