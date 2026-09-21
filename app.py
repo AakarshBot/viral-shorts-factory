@@ -1911,6 +1911,13 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     script_data = snapshot.get("script_data") or {}
     metadata = snapshot.get("final_metadata") or {}
     run_id = str(snapshot.get("run_id") or "")
+    pending_metadata = st.session_state.pop("metadata_pending_values", None)
+    if isinstance(pending_metadata, dict):
+        st.session_state["final_title"] = str(pending_metadata.get("title") or "").strip()
+        st.session_state["final_description"] = str(pending_metadata.get("description") or "").strip()
+        st.session_state["final_comment"] = str(pending_metadata.get("comment") or "").strip()
+        st.session_state["metadata_approved"] = True
+
     if st.session_state.get("metadata_loaded_run_id") != run_id:
         st.session_state["final_title"] = str(
             metadata.get("title")
@@ -1990,9 +1997,11 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                         clean_title, clean_description, clean_comment = validate_final_upload_metadata(
                             title, description, comment
                         )
-                        st.session_state["final_title"] = clean_title
-                        st.session_state["final_description"] = clean_description
-                        st.session_state["final_comment"] = clean_comment
+                        st.session_state["metadata_pending_values"] = {
+                            "title": clean_title,
+                            "description": clean_description,
+                            "comment": clean_comment,
+                        }
                         st.session_state["metadata_approved"] = True
                         st.rerun()
                     except Exception as exc:
