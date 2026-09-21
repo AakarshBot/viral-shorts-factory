@@ -119,24 +119,6 @@ def _as_image_bytes(data: Any) -> bytes | None:
     return None
 
 
-def _candidate_source_page_key(data: Any) -> str:
-    """Normalize the page/article that supplied an image for pool diversity."""
-    if not isinstance(data, dict):
-        return ""
-    candidates = (
-        data.get("source_page_url"),
-        data.get("source_article_url"),
-        data.get("foreign_landing_url"),
-        data.get("pageURL"),
-        data.get("landing_url"),
-    )
-    for value in candidates:
-        url = str(value or "").strip()
-        if url.startswith(("http://", "https://")):
-            return url.rstrip("/").casefold()
-    return ""
-
-
 def _preflight_image(data: Any) -> tuple[bool, str, bytes | None]:
     """Cheap decode/size/aspect validation; invalid bytes consume no QA budget."""
     if data is None:
