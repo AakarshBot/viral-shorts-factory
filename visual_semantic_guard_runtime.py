@@ -163,10 +163,6 @@ def _descriptor_role_hint(value: str) -> str:
     return ""
 
 
-def _descriptor_present(value: str) -> bool:
-    words = tokens(value)
-    return bool(words) and any(key(word) in VISUAL_DESCRIPTORS for word in words[1:])
-
 
 def _subject_role_hint(value: str) -> str:
     core = _strip_visual_descriptors(value)
@@ -376,32 +372,6 @@ def _stable_identity_from_prompt(candidate: str, prompt: str, role: str) -> str:
         return recovered
     return candidate
 
-
-def _contextual_query_variant(subject: str, anchor: str) -> str:
-    """Build a shorter context-rich query while preserving the factual anchor."""
-    subject_words = tokens(subject)
-    anchor_keys = meaningful_tokens(anchor)
-    if not subject_words or not anchor_keys:
-        return ""
-    positions: list[int] = []
-    next_anchor = 0
-    for index, word in enumerate(subject_words):
-        if next_anchor < len(anchor_keys) and key(word) == anchor_keys[next_anchor]:
-            positions.append(index)
-            next_anchor += 1
-    if next_anchor < len(anchor_keys):
-        return ""
-    context_words: list[str] = []
-    for index, word in enumerate(subject_words):
-        if index in positions:
-            continue
-        k = key(word)
-        if not k or k in GENERIC_NOISE or k in STOPWORDS or k in DISCOURSE_PREFIXES or k in AUXILIARY_WORDS:
-            continue
-        context_words.append(word)
-    if not context_words:
-        return ""
-    return sanitize_candidate(" ".join([*tokens(anchor), *context_words[:4]]))
 
 
 def resolve_subject(scene: dict, video_title: str = "") -> dict:
