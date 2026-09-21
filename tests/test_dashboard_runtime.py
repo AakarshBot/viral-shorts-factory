@@ -1455,3 +1455,15 @@ def test_live_qc_accepts_matching_audio_tracks_and_word_timings(tmp_path):
     )
     assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is True
     assert next(gate for gate in gates if gate["key"] == "narration")["passed"] is True
+
+
+def test_renderer_has_no_artificial_scene_audio_padding():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "audio.duration + 0.25" not in source
+    assert "Audio is already encoded at its natural duration" in source
+
+
+def test_script_writer_prompt_requires_precise_first_scene_without_length_quota():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "Scene 1 is the retention entry point" in source
+    assert "Let the story's real complexity determine how many scenes it needs." in source
