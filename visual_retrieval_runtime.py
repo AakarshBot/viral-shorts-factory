@@ -742,10 +742,14 @@ def _manual_query_visual_context(query: str, scenes: list[dict]) -> tuple[str, s
 
 
 def _manual_query_target(query_index: int) -> int:
-    """Return the descending identity-approved target for an ordered manual query."""
-    rank = max(1, int(query_index))
-    targets = (10, 7, 5, 4, 3)
-    return targets[min(rank, len(targets)) - 1]
+    """Return the hard per-query acceptance cap.
+
+    There is deliberately no minimum. A query may return zero useful images,
+    while a productive query can contribute up to ten AI-verified,
+    monetization-retainable images.
+    """
+    _ = query_index
+    return 10
 
 
 def _visual_search_cache(bot) -> dict:
@@ -984,7 +988,7 @@ def collect_manual_visual_pool(
         verified_for_query = 0
 
         for source_name, fetcher in source_plan:
-            if not callable(fetcher) or source_attempts >= 3 or verified_for_query >= target:
+            if not callable(fetcher) or source_attempts >= 2 or verified_for_query >= target:
                 break
             source_key = str(source_name or "").strip().casefold()
             if not source_key:
@@ -1056,7 +1060,7 @@ def collect_manual_visual_pool(
             qa_requests += requests_made
             verified_for_query = len(assets) - before
 
-            if verified_for_query < target and source_attempts < 3:
+            if verified_for_query < target and source_attempts < 2:
                 continue
             break
 
@@ -1216,25 +1220,41 @@ def collect_manual_visual_search(
     used_hashes: set[str] | None = None,
     used_source_image_urls: set[str] | None = None,
 ) -> dict:
-    """Fetch exactly five new monetization-safe options without identity/resolution QA."""
+    """Fetch up to ten new images that pass monetization and identity AI checks.
+
+    The dashboard search intentionally has no scene/context acceptance gate.
+    The exact user query is preserved, restrictive monetization is rejected,
+    and the same identity AI gate used by the production visual pool decides
+    which candidates are shown.
+    """
+    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
+    from visual_search_intent_runtime import canonical_manual_entity_anchor
+
     exact_query = str(query or "").strip()
     if not exact_query:
-        return {"assets": [], "target": 5, "rejection_counts": {}}
+        return {"assets": [], "target": 10, "rejection_counts": {}}
 
-    scenes = [{"manual_visual_query": exact_query, "primary_entity": exact_query}]
-    try:
-        visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
-    except Exception:
-        visual_type, visual_genre = "GENERAL_CONTEXT", "GENERAL_CONTEXT"
+    visual_type, visual_genre = _manual_query_visual_context(
+        exact_query,
+        [{"manual_visual_query": exact_query, "primary_entity": exact_query}],
+    )
+    entity_anchor = str(
+        canonical_manual_entity_anchor(exact_query, "") or exact_query
+    ).strip()
 
-    existing_hashes = set(used_hashes or set())
-    seen_hashes = set(existing_hashes)
+    seen_hashes = set(used_hashes or set())
     seen_urls: set[str] = {
         str(value or "").strip().casefold().rstrip("/")
         for value in (used_source_image_urls or set())
         if str(value or "").strip()
     }
-    rejected_counts = {"monetization": 0, "invalid_image": 0, "duplicate": 0}
+    rejected_counts = {
+        "monetization": 0,
+        "invalid_image": 0,
+        "duplicate": 0,
+        "ai_no": 0,
+        "ai_uncertain": 0,
+    }
     candidates: list[dict] = []
     search_cache = _visual_search_cache(bot)
     fetch_used_urls: set[str] = set(used_source_image_urls or set())
@@ -1244,116 +1264,130 @@ def collect_manual_visual_search(
     except TypeError:
         source_plan = _source_plan(bot, visual_type)
 
-    # Recent web discovery is only used for contextual manual searches. Exact
-    # identity searches continue through the established identity-oriented sources.
-    contextual_manual_genres = {
-        "SPORTS_ACTION",
-        "SPORTS_MATCH",
-        "TEAM_ACTION",
-        "PLACE_SCENE",
-        "EVENT_SCENE",
-        "GENERAL_PHOTO",
-        "GENERAL_CONTEXT",
-    }
-    if (
-        visual_genre in contextual_manual_genres
-        and str(os.getenv("SERPAPI_API_KEY", "")).strip()
-    ):
-        try:
-            from image_sources_runtime import fetch_serpapi_candidates
-            if all(str(name).casefold() != "serpapi" for name, _fetcher in source_plan):
-                source_plan = [("SerpApi", fetch_serpapi_candidates)] + list(source_plan)
-        except Exception:
-            pass
-
-    for page in range(1, MANUAL_SEARCH_MAX_PAGES + 1):
-        for source_name, fetcher in source_plan:
-            if len(candidates) >= 5 or not callable(fetcher):
-                break
-            source_key = str(source_name or "").strip().casefold()
-            cache_key = ("query", source_key, exact_query.casefold(), page)
-            raw_data = search_cache.get(cache_key)
-            if raw_data is None:
-                try:
-                    raw_data = runtime._call_fetcher_with_timeout(
-                        fetcher,
-                        (
-                            exact_query,
-                            fetch_used_urls,
-                            exact_query,
-                            video_title,
-                            visual_type,
-                            visual_genre,
-                            True,
-                            page,
-                        ),
-                        str(source_name),
-                        exact_query,
-                    )
-                except Exception as exc:
-                    print(
-                        f"   [Manual Visual Search] {source_name} page={page} failed safely: "
-                        f"{type(exc).__name__}: {exc}",
-                        flush=True,
-                    )
-                    raw_data = []
-                search_cache[cache_key] = list(raw_data or [])
-
-            for data in search_cache.get(cache_key) or []:
-                candidate = _manual_candidate_from_data(
-                    str(source_name),
-                    data,
-                    exact_query,
-                    visual_type,
-                    visual_genre,
-                    bot,
-                    seen_hashes,
-                    seen_urls,
-                    rejected_counts,
-                )
-                if candidate is None:
-                    continue
-                candidate["status"] = "new-search"
-                candidates.append(candidate)
-                if len(candidates) >= 5:
-                    break
-
-        if len(candidates) >= 5:
+    # Keep this cheap: at most two providers, each bounded to ten raw downloads.
+    for source_name, fetcher in source_plan[:2]:
+        if len(candidates) >= 20 or not callable(fetcher):
             break
+        source_key = str(source_name or "").strip().casefold()
+        cache_key = ("dashboard-query", source_key, exact_query.casefold())
+        raw_data = search_cache.get(cache_key)
+        if raw_data is None:
+            try:
+                raw_data = runtime._call_fetcher_with_timeout(
+                    fetcher,
+                    (
+                        exact_query,
+                        fetch_used_urls,
+                        exact_query,
+                        video_title,
+                        visual_type,
+                        visual_genre,
+                        True,
+                        1,
+                    ),
+                    str(source_name),
+                    exact_query,
+                )
+            except Exception as exc:
+                print(
+                    f"   [Manual Visual Search] {source_name} failed safely: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                raw_data = []
+            search_cache[cache_key] = list(raw_data or [])
 
-    candidates.sort(key=lambda item: (
-        -float(item.get("priority") or 0.0),
-        str(item.get("source") or "").casefold(),
-    ))
-    assets = [
-        {
-            "subject": exact_query,
-            "bytes": item["bytes"],
-            "hash": item["hash"],
-            "source": item["source"],
-            "query": exact_query,
-            "visual_type": item["visual_type"],
-            "visual_genre": item["visual_genre"],
-            "provenance": dict(item["provenance"]),
-            "provenance_status": str(item.get("provenance_status") or "commercial-verified"),
-            "priority": float(item["priority"]),
-            "search_text": _candidate_search_text(item["data"]),
-            "source_page_url": str(item.get("source_page_url") or "").strip(),
-            "source_image_url": str(item.get("source_image_url") or "").strip(),
-            "status": "new-search",
-            "used": False,
-        }
-        for item in candidates[:5]
-    ]
+        for data in search_cache.get(cache_key) or []:
+            candidate = _manual_candidate_from_data(
+                str(source_name),
+                data,
+                exact_query,
+                visual_type,
+                visual_genre,
+                bot,
+                seen_hashes,
+                seen_urls,
+                rejected_counts,
+            )
+            if candidate is None:
+                continue
+            candidates.append(candidate)
+            if len(candidates) >= 20:
+                break
+
+    candidates.sort(
+        key=lambda item: (
+            -float(item.get("priority") or 0.0),
+            str(item.get("source") or "").casefold(),
+        )
+    )
+    candidates = candidates[:20]
+
+    accepted: list[dict] = []
+    if candidates:
+        start_visual_qa_scene()
+        batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
+        for offset in range(0, len(candidates), batch_size):
+            if len(accepted) >= 10:
+                break
+            batch = candidates[offset : offset + batch_size]
+            if not batch:
+                continue
+            result_map = strict_gemini_check_batch(
+                [item["bytes"] for item in batch],
+                entity_anchor,
+                os.getenv("GEMINI_API_KEY"),
+                tier="IDENTITY",
+                visual_type=visual_type,
+                visual_genre=visual_genre,
+            )
+            for local_index, verdict in result_map.items():
+                if not (0 <= int(local_index) < len(batch)):
+                    continue
+                candidate = batch[int(local_index)]
+                if verdict is True:
+                    accepted.append(
+                        {
+                            "subject": entity_anchor,
+                            "bytes": candidate["bytes"],
+                            "hash": candidate["hash"],
+                            "source": candidate["source"],
+                            "query": exact_query,
+                            "visual_type": candidate["visual_type"],
+                            "visual_genre": candidate["visual_genre"],
+                            "provenance": dict(candidate["provenance"]),
+                            "provenance_status": str(
+                                candidate.get("provenance_status")
+                                or "commercial-verified"
+                            ),
+                            "priority": float(candidate["priority"]),
+                            "search_text": _candidate_search_text(candidate["data"]),
+                            "source_page_url": str(
+                                candidate.get("source_page_url") or ""
+                            ).strip(),
+                            "source_image_url": str(
+                                candidate.get("source_image_url") or ""
+                            ).strip(),
+                            "status": "new-search-ai-verified",
+                            "used": False,
+                        }
+                    )
+                    if len(accepted) >= 10:
+                        break
+                elif verdict is False:
+                    rejected_counts["ai_no"] += 1
+                else:
+                    rejected_counts["ai_uncertain"] += 1
+
     return {
-        "assets": assets,
-        "target": 5,
-        "available": len(assets),
+        "assets": accepted[:10],
+        "target": 10,
+        "available": len(accepted[:10]),
         "exact_query": exact_query,
+        "entity_anchor": entity_anchor,
         "rejection_counts": rejected_counts,
-        "search_exhausted": len(assets) < 5,
+        "search_exhausted": len(accepted) < 10,
     }
-
 
 def collect_manual_visual_options(
     runtime,
