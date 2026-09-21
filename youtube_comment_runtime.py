@@ -160,6 +160,11 @@ def patch_youtube_upload(bot):
             video_id = response.get("id") if response else None
             if not video_id:
                 raise RuntimeError("YouTube upload completed without a video ID.")
+
+            if body["status"]["privacyStatus"] == "public":
+                from ultimate_bot import _verify_youtube_privacy
+                _verify_youtube_privacy(youtube, video_id, "public")
+
             print(f"   [+] Successfully uploaded to YouTube! Video ID: {video_id}", flush=True)
 
             if body["status"]["privacyStatus"] == "public":
@@ -180,7 +185,9 @@ def patch_youtube_upload(bot):
 
             return video_id
         except Exception as exc:
-            print(f"   [!] YouTube upload failed: {exc}", flush=True)
+            print(f"   [!] YouTube upload failed: {type(exc).__name__}: {exc}", flush=True)
+            if type(exc).__name__ == "YouTubePublicVisibilityError":
+                raise
             return None
 
     upload_with_creator_comment._creator_comment_wrapped = True
