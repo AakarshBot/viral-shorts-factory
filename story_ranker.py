@@ -946,7 +946,19 @@ def _deduplicate_stage(stories, max_items=15):
                 duplicate = True
                 break
             similarity = _story_theme_similarity(story, old)
-            if similarity >= 0.68 and _topic_dedupe_compatible(story, old):
+            if similarity < 0.50 or not _topic_dedupe_compatible(story, old):
+                continue
+            story_entities = _topic_entities(story)
+            old_entities = _topic_entities(old)
+            shared_entities = story_entities & old_entities
+            conflicting_entities = (
+                bool(story_entities - old_entities)
+                and bool(old_entities - story_entities)
+            )
+            # A residual duplicate should share a distinctive subject anchor,
+            # while genuinely different targets (for example Australia vs
+            # England) must remain separate even when headline wording overlaps.
+            if shared_entities and not conflicting_entities:
                 duplicate = True
                 break
         if duplicate:
