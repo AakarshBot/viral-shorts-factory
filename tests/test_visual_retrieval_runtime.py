@@ -506,6 +506,119 @@ def test_visual_provider_fetches_overlap_without_sharing_used_url_state(monkeypa
     assert "https://one.example/image.jpg" in used_urls
     assert "https://two.example/image.jpg" in used_urls
 
+
+def test_manual_visual_search_fetches_all_sources_concurrently(monkeypatch):
+    import threading
+    import time
+
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def provider(name):
+        def fetch(*args):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                candidate = _licensed_candidate(
+                    _jpeg_bytes((1200, 1600), color=(30 + len(name) * 10, 70, 100)),
+                    "cc-by-nc",
+                )
+                candidate["source_image_url"] = f"https://{name}.example/{name}.jpg"
+                candidate["search_title"] = f"{name} result"
+                time.sleep(0.05)
+                return [candidate]
+            finally:
+                with lock:
+                    active -= 1
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", provider("Commons")),
+            ("Wikipedia", provider("Wikipedia")),
+            ("Openverse", provider("Openverse")),
+            ("DDG", provider("DDG")),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Rishabh Pant",
+    )
+
+    assert peak >= 2
+    assert len(result["assets"]) == 4
+    assert result["rejection_counts"]["monetization"] == 0
+
+
+def test_manual_visual_search_can_rank_a_later_provider_candidate(monkeypatch):
+    image_one = _jpeg_bytes((1200, 1600), color=(20, 20, 20))
+    image_two = _jpeg_bytes((1200, 1600), color=(220, 220, 220))
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def weak_provider(*args):
+        item = _licensed_candidate(image_one, "cc0")
+        item["source_image_url"] = "https://commons.example/weak.jpg"
+        item["search_title"] = "generic sports crowd"
+        return [item]
+
+    def strong_provider(*args):
+        item = _licensed_candidate(image_two, "cc0")
+        item["source_image_url"] = "https://openverse.example/strong.jpg"
+        item["search_title"] = "Rishabh Pant press conference"
+        item["search_description"] = "Rishabh Pant speaking at a press conference"
+        return [item]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", weak_provider),
+            ("Openverse", strong_provider),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Rishabh Pant press conference",
+    )
+
+    assert result["assets"]
+    assert result["assets"][0]["source"] == "Openverse"
+
+
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
 
