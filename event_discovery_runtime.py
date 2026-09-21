@@ -112,14 +112,6 @@ def _safe_float(value: object, default: float = 0.0) -> float:
         return default
 
 
-def _token_overlap(left: object, right: object) -> float:
-    a = _tokens(left)
-    b = _tokens(right)
-    if not a or not b:
-        return 0.0
-    return len(a & b) / max(1, len(a | b))
-
-
 def _salient_entities(value: object) -> set[str]:
     """Extract cheap, deterministic named-entity proxies from headlines/text."""
     text = _clean(value)
