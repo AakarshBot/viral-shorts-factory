@@ -20,6 +20,7 @@ import requests
 from visual_taxonomy_runtime import preferred_sources
 from visual_licensing_runtime import (
     LICENSE_URLS,
+    allow_unlicensed_visuals,
     is_allowed_license,
     licensed_candidate,
     normalize_license_code,
@@ -437,6 +438,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
     """Resolve near-exact Wikipedia person pages with one search + one batched metadata call."""
     entity = _clean_query(query)
     provider_page = _provider_page(_args)
+    manual_mode = bool(len(_args) > 4 and isinstance(_args[4], bool) and _args[4])
     if not entity:
         return []
     payload = _api_json(
@@ -497,7 +499,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
             value = ext.get(name)
             return value.get("value", "") if isinstance(value, dict) else str(value or "")
         license_code = normalize_license_code(_meta_value("LicenseShortName"))
-        if not is_allowed_license(license_code):
+        if not manual_mode and not is_allowed_license(license_code):
             continue
         source = info.get("thumburl") or info.get("url") or ((page.get("thumbnail") or {}).get("source"))
         if source:
@@ -763,7 +765,7 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
                 return value.get("value", "") if isinstance(value, dict) else str(value or "")
 
             license_code = normalize_license_code(_meta_value("LicenseShortName"))
-            if not is_allowed_license(license_code):
+            if not manual_mode and not is_allowed_license(license_code):
                 continue
 
             source = info.get("thumburl") or info.get("url")
@@ -810,6 +812,59 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
             break
 
     return _bounded_downloads(urls, used_urls, limit=MAX_PROVIDER_CANDIDATES)
+
+
+def fetch_duckduckgo_candidates(
+    query: str,
+    used_urls: set[str] | None = None,
+    *_args,
+) -> list[dict[str, Any]]:
+    """Search DDG images for the manual human-QC source pool."""
+    manual_mode = bool(len(_args) > 4 and isinstance(_args[4], bool) and _args[4])
+    if not (manual_mode or allow_unlicensed_visuals()):
+        return []
+    q = _clean_query(query)
+    if not q:
+        return []
+    try:
+        from ddgs import DDGS
+    except Exception:
+        return []
+    try:
+        results = DDGS().images(
+            q,
+            safesearch="moderate",
+            max_results=max(8, MAX_PROVIDER_CANDIDATES * 2),
+        )
+        urls: list[Any] = []
+        for position, result in enumerate(results or [], 1):
+            if not isinstance(result, dict):
+                continue
+            image_url = result.get("image") or result.get("thumbnail") or result.get("url")
+            if not image_url:
+                continue
+            urls.append((
+                str(image_url),
+                {
+                    "provider": "DuckDuckGo",
+                    "url": str(result.get("url") or image_url),
+                    "source_page_url": str(result.get("url") or image_url),
+                    "author": "",
+                    "license": "",
+                    "license_url": "",
+                    "search_title": str(result.get("title") or ""),
+                    "search_description": str(result.get("title") or ""),
+                    "search_tags": str(result.get("source") or ""),
+                    "search_position": position,
+                },
+            ))
+        return _bounded_downloads(urls, used_urls)
+    except Exception as exc:
+        print(
+            f"   [Visual Source] DDG raw fetch failed: {type(exc).__name__}: {exc} | query='{q}'",
+            flush=True,
+        )
+        return []
 
 
 def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
@@ -891,7 +946,11 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
     return _bounded_downloads(urls, used_urls)
 
 
-def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
+def build_raw_source_plan(
+    visual_type: str,
+    visual_genre: str = "",
+    allow_unlicensed: bool = False,
+):
     """Return raw providers ordered for the visual genre.
 
     The provider layer never decides whether an image is correct. It only
@@ -946,6 +1005,9 @@ def build_raw_source_plan(visual_type: str, visual_genre: str = ""):
         if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
             plan.append(("Unsplash", fetch_unsplash_candidates))
 
+    if allow_unlicensed or allow_unlicensed_visuals():
+        plan.append(("DDG", fetch_duckduckgo_candidates))
+
     plan = [(name, fn) for name, fn in plan if callable(fn)]
     preferred = preferred_sources(genre)
     rank = {name.casefold(): index for index, name in enumerate(preferred)}
@@ -968,6 +1030,7 @@ __all__ = [
     "resolve_person_identity",
     "resolve_wikidata_entity",
     "fetch_commons_candidates",
+    "fetch_duckduckgo_candidates",
     "fetch_pexels_candidates",
     "fetch_unsplash_candidates",
     "fetch_wikipedia_person_candidates",
