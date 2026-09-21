@@ -1374,3 +1374,12 @@ def test_upload_controller_keeps_real_upload_path_without_dashboard_qc_recheck()
     assert "live_qc_passes" not in block
     assert "evaluate_live_qc_gates" not in block
     assert "self._real_uploader" in block
+
+
+def test_runtime_initialisation_does_not_repeat_idempotent_installers():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def initialise_runtime")
+    end = source.index("\ndef check_required_local_assets", start)
+    initialise = source[start:end]
+    assert initialise.count("install_visual_qa_bridge(visual_runtime)") == 1
+    assert initialise.count("patch_provider_adapters(ultimate_bot)") == 1
