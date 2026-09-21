@@ -1318,8 +1318,8 @@ def _candidate_reason(story):
 def _topic_entities(story):
     """Return lightweight subject/entity tokens for diversity-aware selection."""
     generic = {
-        "india", "indian", "cricket", "icc", "bcci", "pcb", "t20", "odi", "test",
-        "ipl", "psl", "team", "teams", "player", "players", "match", "matches",
+        "india", "indian", "cricket", "t20", "odi", "test",
+        "team", "teams", "player", "players", "match", "matches",
         "series", "tournament", "league", "sports", "sport", "news", "latest",
         "today", "world", "global", "official",
     }
