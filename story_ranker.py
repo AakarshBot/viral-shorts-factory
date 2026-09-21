@@ -1263,6 +1263,8 @@ def _candidate_quality_pass(story):
     source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
 
+    if not _headline_noise_pass(story):
+        return False
     if freshness < 2.0 and momentum < 2.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
@@ -1297,6 +1299,8 @@ def _discovery_portfolio_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
     actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
+    if not _headline_noise_pass(story):
+        return False
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
@@ -1576,6 +1580,30 @@ def _india_relevance_score(story):
         score += 1.0
     return _clamp_score(score)
 
+NON_EVENT_HEADLINE_PATTERNS = (
+    r"\blive updates?\b",
+    r"\blive blog\b",
+    r"\bphoto(s| gallery)?\b",
+    r"\bwatch( the)? video\b",
+    r"\bvideo(s)?\b",
+    r"\bexplainer\b",
+    r"\bexplained\b",
+    r"\bwhat you need to know\b",
+    r"\bthings to know\b",
+    r"\btop \d+\b",
+    r"\bopinion\b",
+)
+
+
+def _headline_noise_pass(story):
+    """Reject presentation/SEO headlines that are not themselves a concrete event."""
+    title = _clean(story.get("title") or "")
+    if any(re.search(pattern, title) for pattern in NON_EVENT_HEADLINE_PATTERNS):
+        story["discovery_rejection"] = "Non-event/SEO headline"
+        return False
+    return True
+
+
 def _story_substance_pass(story, minimum_body_chars=120):
     """Reject headline-only candidates unless the event is independently corroborated."""
     body = " ".join(
@@ -1585,13 +1613,14 @@ def _story_substance_pass(story, minimum_body_chars=120):
     body_chars = len(re.sub(r"\s+", " ", body))
     source_count = int(story.get("event_source_count") or 0)
     article_count = int(story.get("event_article_count") or 0)
+    collection_source = _clean(story.get("collection_source"))
 
     story["story_substance_chars"] = body_chars
-    if body_chars >= max(40, int(minimum_body_chars)):
-        return True
     if source_count >= 2 and article_count >= 2:
         return True
-    return False
+    if collection_source == "official" and body_chars >= max(80, int(minimum_body_chars)):
+        return True
+    return body_chars >= max(180, int(minimum_body_chars) + 60)
 
 
 def _topic_actionability(story):
@@ -1798,6 +1827,7 @@ def collect_high_recall_stories(
     official_futures = []
     trend_futures = []
     reddit_futures = []
+    gdelt_future = None
 
     try:
         google_futures = [
@@ -1821,6 +1851,25 @@ def collect_high_recall_stories(
             signal_pool.submit(_reddit_items, genre_key, subreddit, 40)
             for subreddit in reddit_subreddits
         ]
+
+        # Start the only supplemental fallback early when the normal category
+        # intake is small enough that it is likely to need help. It shares the
+        # same overall deadline, so a slow GDELT response can never add another
+        # wait after the factual sources finish.
+        if len(google_queries) <= 2:
+            gdelt_query = (
+                str(trend_keyword or "").strip()
+                or str(custom_gnews_q or "").strip()
+                or str(genre_cfg.get("gnews_q") or "").strip()
+                or GOOGLE_NEWS_RADAR_QUERIES[0]
+            )
+            gdelt_future = core_pool.submit(
+                fetch_gdelt_articles,
+                gdelt_query,
+                timespan="48h",
+                max_records=75,
+                timeout=3.0,
+            )
 
         core_sources = {future: "Google News" for future in google_futures}
         core_sources.update({future: "RSS" for future in rss_futures})
@@ -1882,22 +1931,11 @@ def collect_high_recall_stories(
             seen.add(key)
             compacted.append(story)
 
-        if len(compacted) < DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT:
-            gdelt_query = (
-                str(trend_keyword or "").strip()
-                or str(custom_gnews_q or "").strip()
-                or str(genre_cfg.get("gnews_q") or "").strip()
-                or GOOGLE_NEWS_RADAR_QUERIES[0]
-            )
+        gdelt_rows = resolved.get(gdelt_future) or [] if gdelt_future is not None else []
+        if len(compacted) < DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT and gdelt_rows:
             print(
-                f"   [Discovery] Core factual intake is light ({len(compacted)}); using one bounded GDELT fallback.",
+                f"   [Discovery] Core factual intake is light ({len(compacted)}); using completed bounded GDELT fallback.",
                 flush=True,
-            )
-            gdelt_rows = fetch_gdelt_articles(
-                gdelt_query,
-                timespan="48h",
-                max_records=75,
-                timeout=3.0,
             )
             for row in gdelt_rows:
                 if not _discovery_category_allowed(genre_key, row):
