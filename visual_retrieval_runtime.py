@@ -18,6 +18,7 @@ import hashlib
 import io
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -1546,11 +1547,16 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             flush=True,
         )
 
+        # Provider requests are independent network operations. Run the bounded
+        # source set concurrently, but keep each provider on a private URL set
+        # and process results back in source-plan order so downstream ranking,
+        # deduplication, provenance and QA behavior remain deterministic.
+        provider_jobs = []
         for source_index, (source, fetcher) in enumerate(source_plan):
             if source_index >= source_limit:
                 break
-            if not callable(fetcher) or len(query_candidates) >= raw_target:
-                break
+            if not callable(fetcher):
+                continue
 
             source_query = _provider_search_query(
                 source,
@@ -1576,8 +1582,47 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 if str(source).casefold() == "wikipedia"
                 else (source_query, local_used_urls, query, video_title, visual_type, visual_genre)
             )
-            raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, source_query)
-            used_urls.update(local_used_urls)
+            provider_jobs.append(
+                (source_index, str(source), fetcher, source_query, local_used_urls, args)
+            )
+
+        provider_results = {}
+        if provider_jobs:
+            with ThreadPoolExecutor(
+                max_workers=len(provider_jobs),
+                thread_name_prefix="visual-provider",
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        runtime._call_fetcher_with_timeout,
+                        fetcher,
+                        args,
+                        source,
+                        source_query,
+                    ): job
+                    for job in provider_jobs
+                    for source_index, source, fetcher, source_query, local_used_urls, args in [job]
+                }
+                for future, job in futures.items():
+                    source_index, source, fetcher, source_query, local_used_urls, args = job
+                    try:
+                        raw_data = future.result()
+                    except Exception as exc:
+                        print(
+                            f"   [Visual Source] {source} | failed: {exc} | query='{source_query}'",
+                            flush=True,
+                        )
+                        raw_data = None
+                    provider_results[source_index] = (raw_data, local_used_urls)
+
+        # Merge provider URL state only after each independent fetch completes.
+        # No worker mutates the shared used_urls set.
+        for source_index, source, fetcher, source_query, local_used_urls, args in provider_jobs:
+            raw_data, completed_used_urls = provider_results.get(
+                source_index,
+                (None, local_used_urls),
+            )
+            used_urls.update(completed_used_urls)
             candidates = _candidate_items(raw_data)
             if not candidates:
                 _record_visual_rejection(seg, "provider_empty", f"{source}:{source_query}")
@@ -1616,6 +1661,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 )
                 if len(query_candidates) >= raw_target:
                     break
+            if len(query_candidates) >= raw_target:
+                # Remaining provider results have already been fetched in parallel,
+                # but their candidates are intentionally ignored to preserve the
+                # existing raw-target cap and downstream selection semantics.
+                break
 
         if not query_candidates:
             continue
