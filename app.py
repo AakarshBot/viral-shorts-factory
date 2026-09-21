@@ -1930,8 +1930,8 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
 
     _render_section_header(
         "Final step",
-        "QC & publish",
-        "Review the gates, approve the metadata, then choose how the Short is published.",
+        "Publish",
+        "Approve the final metadata, then choose how the Short is published.",
     )
 
     current_metadata = {
