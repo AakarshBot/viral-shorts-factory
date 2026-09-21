@@ -457,9 +457,6 @@ def initialise_runtime() -> None:
         patch_audio_pipeline(ultimate_bot)
         patch_provider_adapters(ultimate_bot)
         ultimate_bot._dashboard_runtime_initialized = True
-    else:
-        install_visual_qa_bridge(visual_runtime)
-        patch_provider_adapters(ultimate_bot)
 
     # A full Streamlit rerun must not rebind run_robot globals while the
     # background production worker is active. Doing so replaces the live
