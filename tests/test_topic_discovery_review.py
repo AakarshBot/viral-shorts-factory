@@ -100,11 +100,11 @@ def test_discovery_portfolio_rejects_single_source_headline_without_story_substa
 def test_discovery_portfolio_accepts_headline_only_event_when_independently_corroborated():
     story = {
         "title": "Company announces major new move",
-        "candidate_score": 14.0,
+        "candidate_score": 10.0,
         "discovery_dimensions": {
             "freshness": 6.0,
             "event_momentum": 2.0,
-            "importance": 5.0,
+            "importance": 4.0,
             "shorts_viability": 5.0,
             "corroboration": 4.0,
             "source_quality": 2.0,
