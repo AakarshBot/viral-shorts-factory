@@ -420,7 +420,9 @@ def _recent_topic_cooldown(conn, stories, hours=72):
     try:
         rows = conn.execute(
             "SELECT topic, COALESCE(date_used, created_at) FROM vault "
-            "WHERE topic IS NOT NULL AND topic != ''"
+            "WHERE topic IS NOT NULL AND topic != '' "
+            "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
         ).fetchall()
     except Exception:
         return list(stories or [])
@@ -917,15 +919,24 @@ def _deduplicate_stage(stories, max_items=15):
         ),
         reverse=True,
     ):
-        if story.get("event_clustered"):
-            selected.append(story)
-            story["dedupe_pass"] = True
-        else:
-            title = story.get("title", "")
-            if any(_topic_overlap(title, old.get("title", "")) >= 0.82 for old in selected):
-                continue
-            story["dedupe_pass"] = True
-            selected.append(story)
+        duplicate = False
+        for old in selected:
+            if (
+                story.get("event_id")
+                and old.get("event_id")
+                and str(story.get("event_id")) == str(old.get("event_id"))
+            ):
+                duplicate = True
+                break
+            similarity = _story_theme_similarity(story, old)
+            if similarity >= 0.74 and _topic_dedupe_compatible(story, old):
+                duplicate = True
+                break
+        if duplicate:
+            story["discovery_rejection"] = "Duplicate event/topic"
+            continue
+        story["dedupe_pass"] = True
+        selected.append(story)
         if len(selected) >= max_items:
             break
     return selected
@@ -1029,6 +1040,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     article_support = _safe_float(story.get("article_support_bonus")) or 0.0
     visual = _visual_potential(story)
     risk = _risk_score(story)
+    india_relevance = _india_relevance_score(story)
+    topic_actionability = _topic_actionability(story)
     source_quality = _safe_float(story.get("source_quality_score")) or 0.0
     event_text = story.get("event_search_text") or story.get("title", "")
     social = _social_signal(event_text, social_titles)
@@ -1090,8 +1103,10 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         importance * 1.55
         + audience * 1.35 * momentum_weight
         + shorts_viability * 1.20
+        + topic_actionability * 0.65
         + originality * 0.45
         + visual * 0.20
+        + india_relevance * 0.55
         + channel_history * 0.70
         + channel_fit * 0.45
         + niche * 0.20
@@ -1108,6 +1123,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
     story["shorts_viability_score"] = round(shorts_viability, 2)
+    story["topic_actionability_score"] = round(topic_actionability, 2)
+    story["india_relevance_score"] = round(india_relevance, 2)
     story["importance_score"] = round(importance, 2)
     story["audience_potential_score"] = round(audience, 2)
     story["risk_signal_count"] = risk
@@ -1118,6 +1135,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "importance": round(importance, 2),
         "audience_potential": round(audience, 2),
         "shorts_viability": round(shorts_viability, 2),
+        "topic_actionability": round(topic_actionability, 2),
+        "india_relevance": round(india_relevance, 2),
         "momentum": round(momentum, 2),
         "event_momentum": round(event_momentum, 2),
         "freshness": round(freshness, 2),
@@ -1210,9 +1229,21 @@ def _discovery_portfolio_pass(story):
     freshness = _safe_float(dimensions.get("freshness")) or 0.0
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
+    actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
+    event_sources = int(story.get("event_source_count") or 0)
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text")
+    ).strip()
 
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
+        return False
+    if actionability < 3.0:
+        story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
+        return False
+    if event_sources <= 1 and len(body) < 50 and not (story.get("event_actions") or _event_actions(story.get("title") or "")):
+        story["discovery_rejection"] = "Insufficient story detail behind headline"
         return False
     if score < 6.0:
         story["discovery_rejection"] = "Below exploration quality floor"
@@ -1435,6 +1466,82 @@ def _dedupe_discovery_queries(queries, max_items):
     return output
 
 
+INDIA_SIGNAL_TERMS = {
+    "india", "indian", "delhi", "mumbai", "hyderabad", "bengaluru", "bangalore",
+    "chennai", "kolkata", "pune", "ahmedabad", "telangana", "andhra", "amaravati",
+    "bcci", "ipl", "wpl", "rbi", "isro", "drdo", "supreme court", "parliament",
+    "modi", "government of india",
+}
+
+CLICKBAIT_TITLE_TERMS = {
+    "you won't believe", "you will not believe", "what happens next", "watch this",
+    "shocking", "craziest", "insane", "unbelievable", "must see", "viral video",
+}
+
+ACTIONABILITY_TERMS = {
+    "announce", "announced", "launch", "launched", "unveil", "unveiled", "approve",
+    "approved", "ban", "banned", "sign", "signed", "acquire", "acquired", "win",
+    "won", "wins", "defeat", "beat", "appoint", "appointed", "resign", "resigned",
+    "arrest", "arrested", "qualify", "qualified", "eliminate", "eliminated",
+    "release", "released", "delay", "delayed", "cancel", "cancelled", "join", "joined",
+    "open", "opened", "close", "closed", "surge", "surges", "rise", "rises", "fall",
+    "falls", "drop", "drops", "approve", "decision", "decides", "set to", "faces",
+    "hit", "record", "records", "breakthrough", "deal", "agreement", "investigation",
+    "study", "finds", "found", "result", "results", "election", "elected", "court",
+}
+
+def _india_relevance_score(story):
+    text = _text_blob(story)
+    title = _clean(story.get("title") or "")
+    score = min(10.0, float(len(_tokens(text) & INDIA_SIGNAL_TERMS)))
+    if re.search(r"\b\.in\b", _source_domain(story)):
+        score += 2.0
+    if any(term in title for term in ("india", "indian")):
+        score += 2.0
+    if _clean(story.get("collection_source")) == "official" and (
+        "india" in text or "indian" in text
+    ):
+        score += 1.0
+    return _clamp_score(score)
+
+def _topic_actionability(story):
+    text = _text_blob(story)
+    title = _clean(story.get("title") or "")
+    actions = set(story.get("event_actions") or _event_actions(text))
+    evidence = [
+        item for item in (story.get("event_evidence") or [])
+        if isinstance(item, dict)
+    ]
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text")
+    ).strip()
+    score = 0.0
+    if actions:
+        score += 3.0
+    if len(body) >= 240:
+        score += 3.0
+    elif len(body) >= 100:
+        score += 2.0
+    elif len(body) >= 50:
+        score += 1.0
+    if len(evidence) >= 2 or int(story.get("event_source_count") or 0) >= 2:
+        score += 2.0
+    if story.get("event_entities") or _topic_entities(story):
+        score += 1.0
+    if re.search(r"\d|%", title):
+        score += 1.0
+    if any(term in title for term in CLICKBAIT_TITLE_TERMS):
+        score -= 3.0
+    return _clamp_score(score)
+
+def _topic_dedupe_compatible(left, right):
+    left_actions = set(left.get("event_actions") or _event_actions(left.get("title") or ""))
+    right_actions = set(right.get("event_actions") or _event_actions(right.get("title") or ""))
+    if left_actions and right_actions and not (left_actions & right_actions):
+        return False
+    return True
+
 def _build_discovery_google_queries(
     genre_key,
     genre_cfg,
@@ -1447,12 +1554,16 @@ def _build_discovery_google_queries(
     genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
     candidates = []
     rss_query = _google_news_query_from_url(selected_rss)
+    india_query = str(genre_cfg.get("india_gnews_q") or "").strip()
+    global_query = str(genre_cfg.get("global_gnews_q") or "").strip()
 
     for value in (
+        india_query,
         trend_keyword,
         custom_gnews_q,
         rss_query,
         genre_cfg.get("gnews_q"),
+        global_query,
     ):
         text_value = str(value or "").strip()
         if text_value:
@@ -1466,7 +1577,7 @@ def _build_discovery_google_queries(
     has_category_query = bool(str(genre_cfg.get("gnews_q") or "").strip())
 
     if broad_discovery:
-        radar_budget = 4 if targeted or has_category_query else len(GOOGLE_NEWS_RADAR_QUERIES)
+        radar_budget = 2 if targeted or has_category_query else len(GOOGLE_NEWS_RADAR_QUERIES)
         candidates.extend(GOOGLE_NEWS_RADAR_QUERIES[:radar_budget])
         return _dedupe_discovery_queries(candidates, DISCOVERY_MAX_GOOGLE_QUERIES_BROAD)
 
