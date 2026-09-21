@@ -351,7 +351,6 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
     conic-gradient(from 120deg,#ff5a5f,#ffd45a,#58d68d,#56a8ff,#9b6cff,#ff5a5f) border-box!important;
   color:#252a2d!important;
   box-shadow:0 10px 24px rgba(69,49,31,.08), inset 0 1px 0 rgba(255,255,255,.85)!important;
-  backdrop-filter:blur(12px)!important;
   transition:transform .16s ease,box-shadow .16s ease!important;
 }
 .st-key-live_format_menu button:hover,
@@ -384,7 +383,6 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
   border:1px solid var(--line);
   border-radius:18px;
   box-shadow:var(--shadow);
-  backdrop-filter:blur(10px);
 }
 .stage-accordion-status{font-size:.68rem;font-weight:850;letter-spacing:.08em;color:var(--muted)}
 [data-testid="stExpander"] summary{min-height:48px}
@@ -683,8 +681,6 @@ body{
     conic-gradient(from 100deg,#a8cfc8,#d8cfff,#efddba,#a8cfc8) border-box!important;
   border:1px solid transparent!important;
   box-shadow:var(--studio-shadow),inset 0 1px 0 rgba(255,255,255,.9)!important;
-  backdrop-filter:blur(22px) saturate(1.08);
-  -webkit-backdrop-filter:blur(22px) saturate(1.08);
   display:flex;
   flex-direction:column;
   justify-content:center;
@@ -1053,7 +1049,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
   background:rgba(255,253,249,.34)!important;
   border:1px solid rgba(210,197,183,.46)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important;
-  -webkit-backdrop-filter:blur(11px);
 }
 [data-testid="stPills"] button{
   min-height:48px!important;
