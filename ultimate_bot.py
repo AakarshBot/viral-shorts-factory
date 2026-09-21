@@ -414,10 +414,66 @@ def safe_text(val, fallback=""):
         return " ".join(safe_text(v) for v in val).strip()
     return str(val).strip()
 
+def _remote_mode_enabled():
+    """Return True only when the host explicitly opts into remote mode."""
+    return str(os.getenv("VSF_REMOTE_MODE", "")).strip().lower() in {
+        "1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"
+    }
+
+
+def _load_remote_youtube_credentials():
+    """Build refreshable YouTube credentials from a Streamlit-provided token JSON."""
+    raw = str(os.getenv("YOUTUBE_TOKEN_JSON", "") or "").strip()
+    if not raw:
+        return None
+
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        print("   [YouTube Auth] Remote credential secret is not valid JSON.", flush=True)
+        return None
+
+    if not isinstance(payload, dict) or not payload.get("refresh_token"):
+        print("   [YouTube Auth] Remote credential secret is missing refresh_token.", flush=True)
+        return None
+
+    try:
+        creds = Credentials.from_authorized_user_info(payload, OAUTH_SCOPES)
+        if creds.valid:
+            return creds
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            return creds
+    except Exception as exc:
+        print(
+            f"   [YouTube Auth] Remote credential load failed: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+    return None
+
+
 def get_google_credentials():
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
+
+    # Remote mode is opt-in. This branch never reads/writes the local token
+    # files and never starts a browser on the user's laptop.
+    if _remote_mode_enabled():
+        creds = _load_remote_youtube_credentials()
+        if creds:
+            return creds
+        raise RuntimeError(
+            "Remote YouTube credentials are not configured. "
+            "Set VSF_REMOTE_MODE=1 and provide YOUTUBE_TOKEN_JSON in Streamlit Secrets."
+        )
+
+    # Local behavior is intentionally preserved exactly: use token.json when
+    # available, refresh it locally, and fall back to the installed-app browser flow.
     creds = None
     if os.path.exists(TOKEN_FILE):
         try: creds = Credentials.from_authorized_user_file(TOKEN_FILE, OAUTH_SCOPES)

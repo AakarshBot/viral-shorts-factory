@@ -162,7 +162,27 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
     source_text = _script_evidence_text(story_data)
     if not source_text:
         return None
+
     base_url = _clean(os.getenv("OLLAMA_BASE_URL")) or "http://localhost:11434"
+    base_host = ""
+    try:
+        from urllib.parse import urlparse
+        base_host = str(urlparse(base_url).hostname or "").strip().lower()
+    except Exception:
+        pass
+
+    remote_mode = _clean(os.getenv("VSF_REMOTE_MODE")).lower() in {
+        "1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"
+    }
+    local_hosts = {"localhost", "127.0.0.1", "::1"}
+    if remote_mode and base_host in local_hosts:
+        print(
+            "   [Script Pipeline] Local Ollama unavailable in remote mode; "
+            "skipping local-only fallback.",
+            flush=True,
+        )
+        return None
+
     model = _clean(os.getenv("OLLAMA_SCRIPT_MODEL")) or "gpt-oss:20b"
     payload = {
         "model": model,

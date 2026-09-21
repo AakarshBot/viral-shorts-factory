@@ -375,6 +375,11 @@ REQUIRED_SECRET_NAMES = (
     "UNSPLASH_ACCESS_KEY",
     "HF_TOKEN",
     "PEXELS_API_KEY",
+    "OPENROUTER_API_KEY",
+    # Remote-only controls/credentials. These are loaded only when present
+    # in Streamlit Secrets; the local .env/file-based paths remain untouched.
+    "YOUTUBE_TOKEN_JSON",
+    "VSF_REMOTE_MODE",
 )
 
 
