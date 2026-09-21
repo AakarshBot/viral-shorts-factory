@@ -26,7 +26,7 @@ from visual_licensing_runtime import (
 )
 
 DEFAULT_TIMEOUT = max(3, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "8")))
-MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "6"))))
+MAX_PROVIDER_CANDIDATES = max(1, min(10, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "10"))))
 _PROVIDER_429_COOLDOWN_SECONDS = max(10, min(120, int(os.getenv("VISUAL_PROVIDER_429_COOLDOWN_SECONDS", "45"))))
 _PROVIDER_429_UNTIL: dict[str, float] = {}
 
