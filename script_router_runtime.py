@@ -189,4 +189,7 @@ def install_script_pipeline(bot):
     bot.write_script = write_script
     run_robot.__globals__["write_script"] = write_script
     bot._script_pipeline_installed = True
+    # Preserve the historical capability flags for diagnostics/tests without
+    # retaining the old wrapper layers.
+    bot._research_pipeline_patch_installed = True
     return write_script
