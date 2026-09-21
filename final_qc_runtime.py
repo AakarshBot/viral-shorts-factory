@@ -125,18 +125,27 @@ def _install_exact_run_identity(controller_cls):
 def _mark_exact_run_ready_for_upload(controller, fallback_ready, topic: str):
     """Use exact run identity only; never silently fall back to topic matching."""
     row_id = getattr(controller.bot, "_last_run_row_id", None)
-    if row_id is None:
+    run_id = str(getattr(controller.bot, "_last_run_run_id", "") or "").strip()
+    if row_id is None or not run_id:
         raise RuntimeError("Exact production run identity is unavailable; refusing topic-based READY_FOR_UPLOAD fallback.")
 
     import sqlite3
     import ultimate_bot
     conn = sqlite3.connect(ultimate_bot.DB_PATH)
     try:
+        row = conn.execute("SELECT run_id FROM vault WHERE id = ?", (row_id,)).fetchone()
+        if row is None:
+            raise RuntimeError(f"exact production run row {row_id} was not found")
+        if str(row[0] or "").strip() != run_id:
+            raise RuntimeError(
+                f"exact production run identity mismatch for row {row_id}: "
+                f"controller={run_id!r}, database={str(row[0] or '').strip()!r}"
+            )
         updated = conn.execute(
             """UPDATE vault
                SET video_id='READY_FOR_UPLOAD', status='READY_FOR_UPLOAD', updated_at=CURRENT_TIMESTAMP
-               WHERE id=?""",
-            (row_id,),
+               WHERE id=? AND run_id=?""",
+            (row_id, run_id),
         ).rowcount
         conn.commit()
     finally:
