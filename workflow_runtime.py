@@ -342,8 +342,8 @@ class WorkflowController:
         finally:
             conn.close()
 
-    def _record_uploaded_run(self, video_id: str, title: str = "") -> None:
-        """Record a successful upload against the exact production run row."""
+    def _record_uploaded_run(self, video_id: str, title: str = "", status: str = "UPLOADED") -> None:
+        """Record an upload against the exact production run row."""
         import ultimate_bot
 
         row_id = getattr(self.bot, "_last_run_row_id", None)
@@ -364,7 +364,7 @@ class WorkflowController:
                 raise RuntimeError("Exact production row identity changed before upload was recorded.")
             fields = {
                 "video_id": str(video_id),
-                "status": "UPLOADED",
+                "status": str(status or "UPLOADED"),
             }
             if str(title or "").strip():
                 fields["title_used"] = str(title).strip()
@@ -538,16 +538,44 @@ class WorkflowController:
             self._real_uploader = getattr(self.bot, "upload_to_youtube", None)
         if not callable(self._real_uploader):
             raise RuntimeError("YouTube uploader is not available.")
-        result = self._real_uploader(
-            video_path,
-            script_data,
-            genre_cfg,
-            publish_mode,
-            trend_keyword,
-            title_override=final_title,
-            description_override=final_description,
-            comment_override=final_comment,
-        )
+        try:
+            result = self._real_uploader(
+                video_path,
+                script_data,
+                genre_cfg,
+                publish_mode,
+                trend_keyword,
+                title_override=final_title,
+                description_override=final_description,
+                comment_override=final_comment,
+            )
+        except Exception as exc:
+            if type(exc).__name__ == "YouTubePublicVisibilityError":
+                message = str(exc)
+                match = re.search(r"accepted video\\s+([A-Za-z0-9_-]+)", message)
+                video_id = str(getattr(exc, "video_id", "") or (match.group(1) if match else "")).strip()
+                if video_id:
+                    with self._lock:
+                        self.state.uploaded_video_id = video_id
+                    try:
+                        self._record_uploaded_run(
+                            video_id,
+                            title=final_title,
+                            status="UPLOADED_PRIVATE",
+                        )
+                    except Exception as record_exc:
+                        print(
+                            f"   [Workflow] YouTube created {video_id} as private, but exact run history "
+                            f"could not be updated: {type(record_exc).__name__}: {record_exc}",
+                            flush=True,
+                        )
+                    raise RuntimeError(
+                        f"YouTube accepted video {video_id}, but kept it private instead of public. "
+                        "The video already exists; do not retry this production run. "
+                        "The current Google API project must be eligible/audited for public YouTube API uploads."
+                    ) from exc
+            raise
+
         if not result:
             raise RuntimeError("YouTube uploader returned no video ID.")
 
