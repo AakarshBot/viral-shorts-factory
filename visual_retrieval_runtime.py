@@ -1498,29 +1498,26 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             cached_bytes = buffer.getvalue()
             cached_hash = _hash_image(bot, cached_bytes)
             if cached_hash not in used_hashes:
+                # get_cached_asset() only returns a previously verified asset
+                # with the matching entity/type/context. Re-running the live
+                # Gemini gate here duplicates semantic QA on the same image.
+                used_hashes.add(cached_hash)
+                seg["visual_verified"] = True
+                seg["visual_rescue_reason"] = ""
+                seg["visual_fallback_reason"] = ""
+                seg["visual_query_used"] = "cache"
+                seg["visual_verification_attempts"] = 0
+                seg["visual_cache_reused"] = True
                 try:
-                    cached_ok, _cached_tier, _score, hard_reject = runtime._strict_gate(
-                        bot, cached_bytes, seg, video_title, source="cache"
+                    original_path = os.path.join(
+                        bot.ASSETS_DIR,
+                        f"visual_original_cache_{cached_hash[:16]}.jpg",
                     )
+                    cached_img.convert("RGB").save(original_path, "JPEG", quality=92)
+                    seg["visual_original_path"] = original_path
                 except Exception:
-                    cached_ok, hard_reject = False, True
-                if cached_ok and not hard_reject:
-                    used_hashes.add(cached_hash)
-                    seg["visual_verified"] = True
-                    seg["visual_rescue_reason"] = ""
-                    seg["visual_fallback_reason"] = ""
-                    seg["visual_query_used"] = "cache"
-                    seg["visual_verification_attempts"] = 1
-                    try:
-                        original_path = os.path.join(
-                            bot.ASSETS_DIR,
-                            f"visual_original_cache_{cached_hash[:16]}.jpg",
-                        )
-                        cached_img.convert("RGB").save(original_path, "JPEG", quality=92)
-                        seg["visual_original_path"] = original_path
-                    except Exception:
-                        seg["visual_original_path"] = ""
-                    return cached_img.convert("RGB"), False, "cached"
+                    seg["visual_original_path"] = ""
+                return cached_img.convert("RGB"), False, "cached"
 
     try:
         source_plan = _source_plan(bot, visual_type, visual_genre)
