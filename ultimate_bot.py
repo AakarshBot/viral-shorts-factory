@@ -1892,6 +1892,10 @@ def run_robot(web_config=None):
             print("\n🌐 WEB DASHBOARD MODE ACTIVATED: Pulling settings from Streamlit.")
             format_mode = web_config.get("format_mode", "regular")
             cat_choice = web_config.get("category", "national_global_affairs")
+            # Older dashboard sessions used a virtual AI category. Normalize
+            # it before every production lookup so the real Sports config is used.
+            if str(cat_choice or "").strip().lower() == "ai_recommendation":
+                cat_choice = "sports"
             lang_key = web_config.get("language", "english")
             lang_cfg = LANGUAGES.get(lang_key, LANGUAGES["english"])
             combo_key = f"{format_mode}|{cat_choice}|{lang_key}"
