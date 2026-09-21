@@ -1542,7 +1542,7 @@ def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
     assert "--studio-" in source
     assert "prefers-reduced-motion" in source
     assert "backdrop-filter" in source
-    assert "2026 editorial OS" in source.lower()
+    assert "2026 editorial os" in source.lower()
     assert ".learning-strip" in source
     assert "Channel learning is active" in source
     assert "Learning {channel_fit:.1f}/10" in source
