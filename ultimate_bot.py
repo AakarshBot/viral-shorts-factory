@@ -1789,10 +1789,12 @@ def upload_to_youtube(
 
         return vid_id
     except YouTubePublicVisibilityError as exc:
-        print(f"   [!] YouTube public upload verification failed: {exc}", flush=True)
+        print(f"   [!] YouTube public upload visibility was blocked: {exc}", flush=True)
         raise
     except Exception as exc:
         print(f"   [!] YouTube upload failed: {exc}")
+        if str(publish_mode).lower() == "public":
+            raise
         return None
 
 def font_preflight_check(lang_cfg):
