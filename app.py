@@ -604,7 +604,8 @@ body{
     transparent!important;
   position:relative;
 }
-[data-testid="stAppViewContainer"] .main{position:relative;z-index:1}
+[data-testid="stAppViewContainer"] .main{position:relative;z-index:2}
+.block-container{position:relative;z-index:3!important}
 .block-container{padding-top:1.2rem!important}
 .brand-card{
   background:
@@ -1023,8 +1024,36 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
 }
 
 /* Final composition pass: shared rails, section rhythm and tactile focus states. */
-.stApp{
-  isolation:isolate;
+
+.studio-boot-shell{
+  position:relative;
+  z-index:10;
+  margin:0 0 14px;
+  padding:14px 16px;
+  border:1px solid rgba(95,126,125,.18);
+  border-radius:16px;
+  background:linear-gradient(135deg,rgba(255,253,249,.92),rgba(241,247,245,.82));
+  box-shadow:0 10px 26px rgba(47,93,98,.06);
+}
+.studio-boot-eyebrow{
+  color:#4d7c77;
+  font-size:.56rem;
+  font-weight:900;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+}
+.studio-boot-title{
+  margin-top:3px;
+  color:#1c2729;
+  font-size:1rem;
+  font-weight:900;
+  letter-spacing:-.02em;
+}
+.studio-boot-copy{
+  margin-top:2px;
+  color:#726a60;
+  font-size:.68rem;
+  line-height:1.4;
 }
 .section-title{
   position:relative;
@@ -3455,6 +3484,15 @@ def render_demo_page() -> None:
     render_factory_function_coverage()
 
 def main() -> None:
+    boot = st.empty()
+    boot.markdown(
+        "<div class='studio-boot-shell'>"
+        "<div class='studio-boot-eyebrow'>Shorts Studio · control deck</div>"
+        "<div class='studio-boot-title'>Loading your editorial workspace</div>"
+        "<div class='studio-boot-copy'>Preparing the dashboard without starting a production run.</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
     load_streamlit_secrets_into_runtime()
     _remote_startup_guard()
     initialise_runtime()
@@ -3469,6 +3507,7 @@ def main() -> None:
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     workspace = render_workspace_navigation()
+    boot.empty()
 
     if workspace == "Live":
         snapshot = controller.snapshot()
