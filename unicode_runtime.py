@@ -98,69 +98,6 @@ def _planner_normalise(module, text):
     return " ".join(words[:module.MAX_QUERY_WORDS])
 
 
-def _script_guard_sentences(module, text):
-    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
-    return [
-        re.sub(r"\s+", " ", sentence).strip(" -")
-        for sentence in re.split(r"(?<=[.!?])\s+", cleaned)
-        if len(unicode_words(sentence)) >= 5 and not module.looks_like_instructional_narration(sentence)
-    ]
-
-
-def _safe_subject_limit_wrapper(module, original_builder):
-    """Build a repeat-limited visual wrapper that never blanks primary_entity."""
-    def limited_relevant_asset(original):
-        def wrapped(bot, seg, category, used_urls, used_hashes, video_title=""):
-            entity = str(seg.get("primary_entity", "") or "").strip()
-            key = re.sub(r"\s+", " ", entity.casefold()).strip()
-            chosen_seg = seg
-            run_key = id(used_hashes)
-            if key:
-                with module._SUBJECT_LOCK:
-                    run_counts = module._SUBJECT_RUNS.setdefault(run_key, module.defaultdict(int))
-                    count = run_counts[key]
-                    if count < 2:
-                        run_counts[key] += 1
-                    else:
-                        chosen_seg = dict(seg)
-                        intent = str(seg.get("visual_intent", "") or "").strip()
-                        prompt = str(seg.get("specific_search_prompt", "") or "").strip()
-                        scene_no = str(seg.get("scene_index") or seg.get("scene_number") or "").strip()
-                        context = " ".join(x for x in (prompt, intent, f"scene {scene_no}" if scene_no else "") if x)
-                        chosen_seg["specific_search_prompt"] = context or entity
-            try:
-                return original(bot, chosen_seg, category, used_urls, used_hashes, video_title)
-            finally:
-                with module._SUBJECT_LOCK:
-                    if len(module._SUBJECT_RUNS) > 32:
-                        module._SUBJECT_RUNS.pop(next(iter(module._SUBJECT_RUNS)), None)
-
-        wrapped._subject_limit_bound = True
-        return wrapped
-    return limited_relevant_asset(original_builder)
-
-
-def _patch_subject_limit_before_install():
-    """Replace the legacy wrapper factory before it can create blank entities."""
-    try:
-        import visual_policy_runtime as policy
-        if getattr(policy, "_unicode_safe_subject_policy", False):
-            return
-
-        original_builder = getattr(policy, "_subject_limit_wrapper", None)
-        if not callable(original_builder):
-            return
-
-        def safe_builder(original):
-            return _safe_subject_limit_wrapper(policy, original)
-
-        policy._subject_limit_wrapper = safe_builder
-        policy._unicode_safe_subject_policy = True
-        print("   [Unicode Runtime] Visual repeat-limit wrapper hardened: primary_entity is always preserved.", flush=True)
-    except Exception as exc:
-        print(f"   [Unicode Runtime] Visual repeat-limit hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
-
-
 def install() -> bool:
     """Patch all known ASCII-only text helpers once."""
     if globals().get("_INSTALLED", False):
@@ -168,8 +105,6 @@ def install() -> bool:
 
     patched = []
     try:
-        _patch_subject_limit_before_install()
-
         import script_runtime
         script_runtime._words = unicode_words
         script_runtime._normalise = unicode_normalise
@@ -202,8 +137,8 @@ def install() -> bool:
         patched.append("visual_strategy_runtime._normalise_query")
 
         import script_guard_runtime as guard
-        guard._source_sentences = lambda text: _script_guard_sentences(guard, text)
-        patched.append("script_guard_runtime._source_sentences")
+        if guard.install():
+            patched.append("script_guard_runtime")
 
         globals()["_INSTALLED"] = True
         globals()["UNICODE_RUNTIME_VERSION"] = _VERSION
