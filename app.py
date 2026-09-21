@@ -982,12 +982,10 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             bank_path = str(bank_item.get("path") or "").strip()
             if bank_path and os.path.isfile(bank_path):
                 bank.append(dict(bank_item))
-        # Dashboard display is intentionally simple: if the image passed the
-        # identity AI gate and the lenient monetization/provenance gate, show it.
-        # Context suitability and soft resolution are not display filters.
-        # Every retained bank image is displayable once it has passed the
-        # upstream AI identity and lenient monetization checks. Scene context
-        # is deliberately not used to hide dashboard choices.
+        # Dashboard display is intentionally simple: identity AI verification
+        # is the acceptance boundary; provider rights/provenance remain visible
+        # as metadata for the human reviewer. Context suitability and soft
+        # resolution are deliberately not display filters.
         unused_verified = [dict(item) for item in bank]
         factory_rejected = []
         scene_rejected = []
@@ -1225,9 +1223,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         dict(group) for group in (snapshot.get("visual_search_groups") or [])
         if isinstance(group, dict)
     ]
-    # Every retained image that passed AI identity verification and the
-    # lenient monetization/provenance gate is displayed. Context, scene score
-    # and soft resolution are deliberately not acceptance filters here.
+    # Every retained image that passed AI identity verification is displayed.
+    # Provider rights/provenance stay visible as metadata for the human reviewer;
+    # they are not an automatic manual-QC acceptance filter.
     available = [
         item for item in pool
         if not bool(item.get("used"))
@@ -1248,8 +1246,8 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         unsafe_allow_html=True,
     )
     st.caption(
-        "Every slide already has an image. The shared pools below contain additional choices; "
-        "assign any unused image to one slide, then reframe it with the drag cropper when needed."
+        "Every slide already has an image. The pools below collect identity-checked choices from the available image sources. "
+        "Assign any unused image to one slide, then reframe it with the cropper when needed."
     )
 
     metric_cols = st.columns(4, gap="small")
@@ -1364,8 +1362,38 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     )
 
     # All retained images are already shown in the single pool above.
-    st.markdown("### New manual searches")
-    st.caption("Each search returns up to 10 NEW images that passed the AI identity check and lenient monetization check. Context suitability is left to you.")
+    st.markdown("### Find 10 more images")
+    st.caption(
+        "Search all available image sources for up to 10 new AI-checked results. "
+        "Licensing/provenance is shown as source metadata; you decide what to use."
+    )
+    with st.form(
+        key=f"global_visual_search_form_{run_id}",
+        clear_on_submit=True,
+        border=True,
+    ):
+        search_query = st.text_input(
+            "New image search",
+            placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
+        )
+        search_submitted = st.form_submit_button(
+            "Search up to 10 new images",
+            type="secondary",
+            width="stretch",
+        )
+
+    if search_submitted:
+        ok, message = controller.search_visual_pool(search_query)
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
+        search_groups = [
+            dict(group)
+            for group in (controller.snapshot().get("visual_search_groups") or [])
+            if isinstance(group, dict)
+        ]
+
     for group in search_groups:
         group_id = str(group.get("id") or "search")
         group_items = [dict(item) for item in (group.get("items") or []) if isinstance(item, dict)]
@@ -1422,24 +1450,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 ):
                                     st.session_state.visual_pool_crop_target = asset_hash
                                     st.rerun()
-
-    search_query = st.text_input(
-        "Search for up to 10 new images",
-        placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
-        key=f"global_visual_search_{run_id}",
-    )
-    if st.button(
-        "Search up to 10 new images",
-        type="secondary",
-        width="stretch",
-        key=f"global_visual_search_button_{run_id}",
-    ):
-        ok, message = controller.search_visual_pool(search_query)
-        if ok:
-            st.success(message)
-            st.rerun()
-        else:
-            st.error(message)
 
     st.markdown("---")
     approve_col, reject_col = st.columns([1.35, 1], gap="medium")

@@ -1,6 +1,8 @@
 """Regression coverage for the bounded content-first visual retrieval boundary."""
 
 import io
+import threading
+import time
 
 import visual_qa_runtime as visual_qa
 
@@ -432,6 +434,239 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
     assert any(candidate == provider_two_bytes for candidate in batch_payloads[0])
     assert source == "visual-rescue"
 
+
+def test_visual_provider_fetches_overlap_without_sharing_used_url_state(monkeypatch):
+    active = 0
+    peak = 0
+    url_sets = []
+    lock = threading.Lock()
+
+    def provider(name):
+        def fetch(*args):
+            nonlocal active, peak
+            local_used_urls = args[1]
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                url_sets.append(local_used_urls)
+            local_used_urls.add(f"https://{name}.example/image.jpg")
+            time.sleep(0.08)
+            with lock:
+                active -= 1
+            return []
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 4
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("ProviderOne", provider("one")),
+            ("ProviderTwo", provider("two")),
+        ],
+    )
+
+    used_urls = set()
+    retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        {
+            "primary_entity": "India",
+            "factual_primary_entity": "India",
+            "visual_intent": "match",
+            "specific_search_prompt": "India match",
+            "voiceover": "India match update.",
+        },
+        "news",
+        used_urls,
+        set(),
+        "India match",
+    )
+
+    assert peak >= 2
+    assert len(url_sets) >= 2
+    assert len({id(item) for item in url_sets}) == len(url_sets)
+    assert "https://one.example/image.jpg" in used_urls
+    assert "https://two.example/image.jpg" in used_urls
+
+
+def test_openverse_manual_search_uses_separate_cache_namespace(monkeypatch):
+    import image_sources_runtime as sources
+
+    cache_providers = []
+    image = _jpeg_bytes((1200, 1600))
+
+    monkeypatch.setattr(
+        sources,
+        "_read_cache",
+        lambda provider, query, page=1: (
+            cache_providers.append(provider) or {
+                "results": [{
+                    "license": "by-nc",
+                    "url": "https://example.com/manual.jpg",
+                    "thumbnail": "https://example.com/manual-thumb.jpg",
+                    "creator": "Example",
+                    "title": "Manual result",
+                }]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        sources,
+        "_download",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": image,
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        },
+    )
+
+    result = sources.fetch_openverse_candidates(
+        "Rishabh Pant",
+        set(),
+        "",
+        "",
+        "",
+        "",
+        True,
+    )
+
+    assert result
+    assert cache_providers == ["openverse-manual"]
+
+
+def test_manual_visual_search_fetches_all_sources_concurrently(monkeypatch):
+    import threading
+    import time
+
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def provider(name):
+        def fetch(*args):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                candidate = _licensed_candidate(
+                    _jpeg_bytes(
+                        (1200, 1600),
+                        color=(30 + (sum(ord(char) for char in name) % 180), 70, 100),
+                    ),
+                    "cc-by-nc",
+                )
+                candidate["source_image_url"] = f"https://{name}.example/{name}.jpg"
+                candidate["search_title"] = f"{name} result"
+                time.sleep(0.05)
+                return [candidate]
+            finally:
+                with lock:
+                    active -= 1
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", provider("Commons")),
+            ("Wikipedia", provider("Wikipedia")),
+            ("Openverse", provider("Openverse")),
+            ("DDG", provider("DDG")),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Rishabh Pant",
+    )
+
+    assert peak >= 2
+    assert len(result["assets"]) == 4
+    assert result["rejection_counts"]["monetization"] == 0
+
+
+def test_manual_visual_search_can_rank_a_later_provider_candidate(monkeypatch):
+    image_one = _jpeg_bytes((1200, 1600), color=(20, 20, 20))
+    image_two = _jpeg_bytes((1200, 1600), color=(220, 220, 220))
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def weak_provider(*args):
+        item = _licensed_candidate(image_one, "cc0")
+        item["source_image_url"] = "https://commons.example/weak.jpg"
+        item["search_title"] = "generic sports crowd"
+        return [item]
+
+    def strong_provider(*args):
+        item = _licensed_candidate(image_two, "cc0")
+        item["source_image_url"] = "https://openverse.example/strong.jpg"
+        item["search_title"] = "Rishabh Pant press conference"
+        item["search_description"] = "Rishabh Pant speaking at a press conference"
+        return [item]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", weak_provider),
+            ("Openverse", strong_provider),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Rishabh Pant press conference",
+    )
+
+    assert result["assets"]
+    assert result["assets"][0]["source"] == "Openverse"
+
+
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
 
@@ -552,19 +787,15 @@ def test_person_action_reuses_verified_cache_without_duplicate_semantic_qa(monke
         "Pat Cummins interview",
     )
 
+    # Cached verified assets are reused without another semantic-QA request.
+    # The cache preserves the source image dimensions; final Shorts fitting happens
+    # later in the content-first renderer.
     assert calls["qa"] == 0
     assert source == "cached"
     assert used_ai is False
     assert scene["visual_verified"] is True
     assert scene["visual_cache_reused"] is True
-    assert image.size == (1080, 1920)
-    assert used_ai is False
-    assert source == "visual-rescue"
-    assert scene["visual_qc_blocked"] is False
-    assert scene["visual_qc_block_reason"] == ""
-    assert retrieval._trusted_source_evidence(
-        "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
-    )[0] is False
+    assert image.size == (900, 1200)
 
 
 def test_commons_logo_still_passes_visual_qc(monkeypatch):
@@ -1531,7 +1762,7 @@ def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
     assert result["rejection_counts"]["duplicate"] == 0
 
 
-def test_new_manual_search_applies_monetization_and_identity_filters(monkeypatch):
+def test_new_manual_search_does_not_apply_monetization_filter(monkeypatch):
     values = [
         {
             "bytes": _jpeg_bytes((240, 240)),
@@ -1585,8 +1816,130 @@ def test_new_manual_search_applies_monetization_and_identity_filters(monkeypatch
         FakeBot(),
         "BCCI logo",
     )
-    assert len(result["assets"]) == 5
-    assert result["rejection_counts"]["monetization"] == 1
+    assert len(result["assets"]) == 6
+    assert result["rejection_counts"]["monetization"] == 0
+
+
+
+def test_manual_pool_searches_every_available_provider_before_qa(monkeypatch):
+    calls = []
+
+    def make_provider(name):
+        def fetch(*args):
+            calls.append(name)
+            candidate = _licensed_candidate(_jpeg_bytes((1200, 1600), color=(40 + len(calls) * 20, 70, 100)), "cc-by-nc")
+            candidate["source_image_url"] = f"https://{name}.example/image-{len(calls)}.jpg"
+            candidate["search_title"] = f"{name} result"
+            return [candidate]
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", make_provider("Commons")),
+            ("Wikipedia", make_provider("Wikipedia")),
+            ("Openverse", make_provider("Openverse")),
+            ("Pexels", make_provider("Pexels")),
+            ("Unsplash", make_provider("Unsplash")),
+            ("Pixabay", make_provider("Pixabay")),
+            ("DDG", make_provider("DDG")),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Rishabh Pant", "voiceover": "Rishabh Pant appears."}],
+        ["Rishabh Pant"],
+        "Test story",
+        pool_target=7,
+        pool_max=7,
+        allow_auto_backfill=False,
+    )
+
+    assert calls == [
+        "Commons",
+        "Wikipedia",
+        "Openverse",
+        "Pexels",
+        "Unsplash",
+        "Pixabay",
+        "DDG",
+    ]
+    assert len(result["assets"]) == 7
+    assert result["rejection_counts"]["monetization"] == 0
+
+
+def test_manual_source_plan_can_include_ddg_without_global_unlicensed_flag(monkeypatch):
+    monkeypatch.delenv("ALLOW_UNLICENSED_VISUALS", raising=False)
+    plan = provider_boundary.build_raw_source_plan(
+        "PERSON",
+        "PERSON_ACTION",
+        allow_unlicensed=True,
+    )
+    assert any(name == "DDG" for name, _fetcher in plan)
+
+
+def test_manual_commons_qc_does_not_filter_noncommercial_license(monkeypatch):
+    image_bytes = _jpeg_bytes()
+    monkeypatch.setattr(
+        provider_boundary,
+        "_api_json",
+        lambda *args, **kwargs: {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:Test.jpg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/test.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Test.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC BY-NC 4.0"},
+                                "Artist": {"value": "Test"},
+                                "ImageDescription": {"value": "Test Person"},
+                            },
+                        }],
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        provider_boundary,
+        "_download_image",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": image_bytes,
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        },
+    )
+
+    candidates = provider_boundary.fetch_commons_candidates(
+        "Test Person",
+        set(),
+        "",
+        "",
+        "PERSON",
+        "PERSON_ACTION",
+        True,
+    )
+
+    assert candidates
+    assert candidates[0]["provenance"]["license"] == "by-nc"
 
 
 def test_manual_query_planner_has_non_network_fallback(monkeypatch):

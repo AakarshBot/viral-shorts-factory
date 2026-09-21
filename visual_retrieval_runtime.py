@@ -18,6 +18,7 @@ import hashlib
 import io
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -86,10 +87,15 @@ def _hash_image(bot, img_bytes: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
 
-def _source_plan(_bot, visual_type: str, visual_genre: str = ""):
+def _source_plan(
+    _bot,
+    visual_type: str,
+    visual_genre: str = "",
+    allow_unlicensed: bool = False,
+):
     """Compatibility boundary backed only by the authoritative raw provider plan."""
     from visual_provider_boundary_runtime import build_raw_source_plan
-    return build_raw_source_plan(visual_type, visual_genre)
+    return build_raw_source_plan(visual_type, visual_genre, allow_unlicensed=allow_unlicensed)
 
 
 def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
@@ -811,10 +817,9 @@ def _manual_candidate_from_data(
         return None
 
     record = candidate_provenance(data)
-    if not provenance_is_usable(record):
-        if not provenance_is_retainable(record):
-            rejected_counts["monetization"] += 1
-            return None
+    # Manual visual selection is a human-QC surface. Licensing/provenance is
+    # retained as metadata, but it must not prevent a useful image from
+    # reaching the dashboard.
 
     valid, reason, normalized = _preflight_image(normalized)
     if not valid or normalized is None:
@@ -869,7 +874,7 @@ def collect_manual_visual_pool(
     pool_max: int | None = None,
     allow_auto_backfill: bool = True,
 ) -> dict:
-    """Build the shared entity-verified pool from the user's ordered queries."""
+    """Build the shared entity-verified pool from every available manual source."""
     from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
     from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
 
@@ -978,21 +983,28 @@ def collect_manual_visual_pool(
         entity_anchor = str(canonical_manual_entity_anchor(exact_query, "") or exact_query).strip()
         visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
         try:
-            source_plan = _source_plan(bot, visual_type, visual_genre)
+            source_plan = _source_plan(
+                bot,
+                visual_type,
+                visual_genre,
+                allow_unlicensed=True,
+            )
         except TypeError:
-            source_plan = _source_plan(bot, visual_type)
+            try:
+                source_plan = _source_plan(bot, visual_type, visual_genre)
+            except TypeError:
+                source_plan = _source_plan(bot, visual_type)
 
         target = _manual_query_target(query_index)
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
-        source_attempts = 0
         qa_requests = 0
         verified_for_query = 0
 
         for source_name, fetcher in source_plan:
-            if not callable(fetcher) or source_attempts >= 2 or verified_for_query >= target:
-                break
+            if not callable(fetcher):
+                continue
             source_key = str(source_name or "").strip().casefold()
             if not source_key:
                 continue
@@ -1022,8 +1034,6 @@ def collect_manual_visual_pool(
                     )
                     raw_data = []
                 search_cache[cache_key] = list(_raw_items(raw_data))
-            source_attempts += 1
-
             for data in search_cache.get(cache_key) or []:
                 candidate = _manual_candidate_from_data(
                     str(source_name),
@@ -1039,33 +1049,25 @@ def collect_manual_visual_pool(
                 if candidate is None:
                     continue
                 query_candidates.append(candidate)
-                if len(query_candidates) >= target * 2:
-                    break
 
-            if not query_candidates:
-                continue
-
-            # Verify the strongest current candidates before paying for another source.
-            query_candidates.sort(
-                key=lambda item: (
-                    -float(item.get("priority") or 0.0),
-                    str(item.get("source") or "").casefold(),
-                )
+        # Search every available provider before QA so the strongest result can
+        # win globally instead of being pre-empted by the first provider.
+        query_candidates.sort(
+            key=lambda item: (
+                -float(item.get("priority") or 0.0),
+                str(item.get("source") or "").casefold(),
             )
-            before = len(assets)
-            added, requests_made = _verify(
-                query_candidates,
-                entity_anchor,
-                query_index,
-                target,
-                f"manual:{query_index}",
-            )
-            qa_requests += requests_made
-            verified_for_query = len(assets) - before
-
-            if verified_for_query < target and source_attempts < 2:
-                continue
-            break
+        )
+        before = len(assets)
+        added, requests_made = _verify(
+            query_candidates,
+            entity_anchor,
+            query_index,
+            target,
+            f"manual:{query_index}",
+        )
+        qa_requests += requests_made
+        verified_for_query = len(assets) - before
 
         # Carry forward the actual accepted identity-approved candidates into the
         # run-wide dedupe sets. Multiple distinct images from one article are allowed.
@@ -1223,10 +1225,10 @@ def collect_manual_visual_search(
     used_hashes: set[str] | None = None,
     used_source_image_urls: set[str] | None = None,
 ) -> dict:
-    """Fetch up to ten new images that pass monetization and identity AI checks.
+    """Fetch up to ten new images from every available manual source with identity AI checks.
 
     The dashboard search intentionally has no scene/context acceptance gate.
-    The exact user query is preserved, restrictive monetization is rejected,
+    The exact user query is preserved, licensing/provenance remains metadata,
     and the same identity AI gate used by the production visual pool decides
     which candidates are shown.
     """
@@ -1263,19 +1265,39 @@ def collect_manual_visual_search(
     fetch_used_urls: set[str] = set(used_source_image_urls or set())
 
     try:
-        source_plan = _source_plan(bot, visual_type, visual_genre)
+        source_plan = _source_plan(
+            bot,
+            visual_type,
+            visual_genre,
+            allow_unlicensed=True,
+        )
     except TypeError:
-        source_plan = _source_plan(bot, visual_type)
+        try:
+            source_plan = _source_plan(bot, visual_type, visual_genre)
+        except TypeError:
+            source_plan = _source_plan(bot, visual_type)
 
-    # Keep this cheap: at most two providers and at most ten raw candidates per
-    # provider page. If the first page contains only images already used by the
-    # dashboard, advance once so a replacement search can actually return new
-    # choices without turning this into an open-ended crawl.
-    for source_name, fetcher in source_plan[:2]:
-        if len(candidates) >= 20 or not callable(fetcher):
-            break
+    # Search each available provider concurrently. Each worker owns its URL
+    # set and performs the same bounded two-page fallback as the old serial path.
+    # Results are merged on the main thread in provider-plan order, preserving
+    # deterministic ranking/deduplication while removing cumulative provider waits.
+    provider_jobs = []
+    for source_index, (source_name, fetcher) in enumerate(source_plan):
+        if not callable(fetcher):
+            continue
         source_key = str(source_name or "").strip().casefold()
-        provider_added = 0
+        if not source_key:
+            continue
+        provider_jobs.append((source_index, str(source_name), fetcher, source_key))
+
+    provider_results: dict[int, tuple[list, set[str], dict[tuple, list]]] = {}
+
+    def _fetch_manual_provider(job):
+        source_index, source_name, fetcher, source_key = job
+        local_used_urls = set(used_source_image_urls or set())
+        cache_updates: dict[tuple, list] = {}
+        provider_items: list = []
+
         for page in (1, 2):
             cache_key = ("dashboard-query", source_key, exact_query.casefold(), page)
             raw_data = search_cache.get(cache_key)
@@ -1285,7 +1307,7 @@ def collect_manual_visual_search(
                         fetcher,
                         (
                             exact_query,
-                            fetch_used_urls,
+                            local_used_urls,
                             exact_query,
                             video_title,
                             visual_type,
@@ -1293,7 +1315,7 @@ def collect_manual_visual_search(
                             True,
                             page,
                         ),
-                        str(source_name),
+                        source_name,
                         exact_query,
                     )
                 except Exception as exc:
@@ -1303,33 +1325,82 @@ def collect_manual_visual_search(
                         flush=True,
                     )
                     raw_data = []
-                search_cache[cache_key] = list(raw_data or [])
+                normalized = list(raw_data or [])
+                cache_updates[cache_key] = normalized
+            else:
+                normalized = list(raw_data or [])
 
-            page_added = 0
-            for data in search_cache.get(cache_key) or []:
-                candidate = _manual_candidate_from_data(
-                    str(source_name),
-                    data,
-                    exact_query,
-                    visual_type,
-                    visual_genre,
-                    bot,
-                    seen_hashes,
-                    seen_urls,
-                    rejected_counts,
-                )
-                if candidate is None:
-                    continue
-                candidates.append(candidate)
-                page_added += 1
-                provider_added += 1
-                if len(candidates) >= 20:
+            provider_items.extend(normalized)
+            if normalized:
+                # Preserve the old bounded behavior: page 2 is needed only
+                # when page 1 contains no candidate that is actually new to
+                # this dashboard search.
+                page_has_new = False
+                for item in normalized:
+                    raw_bytes = _as_image_bytes(item)
+                    if not raw_bytes:
+                        continue
+                    image_hash = _hash_image(bot, raw_bytes)
+                    image_url = _source_image_key(item)
+                    if (
+                        image_hash not in (used_hashes or set())
+                        and (
+                            not image_url
+                            or image_url.casefold().rstrip("/") not in {
+                                str(value or "").casefold().rstrip("/")
+                                for value in (used_source_image_urls or set())
+                            }
+                        )
+                    ):
+                        page_has_new = True
+                        break
+                if page_has_new:
                     break
-            if len(candidates) >= 20 or provider_added:
-                break
-            if not search_cache.get(cache_key):
-                break
+                continue
 
+        return source_index, source_name, provider_items, local_used_urls, cache_updates
+
+    if provider_jobs:
+        with ThreadPoolExecutor(
+            max_workers=len(provider_jobs),
+            thread_name_prefix="manual-visual-provider",
+        ) as executor:
+            futures = [executor.submit(_fetch_manual_provider, job) for job in provider_jobs]
+            for future in futures:
+                source_index, source_name, provider_items, local_used_urls, cache_updates = future.result()
+                provider_results[source_index] = (
+                    provider_items,
+                    local_used_urls,
+                    cache_updates,
+                )
+
+    for source_index, source_name, fetcher, source_key in provider_jobs:
+        provider_items, local_used_urls, cache_updates = provider_results.get(
+            source_index,
+            ([], set(), {}),
+        )
+        for cache_key, raw_items in cache_updates.items():
+            search_cache[cache_key] = list(raw_items)
+        fetch_used_urls.update(local_used_urls)
+
+        for data in provider_items:
+            candidate = _manual_candidate_from_data(
+                source_name,
+                data,
+                exact_query,
+                visual_type,
+                visual_genre,
+                bot,
+                seen_hashes,
+                seen_urls,
+                rejected_counts,
+            )
+            if candidate is None:
+                continue
+            candidates.append(candidate)
+
+    # Only cap after all providers have contributed so ranking can choose the
+    # strongest image regardless of which provider returned it.
     candidates.sort(
         key=lambda item: (
             -float(item.get("priority") or 0.0),
@@ -1546,11 +1617,16 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             flush=True,
         )
 
+        # Provider requests are independent network operations. Run the bounded
+        # source set concurrently, but keep each provider on a private URL set
+        # and process results back in source-plan order so downstream ranking,
+        # deduplication, provenance and QA behavior remain deterministic.
+        provider_jobs = []
         for source_index, (source, fetcher) in enumerate(source_plan):
             if source_index >= source_limit:
                 break
-            if not callable(fetcher) or len(query_candidates) >= raw_target:
-                break
+            if not callable(fetcher):
+                continue
 
             source_query = _provider_search_query(
                 source,
@@ -1576,8 +1652,47 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 if str(source).casefold() == "wikipedia"
                 else (source_query, local_used_urls, query, video_title, visual_type, visual_genre)
             )
-            raw_data = runtime._call_fetcher_with_timeout(fetcher, args, source, source_query)
-            used_urls.update(local_used_urls)
+            provider_jobs.append(
+                (source_index, str(source), fetcher, source_query, local_used_urls, args)
+            )
+
+        provider_results = {}
+        if provider_jobs:
+            with ThreadPoolExecutor(
+                max_workers=len(provider_jobs),
+                thread_name_prefix="visual-provider",
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        runtime._call_fetcher_with_timeout,
+                        fetcher,
+                        args,
+                        source,
+                        source_query,
+                    ): job
+                    for job in provider_jobs
+                    for source_index, source, fetcher, source_query, local_used_urls, args in [job]
+                }
+                for future, job in futures.items():
+                    source_index, source, fetcher, source_query, local_used_urls, args = job
+                    try:
+                        raw_data = future.result()
+                    except Exception as exc:
+                        print(
+                            f"   [Visual Source] {source} | failed: {exc} | query='{source_query}'",
+                            flush=True,
+                        )
+                        raw_data = None
+                    provider_results[source_index] = (raw_data, local_used_urls)
+
+        # Merge provider URL state only after each independent fetch completes.
+        # No worker mutates the shared used_urls set.
+        for source_index, source, fetcher, source_query, local_used_urls, args in provider_jobs:
+            raw_data, completed_used_urls = provider_results.get(
+                source_index,
+                (None, local_used_urls),
+            )
+            used_urls.update(completed_used_urls)
             candidates = _candidate_items(raw_data)
             if not candidates:
                 _record_visual_rejection(seg, "provider_empty", f"{source}:{source_query}")
@@ -1616,6 +1731,11 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                 )
                 if len(query_candidates) >= raw_target:
                     break
+            if len(query_candidates) >= raw_target:
+                # Remaining provider results have already been fetched in parallel,
+                # but their candidates are intentionally ignored to preserve the
+                # existing raw-target cap and downstream selection semantics.
+                break
 
         if not query_candidates:
             continue

@@ -344,6 +344,18 @@ def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
     assert script_data["visual_rescue_count"] == 2
     assert script_data["visual_fallback_count"] == 2
 
+def test_manual_rights_review_assets_are_not_written_to_verified_cache():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
+    cache_block_start = source.index("for asset in manual_pool_result.get(\"assets\") or []:")
+    cache_block_end = source.index("manual_pool_materialized =", cache_block_start)
+    block = source[cache_block_start:cache_block_end]
+
+    assert 'if str(asset.get("provenance_status") or "").strip() != "commercial-verified":' in block
+    assert "Rights-review images remain available to the human QC pool" in block
+
+
 def test_global_manual_queries_remain_available_as_fallback():
     from manual_visual_query_runtime import assign_manual_queries
 
