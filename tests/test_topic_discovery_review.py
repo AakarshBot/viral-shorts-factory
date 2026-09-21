@@ -10,7 +10,7 @@ class _FakeResponse:
         self.content = content
 
 
-def test_latest_trustworthy_time_drives_freshness():
+def test_latest_trustworthy_publication_or_update_time_drives_freshness():
     story = {
         "publishedAt": "2026-09-20T10:00:00+00:00",
         "updated_at": "2026-09-22T09:00:00+00:00",
