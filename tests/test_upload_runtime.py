@@ -164,6 +164,43 @@ def test_youtube_upload_public_refuses_private_result(monkeypatch, tmp_path):
         raise AssertionError("Public upload must fail closed when YouTube persists private visibility.")
 
 
+def test_workflow_controller_rejects_duplicate_upload_for_same_run(monkeypatch, tmp_path):
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"synthetic mp4")
+
+    controller = WorkflowController(type("Bot", (), {})())
+    controller.state.completed = True
+    controller.state.thread_alive = False
+    controller.state.video_path = str(video_path)
+    controller.state.uploaded_video_id = "video-existing"
+    monkeypatch.setattr(
+        __import__("final_qc_runtime"),
+        "validate_final_video",
+        lambda *_args, **_kwargs: True,
+    )
+    import final_qc_runtime
+    monkeypatch.setattr(
+        final_qc_runtime,
+        "validate_final_upload_metadata",
+        lambda title, description, comment: (title, description, comment),
+    )
+
+    try:
+        controller.upload_manual(
+            str(video_path),
+            {"title": "Approved title"},
+            "Approved title",
+            "Approved description",
+            "Approved comment",
+            "private",
+            {"label": "News", "category_id": "25", "hashtags": []},
+        )
+    except RuntimeError as exc:
+        assert "already been uploaded" in str(exc)
+    else:
+        raise AssertionError("Duplicate upload must be blocked.")
+
+
 def test_workflow_controller_upload_delegates_approved_payload(monkeypatch, tmp_path):
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"synthetic mp4")
