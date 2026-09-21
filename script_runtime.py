@@ -641,12 +641,10 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     scenes = []
     fallback_sentences = list(sentences)
     # The emergency path should still open with the concrete story headline,
-    # not with source boilerplate or a generic setup sentence.
-    if title:
-        fallback_sentences = [title] + [
-            sentence for sentence in fallback_sentences
-            if _normalise(sentence) != _normalise(title)
-        ]
+    # not with source boilerplate or a generic setup sentence. Replace the
+    # first source beat rather than adding a new scene.
+    if title and fallback_sentences:
+        fallback_sentences[0] = title
     for index, sentence in enumerate(fallback_sentences, 1):
         role = (
             "hook" if index == 1
