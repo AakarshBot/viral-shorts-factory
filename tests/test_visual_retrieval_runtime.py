@@ -507,6 +507,51 @@ def test_visual_provider_fetches_overlap_without_sharing_used_url_state(monkeypa
     assert "https://two.example/image.jpg" in used_urls
 
 
+def test_openverse_manual_search_uses_separate_cache_namespace(monkeypatch):
+    import image_sources_runtime as sources
+
+    cache_providers = []
+    image = _jpeg_bytes((1200, 1600))
+
+    monkeypatch.setattr(
+        sources,
+        "_read_cache",
+        lambda provider, query, page=1: (
+            cache_providers.append(provider) or {
+                "results": [{
+                    "license": "by-nc",
+                    "url": "https://example.com/manual.jpg",
+                    "thumbnail": "https://example.com/manual-thumb.jpg",
+                    "creator": "Example",
+                    "title": "Manual result",
+                }]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        sources,
+        "_download",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": image,
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        },
+    )
+
+    result = sources.fetch_openverse_candidates(
+        "Rishabh Pant",
+        set(),
+        "",
+        "",
+        "",
+        "",
+        True,
+    )
+
+    assert result
+    assert cache_providers == ["openverse-manual"]
+
+
 def test_manual_visual_search_fetches_all_sources_concurrently(monkeypatch):
     import threading
     import time
