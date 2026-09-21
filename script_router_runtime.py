@@ -115,6 +115,8 @@ def install_script_pipeline(bot):
             )
 
         valid, reason = sr.validate_content_density(cleaned, data, format_mode)
+        if valid:
+            valid, reason, _structure = sr.assess_release_structure(cleaned, format_mode)
         if not valid:
             print(
                 f"   [Script QC] Generated script rejected: {reason}. "
@@ -130,6 +132,10 @@ def install_script_pipeline(bot):
             valid, reason = sr.validate_content_density(
                 cleaned, data, format_mode
             )
+            if valid:
+                valid, reason, _structure = sr.assess_release_structure(
+                    cleaned, format_mode
+                )
             if not valid:
                 raise ValueError(
                     f"Script completeness gate failed after fallback: {reason}"
@@ -161,6 +167,10 @@ def install_script_pipeline(bot):
             valid, reason = sr.validate_content_density(
                 cleaned, data, format_mode
             )
+            if valid:
+                valid, reason, _structure = sr.assess_release_structure(
+                    cleaned, format_mode
+                )
             if not valid:
                 raise ValueError(
                     f"Originality rewrite failed script validation: {reason}"
