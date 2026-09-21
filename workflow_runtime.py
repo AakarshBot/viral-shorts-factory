@@ -410,6 +410,28 @@ class WorkflowController:
                         globals_dict["gather_and_filter_stories"] = original_gather
 
                 script = self.state.script_data or {}
+                video_path = str(self.state.video_path or "").strip()
+                if not isinstance(script, dict) or not script.get("script"):
+                    raise RuntimeError(
+                        "Production stopped before a usable script reached the dashboard."
+                    )
+                if not video_path or not os.path.isfile(video_path):
+                    raise RuntimeError(
+                        "Production stopped before a final video artifact was produced."
+                    )
+                scene_count = len(script.get("script") or [])
+                if len(self.state.audio_paths) != scene_count:
+                    raise RuntimeError(
+                        "Production stopped with incomplete narration artifacts "
+                        f"({len(self.state.audio_paths)}/{scene_count} audio tracks)."
+                    )
+                if len(self.state.word_timings) != scene_count or any(
+                    not isinstance(items, list) or not items
+                    for items in self.state.word_timings
+                ):
+                    raise RuntimeError(
+                        "Production stopped with incomplete word-level narration timings."
+                    )
                 category_key = config.get("category", "national_global_affairs")
                 genre_cfg = self.bot.CONTENT_CATEGORIES.get(category_key, self.bot.CONTENT_CATEGORIES["national_global_affairs"])
                 title, description, _tags = _build_clean_metadata(
