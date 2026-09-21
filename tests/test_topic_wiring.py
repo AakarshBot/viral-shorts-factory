@@ -292,3 +292,56 @@ def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, categor
     assert captured["genre_key"] == category
     assert captured["genre_cfg"] == ultimate_bot.CONTENT_CATEGORIES[category]
     assert captured["broad_discovery"] is True
+
+
+
+def test_niche_sports_discovery_routes_through_sports_category(monkeypatch):
+    import dashboard_runtime
+
+    captured = {}
+
+    def fake_collect(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        broad_discovery=False,
+    ):
+        captured["genre_key"] = genre_key
+        captured["genre_cfg"] = dict(genre_cfg)
+        captured["broad_discovery"] = broad_discovery
+        return [], []
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+    monkeypatch.setattr(
+        story_ranker,
+        "rank_discovery_candidates",
+        lambda stories, **kwargs: stories,
+    )
+
+    bot = type(
+        "Bot",
+        (),
+        {
+            "CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES,
+            "_active_web_config": {},
+        },
+    )()
+
+    dashboard_runtime.discover_ranked_topics(
+        bot,
+        {
+            "format_mode": "regular",
+            "editorial_mode": "Niche Sports",
+            "category": "sports",
+            "language": "english",
+        },
+        None,
+        max_candidates=5,
+    )
+
+    assert captured["genre_key"] == "sports"
+    assert captured["genre_cfg"] == ultimate_bot.CONTENT_CATEGORIES["sports"]
+    assert captured["broad_discovery"] is True
