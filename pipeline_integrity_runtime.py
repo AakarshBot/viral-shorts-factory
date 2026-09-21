@@ -163,29 +163,6 @@ def _clean_script_result(script_data: dict, story_data: dict, format_mode: str =
     return result
 
 
-def _wrap_script_writer(bot):
-    current = getattr(bot, "write_script", None)
-    if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
-        return
-
-    def guarded_write_script(story_data, language_cfg, genre_key, conn, format_mode):
-        try:
-            result = current(story_data, language_cfg, genre_key, conn, format_mode)
-            cleaned = _clean_script_result(result, story_data, format_mode)
-            # A strict fallback is only used when the existing generator fails
-            # or produces invalid narration; it never silently patches missing facts.
-            return cleaned
-        except Exception as exc:
-            print(f"   [Script Integrity] AI script rejected: {type(exc).__name__}: {exc}", flush=True)
-            fallback = strict_fallback(story_data, language_cfg, genre_key, format_mode)
-            return _clean_script_result(fallback, story_data, format_mode)
-
-    guarded_write_script._pipeline_integrity_wrapped = True
-    bot.write_script = guarded_write_script
-    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
-        bot.run_robot.__globals__["write_script"] = guarded_write_script
-
-
 def _wrap_audio(bot):
     current = getattr(bot, "generate_voiceover_and_timestamps", None)
     if not callable(current) or getattr(current, "_pipeline_script_source_bound", False):
@@ -242,68 +219,12 @@ def _wrap_visuals(bot):
         bot.run_robot.__globals__["process_visuals_async"] = script_bound_visuals
 
 
-def _write_endpoint_srt(path: str, word_timings: list[dict], offset: float = 0.0) -> bool:
-    if not word_timings:
-        return False
-    lines = []
-    chunk = []
-    start = None
-    last_end = None
-    for item in word_timings:
-        word = clean_narration(item.get("word", ""))
-        if not word:
-            continue
-        item_start = max(0.0, float(item.get("start", 0.0))) + offset
-        item_end = max(item_start + 0.08, float(item.get("end", item_start + 0.1)) + offset)
-        if start is None:
-            start = item_start
-        chunk.append(word)
-        last_end = item_end
-        if len(chunk) >= 6 or (last_end - start) >= 2.2:
-            lines.append((start, last_end, " ".join(chunk)))
-            chunk, start = [], None
-    if chunk and start is not None and last_end is not None:
-        lines.append((start, last_end, " ".join(chunk)))
-    if not lines:
-        return False
-
-    def stamp(seconds: float) -> str:
-        millis = max(0, int(round(seconds * 1000)))
-        hours, millis = divmod(millis, 3_600_000)
-        minutes, millis = divmod(millis, 60_000)
-        secs, millis = divmod(millis, 1000)
-        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-    with open(path, "w", encoding="utf-8") as handle:
-        for index, (start, end, text) in enumerate(lines, 1):
-            handle.write(f"{index}\n{stamp(start)} --> {stamp(end)}\n{text}\n\n")
-    return True
-
-
-def _wrap_compile(bot):
-    current = getattr(bot, "compile_video", None)
-    if not callable(current) or getattr(current, "_pipeline_integrity_wrapped", False):
-        return
-
-    def guarded_compile(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
-        # The canonical compile_video owns motion, word-highlight captions, the
-        # scene-one hook overlay and final loudness normalization. Do not add a
-        # second subtitle filter or re-encode here.
-        return current(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode)
-
-    guarded_compile._pipeline_integrity_wrapped = True
-    bot.compile_video = guarded_compile
-    if callable(getattr(bot, "run_robot", None)) and hasattr(bot.run_robot, "__globals__"):
-        bot.run_robot.__globals__["compile_video"] = guarded_compile
-
-
 def patch_pipeline_integrity(bot) -> bool:
     try:
-        _wrap_script_writer(bot)
+        # Script normalization/strict fallback is owned by the canonical script
+        # router. This integrity layer only guards downstream narration/visuals.
         _wrap_audio(bot)
         _wrap_visuals(bot)
-        # compile_video remains owned by the canonical renderer and workflow
-        # progress wrapper; the compatibility helper _wrap_compile is not installed.
         bot._pipeline_integrity_installed = True
         print(f"   [Pipeline Integrity] Strict script/narration/subtitle/branding guards installed ({VERSION}).", flush=True)
         return True
