@@ -986,7 +986,7 @@ class DashboardWorkflowController(WorkflowController):
             elif count:
                 message = f"Found {count} new AI-checked images for '{query}'; no error was raised because the configured sources were exhausted."
             else:
-                message = f"No new identity-checked images were returned for '{query}'. Try a different query."
+                message = f"No new AI-checked images were returned for '{query}'. Try a different query."
             self.update("visual_approval", 76, message)
             return True, message
         except Exception as exc:
