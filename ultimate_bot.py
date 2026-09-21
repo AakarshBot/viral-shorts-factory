@@ -31,7 +31,11 @@ def global_exception_hook(exctype, value, tb):
     print("!"*60)
     traceback.print_exception(exctype, value, tb)
     print("!"*60)
-    input("\nPress Enter to exit...")
+    remote_mode = str(os.getenv("VSF_REMOTE_MODE", "") or "").strip().lower()
+    if bool(getattr(sys.stdin, "isatty", lambda: False)()) and remote_mode not in {
+        "1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"
+    }:
+        input("\nPress Enter to exit...")
 
 sys.excepthook = global_exception_hook
 

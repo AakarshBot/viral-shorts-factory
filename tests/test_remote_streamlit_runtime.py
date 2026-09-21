@@ -75,3 +75,32 @@ def test_remote_secret_bridge_names_cover_visual_provider_keys():
     assert "SERPAPI_API_KEY" in app.REQUIRED_SECRET_NAMES
     assert "PIXABAY_API_KEY" in app.REQUIRED_SECRET_NAMES
     assert "OPENALEX_API_KEY" in app.REQUIRED_SECRET_NAMES
+
+
+def test_global_exception_hook_does_not_block_noninteractive_runtime(monkeypatch):
+    class _NonInteractiveStdin:
+        @staticmethod
+        def isatty():
+            return False
+
+    monkeypatch.setattr(ultimate_bot.sys, "stdin", _NonInteractiveStdin())
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("non-interactive exception handling must not wait for console input")
+
+    monkeypatch.setattr("builtins.input", fail_if_called)
+    ultimate_bot.global_exception_hook(ValueError, ValueError("diagnostic"), None)
+
+
+def test_global_exception_hook_preserves_local_interactive_pause(monkeypatch):
+    class _InteractiveStdin:
+        @staticmethod
+        def isatty():
+            return True
+
+    calls = []
+    monkeypatch.setattr(ultimate_bot.sys, "stdin", _InteractiveStdin())
+    monkeypatch.delenv("VSF_REMOTE_MODE", raising=False)
+    monkeypatch.setattr("builtins.input", lambda prompt: calls.append(prompt))
+    ultimate_bot.global_exception_hook(ValueError, ValueError("diagnostic"), None)
+    assert calls == ["\nPress Enter to exit..."]
