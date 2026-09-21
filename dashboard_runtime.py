@@ -165,6 +165,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         _deduplicate_stage,
         _editorial_score,
         _infer_discovery_category,
+        _discovery_category_allowed,
         _load_history,
         _load_used_topics,
         _originality_stage,
@@ -181,13 +182,26 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     used_topics = _load_used_topics(conn)
     language = str(web_config.get("language", "english"))
     requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+    ai_sports_mode = str(web_config.get("discovery_mode", "") or "").strip().lower() == "ai_sports"
+
+    # The dashboard's AI choice is nested inside Sports. Keep it on the Sports
+    # discovery lanes and let the AI ranking decide which current sports event
+    # is strongest instead of opening a generic all-news radar.
+    genre_key = "sports" if ai_sports_mode else ""
+    genre_cfg = dict(bot.CONTENT_CATEGORIES.get("sports", {})) if ai_sports_mode else {}
     raw, social_titles = collect_high_recall_stories(
         bot,
-        "",
-        {},
+        genre_key,
+        genre_cfg,
         custom_gnews_q=requested_topic or None,
         broad_discovery=True,
     )
+
+    if ai_sports_mode:
+        raw = [
+            item for item in raw
+            if _discovery_category_allowed("sports", item)
+        ]
 
     stage30 = _cheap_filter(raw, max_items=120, max_age_hours=48)
     stage20 = _deduplicate_stage(stage30, max_items=90)
@@ -197,7 +211,7 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
 
     ranked = []
     for item in stage10:
-        category = _infer_discovery_category(item)
+        category = "sports" if ai_sports_mode else _infer_discovery_category(item)
         scored = _editorial_score(
             item,
             rows,
@@ -231,8 +245,12 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         )
 
     print(
-        f"   [AI Discovery] broad intake={len(raw)} -> Top {len(pool)}; "
-        "category inferred after discovery, not used as an intake gate.",
+        f"   [AI Discovery] {'sports ' if ai_sports_mode else ''}intake={len(raw)} -> Top {len(pool)}; "
+        + (
+            "Sports-scoped AI ranking is active."
+            if ai_sports_mode
+            else "category inferred after discovery."
+        ),
         flush=True,
     )
     return pool
