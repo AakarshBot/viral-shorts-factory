@@ -396,7 +396,10 @@ def _load_history(conn):
             """SELECT status, video_id, avg_view_percentage, genre,
                       format_used, language_used, combo_key, topic
                FROM vault
-               WHERE avg_view_percentage IS NOT NULL"""
+               WHERE avg_view_percentage IS NOT NULL
+                 AND video_id IS NOT NULL
+                 AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')
+                 AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"""
         )
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
