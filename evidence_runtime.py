@@ -6,6 +6,8 @@ independent domains, and records conflicts before the script writer sees the evi
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import html
 import os
 import re
@@ -642,11 +644,26 @@ def _merge_claims(raw_claims: List[Dict[str, Any]]) -> tuple:
 
 def build_evidence_pack(story: Dict[str, Any], sources: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     candidates = list(sources if sources is not None else discover_sources(story))
-    enriched = []
-    for index, source in enumerate(candidates):
-        record = dict(source)
-        record["source_id"] = _source_id(record, index)
-        enriched.append(extract_article_source(record))
+
+    # Each source page is independent. Fetch them concurrently to avoid turning
+    # five bounded network requests into five serial waits. Results are collected
+    # in the original candidate order so evidence ranking/output stays unchanged.
+    enriched = [None] * len(candidates)
+    if len(candidates) <= 1:
+        for index, source in enumerate(candidates):
+            record = dict(source)
+            record["source_id"] = _source_id(record, index)
+            enriched[index] = extract_article_source(record)
+    else:
+        max_workers = min(5, len(candidates))
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="evidence-fetch") as pool:
+            futures = []
+            for index, source in enumerate(candidates):
+                record = dict(source)
+                record["source_id"] = _source_id(record, index)
+                futures.append((index, pool.submit(extract_article_source, record)))
+            for index, future in futures:
+                enriched[index] = future.result()
 
     usable = [
         item for item in enriched
