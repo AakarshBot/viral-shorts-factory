@@ -123,7 +123,7 @@ _SEARCH_WEAK = {
 # in the scene evidence. This is deliberately cross-genre rather than
 # sport/celebrity/product specific.
 _SEARCH_STRONG = {
-    "batting", "bowling", "fielding", "wicket", "innings", "match", "odi", "t20", "test",
+    "batting", "bowling", "fielding", "wicket", "playing", "cricket", "innings", "match", "odi", "t20", "test",
     "series", "qualifier", "semifinal", "final", "trophy", "award", "medal",
     "ceremony", "presentation", "conference", "summit", "launch", "opening",
     "closing", "meeting", "hearing", "rally", "protest", "demonstration",
