@@ -498,6 +498,8 @@ def _init_state() -> None:
         "live_cricket_scope": "",
         "language_label": next(iter(ultimate_bot.LANGUAGES.values()))["label"] if ultimate_bot.LANGUAGES else "English",
         "visual_pipeline_label": "Option 1 · Current image sourcing",
+        "live_path_ready": False,
+        "test_menu_selection": "Offline Diagnostics",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -664,7 +666,8 @@ def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
 
 def render_header(action_mode: str) -> None:
     titles = {
-        "Live Factory": ("Live Factory", "Create, review and release a Short."),
+            "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Test": ("Test", "Diagnostics, previews and engineering checks."),
         "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
         "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
         "Demo Factory": ("Demo Factory", "Controlled tests for factory components."),
@@ -747,6 +750,7 @@ def render_workspace_navigation() -> str:
 
 def render_live_navigation() -> Dict[str, Any]:
     """Render the deliberate Live hierarchy and return the production config."""
+    st.session_state["live_path_ready"] = False
     _render_section_header(
         "Live Factory",
         "Choose your production path",
@@ -795,6 +799,7 @@ def render_live_navigation() -> Dict[str, Any]:
             st.session_state.live_topic_selection = topic_choice
             _clear_live_run_selection()
         final_path_ready = bool(st.session_state.get("live_topic_selection"))
+        st.session_state["live_path_ready"] = final_path_ready
 
     elif live_format == "Sports":
         sports_choice = st.pills(
@@ -828,8 +833,10 @@ def render_live_navigation() -> Dict[str, Any]:
                 st.session_state.live_cricket_scope = cricket_choice
                 _clear_live_run_selection()
             final_path_ready = bool(st.session_state.get("live_cricket_scope"))
+            st.session_state["live_path_ready"] = final_path_ready
         elif sports_mode in {"Niche Sports", "AI"}:
             final_path_ready = True
+            st.session_state["live_path_ready"] = True
 
     if not final_path_ready:
         st.caption("Choose the highlighted menu item to open the next level.")
@@ -2128,6 +2135,9 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
 
 
 def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowController) -> None:
+    if not st.session_state.get("live_path_ready"):
+        return
+
     problems = check_required_local_assets()
     live_blockers = [item for item in problems if "provider key" in item]
     if live_blockers:
