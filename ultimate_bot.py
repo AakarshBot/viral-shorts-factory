@@ -95,60 +95,11 @@ os.makedirs(BGM_DIR, exist_ok=True)
 os.makedirs(SFX_DIR, exist_ok=True)
 os.makedirs(ASSET_CACHE_DIR, exist_ok=True)
 
-BRAND_SAFETY_KEYWORDS = [
-    "death toll", "casualties", "suicide", "terrorism", "attack details", 
-    "sexual assault", "child harm", "hate speech", "active legal cases", 
-    "vaccine claims", "election fraud", "explicit content"
-]
-
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
-
-HOOK_STYLES_REGISTRY = {
-    "Curiosity Gap": [
-        "Nobody is talking about this massive hidden detail...",
-        "There is one crucial piece everyone is missing here...",
-        "What happened behind closed doors completely changes everything..."
-    ],
-    "Bold Declaration": [
-        "Everything you thought you knew about this is entirely wrong.",
-        "This is single handedly the wildest event of the year.",
-        "Nobody saw this historic twist coming."
-    ],
-    "Direct Question": [
-        "Did you actually catch what just happened here?",
-        "Are we really going to pretend this is normal?",
-        "How did everyone miss this massive warning sign?"
-    ],
-    "High-Stakes Reality": [
-        "This single moment just altered the landscape forever.",
-        "The fallout from this is going to be completely brutal.",
-        "There is no coming back from what just occurred."
-    ],
-    "Urgent Warning": [
-        "Stop scrolling right now because this matters.",
-        "This update changes the entire rulebook instantly.",
-        "Pay very close attention to what is unfolding right now."
-    ],
-    "Contrarian Take": [
-        "Unpopular opinion, but this was entirely bound to happen.",
-        "Everyone is praising this, but they are dead wrong.",
-        "The real story here is completely different from what you think."
-    ],
-    "Absurd Reality": [
-        "You honestly will not believe your eyes when you see this.",
-        "This sounds like pure fiction, but it actually happened.",
-        "We live in a simulation because this makes zero sense."
-    ],
-    "The Aftermath": [
-        "The consequences of this move are already hitting hard.",
-        "Everything changes starting right this second.",
-        "The fallout from this decision is staggering."
-    ]
-}
 
 CONTENT_CATEGORIES = {
     "entertainment": {

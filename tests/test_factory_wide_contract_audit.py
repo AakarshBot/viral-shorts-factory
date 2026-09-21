@@ -85,3 +85,11 @@ def test_unicode_visual_queries_survive_planner():
         queries, visual_type = planner.build_deep_queries(scene, title)
         assert queries, f"planner lost multilingual entity {entity!r}"
         assert any(entity in query for query in queries), (entity, queries, visual_type)
+
+
+def test_ultimate_bot_has_no_unused_legacy_top_level_constant_registries():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "\nBRAND_SAFETY_KEYWORDS =" not in source
+    assert "\nHOOK_STYLES_REGISTRY =" not in source
