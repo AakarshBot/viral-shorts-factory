@@ -386,7 +386,11 @@ class WorkflowController:
                     config["selected_story"] = dict(selected_story)
                 try:
                     self._reporter("research", 18, "Selected story locked. Preparing the production pipeline…")
-                    run_robot_with_exact_identity(self.bot, web_config=config)
+                    production_runner = getattr(self.bot, "run_robot", None)
+                    if getattr(production_runner, "_exact_identity_runner", False):
+                        production_runner(web_config=config)
+                    else:
+                        run_robot_with_exact_identity(self.bot, web_config=config)
                 finally:
                     if original_gather is not None:
                         globals_dict["gather_and_filter_stories"] = original_gather
