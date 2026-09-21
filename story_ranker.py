@@ -1507,18 +1507,6 @@ CLICKBAIT_TITLE_TERMS = {
     "shocking", "craziest", "insane", "unbelievable", "must see", "viral video",
 }
 
-ACTIONABILITY_TERMS = {
-    "announce", "announced", "launch", "launched", "unveil", "unveiled", "approve",
-    "approved", "ban", "banned", "sign", "signed", "acquire", "acquired", "win",
-    "won", "wins", "defeat", "beat", "appoint", "appointed", "resign", "resigned",
-    "arrest", "arrested", "qualify", "qualified", "eliminate", "eliminated",
-    "release", "released", "delay", "delayed", "cancel", "cancelled", "join", "joined",
-    "open", "opened", "close", "closed", "surge", "surges", "rise", "rises", "fall",
-    "falls", "drop", "drops", "approve", "decision", "decides", "set to", "faces",
-    "hit", "record", "records", "breakthrough", "deal", "agreement", "investigation",
-    "study", "finds", "found", "result", "results", "election", "elected", "court",
-}
-
 def _india_relevance_score(story):
     text = _text_blob(story)
     title = _clean(story.get("title") or "")
