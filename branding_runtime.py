@@ -100,6 +100,8 @@ def _artifact_qc(
         format_name = str((data.get("format") or {}).get("format_name") or "")
         if width <= 0 or height <= 0 or duration <= 0:
             return False, "rendered video has invalid dimensions or duration"
+        if duration > 180.0:
+            return False, f"rendered video is longer than the 3-minute YouTube Shorts limit: {duration:.2f}s"
         if abs((width / height) - (9 / 16)) > 0.015:
             return False, f"rendered video is not Shorts-shaped: {width}x{height}"
         if "mp4" not in format_name.lower() and not str(path).lower().endswith(".mp4"):
