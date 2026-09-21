@@ -289,12 +289,18 @@ def _channel_performance_prior(rows, target_category="", target_format="", targe
 
     global_mean = sum(values) / len(values)
 
-    category = _clean(target_category)
+    def _context_value(value):
+        cleaned = _clean(value)
+        if "sports" in cleaned or "cricket" in cleaned:
+            return "sports"
+        return cleaned
+
+    category = _context_value(target_category)
     fmt = _clean(target_format)
     language = _clean(target_language)
 
     def matches(row, require_all=True):
-        row_category = _clean(row.get("genre"))
+        row_category = _context_value(row.get("genre"))
         row_format = _clean(row.get("format_used"))
         row_language = _clean(row.get("language_used"))
         checks = []
@@ -308,7 +314,7 @@ def _channel_performance_prior(rows, target_category="", target_format="", targe
 
     context_rows = [row for row in eligible if matches(row, require_all=True)]
     if not context_rows and category:
-        context_rows = [row for row in eligible if _clean(row.get("genre")) == category]
+        context_rows = [row for row in eligible if _context_value(row.get("genre")) == category]
     if not context_rows and fmt:
         context_rows = [row for row in eligible if _clean(row.get("format_used")) == fmt]
     if not context_rows and language:
