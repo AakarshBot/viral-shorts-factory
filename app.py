@@ -1926,6 +1926,7 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
             ):
                 st.rerun()
                 return
+            render_powershell_widget(live_snapshot)
             _render_content(live_snapshot)
 
         _live_monitor_fragment()
