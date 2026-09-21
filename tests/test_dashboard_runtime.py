@@ -1050,6 +1050,46 @@ def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, 
     assert "already assigned to slide 2" in message
 
 
+def test_dashboard_manual_visual_search_releases_operation_lock_after_failure(monkeypatch, tmp_path):
+    from dashboard_runtime import DashboardWorkflowController
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Search lock test",
+        "script": [{"primary_entity": "Subject", "voiceover": "One."}],
+    }
+    controller._visual_packages = [[{"image": str(tmp_path / "missing.jpg"), "visual_verified": True}]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    import visual_retrieval_runtime
+    def fail_search(*args, **kwargs):
+        raise RuntimeError("synthetic search failure")
+    monkeypatch.setattr(visual_retrieval_runtime, "collect_manual_visual_search", fail_search)
+
+    ok, message = controller.search_visual_pool("Subject")
+    assert ok is False
+    assert "failed safely" in message.lower()
+
+    assert controller._visual_search_operation_lock.acquire(blocking=False) is True
+    controller._visual_search_operation_lock.release()
+
+
+def test_dashboard_manual_visual_search_ui_uses_one_shot_form_without_forced_rerun():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index('st.markdown("### Find 10 more images")')
+    end = source.index('st.markdown("---")', start)
+    block = source[start:end]
+
+    assert "with st.form(" in block
+    assert "clear_on_submit=True" in block
+    assert "search_submitted = st.form_submit_button(" in block
+    assert "controller.search_visual_pool(search_query)" in block
+    assert "st.rerun()" not in block
+
+
+
 def test_dashboard_new_visual_search_uses_ten_image_contract(monkeypatch, tmp_path):
     from dashboard_runtime import DashboardWorkflowController
 
