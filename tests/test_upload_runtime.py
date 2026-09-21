@@ -23,16 +23,6 @@ class _FakeVideos:
         self.insert_calls.append(kwargs)
         return _FakeUploadRequest(self.response)
 
-    def list(self, **kwargs):
-        class _ListRequest:
-            def __init__(self, response):
-                self.response = response
-
-            def execute(self):
-                return {"items": [{"status": self.response.get("status", {})}]}
-
-        return _ListRequest(self.response)
-
 
 class _FakeCommentRequest:
     def __init__(self, response):
@@ -142,7 +132,7 @@ def test_youtube_upload_public_posts_approved_comment(monkeypatch, tmp_path):
     )
 
 
-def test_youtube_upload_public_refuses_private_result(monkeypatch, tmp_path):
+def test_youtube_upload_public_reports_youtube_visibility_override(monkeypatch, tmp_path):
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"synthetic mp4")
 
@@ -159,9 +149,10 @@ def test_youtube_upload_public_refuses_private_result(monkeypatch, tmp_path):
         )
     except Exception as exc:
         assert type(exc).__name__ == "YouTubePublicVisibilityError"
-        assert "privacyStatus='private'" in str(exc)
+        assert "kept it private instead of public" in str(exc)
+        assert exc.video_id == "video-123"
     else:
-        raise AssertionError("Public upload must fail closed when YouTube persists private visibility.")
+        raise AssertionError("A YouTube privacy override should be reported to the caller.")
 
 
 def test_workflow_controller_rejects_duplicate_upload_for_same_run(monkeypatch, tmp_path):
