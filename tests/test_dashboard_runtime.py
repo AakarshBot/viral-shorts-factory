@@ -1561,8 +1561,11 @@ def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
     assert "--studio-" in source
     assert "prefers-reduced-motion" in source
     assert ".stApp::before" not in source
-    assert "position:fixed;" not in source[source.index(".studio-") : source.index("</style>")]
-    assert "backdrop-filter" not in source[source.index(".studio-") : source.index("</style>")]
+    style_start = source.index('st.markdown("""<style>')
+    style_end = source.index('</style>""", unsafe_allow_html=True)', style_start)
+    style = source[style_start:style_end]
+    assert "position:fixed;" not in style
+    assert "backdrop-filter" not in style
     assert "2026 editorial os" in source.lower()
     assert ".learning-strip" in source
     assert "Channel learning is active" in source
