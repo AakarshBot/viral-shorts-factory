@@ -891,7 +891,6 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
 
     assert "Choose from the visual pool" in source
     assert "Available verified images" in source
-    assert "Available verified images" in source
     assert "Search up to 10 new images" in source
     assert '@st.dialog("Crop / reframe selected image", width="large")' in source
     assert 'st.session_state["visual_crop_target"]' in source
@@ -900,7 +899,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     assert "controller.crop_visual_pool_asset(" in source
     assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
     assert 'crop_mode=mode_value' in source
-    assert 'return_type="both"' in source
+    assert 'return_type="box"' in source
     assert 'should_resize_image=True' in source
     assert "Use on slide" in source
     assert "Crop / reframe selected image" in source
@@ -919,6 +918,55 @@ def test_repository_does_not_use_deprecated_streamlit_container_width():
             offenders.append(str(path.relative_to(repo_root)))
     assert offenders == []
 
+
+
+def test_dashboard_six_topic_grid_uses_three_column_rows():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def render_live_factory")
+    end = source.index("def render_channel_statistics", start)
+    block = source[start:end]
+    assert "page_size = 6" in block
+    assert "range(0, len(visible), 3)" in block
+
+
+def test_dashboard_retained_topics_are_sent_back_through_current_discovery():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert 'retained_candidates=st.session_state.get("retained_topics", [])' in source
+    runtime = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
+    assert "def _merge_retained_topics(" in runtime
+    assert "rank_discovery_candidates(" in runtime
+
+
+def test_dashboard_error_progress_preserves_last_known_percent():
+    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("except Exception as exc:", source.index("def start_production"))
+    block = source[start:source.index("finally:", start)]
+    assert "last_percent = self.state.percent" in block
+    assert "self.state.percent = last_percent" in block
+    assert "self.state.percent = 100" not in block
+
+
+def test_dashboard_crop_preview_uses_the_same_server_crop_logic():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def _render_crop_dialog")
+    end = source.index("def render_visual_review", start)
+    block = source[start:end]
+    assert 'return_type="box"' in block
+    assert "_manual_crop_box_to_shorts(" in block
+    assert "crop_preview = crop_result" not in block
+
+
+def test_dashboard_visual_replacement_returns_old_image_to_global_pool():
+    source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
+    assert "def _return_slide_visual_to_pool(" in source
+    assert "self._return_slide_visual_to_pool(layer, scene)" in source
+    assert "self._return_slide_visual_to_pool(old_layer, replacement_scene)" in source
+    assert 'live_item.get("original_path") or live_item.get("path")' in source
+
+
+def test_workflow_error_message_is_dashboard_neutral():
+    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    assert 'self.state.message = "Run stopped with an error."' in source
 
 
 def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, tmp_path):
@@ -1408,9 +1456,9 @@ def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
     assert ".brand-eyebrow" in source
     assert ".brand-trust-row" in source
     assert ".learning-strip" in source
-    assert "Factory learning is active" in source
+    assert "Channel learning is active" in source
     assert "Learning {channel_fit:.1f}/10" in source
-    assert "Past topic match" in source
+    assert "Held · previous run" in source
     assert "st.markdown(" in source
 
 
