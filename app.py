@@ -274,6 +274,27 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
 }
 .sidebar-status-title{color:#252a2d}
 .sidebar-status-copy{color:#756d63}
+section[data-testid="stSidebar"] .st-key-workspace_mode button{
+  min-height:42px!important;
+  border-radius:12px!important;
+  border:1px solid #d4c7b9!important;
+  background:rgba(255,253,249,.82)!important;
+  color:#2d3235!important;
+  font-weight:850!important;
+  box-shadow:none!important;
+}
+section[data-testid="stSidebar"] .st-key-workspace_mode button:hover{
+  border-color:#a9bbb8!important;
+  background:#f8fbfa!important;
+}
+section[data-testid="stSidebar"] .st-key-workspace_mode button[aria-selected="true"],
+section[data-testid="stSidebar"] .st-key-workspace_mode button[aria-checked="true"]{
+  transform:scale(1.02);
+  border-color:#8eafab!important;
+  background:#e9f1ef!important;
+  color:#244d50!important;
+  box-shadow:0 6px 16px rgba(47,93,98,.10)!important;
+}
 [data-testid="stSidebar"] [data-testid="stExpander"]{
   background:rgba(255,253,249,.82)!important;
   border-color:#d8ccbf!important;
@@ -795,15 +816,18 @@ def render_workspace_navigation() -> str:
     current = st.session_state.get("workspace_mode", "Live")
     if current not in options:
         current = "Live"
+
     st.sidebar.markdown("<div class='sidebar-kicker'>Workspace</div>", unsafe_allow_html=True)
-    selected = st.sidebar.radio(
+    selected = st.sidebar.pills(
         "Workspace",
         options,
-        index=options.index(current),
+        selection_mode="single",
+        default=current,
         key="workspace_mode",
-        label_visibility="visible",
+        label_visibility="collapsed",
+        width="stretch",
     )
-    return selected
+    return selected or current
 
 
 def render_live_navigation() -> Dict[str, Any]:
