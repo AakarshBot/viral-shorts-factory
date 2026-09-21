@@ -149,73 +149,10 @@ def build_discovery_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 48) -> list[dict[str, Any]]:
-    """Remove stories that substantially overlap topics used in the recent cooldown window."""
-    if conn is None:
-        return stories
+    """Use the canonical posted-only discovery cooldown implementation."""
+    from story_ranker import _recent_topic_cooldown as canonical_recent_topic_cooldown
 
-    recent_topics: list[str] = []
-    try:
-        rows = conn.execute(
-            "SELECT topic, COALESCE(date_used, created_at) FROM vault "
-            "WHERE topic IS NOT NULL AND topic != '' "
-            "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
-            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
-        ).fetchall()
-        now = datetime.now(timezone.utc)
-        for topic, raw_date in rows:
-            if not topic or not raw_date:
-                continue
-            value = raw_date if isinstance(raw_date, datetime) else str(raw_date).strip()
-            if not value:
-                continue
-            try:
-                when = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                try:
-                    when = datetime.strptime(value[:10], "%Y-%m-%d")
-                except ValueError:
-                    continue
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=timezone.utc)
-            age_hours = (now - when.astimezone(timezone.utc)).total_seconds() / 3600.0
-            if 0 <= age_hours <= hours:
-                recent_topics.append(str(topic))
-    except Exception as exc:
-        print(f"   [Dashboard Discovery] Recent topic history unavailable: {type(exc).__name__}", flush=True)
-        return stories
-
-    if not recent_topics:
-        return stories
-
-    from story_ranker import _tokens, _topic_overlap
-
-    kept: list[dict[str, Any]] = []
-    excluded = 0
-    for story in stories:
-        title = str(story.get("title") or "").strip()
-        current_tokens = _tokens(title)
-        is_repeat = False
-        for old_topic in recent_topics:
-            overlap = _topic_overlap(title, old_topic)
-            shared = len(current_tokens & _tokens(old_topic))
-            if overlap >= 0.50 or (shared >= 3 and overlap >= 0.32):
-                is_repeat = True
-                break
-        if is_repeat:
-            story["discovery_rejection"] = "Recent topic cooldown (48 hours)"
-            excluded += 1
-            continue
-        kept.append(story)
-
-    if excluded:
-        print(
-            f"   [Dashboard Discovery] Recent topic cooldown removed {excluded} repeated candidate(s); "
-            f"window={hours}h.",
-            flush=True,
-        )
-    return kept
-
-
+    return canonical_recent_topic_cooldown(conn, stories, hours=hours)
 
 
 
