@@ -1284,6 +1284,27 @@ def _discovery_portfolio_pass(story):
     return True
 
 
+def _source_label(story):
+    """Return a stable display label for a discovered story."""
+    for key in ("source", "publisher", "source_name", "domain"):
+        value = story.get(key)
+        if value:
+            return str(value)
+    url = str(story.get("url") or story.get("link") or "")
+    match = re.search(r"https?://([^/]+)", url)
+    return match.group(1) if match else "News source"
+
+
+def _story_url(story):
+    return str(story.get("url") or story.get("link") or "").strip()
+
+
+def _story_key(story):
+    title = str(story.get("title") or "").strip().lower()
+    url = _story_url(story).lower()
+    return re.sub(r"[^a-z0-9]+", " ", f"{title} {url}").strip()
+
+
 def _candidate_reason(story):
     dimensions = story.get("discovery_dimensions") or {}
     parts = []
