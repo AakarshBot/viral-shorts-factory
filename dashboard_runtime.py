@@ -157,7 +157,9 @@ def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 
     try:
         rows = conn.execute(
             "SELECT topic, COALESCE(date_used, created_at) FROM vault "
-            "WHERE topic IS NOT NULL AND topic != ''"
+            "WHERE topic IS NOT NULL AND topic != '' "
+            "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
         ).fetchall()
         now = datetime.now(timezone.utc)
         for topic, raw_date in rows:
