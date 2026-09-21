@@ -93,3 +93,6 @@ def test_ultimate_bot_has_no_unused_legacy_top_level_constant_registries():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "\nBRAND_SAFETY_KEYWORDS =" not in source
     assert "\nHOOK_STYLES_REGISTRY =" not in source
+    assert '\nIMAGEMAGICK_BINARY_PATH =' not in source
+    assert '\nUNSPLASH_ACCESS_KEY = os.getenv' not in source
+    assert '\nPEXELS_API_KEY = os.getenv' not in source
