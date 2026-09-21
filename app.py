@@ -2715,7 +2715,7 @@ def render_channel_statistics() -> None:
                 with st.expander(f"Learning · {label}", expanded=False):
                     st.dataframe(table[:8], width="stretch", hide_index=True)
                     st.caption(
-                        "These historical factory patterns are already used by the editorial/ranking system. "
+                        "These historical patterns are shown here for analysis. Active ranking currently uses retention, category/format/language fit and prior-topic similarity; deeper hook/structure patterns are analytics only. "
                         "Small samples are directional rather than causal."
                     )
     except Exception as exc:
