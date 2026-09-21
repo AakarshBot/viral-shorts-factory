@@ -2720,7 +2720,7 @@ def render_channel_statistics() -> None:
         ("By language", stats["by_language"]),
         ("Recent history", stats["recent"]),
     ):
-        with st.expander(label, expanded=(label == "Recent factory history")):
+        with st.expander(label, expanded=(label == "Recent history")):
             if table:
                 st.dataframe(table, width="stretch", hide_index=True)
             else:
@@ -2880,7 +2880,7 @@ def render_test_page() -> None:
         render_channel_statistics()
     elif st.session_state.test_menu_selection == "Offline Diagnostics":
         render_offline_page()
-    elif st.session_state.test_menu_selection == "Demo Factory":
+    elif st.session_state.test_menu_selection == "Demo":
         render_demo_page()
     else:
         render_final_branding_preview()
