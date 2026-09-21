@@ -44,8 +44,6 @@ from dashboard_runtime import (
     factory_function_coverage,
     run_demo_section,
     upload_ready_for_manual_decision,
-    evaluate_live_qc_gates,
-    live_qc_passes,
     live_monitor_should_poll,
 )
 
@@ -150,14 +148,6 @@ p{color:var(--text)}
 .sidebar-status{background:#171c25;border:1px solid #29303b;border-radius:13px;padding:12px 13px;margin-top:10px}
 .sidebar-status-title{font-size:.75rem;font-weight:800;color:#f3f5f8}
 .sidebar-status-copy{color:#9ca6b5;font-size:.69rem;margin-top:3px;line-height:1.4}
-.release-gates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.release-gate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
-.release-gate.pass{border-color:#c6e8d6;background:linear-gradient(180deg,#fff,#f7fcf9)}
-.release-gate.block{border-color:#f0d8b0;background:linear-gradient(180deg,#fff,#fffbf4)}
-.release-gate-name{font-size:.75rem;font-weight:850;color:var(--text)}
-.release-gate-detail{color:var(--muted);font-size:.69rem;line-height:1.4;margin-top:3px}
-.live-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 13px;margin:10px 0 16px;box-shadow:var(--shadow)}
-.live-bar-copy{color:var(--muted);font-size:.75rem}.live-bar-copy b{color:var(--text)}
 .empty-state{background:linear-gradient(135deg,#ffffff 0%,#f8f7ff 100%);border:1px solid #ddd9ff;border-radius:21px;padding:28px;box-shadow:var(--shadow-lg)}
 .empty-title{font-size:1.58rem;font-weight:900;letter-spacing:-.04em;color:var(--text)}
 .empty-copy{color:var(--muted);font-size:.88rem;line-height:1.55;max-width:720px}
