@@ -1364,8 +1364,38 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     )
 
     # All retained images are already shown in the single pool above.
-    st.markdown("### New manual searches")
-    st.caption("Each search returns up to 10 NEW images that passed the AI identity check and lenient monetization check. Context suitability is left to you.")
+    st.markdown("### Find 10 more images")
+    st.caption(
+        "Search all available image sources for up to 10 new AI-checked results. "
+        "Licensing/provenance is shown as source metadata; you decide what to use."
+    )
+    with st.form(
+        key=f"global_visual_search_form_{run_id}",
+        clear_on_submit=True,
+        border=True,
+    ):
+        search_query = st.text_input(
+            "New image search",
+            placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
+        )
+        search_submitted = st.form_submit_button(
+            "Search up to 10 new images",
+            type="secondary",
+            width="stretch",
+        )
+
+    if search_submitted:
+        ok, message = controller.search_visual_pool(search_query)
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
+        search_groups = [
+            dict(group)
+            for group in (controller.snapshot().get("visual_search_groups") or [])
+            if isinstance(group, dict)
+        ]
+
     for group in search_groups:
         group_id = str(group.get("id") or "search")
         group_items = [dict(item) for item in (group.get("items") or []) if isinstance(item, dict)]
@@ -1422,24 +1452,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 ):
                                     st.session_state.visual_pool_crop_target = asset_hash
                                     st.rerun()
-
-    search_query = st.text_input(
-        "Search for up to 10 new images",
-        placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
-        key=f"global_visual_search_{run_id}",
-    )
-    if st.button(
-        "Search up to 10 new images",
-        type="secondary",
-        width="stretch",
-        key=f"global_visual_search_button_{run_id}",
-    ):
-        ok, message = controller.search_visual_pool(search_query)
-        if ok:
-            st.success(message)
-            st.rerun()
-        else:
-            st.error(message)
 
     st.markdown("---")
     approve_col, reject_col = st.columns([1.35, 1], gap="medium")
