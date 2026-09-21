@@ -156,7 +156,66 @@ def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 
 
 
 
-def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
+def _merge_retained_topics(
+    bot,
+    web_config: dict[str, Any],
+    conn,
+    fresh_candidates: list[dict[str, Any]],
+    retained_candidates: list[dict[str, Any]] | None,
+    *,
+    max_candidates: int,
+) -> list[dict[str, Any]]:
+    """Revalidate unpublished topics through the current discovery gate."""
+    retained = [dict(item) for item in (retained_candidates or []) if isinstance(item, dict) and str(item.get("title") or "").strip()]
+    if not retained:
+        return list(fresh_candidates or [])[:max_candidates]
+    from story_ranker import _cricket_relevance_pass, _requested_topic_pass, rank_discovery_candidates
+    category = str(web_config.get("category") or "").strip()
+    format_mode = str(web_config.get("format_mode") or "regular").strip()
+    language = str(web_config.get("language") or "english").strip()
+    requested_topic = str(web_config.get("requested_topic") or "").strip()
+    genre_key = category or ("sports_stories_of_day" if web_config.get("cricket_pipeline") else "national_global_affairs")
+    eligible = [
+        item for item in retained
+        if _cricket_relevance_pass(item, genre_key)
+        and _requested_topic_pass(item, requested_topic)
+    ]
+    if not eligible:
+        return list(fresh_candidates or [])[:max_candidates]
+    validated = rank_discovery_candidates(
+        eligible,
+        conn=conn,
+        target_category=category or genre_key,
+        target_format=format_mode,
+        target_language=language,
+        social_titles=[],
+        ai_cricket=(genre_key == "sports_stories_of_day"),
+        max_candidates=len(eligible),
+    )
+    validated_keys = {
+        str(item.get("story_key") or item.get("story_url") or item.get("url") or item.get("title") or "").strip().casefold()
+        for item in validated
+        if isinstance(item, dict)
+    }
+    output = []
+    seen = set()
+    for item in [*validated, *(fresh_candidates or [])]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("story_key") or item.get("story_url") or item.get("url") or item.get("title") or "").strip().casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        item = dict(item)
+        if key in validated_keys:
+            item["retained_from_previous_run"] = True
+        output.append(item)
+        if len(output) >= max_candidates:
+            break
+    return output
+
+
+def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28, retained_candidates: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Build the Sports-AI topic portfolio from the canonical sports discovery radar."""
     from story_ranker import (
         _candidate_reason,
@@ -234,6 +293,14 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         ranked.append(scored)
 
     ranked = diversity_rerank(ranked, max_items=max_candidates)
+    ranked = _merge_retained_topics(
+        bot,
+        web_config,
+        conn,
+        ranked,
+        retained_candidates,
+        max_candidates=max_candidates,
+    )
     pool = ranked[:max_candidates]
     for rank, item in enumerate(pool, 1):
         item["discovery_rank"] = rank
@@ -258,7 +325,13 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     return pool
 
 
-def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
+def discover_ranked_topics(
+    bot,
+    web_config: dict[str, Any],
+    conn,
+    max_candidates: int = 28,
+    retained_candidates: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Dashboard discovery pool: return up to 28 diverse, evidence-backed topics."""
     from story_ranker import (
         _cricket_relevance_pass,
@@ -347,6 +420,14 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         max_candidates=max_candidates,
     )
 
+    ranked = _merge_retained_topics(
+        bot,
+        web_config,
+        conn,
+        ranked,
+        retained_candidates,
+        max_candidates=max_candidates,
+    )
     pool = ranked[:max_candidates]
     for rank, story in enumerate(pool, 1):
         story["discovery_rank"] = rank
@@ -760,6 +841,58 @@ class DashboardWorkflowController(WorkflowController):
                     return f"search:{group_index}", item_index, item
         return None, None, None
 
+    def _return_slide_visual_to_pool(self, layer: dict[str, Any], scene: dict[str, Any] | None = None) -> None:
+        """Return the current verified slide image to the shared unused pool."""
+        if not isinstance(layer, dict) or not bool(layer.get("visual_verified")):
+            return
+        source_path = str(layer.get("visual_original_path") or layer.get("image") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            return
+        provenance = dict(layer.get("asset_provenance") or {})
+        source_url = str(layer.get("source_image_url") or provenance.get("url") or "").strip()
+        selected_hash = str(layer.get("visual_selected_hash") or layer.get("bank_selected_hash") or "").strip()
+        if not selected_hash:
+            try:
+                from visual_retrieval_runtime import _hash_image
+                with open(source_path, "rb") as fh:
+                    selected_hash = str(_hash_image(self.bot, fh.read()) or "").strip()
+            except Exception:
+                selected_hash = ""
+        scene = scene if isinstance(scene, dict) else {}
+        entry = {
+            "path": source_path,
+            "original_path": str(layer.get("visual_original_path") or source_path).strip(),
+            "hash": selected_hash,
+            "source": str(layer.get("source_type") or "visual").strip(),
+            "query": str(layer.get("manual_visual_query") or layer.get("visual_query_used") or layer.get("bank_selected_query") or "").strip(),
+            "visual_type": str(layer.get("visual_type") or scene.get("visual_type") or "").strip().upper(),
+            "visual_genre": str(layer.get("visual_genre") or scene.get("visual_genre") or "").strip().upper(),
+            "provenance": provenance,
+            "source_image_url": source_url,
+            "status": "previously-selected",
+            "used": False,
+            "assigned_slide": 0,
+            "assigned_time": "",
+        }
+        with self._lock:
+            for item in self._visual_pool:
+                if not isinstance(item, dict):
+                    continue
+                item_hash = str(item.get("hash") or "").strip()
+                item_path = str(item.get("path") or "").strip()
+                item_original = str(item.get("original_path") or "").strip()
+                item_url = str(item.get("source_image_url") or (item.get("provenance") or {}).get("url") or "").strip()
+                if (
+                    (selected_hash and item_hash == selected_hash)
+                    or item_path == source_path
+                    or item_original == source_path
+                    or (source_url and item_url == source_url)
+                ):
+                    item.update(entry)
+                    return
+            self._visual_pool.insert(0, entry)
+            self._visual_pool = self._visual_pool[:40]
+
     def search_visual_pool(self, replacement_query: str) -> tuple[bool, str]:
         """Fetch up to ten additional AI-checked images for the global QC pool."""
         snapshot = self.snapshot()
@@ -918,7 +1051,9 @@ class DashboardWorkflowController(WorkflowController):
                 live_layer["visual_verification_source"] = (
                     "manual_qc" if str(live_item.get("status") or "") == "new-search" else "identity_ai"
                 )
-                live_layer["visual_original_path"] = str(live_item.get("path") or "").strip()
+                live_layer["visual_original_path"] = str(
+                    live_item.get("original_path") or live_item.get("path") or ""
+                ).strip()
                 live_layer["visual_selected_hash"] = str(live_item.get("hash") or "").strip()
                 live_layer["source_image_url"] = str(live_item.get("source_image_url") or "").strip()
 
@@ -1401,6 +1536,8 @@ class DashboardWorkflowController(WorkflowController):
             else:
                 source_credit = str(old_layer.get("source_credit") or "").strip() if isinstance(old_layer, dict) else ""
 
+            self._return_slide_visual_to_pool(old_layer, replacement_scene)
+
             new_layer = {
                 "image": replacement_path,
                 "text": "" if format_mode == "top5" else replacement_scene.get("voiceover", ""),
@@ -1537,11 +1674,13 @@ class DashboardWorkflowController(WorkflowController):
             old_path = str(layer.get("image") or "").strip()
             old_query = str(layer.get("manual_visual_query") or layer.get("visual_query_used") or "").strip()
 
+            self._return_slide_visual_to_pool(layer, scene)
+
             new_bank = [
                 item for item in bank
                 if str(item.get("path") or "").strip() != selected_path
             ]
-            old_original_path = str(layer.get("visual_original_path") or "").strip() or old_path
+            old_original_path = str(layer.get("visual_original_path") or old_path).strip()
             if (
                 old_original_path
                 and os.path.isfile(old_original_path)
@@ -1582,6 +1721,7 @@ class DashboardWorkflowController(WorkflowController):
             selected_status = str(selected.get("status") or "entity-verified").strip()
             low_resolution_manual_qc = selected_status == "factory-rejected-resolution"
             new_layer = dict(layer)
+            selected_original_path = str(selected.get("original_path") or selected_path).strip()
             new_layer.update(
                 {
                     "image": replacement_path,
@@ -1599,10 +1739,13 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_rescue_reason": "",
                     "visual_fallback_reason": "",
                     "visual_query_used": f"bank:{selected_query}",
+                    "visual_selected_hash": str(selected.get("hash") or "").strip(),
                     "source_credit": source_credit_for_type(selected_source),
                     "bank_selected_status": selected_status,
                     "source_image_url": str(
-                        (selected.get("provenance") or {}).get("url") or ""
+                        selected.get("source_image_url")
+                        or (selected.get("provenance") or {}).get("url")
+                        or ""
                     ).strip(),
                     "asset_provenance": dict(selected.get("provenance") or {}),
                     "visual_asset_bank": new_bank,
@@ -1744,7 +1887,7 @@ class DashboardWorkflowController(WorkflowController):
             new_layer.update(
                 {
                     "image": output_path,
-                    "visual_original_path": source_path,
+                    "visual_original_path": selected_original_path,
                     "visual_crop_zoom": float(max(1.0, min(4.0, zoom))),
                     "visual_crop_x": float(max(0.0, min(1.0, x_center))),
                     "visual_crop_y": float(max(0.0, min(1.0, y_center))),
