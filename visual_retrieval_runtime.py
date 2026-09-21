@@ -1400,10 +1400,10 @@ def collect_manual_visual_options(
     video_title: str = "",
     used_hashes: set[str] | None = None,
     used_source_pages: set[str] | None = None,
-    min_options: int = 3,
-    max_options: int = 3,
+    min_options: int = 0,
+    max_options: int = 10,
 ) -> dict:
-    """Compatibility wrapper for older dashboard callers; current QC uses the five-image global search."""
+    """Compatibility wrapper for dashboard callers; searches return up to ten AI-checked choices with no minimum."""
     result = collect_manual_visual_search(
         runtime,
         bot,
