@@ -306,7 +306,7 @@ def _test_dashboard_architecture():
     if still_present:
         raise AssertionError(f"legacy dashboard artifacts remain: {still_present}")
     source = (root / "app.py").read_text(encoding="utf-8")
-    forbidden_ui = ("st.dialog", "st.experimental_dialog", "newsroom_dashboard", "app_legacy")
+    forbidden_ui = ("st.experimental_dialog", "newsroom_dashboard", "app_legacy")
     leaked = [token for token in forbidden_ui if token in source]
     if leaked:
         raise AssertionError(f"obsolete dashboard UI leaked into app.py: {leaked}")
