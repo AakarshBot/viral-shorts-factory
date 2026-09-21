@@ -1267,55 +1267,67 @@ def collect_manual_visual_search(
     except TypeError:
         source_plan = _source_plan(bot, visual_type)
 
-    # Keep this cheap: at most two providers, each bounded to ten raw downloads.
+    # Keep this cheap: at most two providers and at most ten raw candidates per
+    # provider page. If the first page contains only images already used by the
+    # dashboard, advance once so a replacement search can actually return new
+    # choices without turning this into an open-ended crawl.
     for source_name, fetcher in source_plan[:2]:
         if len(candidates) >= 20 or not callable(fetcher):
             break
         source_key = str(source_name or "").strip().casefold()
-        cache_key = ("dashboard-query", source_key, exact_query.casefold())
-        raw_data = search_cache.get(cache_key)
-        if raw_data is None:
-            try:
-                raw_data = runtime._call_fetcher_with_timeout(
-                    fetcher,
-                    (
+        provider_added = 0
+        for page in (1, 2):
+            cache_key = ("dashboard-query", source_key, exact_query.casefold(), page)
+            raw_data = search_cache.get(cache_key)
+            if raw_data is None:
+                try:
+                    raw_data = runtime._call_fetcher_with_timeout(
+                        fetcher,
+                        (
+                            exact_query,
+                            fetch_used_urls,
+                            exact_query,
+                            video_title,
+                            visual_type,
+                            visual_genre,
+                            True,
+                            page,
+                        ),
+                        str(source_name),
                         exact_query,
-                        fetch_used_urls,
-                        exact_query,
-                        video_title,
-                        visual_type,
-                        visual_genre,
-                        True,
-                        1,
-                    ),
-                    str(source_name),
-                    exact_query,
-                )
-            except Exception as exc:
-                print(
-                    f"   [Manual Visual Search] {source_name} failed safely: "
-                    f"{type(exc).__name__}: {exc}",
-                    flush=True,
-                )
-                raw_data = []
-            search_cache[cache_key] = list(raw_data or [])
+                    )
+                except Exception as exc:
+                    print(
+                        f"   [Manual Visual Search] {source_name} failed safely: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    raw_data = []
+                search_cache[cache_key] = list(raw_data or [])
 
-        for data in search_cache.get(cache_key) or []:
-            candidate = _manual_candidate_from_data(
-                str(source_name),
-                data,
-                exact_query,
-                visual_type,
-                visual_genre,
-                bot,
-                seen_hashes,
-                seen_urls,
-                rejected_counts,
-            )
-            if candidate is None:
-                continue
-            candidates.append(candidate)
-            if len(candidates) >= 20:
+            page_added = 0
+            for data in search_cache.get(cache_key) or []:
+                candidate = _manual_candidate_from_data(
+                    str(source_name),
+                    data,
+                    exact_query,
+                    visual_type,
+                    visual_genre,
+                    bot,
+                    seen_hashes,
+                    seen_urls,
+                    rejected_counts,
+                )
+                if candidate is None:
+                    continue
+                candidates.append(candidate)
+                page_added += 1
+                provider_added += 1
+                if len(candidates) >= 20:
+                    break
+            if len(candidates) >= 20 or provider_added:
+                break
+            if not search_cache.get(cache_key):
                 break
 
     candidates.sort(
@@ -1413,7 +1425,7 @@ def collect_manual_visual_options(
     )
     maximum = max(1, int(max_options or 5))
     result["assets"] = list(result.get("assets") or [])[:maximum]
-    result["minimum_options"] = min(int(min_options or 1), maximum)
+    result["minimum_options"] = max(0, min(int(min_options or 0), maximum))
     result["available_options"] = len(result["assets"])
     result["enough_options"] = len(result["assets"]) >= result["minimum_options"]
     result["target"] = maximum
