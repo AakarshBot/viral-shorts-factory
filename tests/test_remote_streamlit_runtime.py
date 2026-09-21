@@ -67,3 +67,11 @@ def test_remote_youtube_credentials_use_secret_without_local_files(monkeypatch):
 
     creds = ultimate_bot.get_google_credentials()
     assert isinstance(creds, FakeCredentials)
+
+
+def test_remote_secret_bridge_names_cover_visual_provider_keys():
+    import app
+
+    assert "SERPAPI_API_KEY" in app.REQUIRED_SECRET_NAMES
+    assert "PIXABAY_API_KEY" in app.REQUIRED_SECRET_NAMES
+    assert "OPENALEX_API_KEY" in app.REQUIRED_SECRET_NAMES

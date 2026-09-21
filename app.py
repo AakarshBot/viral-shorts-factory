@@ -376,6 +376,10 @@ REQUIRED_SECRET_NAMES = (
     "HF_TOKEN",
     "PEXELS_API_KEY",
     "OPENROUTER_API_KEY",
+    "SERPAPI_API_KEY",
+    "PIXABAY_API_KEY",
+    "OPENALEX_API_KEY",
+    "OLLAMA_BASE_URL",
     # Remote-only controls/credentials. These are loaded only when present
     # in Streamlit Secrets; the local .env/file-based paths remain untouched.
     "YOUTUBE_TOKEN_JSON",
@@ -399,6 +403,30 @@ def load_streamlit_secrets_into_runtime() -> set[str]:
             loaded.add(name)
     return loaded
 
+
+
+def _remote_startup_guard() -> None:
+    """Fail fast on Streamlit when required remote-only credentials are absent."""
+    remote_mode = str(os.getenv("VSF_REMOTE_MODE", "")).strip().lower() in {
+        "1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"
+    }
+    if not remote_mode:
+        return
+    if not str(os.getenv("YOUTUBE_TOKEN_JSON", "")).strip():
+        st.error(
+            "Remote mode is enabled, but YOUTUBE_TOKEN_JSON is missing. "
+            "Add the complete refreshable token.json content to Streamlit Secrets before starting production."
+        )
+        st.stop()
+    if not any(
+        str(os.getenv(name, "")).strip()
+        for name in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
+    ):
+        st.error(
+            "Remote mode is enabled, but no script-generation provider key is configured. "
+            "Add GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY to Streamlit Secrets."
+        )
+        st.stop()
 
 def check_required_local_assets() -> list[str]:
     base = ultimate_bot.BASE_DIR
@@ -2006,7 +2034,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with publish_col:
         st.markdown("#### 3 · Publish")
         st.caption("Private stays hidden. Public always requires a second confirmation.")
-        upload_unlocked = metadata_approved
+        upload_unlocked = metadata_approved and not bool(st.session_state.get("upload_result")) and not bool(snapshot.get("uploaded_video_id"))
         public_ready = upload_unlocked and not public_blocked
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
@@ -2664,6 +2692,7 @@ def render_demo_page() -> None:
 
 def main() -> None:
     load_streamlit_secrets_into_runtime()
+    _remote_startup_guard()
     initialise_runtime()
 
     try:
