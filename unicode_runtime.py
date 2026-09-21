@@ -191,22 +191,6 @@ def install() -> bool:
         }
         patched.append("story_ranker._tokens")
 
-        import workflow_runtime
-        workflow_runtime._token_set = lambda value: {
-            word for word in unicode_words(value)
-            if len(word) > 2 and word not in {
-                "the", "and", "for", "with", "from", "this", "that", "into", "after",
-                "before", "over", "under", "what", "how", "why", "world", "news",
-                "latest", "today", "just", "will", "says", "said", "new", "breaking",
-            }
-        }
-        workflow_runtime._story_key = lambda story: re.sub(
-            r"\W+", " ",
-            f"{str(story.get('title') or '').casefold()} {str(story.get('url') or story.get('link') or '').casefold()}",
-            flags=re.UNICODE,
-        ).strip()
-        patched.extend(["workflow_runtime._token_set", "workflow_runtime._story_key"])
-
         import visual_retrieval_planner as planner
         planner._tokens = _planner_tokens
         planner._key = _planner_key
