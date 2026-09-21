@@ -2092,7 +2092,22 @@ def _perform_upload(
         st.session_state.upload_result = str(result)
         st.rerun()
     except Exception as exc:
-        st.error(f"Upload failed: {type(exc).__name__}: {exc}")
+        message = str(exc)
+        match = re.search(r"accepted video\s+([A-Za-z0-9_-]+)", message)
+        video_id = str(getattr(exc, "video_id", "") or (match.group(1) if match else "")).strip()
+        if video_id and "kept it private instead of public" in message:
+            st.error(message)
+            st.info(
+                "The video was already created on YouTube. Do not retry this run; "
+                "public API publishing requires an eligible/audited Google API project."
+            )
+            st.link_button(
+                "Open the YouTube video",
+                f"https://www.youtube.com/watch?v={video_id}",
+                width="content",
+            )
+        else:
+            st.error(f"Upload failed: {type(exc).__name__}: {exc}")
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
