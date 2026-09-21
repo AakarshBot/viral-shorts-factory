@@ -1297,7 +1297,7 @@ class DashboardWorkflowController(WorkflowController):
                 )
 
             with self._lock:
-                self._visual_search_options[index] = [dict(item) for item in options[:3]]
+                self._visual_search_options[index] = [dict(item) for item in options[:10]]
                 live_packages = self._visual_packages
                 if 1 <= index <= len(live_packages):
                     live_layer = (
@@ -1306,7 +1306,7 @@ class DashboardWorkflowController(WorkflowController):
                         else live_packages[index - 1]
                     )
                     if isinstance(live_layer, dict):
-                        live_layer["visual_search_options"] = [dict(item) for item in options[:3]]
+                        live_layer["visual_search_options"] = [dict(item) for item in options[:10]]
 
             self.update(
                 "visual_approval",
