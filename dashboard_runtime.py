@@ -119,16 +119,19 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
         or (snapshot.get("selected_story") or {}).get("format_mode")
         or "regular"
     ).lower()
-    minimum = 7 if format_mode == "top5" else 5
-    maximum = 7 if format_mode == "top5" else 8
     selected = snapshot.get("selected_story") or {}
     story_ok = bool(
         str(selected.get("title") or "").strip()
         and str(selected.get("story_key") or "").strip()
         and str(selected.get("discovery_rank") or "").isdigit()
     )
+    try:
+        from script_runtime import assess_release_structure
+        structure_ok, structure_reason, _structure = assess_release_structure(script, format_mode)
+    except Exception as exc:
+        structure_ok, structure_reason = False, f"Script structure check unavailable: {type(exc).__name__}: {exc}"
     script_ok = (
-        minimum <= len(scenes) <= maximum
+        structure_ok
         and len(script.get("titles") or []) == 3
         and script.get("recommended_title_index") in (0, 1, 2)
         and len(str(script.get("seo_description") or "").split()) >= 10
@@ -140,8 +143,23 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
             for scene in scenes
         )
     )
-    audio_paths = [str(path).strip() for path in (snapshot.get("audio_paths") or []) if str(path or "").strip()]
-    audio_ok = bool(scenes) and len(audio_paths) >= len(scenes) and all(os.path.isfile(path) for path in audio_paths)
+
+    audio_paths = [
+        str(path).strip()
+        for path in (snapshot.get("audio_paths") or [])
+        if str(path or "").strip()
+    ]
+    word_timings = snapshot.get("word_timings") or []
+    timing_ok = (
+        len(word_timings) == len(scenes)
+        and all(isinstance(items, list) and bool(items) for items in word_timings)
+    )
+    audio_ok = (
+        bool(scenes)
+        and len(audio_paths) == len(scenes)
+        and all(os.path.isfile(path) for path in audio_paths)
+        and timing_ok
+    )
     packages = snapshot.get("visual_packages") or []
     visual_items = []
     for package in packages:
@@ -210,9 +228,9 @@ def evaluate_live_qc_gates(snapshot: dict[str, Any], metadata: dict[str, str] | 
         {"key": "story_lock", "label": "Verified story selection", "passed": story_ok,
          "detail": "Selected headline is tied to the discovery pool." if story_ok else "Production input is not tied to a verified discovery selection."},
         {"key": "script_contract", "label": "Script contract", "passed": script_ok,
-         "detail": f"{len(scenes)} scenes satisfy the structure and metadata contract." if script_ok else f"Script contract failed: {len(scenes)} scenes; required {minimum}-{maximum} plus required metadata."},
+         "detail": "Narrative structure and required metadata are production-ready." if script_ok else f"Script contract failed: {structure_reason} Required metadata or scene grounding is also checked."},
         {"key": "narration", "label": "Narration + timings", "passed": audio_ok,
-         "detail": f"{len(audio_paths)} narration track(s) are present." if audio_ok else "Narration tracks are missing or incomplete."},
+         "detail": f"{len(audio_paths)} narration track(s) and matching word timings are present." if audio_ok else "Narration tracks or word-level timings are missing or incomplete."},
         {"key": "visual_package", "label": "Visual package", "passed": visual_package_ok,
          "detail": f"{len(visual_items)} renderable scene visual(s) are present." if visual_package_ok else "Visual package is incomplete or contains missing files."},
         {"key": "visual_semantic_qc", "label": "Visual semantic QC", "passed": visual_verified_ok,
