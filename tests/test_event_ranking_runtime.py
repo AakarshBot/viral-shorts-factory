@@ -154,7 +154,8 @@ def test_broad_discovery_uses_shared_free_radar_contract():
     assert len(story_ranker.GOOGLE_NEWS_RADAR_QUERIES) == 6
     assert story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_BROAD == 7
     assert story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD == 4
-    assert story_ranker.DISCOVERY_SIGNAL_WAIT_SECONDS == 8.0
+    assert story_ranker.DISCOVERY_OVERALL_WAIT_SECONDS == 10.0
+    assert not hasattr(story_ranker, "DISCOVERY_SIGNAL_WAIT_SECONDS")
     assert story_ranker.GOOGLE_TRENDS_GEOS == ("IN", "US", "GB")
     assert story_ranker.REDDIT_RADAR_SUBREDDITS == (
         "news", "worldnews", "india", "technology", "sports", "movies"
