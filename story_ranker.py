@@ -1583,7 +1583,8 @@ def _india_relevance_score(story):
 NON_EVENT_HEADLINE_PATTERNS = (
     r"\blive updates?\b",
     r"\blive blog\b",
-    r"\bphoto(s| gallery)?\b",
+    r"\bphotos?\s+(?:gallery|collection)\b",
+    r"\bphotos?:\s",
     r"\bwatch( the)? video\b",
     r"\bvideo gallery\b",
     r"\bexplainer\b",
