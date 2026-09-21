@@ -247,6 +247,9 @@ class WorkflowState:
     selected_story: Optional[Dict[str, Any]] = None
     candidates: List[Dict[str, Any]] = field(default_factory=list)
     script_data: Optional[Dict[str, Any]] = None
+    audio_paths: List[str] = field(default_factory=list)
+    word_timings: List[List[Dict[str, Any]]] = field(default_factory=list)
+    format_mode: str = ""
     video_path: str = ""
     final_metadata: Dict[str, str] = field(default_factory=dict)
     error: str = ""
@@ -286,6 +289,9 @@ class WorkflowController:
                 "selected_story": dict(self.state.selected_story or {}),
                 "candidates": [dict(x) for x in self.state.candidates],
                 "script_data": self.state.script_data,
+                "audio_paths": list(self.state.audio_paths),
+                "word_timings": [list(items) for items in self.state.word_timings],
+                "format_mode": self.state.format_mode,
                 "video_path": self.state.video_path,
                 "final_metadata": dict(self.state.final_metadata),
                 "error": self.state.error,
@@ -364,6 +370,8 @@ class WorkflowController:
         config["publish_mode"] = "private"
         config["manual_qc_required"] = True
         self.bot._active_web_config = dict(config)
+        with self._lock:
+            self.state.format_mode = str(config.get("format_mode") or "").strip().lower()
 
         def worker():
             try:
