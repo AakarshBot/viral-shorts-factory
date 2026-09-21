@@ -227,6 +227,7 @@ def test_discovery_portfolio_keeps_current_niche_topic_but_marks_it_exploratory(
             "corroboration": 2.0,
             "source_quality": 1.0,
         },
+        "topic_actionability_score": 3.5,
     }
 
     assert story_ranker._discovery_portfolio_pass(story) is True
