@@ -28,22 +28,13 @@ def test_visual_cuts_keep_beats_at_or_below_four_seconds():
     assert ultimate_bot._scene_visual_segment_count(8.1) == 3
 
 
-def test_scene_one_hook_is_at_most_eight_words():
-    text = "India announces a major policy change that could reshape the market today."
-    headline = ultimate_bot._hook_headline_from_scene(text)
-    assert len(headline.split()) <= 8
-    assert headline == "India announces a major policy change that could"
-
-
-def test_hook_overlay_is_written_inside_its_small_safe_card(tmp_path):
-    path = tmp_path / "hook.png"
-    result = ultimate_bot._render_hook_headline_overlay(
-        "India announces a major policy change today",
-        None,
-        str(path),
-    )
-    assert result == str(path)
-    assert path.is_file()
+def test_first_scene_does_not_add_transient_headline_overlay():
+    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
+    assert "_hook_headline_from_scene" not in source
+    assert "_render_hook_headline_overlay" not in source
+    assert "hook_headline.png" not in source
+    assert "FadeIn" not in source
+    assert "FadeOut" not in source
 
 
 def test_audio_loudnorm_command_targets_minus_fourteen_lufs(monkeypatch, tmp_path):
