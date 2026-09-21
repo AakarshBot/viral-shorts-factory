@@ -1,6 +1,5 @@
 """Bind runtime patches to the authoritative production globals."""
 
-import functools
 import json
 import os
 import threading
