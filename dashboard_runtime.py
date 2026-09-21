@@ -270,11 +270,13 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
             # the India/Asia result set.
             genre_cfg["india_gnews_q"] = cricket_cfg["query"]
             genre_cfg["global_gnews_q"] = ""
+            genre_cfg["gnews_q"] = cricket_cfg["query"]
         elif cricket_name == "Global":
             # Scope-specific cricket discovery: keep the selected result set
             # on the global lane rather than re-adding India-first headlines.
             genre_cfg["india_gnews_q"] = ""
             genre_cfg["global_gnews_q"] = cricket_cfg["query"]
+            genre_cfg["gnews_q"] = cricket_cfg["query"]
         requested_topic = str(web_config.get("requested_topic", "") or "").strip()
         custom_q = requested_topic or None if cricket_name != "AI-assisted top story in cricket" else (
             requested_topic or cricket_cfg["query"]
