@@ -131,5 +131,5 @@ def test_discover_sources_overlaps_independent_research_calls(monkeypatch):
         max_sources=5,
     )
 
-    assert [item["publisher"] for item in result] == ["Reuters", "Nature"]
+    assert {item["publisher"] for item in result} == {"Reuters", "Nature"}
     assert {kind for kind, _ in calls} == {"ddg", "openalex"}
