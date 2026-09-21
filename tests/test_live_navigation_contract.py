@@ -19,6 +19,14 @@ def test_live_navigation_is_incremental_pill_hierarchy():
     assert "st.radio(" not in source
 
 
+def test_live_navigation_labels_sports_as_a_separate_lane():
+    source = _live_navigation_source()
+
+    assert 'lane_label = "Sports lane" if live_format == "Sports" else "Topic lane"' in source
+    assert '"Sports lane"' in source
+    assert '"Topic lane"' in source
+
+
 def test_live_navigation_reveals_sports_scope_only_after_sports_selection():
     source = _live_navigation_source()
 
