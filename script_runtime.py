@@ -639,12 +639,20 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category = str(genre_key or "news").replace("_", " ").title()
     scenes = []
-    for index, sentence in enumerate(sentences, 1):
+    fallback_sentences = list(sentences)
+    # The emergency path should still open with the concrete story headline,
+    # not with source boilerplate or a generic setup sentence.
+    if title:
+        fallback_sentences = [title] + [
+            sentence for sentence in fallback_sentences
+            if _normalise(sentence) != _normalise(title)
+        ]
+    for index, sentence in enumerate(fallback_sentences, 1):
         role = (
             "hook" if index == 1
             else "development" if index == 2
             else "context" if index == 3
-            else "consequence" if index == len(sentences)
+            else "consequence" if index == len(fallback_sentences)
             else ""
         )
         scenes.append({
