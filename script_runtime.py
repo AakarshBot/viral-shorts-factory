@@ -497,6 +497,24 @@ def _rewrite_for_originality_once(script_data, story_data, overlap):
     rewritten["originality_rewrite_attempted"] = True
     return rewritten
 
+def assess_release_structure(script_data, format_mode="regular"):
+    """Check production-ready narrative structure without word/character quotas."""
+    assessment = assess_narrative_completeness(script_data)
+    if not assessment.get("passed"):
+        return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
+
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    count = len(scenes)
+    # Four distinct newsroom beats are the smallest coherent story: hook,
+    # development, context and consequence. This prevents 1–3 scene stubs
+    # without imposing a word or character target.
+    if count < 4:
+        return False, "Script is too compressed: it lacks enough distinct narrative beats.", assessment
+    if str(format_mode or "").lower() == "top5" and count < 5:
+        return False, "Top-5 script is too compressed to present the list structure.", assessment
+    return True, "Narrative structure is production-ready.", assessment
+
+
 def validate_content_density(script_data, story_data, format_mode):
     """Semantic script gate; no scene-count or word-count quotas."""
     if not isinstance(script_data, dict):
