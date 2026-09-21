@@ -985,11 +985,10 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
         # Dashboard display is intentionally simple: if the image passed the
         # identity AI gate and the lenient monetization/provenance gate, show it.
         # Context suitability and soft resolution are not display filters.
-        unused_verified = [
-            dict(item)
-            for item in bank
-            if str(item.get("scene_status") or "").strip() != "scene-rejected"
-        ]
+        # Every retained bank image is displayable once it has passed the
+        # upstream AI identity and lenient monetization checks. Scene context
+        # is deliberately not used to hide dashboard choices.
+        unused_verified = [dict(item) for item in bank]
         factory_rejected = []
         scene_rejected = []
         items.append(
