@@ -221,3 +221,14 @@ def test_real_video_event_is_not_rejected_by_headline_noise_filter():
     }
 
     assert story_ranker._headline_noise_pass(story) is True
+
+
+
+def test_learning_readers_filter_invalid_vault_rows_at_sql_boundary():
+    story_ranker = Path(__file__).resolve().parents[1].joinpath("story_ranker.py").read_text(encoding="utf-8")
+    autopilot = Path(__file__).resolve().parents[1].joinpath("autopilot_runtime.py").read_text(encoding="utf-8")
+
+    for source in (story_ranker, autopilot):
+        assert "video_id IS NOT NULL" in source
+        assert "READY_FOR_UPLOAD" in source
+        assert "status NOT IN" in source
