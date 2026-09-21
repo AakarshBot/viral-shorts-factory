@@ -120,3 +120,17 @@ def test_discovery_queries_have_india_first_and_global_lane():
     assert queries[0] == cfg["india_gnews_q"]
     assert cfg["global_gnews_q"] in queries
     assert len(queries) <= story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_BROAD
+
+def test_explicit_genre_does_not_add_generic_cross_genre_radar():
+    cfg = {
+        "india_gnews_q": "(India OR Indian) (technology OR AI)",
+        "global_gnews_q": "(global OR worldwide) (AI OR technology) (launch OR breakthrough)",
+        "gnews_q": "(India OR Indian) technology",
+    }
+    queries = story_ranker._build_discovery_google_queries(
+        "technology",
+        cfg,
+        broad_discovery=True,
+    )
+    assert " (sports OR cricket OR football OR tennis)" not in " ".join(queries).lower()
+    assert story_ranker.GOOGLE_NEWS_RADAR_QUERIES[0] not in queries
