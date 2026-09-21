@@ -55,3 +55,11 @@ def test_validate_selected_story_accepts_dashboard_candidate_from_expanded_pool(
 
     assert validated == story
     assert validated is not story
+
+
+def test_legacy_discovery_path_is_removed():
+    import workflow_runtime
+
+    assert not hasattr(workflow_runtime, "discover_three_candidates")
+    assert not hasattr(workflow_runtime, "_remove_near_duplicates")
+    assert not hasattr(workflow_runtime, "_diverse_top_three")
