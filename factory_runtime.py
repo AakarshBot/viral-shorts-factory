@@ -84,14 +84,4 @@ def patch_dashboard_runtime(bot):
     def write(*a,**kw):
         result=old_write(*a,**kw); bot._active_script_data=result or {}; return result
     bot.write_script=write
-    old_run=bot.run_robot
-    def run(web_config=None):
-        import sqlite3
-        old_connect=sqlite3.connect
-        def connect(*a,**kw):
-            c=old_connect(*a,**kw); bot._active_scoring_conn=c; return c
-        sqlite3.connect=connect
-        try:return old_run(web_config=web_config)
-        finally:sqlite3.connect=old_connect; bot._active_scoring_conn=None
-    bot.run_robot=run
     return bot
