@@ -2598,7 +2598,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                             if candidate.get("retained_from_previous_run")
                             else ""
                         )
-                        f"</div>"
+                        + f"</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )
