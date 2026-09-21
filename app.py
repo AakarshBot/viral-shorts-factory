@@ -373,21 +373,6 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.app-shell-glow{
-  position:relative;
-}
-.app-shell-glow::before{
-  content:"";
-  position:fixed;
-  top:-180px;
-  right:-140px;
-  width:520px;
-  height:520px;
-  border-radius:50%;
-  background:radial-gradient(circle,rgba(61,111,116,.10) 0%,rgba(61,111,116,0) 70%);
-  pointer-events:none;
-  z-index:-1;
-}
 .brand-card{
   position:relative;
   overflow:hidden;
