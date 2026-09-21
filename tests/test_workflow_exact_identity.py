@@ -31,8 +31,10 @@ def test_ready_for_upload_updates_exact_run_not_latest_topic():
         controller.bot._last_run_row_id = first_id
         controller.bot._last_run_run_id = "run-old"
 
-        with patch.object(ultimate_bot, "DB_PATH", path):
-            controller._mark_latest_run_ready_for_qc("Repeated topic")
+        import final_qc_runtime
+        with patch.object(final_qc_runtime, "validate_final_video", lambda *_args, **_kwargs: None):
+            with patch.object(ultimate_bot, "DB_PATH", path):
+                controller._mark_latest_run_ready_for_qc("Repeated topic")
 
         db = sqlite3.connect(path)
         rows = db.execute(
@@ -56,10 +58,12 @@ def test_ready_for_upload_fails_closed_on_run_id_mismatch(tmp_path):
     controller.bot._last_run_row_id = row_id
     controller.bot._last_run_run_id = "run-wrong"
 
-    with patch.object(ultimate_bot, "DB_PATH", path):
-        try:
-            controller._mark_latest_run_ready_for_qc("Repeated topic")
-        except RuntimeError as exc:
-            assert "identity" in str(exc).lower()
-        else:
-            raise AssertionError("run identity mismatch must fail closed")
+    import final_qc_runtime
+    with patch.object(final_qc_runtime, "validate_final_video", lambda *_args, **_kwargs: None):
+        with patch.object(ultimate_bot, "DB_PATH", path):
+            try:
+                controller._mark_latest_run_ready_for_qc("Repeated topic")
+            except RuntimeError as exc:
+                assert "identity" in str(exc).lower()
+            else:
+                raise AssertionError("run identity mismatch must fail closed")
