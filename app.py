@@ -538,6 +538,43 @@ section[data-testid="stSidebar"] .stRadio label{
   border-top:1px solid #e7ddd1;
   margin-top:24px;
 }
+.learning-strip{
+  display:flex;
+  align-items:flex-start;
+  gap:11px;
+  margin:16px 0 18px;
+  padding:13px 15px;
+  border:1px solid #d9e3e0;
+  border-radius:16px;
+  background:linear-gradient(135deg,#f5faf8 0%,#eef5f2 100%);
+  box-shadow:0 8px 22px rgba(47,93,98,.055);
+}
+.learning-strip-dot{
+  width:9px;
+  height:9px;
+  margin-top:4px;
+  flex:0 0 9px;
+  border-radius:50%;
+  background:#4e9188;
+  box-shadow:0 0 0 5px rgba(78,145,136,.10);
+}
+.learning-strip-title{
+  font-size:.78rem;
+  font-weight:900;
+  color:#31565a;
+  letter-spacing:.01em;
+}
+.learning-strip-copy{
+  margin-top:2px;
+  color:#6b655d;
+  font-size:.72rem;
+  line-height:1.45;
+}
+.learning-chip{
+  background:#edf5f2;
+  border-color:#cfe0dc;
+  color:#31565a;
+}
 </style>""", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
@@ -661,8 +698,10 @@ def _channel_options() -> list[str]:
 
 
 def _init_state() -> None:
+    if "workflow_controller" not in st.session_state:
+        st.session_state.workflow_controller = DashboardWorkflowController(ultimate_bot)
+
     defaults = {
-        "workflow_controller": DashboardWorkflowController(ultimate_bot),
         "candidates": [],
         "web_config": {},
         "production_started": False,
@@ -2492,6 +2531,9 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 score = float(candidate.get("candidate_score") or 0.0)
                 evidence = build_discovery_evidence(candidate)
                 history_fit = float(evidence.get("channel_history") or 0.0)
+                channel_fit = float(candidate.get("channel_fit_score") or 0.0)
+                channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)
+                history_matches = int(candidate.get("historical_topic_matches") or 0)
                 source = str(candidate.get("source_label") or "News source").strip()
                 url = str(candidate.get("story_url") or "").strip()
 
@@ -2515,7 +2557,17 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         f"<span class='topic-chip strong'>Event {actionability:.1f}/10</span>"
                         f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}/10</span>"
                         f"<span class='topic-chip'>India focus {india_focus:.1f}/10</span>"
-                        f"<span class='topic-chip'>Rank {score:.1f}</span>"
+                        + (
+                            f"<span class='topic-chip learning-chip'>Learning {channel_fit:.1f}/10 · {channel_fit_samples} upload(s)</span>"
+                            if channel_fit_samples > 0
+                            else ""
+                        )
+                        + (
+                            f"<span class='topic-chip learning-chip'>Past topic match · {history_matches}</span>"
+                            if history_matches > 0
+                            else ""
+                        )
+                        + f"<span class='topic-chip'>Rank {score:.1f}</span>"
                         f"</div>"
                         "</div>",
                         unsafe_allow_html=True,
@@ -2579,6 +2631,15 @@ def render_channel_statistics() -> None:
     metric_cols[4].metric(
         "Average CTR",
         f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—",
+    )
+
+    st.markdown(
+        "<div class='learning-strip'>"
+        "<div class='learning-strip-dot'></div>"
+        "<div><div class='learning-strip-title'>Factory learning is active</div>"
+        "<div class='learning-strip-copy'>Completed factory uploads with synced retention data influence topic ranking and format/category selection. Analytics refresh stays manual so a dashboard visit does not consume YouTube quota.</div></div>"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
     st.markdown("### Live channel")
