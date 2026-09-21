@@ -531,17 +531,76 @@ def validate_content_density(script_data, story_data, format_mode):
     return True, "Passed semantic narrative completeness and anti-retention checks"
 
 
+def _fallback_source_fragments(*values):
+    """Return source-derived prose while rejecting prompt/schema/workflow leakage."""
+    try:
+        from script_guard_runtime import looks_like_instructional_narration
+    except Exception:
+        looks_like_instructional_narration = None
+
+    fragments = []
+    seen = set()
+    for value in values:
+        text = re.sub(r"<[^>]+>", " ", str(value or ""))
+        text = re.sub(r"https?://\S+", " ", text)
+        for raw in re.split(r"(?<=[.!?])\s+|\n+", text):
+            sentence = re.sub(r"\s+", " ", raw).strip(" -")
+            if not sentence or len(re.findall(r"\b\w+\b", sentence)) < 5:
+                continue
+
+            if re.match(
+                r"^(?:PHASE 2 EVIDENCE PACK|STATUS|SOURCE HIERARCHY|VERIFIED SOURCE METADATA|CLAIMS|"
+                r"CONFLICTS(?:\s+[—-].*)?|DISCOVERY-ONLY SOURCES)\s*:?$",
+                sentence,
+                re.IGNORECASE,
+            ):
+                continue
+            if re.match(r"^(?:variant|independent sources)\s*:", sentence, re.IGNORECASE):
+                continue
+
+            sentence = re.sub(
+                r"^\[(?:CORROBORATED|PRIMARY_ONLY|SINGLE_SOURCE|CONFLICTED)\]\s*",
+                "",
+                sentence,
+                flags=re.IGNORECASE,
+            )
+            sentence = re.sub(
+                r"\s+\(independent sources:.*?\)\s*$",
+                "",
+                sentence,
+                flags=re.IGNORECASE,
+            )
+            if not sentence or len(re.findall(r"\b\w+\b", sentence)) < 5:
+                continue
+            if looks_like_instructional_narration and looks_like_instructional_narration(sentence):
+                continue
+            if contains_retention_bait(sentence) or _looks_like_filler(sentence):
+                continue
+
+            key = _normalise(sentence)
+            if key and key not in seen:
+                seen.add(key)
+                fragments.append(sentence)
+    return fragments
+
+
 def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode):
     """Emergency source-only fallback; never fabricate filler or collapse a complete story."""
     story_data = story_data if isinstance(story_data, dict) else {}
     title = re.sub(r"\s+", " ", str(story_data.get("title") or story_data.get("topic") or "Untitled story")).strip()
-    raw_source = " ".join(
+
+    raw_parts = [
         str(story_data.get(key) or "")
-        for key in ("research_evidence_text", "text", "summary", "description")
-    )
-    raw_source = re.sub(r"<[^>]+>", " ", raw_source)
-    raw_source = re.sub(r"https?://\S+", " ", raw_source)
-    raw_source = re.sub(r"\s+", " ", raw_source).strip()
+        for key in ("text", "summary", "description")
+        if str(story_data.get(key) or "").strip()
+    ]
+    research_text = str(story_data.get("research_evidence_text") or "").strip()
+    source_fragments = _fallback_source_fragments(*raw_parts)
+    # Prefer the actual selected-story prose. Use Phase 2's formatted evidence
+    # text only when the selected-story fields do not provide enough narration.
+    if len(source_fragments) < 4 and research_text:
+        source_fragments.extend(_fallback_source_fragments(research_text))
+    raw_source = " ".join(source_fragments)
 
     if str(format_mode or "").lower() == "top5" and story_data.get("text"):
         try:
@@ -558,13 +617,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
-    sentences = [
-        re.sub(r"\s+", " ", sentence).strip(" -")
-        for sentence in re.split(r"(?<=[.!?])\s+", raw_source)
-        if sentence.strip()
-        and not contains_retention_bait(sentence)
-        and not _looks_like_filler(sentence)
-    ]
+    sentences = source_fragments
     entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category = str(genre_key or "news").replace("_", " ").title()
     scenes = []
