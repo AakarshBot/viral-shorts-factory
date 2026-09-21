@@ -1739,10 +1739,25 @@ def collect_high_recall_stories(
             if isinstance(row, dict) and str(row.get("title") or "").strip()
         ]
 
-        # Google Trends rows contain linked news articles and can be used as factual
-        # source records; Reddit remains an audience-interest signal only.
+        # Google Trends is a cross-category signal source. For an explicit
+        # dashboard genre, only trend-linked articles whose inferred category
+        # matches that genre may enter the factual candidate pool. Trends never
+        # act as a license to leak unrelated headlines into a genre.
         for future in trend_futures:
-            raw.extend(resolved_signals.get(future) or [])
+            trend_rows = resolved_signals.get(future) or []
+            if not genre_key:
+                raw.extend(trend_rows)
+                continue
+            for row in trend_rows:
+                inferred = _infer_discovery_category(row)
+                if genre_key == "sports_stories_of_day":
+                    allowed = inferred == "sports"
+                elif genre_key == "tech_reviews":
+                    allowed = inferred == "technology"
+                else:
+                    allowed = inferred == genre_key
+                if allowed:
+                    raw.append(row)
 
         compacted = []
         seen = set()
