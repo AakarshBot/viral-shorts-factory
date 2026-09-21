@@ -85,12 +85,11 @@ def install_script_pipeline(bot):
         except Exception as exc:
             print(
                 f"   [Script Pipeline] Primary writer failed: {type(exc).__name__}: {exc}. "
-                "Using strict source-grounded fallback.",
+                "Trying the next original-script provider.",
                 flush=True,
             )
-            result = pir.strict_fallback(
-                data, language_cfg, genre_key, format_mode
-            )
+            result = None
+
         if result is None:
             print("   [Script Pipeline] Trying OpenRouter free fallback.", flush=True)
             result = rr._openrouter_script_fallback(
@@ -99,6 +98,15 @@ def install_script_pipeline(bot):
         if result is None:
             print("   [Script Pipeline] Trying local Ollama fallback.", flush=True)
             result = rr._ollama_script_fallback(
+                data, language_cfg, genre_key, format_mode
+            )
+        if result is None:
+            print(
+                "   [Script Pipeline] All original-script providers failed; "
+                "using source-grounded emergency fallback.",
+                flush=True,
+            )
+            result = pir.strict_fallback(
                 data, language_cfg, genre_key, format_mode
             )
 
@@ -136,12 +144,22 @@ def install_script_pipeline(bot):
         if not valid:
             print(
                 f"   [Script QC] Generated script rejected: {reason}. "
-                "Trying source-grounded fallback.",
+                "Trying the free original-script providers before the emergency fallback.",
                 flush=True,
             )
-            fallback = sr._extractive_script_fallback(
-                data, language_cfg, genre_key, format_mode
-            )
+            fallback = None
+            for provider_name, provider_call in (
+                ("OpenRouter free", rr._openrouter_script_fallback),
+                ("local Ollama", rr._ollama_script_fallback),
+            ):
+                print(f"   [Script Pipeline] Retrying {provider_name}.", flush=True)
+                fallback = provider_call(data, language_cfg, genre_key, format_mode)
+                if fallback is not None:
+                    break
+            if fallback is None:
+                fallback = sr._extractive_script_fallback(
+                    data, language_cfg, genre_key, format_mode
+                )
             cleaned, fallback_diag = sr.clean_script_data(
                 fallback, data, format_mode
             )
