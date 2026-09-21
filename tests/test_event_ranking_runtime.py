@@ -213,6 +213,10 @@ def test_candidate_quality_floor_keeps_current_supported_topic():
             "corroboration": 4.0,
             "source_quality": 3.0,
         },
+        "description": (
+            "A concrete current development with enough factual detail to support the selected topic, "
+            "including the key action, the affected entity, and the immediate consequence for the audience."
+        ),
     }
     assert story_ranker._candidate_quality_pass(story) is True
 
@@ -230,6 +234,7 @@ def test_discovery_portfolio_keeps_current_niche_topic_but_marks_it_exploratory(
         },
         "topic_actionability_score": 3.5,
         "event_source_count": 2,
+        "event_article_count": 2,
         "description": "A concrete current development with enough factual detail to support a short-form story.",
         "event_actions": ["announce"],
     }
