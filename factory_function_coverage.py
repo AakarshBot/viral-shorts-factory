@@ -17,7 +17,6 @@ SURFACE_MAP: dict[str, str] = {
     "global_exception_hook": "Internal",
     "_remote_mode_enabled": "Internal",
     "_load_remote_youtube_credentials": "Internal",
-    "_verify_youtube_privacy": "Internal",
     "safe_cleanup": "Live Factory",
     "enforce_cache_ttl_hygiene": "Live Factory",
     "parse_groq_json_response": "Demo / Diagnostics",
