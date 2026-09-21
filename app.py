@@ -1076,6 +1076,140 @@ def _recommended_shorts_crop_box(img, aspect_ratio=None) -> dict[str, int]:
     }
 
 
+@st.dialog("Crop / reframe selected image", width="large")
+def _render_crop_dialog(
+    controller: DashboardWorkflowController,
+    snapshot: Dict[str, Any],
+    target: str,
+) -> None:
+    target = str(target or "").strip()
+    source_path = ""
+    stored_box: dict[str, Any] = {}
+    crop_label = "selected image"
+    slide_index = None
+    asset_hash = ""
+
+    if target.startswith("slide:"):
+        try:
+            slide_index = int(target.split(":", 1)[1])
+        except (TypeError, ValueError):
+            slide_index = None
+        item = next((row for row in _visual_items(snapshot) if row.get("index") == slide_index), None)
+        if item:
+            source_path = str(item.get("original_path") or item.get("path") or "").strip()
+            stored_box = dict(item.get("crop_box") or {})
+            crop_label = f"slide {slide_index}"
+    elif target.startswith("asset:"):
+        asset_hash = target.split(":", 1)[1].strip()
+        candidates = [
+            item for item in (snapshot.get("visual_pool") or []) if isinstance(item, dict)
+        ]
+        for group in snapshot.get("visual_search_groups") or []:
+            candidates.extend(
+                item for item in (group.get("items") or []) if isinstance(item, dict)
+            )
+        asset = next(
+            (item for item in candidates if str(item.get("hash") or "").strip() == asset_hash),
+            None,
+        )
+        if asset:
+            source_path = str(asset.get("original_path") or asset.get("path") or "").strip()
+            stored_box = dict(asset.get("crop_box") or {})
+            crop_label = "selected pool image"
+
+    if not source_path or not os.path.isfile(source_path):
+        st.error("The original image is no longer available.")
+        if st.button("Close", width="stretch", key=f"close_crop_missing_{target[:32]}"):
+            st.session_state["visual_crop_target"] = ""
+            st.rerun()
+        return
+
+    if st_cropper is None:
+        st.error("Interactive cropping is unavailable in this Python environment.")
+        if st.button("Close", width="stretch", key=f"close_crop_unavailable_{target[:32]}"):
+            st.session_state["visual_crop_target"] = ""
+            st.rerun()
+        return
+
+    from PIL import Image
+
+    image = Image.open(source_path).convert("RGB")
+    default_coords = None
+    try:
+        if all(key in stored_box for key in ("left", "top", "width", "height")):
+            left = int(stored_box["left"])
+            top = int(stored_box["top"])
+            width = int(stored_box["width"])
+            height = int(stored_box["height"])
+            default_coords = (left, left + width, top, top + height)
+    except (TypeError, ValueError):
+        default_coords = None
+
+    st.caption(
+        f"{crop_label}. Drag and resize the frame. The original image remains preserved for future crops."
+    )
+    crop_mode = st.selectbox(
+        "Crop mode",
+        ["Shorts 9:16", "Rectangle (free)"],
+        key=f"crop_dialog_mode_{snapshot.get('run_id','active')}_{target[:32]}",
+    )
+    crop_is_shorts = crop_mode == "Shorts 9:16"
+    crop_result = st_cropper(
+        img_file=image,
+        realtime_update=True,
+        default_coords=default_coords,
+        box_color="#177fd1",
+        aspect_ratio=(9, 16) if crop_is_shorts else None,
+        box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
+        return_type="both",
+        key=f"crop_dialog_{snapshot.get('run_id','active')}_{target[:32]}",
+        should_resize_image=False,
+        stroke_width=3,
+    )
+    if isinstance(crop_result, tuple) and len(crop_result) == 2:
+        crop_preview, crop_box = crop_result
+    else:
+        crop_preview, crop_box = crop_result, {}
+
+    if crop_preview is not None:
+        st.image(crop_preview, width="stretch")
+
+    action_cols = st.columns([1, 1])
+    with action_cols[0]:
+        if st.button(
+            "Apply crop",
+            type="primary",
+            width="stretch",
+            disabled=not isinstance(crop_box, dict) or not crop_box,
+            key=f"apply_crop_dialog_{snapshot.get('run_id','active')}_{target[:32]}",
+        ):
+            mode_value = "free" if not crop_is_shorts else "shorts"
+            if slide_index is not None:
+                ok, message = controller.crop_visual(
+                    slide_index,
+                    crop_box=crop_box,
+                    crop_mode=mode_value,
+                )
+            else:
+                ok, message = controller.crop_visual_pool_asset(
+                    asset_hash,
+                    crop_box,
+                    crop_mode=mode_value,
+                )
+            if ok:
+                st.session_state["visual_crop_target"] = ""
+                st.rerun()
+            st.error(message)
+    with action_cols[1]:
+        if st.button(
+            "Close",
+            width="stretch",
+            key=f"close_crop_dialog_{snapshot.get('run_id','active')}_{target[:32]}",
+        ):
+            st.session_state["visual_crop_target"] = ""
+            st.rerun()
+
+
 def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict[str, Any]) -> None:
     items = _visual_items(snapshot)
     if not items:
@@ -1124,97 +1258,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     metric_cols[2].metric("Pool images", len(available) + len(provenance_review) + len(rejected))
     metric_cols[3].metric("New search", active_search_count)
 
-    crop_target = str(st.session_state.get("visual_pool_crop_target") or "").strip()
-    crop_asset = None
+    crop_target = str(st.session_state.get("visual_crop_target") or "").strip()
     if crop_target:
-        for candidate in pool:
-            if str(candidate.get("hash") or "").strip() == crop_target:
-                crop_asset = candidate
-                break
-        if crop_asset is None:
-            for group in search_groups:
-                for candidate in group.get("items") or []:
-                    if isinstance(candidate, dict) and str(candidate.get("hash") or "").strip() == crop_target:
-                        crop_asset = candidate
-                        break
-                if crop_asset is not None:
-                    break
-
-    if crop_asset is not None:
-        with st.container(border=True):
-            st.markdown("<div class='qc-card-title'>Crop / reframe selected image</div>", unsafe_allow_html=True)
-            crop_path = str(crop_asset.get("path") or "").strip()
-            if crop_path and os.path.isfile(crop_path):
-                from PIL import Image
-                crop_source_path = str(crop_asset.get("original_path") or crop_path).strip()
-                if crop_source_path and os.path.isfile(crop_source_path):
-                    crop_path = crop_source_path
-                crop_image = Image.open(crop_path).convert("RGB")
-                stored_box = crop_asset.get("crop_box") or {}
-                default_coords = None
-                try:
-                    if all(key in stored_box for key in ("left", "top", "width", "height")):
-                        left = int(stored_box["left"])
-                        top = int(stored_box["top"])
-                        width = int(stored_box["width"])
-                        height = int(stored_box["height"])
-                        default_coords = (left, left + width, top, top + height)
-                except (TypeError, ValueError):
-                    default_coords = None
-                if st_cropper is None:
-                    st.warning("Interactive cropping is unavailable in this Python environment.")
-                else:
-                    crop_left, crop_right = st.columns([1.2, 0.8], gap="medium")
-                    with crop_left:
-                        crop_mode = st.selectbox(
-                            "Crop shape",
-                            ["Shorts 9:16", "Rectangle (free)"],
-                            key=f"visual_pool_crop_mode_{run_id}_{crop_target[:12]}",
-                            label_visibility="collapsed",
-                        )
-                        crop_is_shorts = crop_mode == "Shorts 9:16"
-                        crop_result = st_cropper(
-                            img_file=crop_image,
-                            realtime_update=True,
-                            default_coords=default_coords,
-                            box_color="#177fd1",
-                            aspect_ratio=(9, 16) if crop_is_shorts else None,
-                            box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
-                            return_type="both",
-                            key=f"visual_pool_cropper_{run_id}_{crop_target[:12]}",
-                            should_resize_image=False,
-                            stroke_width=3,
-                        )
-                        if isinstance(crop_result, tuple) and len(crop_result) == 2:
-                            crop_preview, crop_box = crop_result
-                        else:
-                            crop_preview, crop_box = crop_result, {}
-                    with crop_right:
-                        st.markdown("**Shorts preview**")
-                        if crop_preview is not None:
-                            st.image(crop_preview, width=240)
-                        st.caption("Drag and resize the crop frame. The full original image stays available for another crop.")
-                    action_cols = st.columns([1, 1])
-                    with action_cols[0]:
-                        if isinstance(crop_box, dict) and crop_box and st.button(
-                            "Apply crop",
-                            type="primary",
-                            width="stretch",
-                            key=f"apply_pool_crop_{run_id}_{crop_target[:12]}",
-                        ):
-                            ok, message = controller.crop_visual_pool_asset(crop_target, crop_box)
-                            if ok:
-                                st.session_state.visual_pool_crop_target = ""
-                                st.rerun()
-                            st.error(message)
-                    with action_cols[1]:
-                        if st.button(
-                            "Close crop editor",
-                            width="stretch",
-                            key=f"close_pool_crop_{run_id}_{crop_target[:12]}",
-                        ):
-                            st.session_state.visual_pool_crop_target = ""
-                            st.rerun()
+        _render_crop_dialog(controller, snapshot, crop_target)
 
     st.markdown("### Current slide images")
     for row_start in range(0, len(items), 3):
@@ -1239,58 +1285,14 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         st.caption(item.get("qc_reason") or "This slide still needs a usable image.")
                     original_path = str(item.get("original_path") or "").strip()
                     if original_path and os.path.isfile(original_path):
-                        with st.expander("Crop / reframe", expanded=False):
-                            from PIL import Image
-                            original_image = Image.open(original_path).convert("RGB")
-                            stored_box = item.get("crop_box") or {}
-                            default_coords = None
-                            try:
-                                if all(key in stored_box for key in ("left", "top", "width", "height")):
-                                    left = int(stored_box["left"])
-                                    top = int(stored_box["top"])
-                                    width = int(stored_box["width"])
-                                    height = int(stored_box["height"])
-                                    default_coords = (left, left + width, top, top + height)
-                            except (TypeError, ValueError):
-                                default_coords = None
-                            if st_cropper is not None:
-                                crop_mode = st.selectbox(
-                                    "Crop shape",
-                                    ["Shorts 9:16", "Rectangle (free)"],
-                                    key=f"chosen_crop_mode_{run_id}_{item['index']}",
-                                    label_visibility="collapsed",
-                                )
-                                crop_is_shorts = crop_mode == "Shorts 9:16"
-                                crop_result = st_cropper(
-                                    img_file=original_image,
-                                    realtime_update=True,
-                                    default_coords=default_coords,
-                                    box_color="#177fd1",
-                                    aspect_ratio=(9, 16) if crop_is_shorts else None,
-                                    box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
-                                    return_type="both",
-                                    key=f"chosen_cropper_{run_id}_{item['index']}",
-                                    should_resize_image=False,
-                                    stroke_width=3,
-                                )
-                                if isinstance(crop_result, tuple) and len(crop_result) == 2:
-                                    crop_preview, crop_box = crop_result
-                                else:
-                                    crop_preview, crop_box = crop_result, {}
-                                if crop_preview is not None:
-                                    st.image(crop_preview, width=180)
-                                if isinstance(crop_box, dict) and crop_box and st.button(
-                                    "Apply crop",
-                                    type="primary",
-                                    width="stretch",
-                                    key=f"apply_chosen_crop_{run_id}_{item['index']}",
-                                ):
-                                    ok, message = controller.crop_visual(item["index"], crop_box=crop_box)
-                                    if ok:
-                                        st.rerun()
-                                    st.error(message)
-                            else:
-                                st.warning("Interactive cropping is unavailable in this Python environment.")
+                        if st.button(
+                            "Crop",
+                            width="stretch",
+                            key=f"crop_slide_{run_id}_{item['index']}",
+                        ):
+                            st.session_state["visual_crop_target"] = f"slide:{item['index']}"
+                            st.rerun()
+
 
     def render_pool_section(title: str, description: str, assets: list[dict], section_key: str, rejected_section: bool = False) -> None:
         st.markdown(
@@ -1348,7 +1350,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 width="stretch",
                                 key=f"crop_pool_{run_id}_{section_key}_{asset_hash[:12]}",
                             ):
-                                st.session_state.visual_pool_crop_target = asset_hash
+                                st.session_state["visual_crop_target"] = f"asset:{asset_hash}"
                                 st.rerun()
                         if bool(asset.get("used")):
                             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
