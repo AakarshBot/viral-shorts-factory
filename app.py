@@ -1715,36 +1715,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         )
 
 
-def render_activity_timeline(snapshot: Dict[str, Any]) -> None:
-    events = snapshot.get("activity_events") or []
-    if not events:
-        return
-
-    _render_section_header(
-        "Run activity",
-        "What the factory is doing",
-        "Recent milestones from the active production run.",
-    )
-    recent = events[-8:]
-    rows = []
-    for index, event in enumerate(recent):
-        active = index == len(recent) - 1 and snapshot.get("thread_alive")
-        icon = "●" if active else "✓"
-        rows.append(
-            f"<div class='timeline-row'><div class='timeline-dot'>{icon}</div>"
-            f"<div class='timeline-main'><div class='timeline-head'>{event.get('stage', 'Factory')}"
-            f"<span class='timeline-time'>{_ui_html(event.get('time', ''))}</span></div>"
-            f"<div class='timeline-message'>{_ui_html(event.get('message', ''))}</div></div></div>"
-        )
-    st.markdown("<div class='timeline'>" + "".join(rows) + "</div>", unsafe_allow_html=True)
-
-    if len(events) > len(recent):
-        with st.expander(f"Earlier activity · {len(events) - len(recent)} events", expanded=False):
-            for event in events[:-len(recent)]:
-                st.caption(
-                    f"{event.get('stage', 'Factory')} · {event.get('time', '')} · {event.get('message', '')}"
-                )
-
 def render_research_summary(snapshot: Dict[str, Any]) -> None:
     story = snapshot.get("selected_story") or {}
     if not story:
@@ -1787,20 +1757,6 @@ def render_audio_preview(snapshot: Dict[str, Any]) -> None:
             with st.container(border=True):
                 st.caption(f"SCENE {index}")
                 st.audio(path, format="audio/mpeg")
-
-def render_visual_details(snapshot: Dict[str, Any]) -> None:
-    items = _visual_items(snapshot)
-    if not items:
-        return
-    with st.expander("Visual sourcing details", expanded=False):
-        st.caption("Provider, manual-search and rescue details are kept here so the main review stays visual.")
-        for item in items:
-            details = [f"Visual {item['index']}: {item['visual_type']} · {item['source']}"]
-            if item.get("manual_query"):
-                details.append(f"Manual query: {item['manual_query']}")
-            if item.get("rescue_reason"):
-                details.append(f"Rescue: {item['rescue_reason']}")
-            st.caption(" — ".join(details))
 
 def render_powershell_widget(snapshot: Dict[str, Any]) -> None:
     """Render the worker's exact stdout/stderr in the collapsible dashboard sidebar."""
