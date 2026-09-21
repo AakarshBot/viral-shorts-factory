@@ -2560,7 +2560,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 evidence = build_discovery_evidence(candidate)
                 channel_fit = float(candidate.get("channel_fit_score") or 0.0)
                 channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)
-                                source = str(candidate.get("source_label") or "News source").strip()
+                source = str(candidate.get("source_label") or "News source").strip()
                 url = str(candidate.get("story_url") or "").strip()
 
                 actionability = float(candidate.get("topic_actionability_score") or 0.0)
