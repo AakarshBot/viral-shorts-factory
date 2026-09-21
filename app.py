@@ -649,7 +649,11 @@ def build_config() -> Dict[str, Any]:
                 "format_mode": "regular",
                 "display_format": "AI",
                 "editorial_mode": "AI",
-                "category": "ai_recommendation",
+                # AI is a smart-selection mode inside Sports, not a separate
+                # production genre. Keep the real category key so downstream
+                # metadata/script routing cannot fall back to national affairs.
+                "category": "sports",
+                "discovery_mode": "ai_sports",
                 "language": language_key,
                 "language_label": language_label,
                 "channel": channel,
