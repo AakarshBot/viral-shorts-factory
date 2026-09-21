@@ -228,6 +228,9 @@ def test_discovery_portfolio_keeps_current_niche_topic_but_marks_it_exploratory(
             "source_quality": 1.0,
         },
         "topic_actionability_score": 3.5,
+        "event_source_count": 2,
+        "description": "A concrete current development with enough factual detail to support a short-form story.",
+        "event_actions": ["announce"],
     }
 
     assert story_ranker._discovery_portfolio_pass(story) is True
@@ -249,3 +252,35 @@ def test_discovery_portfolio_still_rejects_stale_low_signal_topic():
 
     assert story_ranker._discovery_portfolio_pass(story) is False
     assert story["discovery_rejection"] == "Insufficient current-event signal"
+
+
+def test_deduplicate_stage_keeps_distinct_action_targets_separate():
+    stories = [
+        {
+            "title": "BCCI announces India's squad for Australia series",
+            "url": "https://example.in/a",
+            "publishedAt": "2026-09-21T10:00:00+00:00",
+            "source": "example.in",
+            "event_actions": ["announce"],
+            "event_entities": ["BCCI", "India", "Australia"],
+            "event_clustered": True,
+            "event_id": "event-australia",
+            "event_source_count": 1,
+            "event_article_count": 1,
+        },
+        {
+            "title": "BCCI announces India's squad for England series",
+            "url": "https://example.in/b",
+            "publishedAt": "2026-09-21T09:30:00+00:00",
+            "source": "example.in",
+            "event_actions": ["announce"],
+            "event_entities": ["BCCI", "India", "England"],
+            "event_clustered": True,
+            "event_id": "event-england",
+            "event_source_count": 1,
+            "event_article_count": 1,
+        },
+    ]
+
+    selected = story_ranker._deduplicate_stage(stories, max_items=10)
+    assert len(selected) == 2
