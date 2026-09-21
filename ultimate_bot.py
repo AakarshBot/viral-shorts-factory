@@ -126,9 +126,9 @@ CONTENT_CATEGORIES = {
     },
     "sports": {
         "label": "Asian & Global Sports Highlights",
-        "gnews_q": "(India OR Indian) (cricket OR tennis OR football OR badminton OR hockey OR athletics) OR (global sports major)",
-        "india_gnews_q": "(India OR Indian) (cricket OR football OR tennis OR badminton OR hockey OR athletics OR ISL OR kabaddi OR Olympics)",
-        "global_gnews_q": "(global OR world) (sports major OR tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
+        "gnews_q": "(India OR Indian) (cricket OR tennis OR football OR soccer OR badminton OR hockey OR athletics OR basketball OR golf OR rugby OR volleyball OR wrestling OR boxing OR motorsport OR Formula 1 OR F1 OR MotoGP) OR (global OR world) (sports OR tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
+        "india_gnews_q": "(India OR Indian) (cricket OR football OR tennis OR badminton OR hockey OR athletics OR basketball OR kabaddi OR wrestling OR boxing OR motorsport OR Formula 1 OR F1 OR golf OR Olympics)",
+        "global_gnews_q": "(global OR world) (sports OR tennis OR football OR soccer OR basketball OR golf OR rugby OR volleyball OR athletics OR motorsport OR Formula 1 OR F1 OR MotoGP OR boxing OR wrestling) (tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "17", 
         "hashtags": ["#Cricket", "#Tennis", "#BGMI", "#Badminton", "#Football", "#SportsHighlights"],
