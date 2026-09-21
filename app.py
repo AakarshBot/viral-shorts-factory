@@ -1912,7 +1912,10 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     metadata = snapshot.get("final_metadata") or {}
     run_id = str(snapshot.get("run_id") or "")
     pending_metadata = st.session_state.pop("metadata_pending_values", None)
-    if isinstance(pending_metadata, dict):
+    if (
+        isinstance(pending_metadata, dict)
+        and str(pending_metadata.get("run_id") or "").strip() == run_id
+    ):
         st.session_state["final_title"] = str(pending_metadata.get("title") or "").strip()
         st.session_state["final_description"] = str(pending_metadata.get("description") or "").strip()
         st.session_state["final_comment"] = str(pending_metadata.get("comment") or "").strip()
@@ -1998,6 +2001,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                             title, description, comment
                         )
                         st.session_state["metadata_pending_values"] = {
+                            "run_id": run_id,
                             "title": clean_title,
                             "description": clean_description,
                             "comment": clean_comment,
