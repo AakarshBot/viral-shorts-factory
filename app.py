@@ -982,22 +982,16 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             bank_path = str(bank_item.get("path") or "").strip()
             if bank_path and os.path.isfile(bank_path):
                 bank.append(dict(bank_item))
-        factory_rejected = [
-            dict(item)
-            for item in bank
-            if str(item.get("status") or "").strip() == "factory-rejected-resolution"
-            or str(item.get("scene_status") or "").strip() == "resolution-rejected"
-        ]
-        scene_rejected = [
-            dict(item)
-            for item in bank
-            if str(item.get("scene_status") or "").strip() == "scene-rejected"
-        ]
+        # Dashboard display is intentionally simple: if the image passed the
+        # identity AI gate and the lenient monetization/provenance gate, show it.
+        # Context suitability and soft resolution are not display filters.
         unused_verified = [
             dict(item)
             for item in bank
-            if str(item.get("scene_status") or "").strip() in {"", "good-unused"}
+            if str(item.get("scene_status") or "").strip() != "scene-rejected"
         ]
+        factory_rejected = []
+        scene_rejected = []
         items.append(
             {
                 "index": index,
@@ -1098,23 +1092,15 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         dict(group) for group in (snapshot.get("visual_search_groups") or [])
         if isinstance(group, dict)
     ]
+    # Every retained image that passed AI identity verification and the
+    # lenient monetization/provenance gate is displayed. Context, scene score
+    # and soft resolution are deliberately not acceptance filters here.
     available = [
         item for item in pool
         if not bool(item.get("used"))
-        and str(item.get("status") or "") != "factory-rejected-resolution"
-        and str(item.get("provenance_status") or "commercial-verified") == "commercial-verified"
     ]
-    provenance_review = [
-        item for item in pool
-        if not bool(item.get("used"))
-        and str(item.get("status") or "") != "factory-rejected-resolution"
-        and str(item.get("provenance_status") or "") == "provenance-review"
-    ]
-    rejected = [
-        item for item in pool
-        if not bool(item.get("used"))
-        and str(item.get("status") or "") == "factory-rejected-resolution"
-    ]
+    provenance_review = []
+    rejected = []
 
     ready_count = sum(1 for item in items if item.get("qc_passed"))
     active_search_count = sum(
@@ -1398,7 +1384,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     )
 
     st.markdown("### New manual searches")
-    st.caption("Each search returns up to five NEW monetization-safe images. Identity is intentionally left to your manual QC for these one-off searches.")
+    st.caption("Each search returns up to 10 NEW images that passed the AI identity check and lenient monetization check. Context suitability is left to you.")
     for group in search_groups:
         group_id = str(group.get("id") or "search")
         group_items = [dict(item) for item in (group.get("items") or []) if isinstance(item, dict)]
@@ -1457,12 +1443,12 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                     st.rerun()
 
     search_query = st.text_input(
-        "Search for five new images",
+        "Search for up to 10 new images",
         placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
         key=f"global_visual_search_{run_id}",
     )
     if st.button(
-        "Search 5 new images",
+        "Search up to 10 new images",
         type="secondary",
         width="stretch",
         key=f"global_visual_search_button_{run_id}",
