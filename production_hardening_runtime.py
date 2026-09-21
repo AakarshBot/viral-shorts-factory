@@ -196,65 +196,104 @@ def install_production_wrappers(controller) -> None:
         raise RuntimeError("Legacy run_robot() is not available.")
     globals_dict = getattr(run_robot, "__globals__", {})
 
+    def _same_controller_wrapper(current):
+        return (
+            callable(current)
+            and getattr(current, "_workflow_progress_wrapper", False)
+            and getattr(current, "_workflow_controller", None) is controller
+        )
+
     original_write = globals_dict.get("write_script")
     if callable(original_write):
-        def write_wrapper(*args, **kwargs):
-            controller._reporter("script", 28, "Writing and checking the selected story…")
-            result = original_write(*args, **kwargs)
-            if isinstance(result, dict):
-                with controller._lock:
-                    controller.state.script_data = result
-                count = len(result.get("script") or [])
-                controller._reporter("script", 38, f"Script complete — {count} scenes passed the production contract.")
-            return result
-        globals_dict["write_script"] = write_wrapper
+        if not _same_controller_wrapper(original_write):
+            inner_write = original_write
+
+            def write_wrapper(*args, **kwargs):
+                controller._reporter("script", 28, "Writing and checking the selected story…")
+                result = inner_write(*args, **kwargs)
+                if isinstance(result, dict):
+                    with controller._lock:
+                        controller.state.script_data = result
+                    count = len(result.get("script") or [])
+                    controller._reporter("script", 38, f"Script complete — {count} scenes passed the production contract.")
+                return result
+
+            write_wrapper._workflow_progress_wrapper = True
+            write_wrapper._workflow_controller = controller
+            globals_dict["write_script"] = write_wrapper
 
     original_audio = globals_dict.get("generate_voiceover_and_timestamps")
     if callable(original_audio):
-        async def audio_wrapper(*args, **kwargs):
-            controller._reporter("audio", 42, "Generating narration and word timings…")
-            result = await original_audio(*args, **kwargs) if inspect.iscoroutinefunction(original_audio) else original_audio(*args, **kwargs)
-            audio_paths = result[0] if isinstance(result, tuple) and result else []
-            word_timings = result[1] if isinstance(result, tuple) and len(result) > 1 else []
-            with controller._lock:
-                controller.state.audio_paths = [
-                    str(path) for path in audio_paths
-                    if str(path or "").strip()
-                ] if isinstance(audio_paths, list) else []
-                controller.state.word_timings = [
-                    list(items) if isinstance(items, list) else []
-                    for items in (word_timings if isinstance(word_timings, list) else [])
-                ]
-            controller._reporter(
-                "audio",
-                53,
-                f"Narration complete — {len(controller.state.audio_paths)} scene audio files ready.",
-            )
-            return result
-        globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
+        if not _same_controller_wrapper(original_audio):
+            inner_audio = original_audio
+
+            async def audio_wrapper(*args, **kwargs):
+                controller._reporter("audio", 42, "Generating narration and word timings…")
+                result = (
+                    await inner_audio(*args, **kwargs)
+                    if inspect.iscoroutinefunction(inner_audio)
+                    else inner_audio(*args, **kwargs)
+                )
+                audio_paths = result[0] if isinstance(result, tuple) and result else []
+                word_timings = result[1] if isinstance(result, tuple) and len(result) > 1 else []
+                with controller._lock:
+                    controller.state.audio_paths = [
+                        str(path) for path in audio_paths
+                        if str(path or "").strip()
+                    ] if isinstance(audio_paths, list) else []
+                    controller.state.word_timings = [
+                        list(items) if isinstance(items, list) else []
+                        for items in (word_timings if isinstance(word_timings, list) else [])
+                    ]
+                controller._reporter(
+                    "audio",
+                    53,
+                    f"Narration complete — {len(controller.state.audio_paths)} scene audio files ready.",
+                )
+                return result
+
+            audio_wrapper._workflow_progress_wrapper = True
+            audio_wrapper._workflow_controller = controller
+            globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
 
     original_visuals = globals_dict.get("process_visuals_async")
     if callable(original_visuals):
-        async def visuals_wrapper(*args, **kwargs):
-            script_data = args[0] if args else kwargs.get("script_data") or {}
-            total = len(script_data.get("script") or []) if isinstance(script_data, dict) else 0
-            controller._reporter("visuals", 56, f"Sourcing and verifying visuals for {total} scenes…")
-            result = await original_visuals(*args, **kwargs) if inspect.iscoroutinefunction(original_visuals) else original_visuals(*args, **kwargs)
-            controller._reporter("visuals", 75, f"Visual package complete — {len(result) if isinstance(result, list) else 0} scene packages ready.")
-            return result
-        globals_dict["process_visuals_async"] = visuals_wrapper
+        if not _same_controller_wrapper(original_visuals):
+            inner_visuals = original_visuals
+
+            async def visuals_wrapper(*args, **kwargs):
+                script_data = args[0] if args else kwargs.get("script_data") or {}
+                total = len(script_data.get("script") or []) if isinstance(script_data, dict) else 0
+                controller._reporter("visuals", 56, f"Sourcing and verifying visuals for {total} scenes…")
+                result = (
+                    await inner_visuals(*args, **kwargs)
+                    if inspect.iscoroutinefunction(inner_visuals)
+                    else inner_visuals(*args, **kwargs)
+                )
+                controller._reporter("visuals", 75, f"Visual package complete — {len(result) if isinstance(result, list) else 0} scene packages ready.")
+                return result
+
+            visuals_wrapper._workflow_progress_wrapper = True
+            visuals_wrapper._workflow_controller = controller
+            globals_dict["process_visuals_async"] = visuals_wrapper
 
     original_compile = globals_dict.get("compile_video")
     if callable(original_compile):
-        def compile_wrapper(*args, **kwargs):
-            controller._reporter("render", 78, "Rendering motion, word-highlight captions and branding…")
-            result = original_compile(*args, **kwargs)
-            controller._reporter("render", 94, "Video rendered and loudness normalized. Preparing final QC…")
-            if isinstance(result, str) and os.path.isfile(result):
-                with controller._lock:
-                    controller.state.video_path = result
-            return result
-        globals_dict["compile_video"] = compile_wrapper
+        if not _same_controller_wrapper(original_compile):
+            inner_compile = original_compile
+
+            def compile_wrapper(*args, **kwargs):
+                controller._reporter("render", 78, "Rendering motion, word-highlight captions and branding…")
+                result = inner_compile(*args, **kwargs)
+                controller._reporter("render", 94, "Video rendered and loudness normalized. Preparing final QC…")
+                if isinstance(result, str) and os.path.isfile(result):
+                    with controller._lock:
+                        controller.state.video_path = result
+                return result
+
+            compile_wrapper._workflow_progress_wrapper = True
+            compile_wrapper._workflow_controller = controller
+            globals_dict["compile_video"] = compile_wrapper
 
     real_upload = getattr(controller.bot, "upload_to_youtube", None)
     if callable(real_upload):
