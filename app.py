@@ -29,7 +29,6 @@ from provider_runtime import patch_provider_adapters
 from quality_runtime import patch_quality_control
 from runtime_bindings import bind_dashboard_patches
 from story_ranker import patch_story_selection
-from visual_content_runtime import patch_content_first_visuals as patch_visual_pipeline
 from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
 from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS
@@ -454,7 +453,6 @@ def initialise_runtime() -> None:
         patch_story_selection(ultimate_bot)
         patch_quality_control(ultimate_bot)
         install_visual_qa_bridge(visual_runtime)
-        patch_visual_pipeline(ultimate_bot)
         from audio_runtime import patch_audio_pipeline
         patch_audio_pipeline(ultimate_bot)
         patch_provider_adapters(ultimate_bot)
