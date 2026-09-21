@@ -2166,14 +2166,14 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
     if st.session_state.candidates:
         _render_section_header(
             "Headline stage",
-            "Choose a headline",
-            "The ranked story pool is ready. Select one to continue.",
+            "Choose a topic",
+            "The event-backed topic pool is ready. Select one to continue.",
         )
     else:
         _render_section_header(
             "Headline stage",
             "Find today's headlines",
-            "Your selected Live path is locked in above. Search current stories and choose one before production starts.",
+            "Your selected Live path is locked in above. Search current events and choose a topic before production starts.",
         )
 
     if not st.session_state.candidates:
@@ -2245,7 +2245,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             "The factory has pre-built ranked image-search phrases. Edit them before production; only the terms left here will be searched.",
         )
         with st.container(border=True):
-            st.markdown("<div class='story-rank'>SELECTED HEADLINE</div>", unsafe_allow_html=True)
+            st.markdown("<div class='story-rank'>SELECTED TOPIC</div>", unsafe_allow_html=True)
             st.markdown(
                 f"<div class='story-title' style='font-size:1.35rem;overflow-wrap:anywhere'>{_ui_html(headline)}</div>",
                 unsafe_allow_html=True,
