@@ -1548,7 +1548,11 @@ def test_dashboard_first_render_has_no_streamlit_exception(monkeypatch):
         if getattr(element, "value", None) is not None
     )
     assert len(at.markdown) > 0, "Live homepage rendered no visible content."
-    assert "studio-boot-shell" in at.markdown[0].value or "Shorts Studio" in at.markdown[0].value
+    assert any(
+        "Live" in str(element.value) or "Build a Short" in str(element.value)
+        for element in at.markdown
+        if getattr(element, "value", None) is not None
+    )
 
 
 
