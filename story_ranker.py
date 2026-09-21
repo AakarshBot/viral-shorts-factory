@@ -1494,7 +1494,7 @@ def _india_relevance_score(story):
     text = _text_blob(story)
     title = _clean(story.get("title") or "")
     score = min(10.0, float(len(_tokens(text) & INDIA_SIGNAL_TERMS)))
-    if re.search(r"\b\.in\b", _source_domain(story)):
+    if _source_domain(story).endswith(".in"):
         score += 2.0
     if any(term in title for term in ("india", "indian")):
         score += 2.0
@@ -1561,9 +1561,9 @@ def _build_discovery_google_queries(
         india_query,
         trend_keyword,
         custom_gnews_q,
-        rss_query,
-        genre_cfg.get("gnews_q"),
         global_query,
+        genre_cfg.get("gnews_q"),
+        rss_query,
     ):
         text_value = str(value or "").strip()
         if text_value:
