@@ -456,6 +456,54 @@ def _load_remote_youtube_credentials():
     return None
 
 
+class YouTubePublicVisibilityError(RuntimeError):
+    """Raised when YouTube does not persist a requested public upload as public."""
+
+
+def _verify_youtube_privacy(youtube, video_id, expected_privacy, attempts=3, delay_seconds=1.0):
+    """Verify YouTube's persisted privacy state after a successful upload request."""
+    expected = str(expected_privacy or "").strip().lower()
+    if expected != "public":
+        return
+
+    last_status = ""
+    try:
+        attempts = max(1, int(attempts))
+    except (TypeError, ValueError):
+        attempts = 3
+
+    for attempt in range(attempts):
+        try:
+            payload = (
+                youtube.videos()
+                .list(part="status", id=str(video_id))
+                .execute()
+            )
+        except Exception as exc:
+            raise YouTubePublicVisibilityError(
+                f"YouTube uploaded video {video_id}, but public visibility could not be verified: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
+        items = payload.get("items") or [] if isinstance(payload, dict) else []
+        if items and isinstance(items[0], dict):
+            status = items[0].get("status") or {}
+            last_status = str(status.get("privacyStatus") or "").strip().lower()
+            if last_status == "public":
+                return
+
+        if attempt + 1 < attempts:
+            time.sleep(max(0.0, float(delay_seconds)))
+
+    observed = last_status or "unknown"
+    raise YouTubePublicVisibilityError(
+        f"YouTube accepted video {video_id} but persisted privacyStatus='{observed}' instead of 'public'. "
+        "The video was not confirmed as public. This can occur when the Google API project is subject "
+        "to YouTube's unverified-project upload restriction; the video remains private until the project "
+        "is eligible for public API uploads."
+    )
+
+
 def get_google_credentials():
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -1748,6 +1796,9 @@ def upload_to_youtube(
         if not vid_id:
             raise RuntimeError("YouTube upload completed without a video ID.")
 
+        if privacy == "public":
+            _verify_youtube_privacy(youtube, vid_id, privacy)
+
         print(f"   [+] Successfully uploaded to YouTube! Video ID: {vid_id}")
 
         # Public publishing uses the dashboard-approved pinned-comment text.
@@ -1794,6 +1845,9 @@ def upload_to_youtube(
                 print("   [!] Public upload succeeded without a comment because the approved comment was empty.")
 
         return vid_id
+    except YouTubePublicVisibilityError as exc:
+        print(f"   [!] YouTube public upload verification failed: {exc}", flush=True)
+        raise
     except Exception as exc:
         print(f"   [!] YouTube upload failed: {exc}")
         return None
