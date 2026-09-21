@@ -388,6 +388,9 @@ def _select_related_asset(
     return candidates[0][1] if candidates else None
 
 def patch_content_first_visuals(bot):
+    """Install the content-first visual pipeline once per bot instance."""
+    if getattr(bot, "_content_first_visuals_patch_installed", False):
+        return bot
     try:
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
@@ -915,4 +918,5 @@ def patch_content_first_visuals(bot):
         return packages
 
     bot.process_visuals_async = process
+    bot._content_first_visuals_patch_installed = True
     return bot

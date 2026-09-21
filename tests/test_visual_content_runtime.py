@@ -31,6 +31,17 @@ def _run_process(bot, script_data, format_mode):
     return asyncio.run(bot.process_visuals_async(script_data, {"font": ""}, format_mode=format_mode))
 
 
+def test_content_first_visuals_installer_is_idempotent(tmp_path):
+    bot = _fake_bot(tmp_path)
+
+    content_runtime.patch_content_first_visuals(bot)
+    first = bot.process_visuals_async
+    content_runtime.patch_content_first_visuals(bot)
+
+    assert bot.process_visuals_async is first
+    assert bot._content_first_visuals_patch_installed is True
+
+
 def test_news_source_ranking_does_not_force_first_slide_for_manual_query():
     scenes = [
         {
