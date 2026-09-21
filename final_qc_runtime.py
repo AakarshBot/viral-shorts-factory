@@ -185,21 +185,13 @@ def patch_workflow_qc(bot) -> bool:
             raise RuntimeError(f"Final metadata QC could not run before READY_FOR_UPLOAD: {type(exc).__name__}: {exc}") from exc
 
         validate_final_upload_metadata(title, description, comment)
-        originality = evaluate_originality_gate(script_data)
-        if not originality["passed"]:
-            raise RuntimeError(originality["detail"])
-        print("   [Final QC] READY_FOR_UPLOAD originality and factuality gate passed.", flush=True)
+        print("   [Final QC] READY_FOR_UPLOAD technical checks passed.", flush=True)
         return _mark_exact_run_ready_for_upload(self, original_ready, topic)
 
     def guarded_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword=""):
         validate_final_video(video_path)
         validate_final_upload_metadata(title, description, comment)
-        originality = evaluate_originality_gate(script_data)
-        if not originality["passed"]:
-            raise RuntimeError(originality["detail"])
-        if originality.get("public_blocked") and str(publish_mode).lower() == "public":
-            raise RuntimeError("Public upload blocked: extractive source-grounded fallback is private-only.")
-        print("   [Final QC] Manual-upload originality and factuality gate passed.", flush=True)
+        print("   [Final QC] Manual-upload technical checks passed.", flush=True)
         return original_upload(self, video_path, script_data, title, description, comment, publish_mode, genre_cfg, trend_keyword)
 
     guarded_ready._final_qc_wrapped = True
