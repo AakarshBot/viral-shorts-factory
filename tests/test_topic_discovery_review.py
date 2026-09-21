@@ -11,6 +11,74 @@ class _FakeResponse:
         self.content = content
 
 
+
+
+def test_script_pipeline_tries_original_free_provider_before_private_extractive_fallback(monkeypatch):
+    import pipeline_integrity_runtime as pir
+    import research_runtime as rr
+    import script_router_runtime as router
+    import script_runtime as sr
+
+    class _Bot:
+        def run_robot(self):
+            return None
+
+    bot = _Bot()
+
+    def primary_raises(*_args, **_kwargs):
+        raise RuntimeError("primary provider failed")
+
+    bot.write_script = primary_raises
+
+    monkeypatch.setattr(rr, "discover_sources", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        rr,
+        "build_evidence_pack",
+        lambda *_args, **_kwargs: {
+            "status": "ok",
+            "counts": {"usable_sources": 2, "independent_domains": 2, "claims": 3, "corroborated_claims": 2, "conflicted_claims": 0},
+            "sources": [],
+        },
+    )
+    monkeypatch.setattr(rr, "format_evidence_pack_for_script", lambda *_args, **_kwargs: "Verified evidence text.")
+    monkeypatch.setattr(rr, "_prepare_primary_writer_data", lambda data, _format: dict(data))
+
+    original_script = {
+        "title": "Recovered original script",
+        "editorial_angle": "Why the development matters",
+        "script": [{
+            "voiceover": "A substantive development changes the situation today.",
+            "primary_entity": "Subject",
+            "specific_search_prompt": "Subject latest development",
+        }],
+    }
+
+    monkeypatch.setattr(rr, "_openrouter_script_fallback", lambda *_args, **_kwargs: dict(original_script))
+    monkeypatch.setattr(
+        rr,
+        "_ollama_script_fallback",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Ollama should not run after OpenRouter succeeds")),
+    )
+    monkeypatch.setattr(
+        pir,
+        "strict_fallback",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Extractive fallback should not run after an original provider succeeds")),
+    )
+    monkeypatch.setattr(pir, "_clean_script_result", lambda result, *_args: dict(result))
+    monkeypatch.setattr(sr, "clean_script_data", lambda result, *_args: (dict(result), {"changed_scenes": 0, "removed_scenes": 0}))
+    monkeypatch.setattr(sr, "validate_content_density", lambda *_args: (True, "ok"))
+    monkeypatch.setattr(sr, "assess_release_structure", lambda *_args: (True, "ok", "Editorial Explainer"))
+    monkeypatch.setattr(sr, "check_script_originality", lambda *_args: {"passed": True, "failures": []})
+    monkeypatch.setattr(sr, "_run_real_critique", lambda *_args: {"unsupported_claims": []})
+
+    write_script = router.install_script_pipeline(bot)
+    result = write_script({"title": "Selected story", "text": "Verified story evidence."}, {}, "technology", object(), "regular")
+
+    assert result["title"] == "Recovered original script"
+    assert result.get("fallback_mode") != "extractive_source_grounded"
+    assert result.get("public_publish_blocked") is not True
+
+
 def test_latest_trustworthy_publication_or_update_time_drives_freshness():
     story = {
         "publishedAt": "2026-09-17T10:00:00+00:00",
