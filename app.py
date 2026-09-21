@@ -860,7 +860,11 @@ def render_live_navigation() -> Dict[str, Any]:
         st.caption("Choose a format to continue.")
         return build_config()
 
-    st.markdown("<div class='live-choice-label'>Topic lane</div>", unsafe_allow_html=True)
+    lane_label = "Sports lane" if live_format == "Sports" else "Topic lane"
+    st.markdown(
+        f"<div style='color:var(--muted-2);font-size:.66rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;margin:14px 0 7px'>{lane_label}</div>",
+        unsafe_allow_html=True,
+    )
 
     final_path_ready = False
     if live_format in {"Deep Dive", "Top 5"}:
