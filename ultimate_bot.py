@@ -1248,68 +1248,6 @@ def _caption_y_position(video_height, scene_source_type="", format_mode="regular
     return int(video_height * 0.52)
 
 
-def _hook_headline_from_scene(scene_text, max_words=8):
-    """Take a compact headline directly from scene-one narration."""
-    text = re.sub(r"\s+", " ", str(scene_text or "")).strip()
-    if not text:
-        return ""
-    sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
-    return " ".join(sentence.split()[:max_words]).strip(" -:|")
-
-
-def _render_hook_headline_overlay(hook_text, font_path, output_path, width=780, height=190):
-    """Render the scene-one hook inside the upper safe area."""
-    hook_text = _hook_headline_from_scene(hook_text)
-    if not hook_text:
-        return None
-    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle(
-        (2, 2, width - 3, height - 3),
-        radius=28,
-        fill=(7, 13, 23, 222),
-        outline=PALETTE["accent_primary"] + (210,),
-        width=3,
-    )
-    draw.rectangle((28, 22, 170, 28), fill=PALETTE["accent_primary"] + (245,))
-    font, lines = fit_text_in_box(
-        hook_text,
-        font_path,
-        width - 70,
-        height - 54,
-        start_size=58,
-    )
-    line_heights = []
-    for line in lines[:2]:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        line_heights.append(max(1, bbox[3] - bbox[1]))
-    gap = 10
-    total_h = sum(line_heights) + gap * max(0, len(line_heights) - 1)
-    y = max(28, (height - total_h) // 2)
-    for line, line_h in zip(lines[:2], line_heights):
-        bbox = draw.textbbox((0, 0), line, font=font)
-        text_w = bbox[2] - bbox[0]
-        x = (width - text_w) / 2
-        draw.text(
-            (x + 4, y + 5),
-            line,
-            font=font,
-            fill=(0, 0, 0, 210),
-            stroke_width=2,
-            stroke_fill=(0, 0, 0, 210),
-        )
-        draw.text(
-            (x, y),
-            line,
-            font=font,
-            fill=PALETTE["text_primary"],
-            stroke_width=1,
-            stroke_fill=(0, 0, 0, 245),
-        )
-        y += line_h + gap
-    image.save(output_path, "PNG")
-    return output_path
-
 
 def _normalize_audio_loudness(input_path, output_path):
     """Normalize final program audio to approximately -14 LUFS with FFmpeg."""
@@ -1358,7 +1296,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
     )
     from moviepy.audio.AudioClip import CompositeAudioClip
     from moviepy.audio.fx import AudioLoop
-    from moviepy.video.fx import FadeIn, FadeOut
 
     width, height = 1080, 1920
     final_clips = []
@@ -1530,29 +1467,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                         .with_position(("center", safe_y_pos))
                     )
 
-            if idx == 0:
-                first_scene_text = (
-                    layer_paths[0].get("narration_text")
-                    or layer_paths[0].get("text")
-                    or " ".join(
-                        safe_text(item.get("word"), "")
-                        for item in scene_wt
-                        if isinstance(item, dict)
-                    )
-                )
-                hook_path = os.path.join(ASSETS_DIR, "hook_headline.png")
-                if _render_hook_headline_overlay(
-                    first_scene_text, font_path, hook_path
-                ):
-                    hook_duration = min(2.0, scene_duration)
-                    if hook_duration >= 1.5:
-                        text_clips.append(
-                            ImageClip(hook_path)
-                            .with_start(0)
-                            .with_duration(hook_duration)
-                            .with_position(("center", 220))
-                            .with_effects([FadeIn(0.18), FadeOut(0.30)])
-                        )
 
             from branding_runtime import build_scene_branding_overlays
 

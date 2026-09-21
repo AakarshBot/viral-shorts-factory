@@ -52,8 +52,6 @@ SURFACE_MAP: dict[str, str] = {
     "generate_karaoke_clip": "Live Factory",
     "_scene_visual_segment_count": "Internal",
     "_caption_y_position": "Internal",
-    "_hook_headline_from_scene": "Internal",
-    "_render_hook_headline_overlay": "Internal",
     "_normalize_audio_loudness": "Internal",
     "compile_video": "Live Factory",
     "upload_to_youtube": "Live Factory",
