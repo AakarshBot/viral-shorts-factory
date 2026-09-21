@@ -192,7 +192,10 @@ def patch_youtube_upload(bot):
                 from ultimate_bot import YouTubePublicVisibilityError
             except Exception:
                 YouTubePublicVisibilityError = None
-            if YouTubePublicVisibilityError is not None and isinstance(exc, YouTubePublicVisibilityError):
+            if (
+                YouTubePublicVisibilityError is not None
+                and isinstance(exc, YouTubePublicVisibilityError)
+            ) or str(publish_mode).lower() == "public":
                 raise
             return None
 
