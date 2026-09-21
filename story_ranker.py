@@ -946,7 +946,7 @@ def _deduplicate_stage(stories, max_items=15):
                 duplicate = True
                 break
             similarity = _story_theme_similarity(story, old)
-            if similarity >= 0.74 and _topic_dedupe_compatible(story, old):
+            if similarity >= 0.68 and _topic_dedupe_compatible(story, old):
                 duplicate = True
                 break
         if duplicate:
