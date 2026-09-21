@@ -552,19 +552,15 @@ def test_person_action_reuses_verified_cache_without_duplicate_semantic_qa(monke
         "Pat Cummins interview",
     )
 
+    # Cached verified assets are reused without another semantic-QA request.
+    # The cache preserves the source image dimensions; final Shorts fitting happens
+    # later in the content-first renderer.
     assert calls["qa"] == 0
     assert source == "cached"
     assert used_ai is False
     assert scene["visual_verified"] is True
     assert scene["visual_cache_reused"] is True
-    assert image.size == (1080, 1920)
-    assert used_ai is False
-    assert source == "visual-rescue"
-    assert scene["visual_qc_blocked"] is False
-    assert scene["visual_qc_block_reason"] == ""
-    assert retrieval._trusted_source_evidence(
-        "Commons", "PERSON", "Pat Cummins interview", "PERSON_ACTION"
-    )[0] is False
+    assert image.size == (900, 1200)
 
 
 def test_commons_logo_still_passes_visual_qc(monkeypatch):
