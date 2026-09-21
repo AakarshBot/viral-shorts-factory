@@ -911,8 +911,12 @@ def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
 def test_dashboard_primary_menu_and_generated_outputs_contract():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert 'mode_labels = ["Deep Dive", "Top 5", "Cricket", "AI"]' in app_source
+    assert 'options = ["Live", "Test"]' in app_source
+    assert '["Deep Dive", "Top 5", "Sports"]' in app_source
+    assert '["Cricket", "Niche Sports", "AI"]' in app_source
+    assert '["India / Asia", "Global"]' in app_source
     assert '["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"]' not in app_source
+    assert 'def render_sidebar_controls(' not in app_source
     assert 'def render_generated_outputs(snapshot: Dict[str, Any]) -> None:' in app_source
     assert 'render_generated_outputs(snapshot)' in app_source
     assert 'def render_script_visual_query_review(' in app_source
@@ -960,7 +964,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
     assert 'crop_mode=mode_value' in source
     assert 'return_type="both"' in source
-    assert 'should_resize_image=False' in source
+    assert 'should_resize_image=True' in source
     assert "Use on slide" in source
     assert "Crop / reframe selected image" in source
 
@@ -1162,7 +1166,7 @@ def test_dashboard_has_collapsible_live_powershell_widget():
     assert 'with st.sidebar:' in source
     assert 'st.expander(f"🖥️ PowerShell · {status}"' in source
     assert 'st.code("\\n".join(visible), language="powershell")' in source
-    assert 'render_powershell_widget(live_snapshot)' in source
+    assert 'render_powershell_widget(snapshot)' in source
     assert 'render_powershell_output(' not in source
 
 
