@@ -440,7 +440,7 @@ def test_dashboard_controller_replaces_only_requested_visual(monkeypatch, tmp_pa
 
 
 
-def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choices(monkeypatch, tmp_path):
+def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_choices(monkeypatch, tmp_path):
     from PIL import Image
     import visual_retrieval_runtime
 
@@ -508,9 +508,9 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choic
                 }
                 for item in options
             ],
-            "target": 3,
-            "hard_max": 3,
-            "minimum_options": 3,
+            "target": 10,
+            "hard_max": 10,
+            "minimum_options": 0,
             "available_options": 3,
             "enough_options": True,
         }
@@ -529,7 +529,7 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_three_choic
     ok, message = controller.search_visual_options(1, "Shafali Verma batting")
 
     assert ok is True
-    assert "3 verified" in message
+    assert "3 AI-checked" in message
     snapshot = controller.snapshot()
     stored = snapshot["visual_packages"][0][0]
     assert stored["image"] == str(current)
@@ -949,8 +949,8 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
 
     assert "Choose from the visual pool" in source
     assert "Available verified images" in source
-    assert "Identity-verified, lower-resolution images" in source
-    assert "Search 5 new images" in source
+    assert "Available verified images" in source
+    assert "Search up to 10 new images" in source
     assert "Apply crop" in source
     assert "controller.crop_visual(" in source
     assert 'aspect_ratio=(9, 16)' in source
