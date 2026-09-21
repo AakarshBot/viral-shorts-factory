@@ -59,6 +59,13 @@ def test_dashboard_workspace_navigation_uses_pills():
     assert "return selected or current" in source
 
 
+def test_dashboard_live_header_uses_canonical_mode():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert 'render_header("Live Factory")' in app_source
+    assert 'render_header("Live")' not in app_source
+
+
 def test_dashboard_live_monitor_uses_controlled_polling():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 

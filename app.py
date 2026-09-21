@@ -2718,7 +2718,7 @@ def main() -> None:
 
     if workspace == "Live":
         snapshot = controller.snapshot()
-        render_header("Live")
+        render_header("Live Factory")
         if (
             not st.session_state.get("production_started")
             and not st.session_state.get("candidates")
