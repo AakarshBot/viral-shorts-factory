@@ -78,7 +78,7 @@ def test_live_qc_uses_active_format_from_snapshot():
             "description": "A sufficiently long description for the release metadata check.",
         },
     )
-    assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is False
+    assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is True
 
 
 def test_dashboard_live_monitor_uses_controlled_polling():
@@ -1380,3 +1380,78 @@ def test_upload_panel_keeps_public_private_controls_and_comment_override_path():
 def test_dashboard_header_does_not_render_empty_top_band():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert '[data-testid="stHeader"]{background:transparent;border-bottom:none}' in source
+
+
+def test_regular_script_release_structure_accepts_four_complete_beats():
+    from script_runtime import assess_release_structure
+
+    script = {
+        "script": [
+            {"voiceover": "The concrete event happened today.", "narrative_role": "hook"},
+            {"voiceover": "The key development changed the situation.", "narrative_role": "development"},
+            {"voiceover": "The relevant context explains why it matters.", "narrative_role": "context"},
+            {"voiceover": "The immediate consequence is now clear.", "narrative_role": "consequence"},
+        ]
+    }
+
+    passed, reason, _ = assess_release_structure(script, "regular")
+    assert passed is True, reason
+
+
+def test_regular_script_release_structure_rejects_compressed_three_beat_stub():
+    from script_runtime import assess_release_structure
+
+    script = {
+        "script": [
+            {"voiceover": "The concrete event happened today.", "narrative_role": "hook"},
+            {"voiceover": "The key development changed the situation.", "narrative_role": "development"},
+            {"voiceover": "The consequence is now clear.", "narrative_role": "consequence"},
+        ]
+    }
+
+    passed, reason, _ = assess_release_structure(script, "regular")
+    assert passed is False
+    assert "compressed" in reason.lower()
+
+
+def test_live_qc_accepts_matching_audio_tracks_and_word_timings(tmp_path):
+    from dashboard_runtime import evaluate_live_qc_gates
+
+    audio = []
+    for index in range(4):
+        path = tmp_path / f"voiceover_{index + 1}.mp3"
+        path.write_bytes(b"audio")
+        audio.append(str(path))
+
+    script = {
+        "title": "A selected story",
+        "titles": ["One", "Two", "Three"],
+        "recommended_title_index": 0,
+        "seo_description": "This is a sufficiently long description for the release metadata check.",
+        "script": [
+            {"voiceover": "The concrete event happened today.", "narrative_role": "hook", "primary_entity": "Subject", "specific_search_prompt": "Subject event"},
+            {"voiceover": "The key development changed the situation.", "narrative_role": "development", "primary_entity": "Subject", "specific_search_prompt": "Subject development"},
+            {"voiceover": "The relevant context explains why it matters.", "narrative_role": "context", "primary_entity": "Subject", "specific_search_prompt": "Subject context"},
+            {"voiceover": "The immediate consequence is now clear.", "narrative_role": "consequence", "primary_entity": "Subject", "specific_search_prompt": "Subject consequence"},
+        ],
+    }
+    gates = evaluate_live_qc_gates(
+        {
+            "format_mode": "regular",
+            "selected_story": {"title": "A selected story", "story_key": "selected", "discovery_rank": 1},
+            "script_data": script,
+            "audio_paths": audio,
+            "word_timings": [
+                [{"word": "The", "start": 0.0, "end": 0.2}],
+                [{"word": "The", "start": 0.0, "end": 0.2}],
+                [{"word": "The", "start": 0.0, "end": 0.2}],
+                [{"word": "The", "start": 0.0, "end": 0.2}],
+            ],
+        },
+        {
+            "title": "A selected story",
+            "description": "A sufficiently long description for the release metadata check.",
+        },
+    )
+    assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is True
+    assert next(gate for gate in gates if gate["key"] == "narration")["passed"] is True
