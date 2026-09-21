@@ -556,19 +556,6 @@ def _remember_unpublished_topic(candidate: Dict[str, Any]) -> None:
     st.session_state.retained_topics = retained[:40]
 
 
-def _forget_unpublished_topic(candidate: Dict[str, Any]) -> None:
-    if not isinstance(candidate, dict):
-        return
-    key = _topic_identity(candidate)
-    if not key:
-        return
-    st.session_state.retained_topics = [
-        dict(item)
-        for item in (st.session_state.get("retained_topics") or [])
-        if isinstance(item, dict) and _topic_identity(item) != key
-    ]
-
-
 def reset_run() -> None:
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     before_reset = controller.snapshot()
@@ -1070,46 +1057,6 @@ def _script_text(script_data: Dict[str, Any]) -> str:
             blocks.append(f"Scene {index}\n{voiceover}")
     return "\n\n".join(blocks)
 
-
-def render_script(snapshot: Dict[str, Any]) -> None:
-    script_data = snapshot.get("script_data") or {}
-    text = _script_text(script_data)
-    if not text:
-        return
-
-    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
-    scene_count = len(scenes) if isinstance(scenes, list) else 0
-    word_count = len(re.findall(r"\b[\w’'-]+\b", text))
-    _render_section_header(
-        "Story output",
-        "Script",
-        "The narration generated from the selected story.",
-    )
-
-    with st.container(border=True):
-        metric_cols = st.columns(3)
-        metric_cols[0].metric("Scenes", scene_count)
-        metric_cols[1].metric("Words", word_count)
-        metric_cols[2].metric("Status", "Ready")
-
-        previews = [scene for scene in scenes if isinstance(scene, dict)][:2] if isinstance(scenes, list) else []
-        for index, scene in enumerate(previews, 1):
-            voiceover = _ui_text(scene.get("voiceover"))
-            if voiceover:
-                st.markdown(
-                    f"<div class='output-card'><div class='small-muted'>SCENE {index}</div>"
-                    f"<div style='margin-top:5px;line-height:1.5;overflow-wrap:anywhere'>{_ui_html(voiceover)}</div></div>",
-                    unsafe_allow_html=True,
-                )
-        with st.expander("Open full narration", expanded=False):
-            st.text_area(
-                "Generated narration",
-                value=text,
-                height=300,
-                disabled=True,
-                label_visibility="collapsed",
-                key="dashboard_script_preview",
-            )
 
 def _ensure_visual_query_plan(pending_candidate: Dict[str, Any], config: Dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
     """Generate the editable ranked query list once per selected story."""
