@@ -1585,7 +1585,7 @@ NON_EVENT_HEADLINE_PATTERNS = (
     r"\blive blog\b",
     r"\bphoto(s| gallery)?\b",
     r"\bwatch( the)? video\b",
-    r"\bvideo(s)?\b",
+    r"\bvideo gallery\b",
     r"\bexplainer\b",
     r"\bexplained\b",
     r"\bwhat you need to know\b",
@@ -1600,7 +1600,9 @@ def _headline_noise_pass(story):
     title = _clean(story.get("title") or "")
     if any(re.search(pattern, title) for pattern in NON_EVENT_HEADLINE_PATTERNS):
         story["discovery_rejection"] = "Non-event/SEO headline"
+        story["headline_noise_pass"] = False
         return False
+    story["headline_noise_pass"] = True
     return True
 
 
