@@ -252,6 +252,7 @@ class WorkflowState:
     format_mode: str = ""
     video_path: str = ""
     final_metadata: Dict[str, str] = field(default_factory=dict)
+    uploaded_video_id: str = ""
     error: str = ""
     thread_alive: bool = False
     completed: bool = False
@@ -294,6 +295,7 @@ class WorkflowController:
                 "format_mode": self.state.format_mode,
                 "video_path": self.state.video_path,
                 "final_metadata": dict(self.state.final_metadata),
+                "uploaded_video_id": self.state.uploaded_video_id,
                 "error": self.state.error,
                 "thread_alive": self.state.thread_alive,
                 "completed": self.state.completed,
@@ -337,6 +339,36 @@ class WorkflowController:
                 video_id="READY_FOR_UPLOAD",
                 status="READY_FOR_UPLOAD",
             )
+        finally:
+            conn.close()
+
+    def _record_uploaded_run(self, video_id: str, title: str = "") -> None:
+        """Record a successful upload against the exact production run row."""
+        import ultimate_bot
+
+        row_id = getattr(self.bot, "_last_run_row_id", None)
+        run_id = getattr(self.bot, "_last_run_run_id", None)
+        if row_id is None or not run_id:
+            return
+
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        try:
+            migrate_vault(conn)
+            row = conn.execute(
+                "SELECT run_id FROM vault WHERE id = ?",
+                (row_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError(f"Exact production row {row_id} was not found after upload.")
+            if str(row[0] or "") != str(run_id):
+                raise RuntimeError("Exact production row identity changed before upload was recorded.")
+            fields = {
+                "video_id": str(video_id),
+                "status": "UPLOADED",
+            }
+            if str(title or "").strip():
+                fields["title_used"] = str(title).strip()
+            update_run_record(conn, row_id, **fields)
         finally:
             conn.close()
 
@@ -481,6 +513,11 @@ class WorkflowController:
     ):
         if self.state.thread_alive:
             raise RuntimeError("Production is still running. Final upload is locked until QC is ready.")
+        if self.state.uploaded_video_id:
+            raise RuntimeError(
+                f"This production run has already been uploaded as {self.state.uploaded_video_id}. "
+                "Start a new run before uploading again."
+            )
         if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Final video file not found: {video_path}")
         from final_qc_runtime import validate_final_upload_metadata, validate_final_video
@@ -513,6 +550,20 @@ class WorkflowController:
         )
         if not result:
             raise RuntimeError("YouTube uploader returned no video ID.")
+
+        with self._lock:
+            self.state.uploaded_video_id = str(result)
+
+        try:
+            self._record_uploaded_run(str(result), title=final_title)
+        except Exception as exc:
+            # The video is already on YouTube; never report a successful upload as
+            # failed solely because the local/ephemeral analytics ledger could not update.
+            print(
+                f"   [Workflow] Upload succeeded, but exact run history could not be updated: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
         return result
 
 
