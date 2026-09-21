@@ -55,15 +55,6 @@ def _text_size(draw, text, font):
             return max(1, len(str(text)) * 10), max(1, getattr(font, "size", 20))
 
 
-def _fit_font(bot, text, max_width, base_size, min_size=20, custom_font_name=None):
-    for size in range(int(base_size), int(min_size) - 1, -2):
-        font = _load_brand_font(bot, size, custom_font_name)
-        width, _ = _text_size(ImageDraw.Draw(Image.new("RGBA", (1, 1))), text, font)
-        if width <= max_width:
-            return font
-    return _load_brand_font(bot, int(min_size), custom_font_name)
-
-
 def _render_hook_card(bot, image, hook_text, font_name=None):
     canvas = image.convert("RGBA")
     width, height = canvas.size
