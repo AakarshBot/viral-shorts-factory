@@ -1,13 +1,6 @@
 """Dashboard visual rendering helpers and the supported runtime patch surface."""
-import random, re, sys, traceback
+import random, re, traceback
 from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
-
-
-def install_safe_exception_hook():
-    def hook(exctype, value, tb):
-        print("💥 UNCAUGHT EXCEPTION DETECTED:")
-        traceback.print_exception(exctype, value, tb)
-    sys.excepthook = hook
 
 
 # ----------------------------- visual system -----------------------------
