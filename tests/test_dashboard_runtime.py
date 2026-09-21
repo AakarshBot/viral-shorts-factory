@@ -1429,3 +1429,44 @@ def test_dashboard_topic_cards_expose_learned_channel_fit_samples():
     assert 'channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)' in source
     assert 'historical_topic_matches = candidate.get("historical_topic_matches")' not in source
     assert 'if channel_fit_samples > 0' in source
+
+
+
+def test_legacy_learning_metrics_ignore_non_publishable_rows(tmp_path):
+    import ultimate_bot
+
+    db_path = Path(tmp_path) / "learning.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE vault (
+            genre TEXT,
+            format_used TEXT,
+            language_used TEXT,
+            hook_style_used TEXT,
+            trend_keyword TEXT,
+            date_used TEXT,
+            views INTEGER,
+            avg_view_percentage REAL,
+            video_id TEXT,
+            status TEXT
+        )"""
+    )
+    rows = [
+        ("technology", "regular", "english", "direct", "ai", "2026-09-20", 1000, 70.0, "good-1", "COMPLETED"),
+        ("technology", "regular", "english", "direct", "ai", "2026-09-19", 500, 10.0, "bad-pending", "PENDING_QC"),
+        ("technology", "regular", "english", "direct", "ai", "2026-09-18", 200, 5.0, "bad-failed", "FAILED"),
+    ]
+    conn.executemany(
+        "INSERT INTO vault VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+
+    scores = ultimate_bot.get_smart_metrics(
+        conn,
+        "genre",
+        metric_col="avg_view_percentage",
+    )
+
+    assert scores["technology"]["count"] == 1
+    conn.close()
