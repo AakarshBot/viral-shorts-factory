@@ -379,6 +379,7 @@ REQUIRED_SECRET_NAMES = (
     "SERPAPI_API_KEY",
     "PIXABAY_API_KEY",
     "OPENALEX_API_KEY",
+    "OLLAMA_BASE_URL",
     # Remote-only controls/credentials. These are loaded only when present
     # in Streamlit Secrets; the local .env/file-based paths remain untouched.
     "YOUTUBE_TOKEN_JSON",
