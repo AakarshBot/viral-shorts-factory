@@ -20,7 +20,6 @@ import requests
 from visual_taxonomy_runtime import preferred_sources
 from visual_licensing_runtime import (
     LICENSE_URLS,
-    allow_unlicensed_visuals,
     is_allowed_license,
     licensed_candidate,
     normalize_license_code,
@@ -1007,7 +1006,7 @@ def build_raw_source_plan(
         if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
             plan.append(("Unsplash", fetch_unsplash_candidates))
 
-    if allow_unlicensed or allow_unlicensed_visuals():
+    if allow_unlicensed:
         plan.append(("DDG", fetch_duckduckgo_candidates))
 
     plan = [(name, fn) for name, fn in plan if callable(fn)]
