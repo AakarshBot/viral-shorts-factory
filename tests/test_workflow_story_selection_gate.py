@@ -58,8 +58,12 @@ def test_validate_selected_story_accepts_dashboard_candidate_from_expanded_pool(
 
 
 def test_legacy_discovery_path_is_removed():
+    import unicode_runtime
     import workflow_runtime
 
+    unicode_runtime.install()
     assert not hasattr(workflow_runtime, "discover_three_candidates")
     assert not hasattr(workflow_runtime, "_remove_near_duplicates")
     assert not hasattr(workflow_runtime, "_diverse_top_three")
+    assert not hasattr(workflow_runtime, "_token_set")
+    assert not hasattr(workflow_runtime, "_story_key")
