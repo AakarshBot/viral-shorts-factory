@@ -1297,12 +1297,6 @@ def _discovery_portfolio_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
     actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
-    event_sources = int(story.get("event_source_count") or 0)
-    body = " ".join(
-        str(story.get(key) or "")
-        for key in ("description", "summary", "snippet", "text")
-    ).strip()
-
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
