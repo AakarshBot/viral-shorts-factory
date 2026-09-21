@@ -257,11 +257,6 @@ def _ranked_scene_terms(scene: dict, subject: str, limit: int = 5) -> list[str]:
     return terms
 
 
-def _context_terms(text: str, subject: str, limit: int = 4) -> list[str]:
-    """Compatibility helper using the same retrieval-aware ranking."""
-    return _ranked_scene_terms({"visual_context": text}, subject, limit=limit)
-
-
 def _scene_terms(scene: dict, subject: str) -> list[str]:
     """Return the strongest evidence-backed visual anchors for this slide."""
     return _ranked_scene_terms(scene, subject, limit=4)
