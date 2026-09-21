@@ -1814,8 +1814,9 @@ def collect_high_recall_stories(
 
     official_urls = _official_feed_urls(genre_key, genre_cfg)
     core_job_count = len(google_queries) + bool(selected_rss) + bool(official_urls)
+    prelaunch_gdelt = len(google_queries) <= 2
     core_pool = ThreadPoolExecutor(
-        max_workers=max(1, core_job_count),
+        max_workers=max(1, core_job_count + int(prelaunch_gdelt)),
         thread_name_prefix="discovery-core",
     )
     signal_job_count = len(trend_geos) + len(reddit_subreddits)
@@ -1983,7 +1984,11 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
     stage50 = _recent_topic_cooldown(conn, stage60, hours=72)
     stage30 = _deduplicate_stage(stage50, max_items=30)
     stage15 = _fact_source_stage(stage30, max_items=15)
-    stage8 = _originality_stage(stage15, used_topics, max_items=8)
+    stage12 = [
+        item for item in stage15
+        if _headline_noise_pass(item) and _story_substance_pass(item)
+    ]
+    stage8 = _originality_stage(stage12, used_topics, max_items=8)
     ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage8]
     ranked.sort(key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0, reverse=True)
     ranked = [item for item in ranked if _candidate_quality_pass(item)]
@@ -1992,8 +1997,8 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
         story["discovery_reason"] = _candidate_reason(story)
 
     print(
-        "   [Discovery Funnel] %d -> %d -> %d -> %d -> %d -> ranked top %d"
-        % (len(stories), len(stage60), len(stage50), len(stage30), len(stage15), min(3, len(ranked))),
+        "   [Discovery Funnel] %d -> %d -> %d -> %d -> %d -> %d -> ranked top %d"
+        % (len(stories), len(stage60), len(stage50), len(stage30), len(stage15), len(stage12), min(3, len(ranked))),
         flush=True,
     )
     return ranked[:3]
@@ -2022,7 +2027,12 @@ def rank_discovery_candidates(
         item for item in stage80
         if _discovery_source_pass(item)
     ]
-    stage50 = _originality_stage(stage60, used_topics, max_items=60)
+    stage50 = _fact_source_stage(stage60, max_items=60)
+    stage40 = [
+        item for item in stage50
+        if _headline_noise_pass(item) and _story_substance_pass(item)
+    ]
+    stage30 = _originality_stage(stage40, used_topics, max_items=60)
 
     ranked = [
         _editorial_score(
@@ -2047,7 +2057,7 @@ def rank_discovery_candidates(
         story["discovery_reason"] = _candidate_reason(story)
 
     print(
-        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
+        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
         % (
             len(stories),
             len(stage120),
@@ -2055,6 +2065,7 @@ def rank_discovery_candidates(
             len(stage80),
             len(stage60),
             len(stage50),
+            len(stage30),
             len(selected),
         ),
         flush=True,
