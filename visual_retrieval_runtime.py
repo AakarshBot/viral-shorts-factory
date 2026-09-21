@@ -576,27 +576,6 @@ def select_manual_visual_candidate(
     )[0]
 
 
-def classify_manual_pool_for_scene(assets: list[dict], scene: dict, selected_hash: str = "") -> list[dict]:
-    """Classify every retained pool image for one slide without another provider/AI call."""
-    selected_hash = str(selected_hash or "").strip()
-    classified = []
-    for asset in assets or []:
-        if not isinstance(asset, dict):
-            continue
-        item = dict(asset)
-        image_hash = str(item.get("hash") or "").strip()
-        item["scene_score"] = _manual_candidate_scene_score(asset, scene)
-        if image_hash and image_hash == selected_hash:
-            item["scene_status"] = "chosen"
-        elif str(item.get("status") or "").strip() == "factory-rejected-resolution":
-            item["scene_status"] = "resolution-rejected"
-        elif float(item.get("scene_score") or 0.0) >= MANUAL_SCENE_GOOD_SCORE:
-            item["scene_status"] = "good-unused"
-        else:
-            item["scene_status"] = "scene-rejected"
-        classified.append(item)
-    return classified
-
 
 def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list[dict]:
     """Persist a shared manual-query pool once; dashboard layers reuse these paths."""
