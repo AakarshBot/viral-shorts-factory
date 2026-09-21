@@ -16,7 +16,6 @@ from branding_runtime import source_credit_for_type
 from manual_visual_query_runtime import parse_manual_visual_queries
 from visual_licensing_runtime import allow_unlicensed_visuals, provenance, rescue_provenance
 from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
-from visual_strategy_runtime import classify_scene
 
 
 def _load_brand_font(bot, size, custom_font_name=None):
@@ -699,6 +698,7 @@ def patch_content_first_visuals(bot):
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
             try:
+                from visual_strategy_runtime import classify_scene
                 visual_type = classify_scene(seg, category)
             except Exception:
                 visual_type = str(seg.get("visual_type", "GENERAL_CONTEXT"))
