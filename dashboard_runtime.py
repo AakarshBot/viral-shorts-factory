@@ -17,13 +17,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from workflow_runtime import WorkflowController
 
 
-def _manual_crop_box_to_shorts(img: Image.Image, crop_box: dict[str, Any]) -> Image.Image:
-    """Apply the exact 9:16 area selected by the dashboard cropper."""
+def _manual_crop_box_to_shorts(
+    img: Image.Image,
+    crop_box: dict[str, Any],
+    free_size: bool = False,
+) -> Image.Image:
+    """Apply the dashboard crop selection and return a renderer-safe Shorts frame."""
     source = img.convert("RGB")
     try:
         left = int(crop_box.get("left", 0))
@@ -38,11 +42,18 @@ def _manual_crop_box_to_shorts(img: Image.Image, crop_box: dict[str, Any]) -> Im
     width = max(1, min(source.width - left, width))
     height = max(1, min(source.height - top, height))
 
+    cropped = source.crop((left, top, left + width, top + height))
+    if free_size:
+        return ImageOps.fit(
+            cropped,
+            (1080, 1920),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
+
     aspect = width / max(1, height)
     if abs(aspect - (9 / 16)) > 0.025:
         raise ValueError("The selected crop area must remain 9:16 for Shorts.")
-
-    cropped = source.crop((left, top, left + width, top + height))
     return cropped.resize((1080, 1920), Image.Resampling.LANCZOS)
 
 
@@ -1066,8 +1077,13 @@ class DashboardWorkflowController(WorkflowController):
         )
         return True, f"Image assigned to slide {index}."
 
-    def crop_visual_pool_asset(self, asset_hash: str, crop_box: dict[str, Any]) -> tuple[bool, str]:
-        """Apply an exact drag-selected 9:16 crop to a pool image without changing its identity record."""
+    def crop_visual_pool_asset(
+        self,
+        asset_hash: str,
+        crop_box: dict[str, Any],
+        crop_mode: str = "shorts",
+    ) -> tuple[bool, str]:
+        """Apply a dashboard crop to a pool image without changing its identity record."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -1093,7 +1109,11 @@ class DashboardWorkflowController(WorkflowController):
             bottom = top + height
             if width < 2 or height < 2 or left < 0 or top < 0 or right > source.width or bottom > source.height:
                 return False, "The selected crop area is outside the image."
-            cropped = source.crop((left, top, right, bottom))
+            cropped = _manual_crop_box_to_shorts(
+                source,
+                {"left": left, "top": top, "width": width, "height": height},
+                free_size=str(crop_mode or "").strip().casefold() == "free",
+            )
             crop_key = hashlib.sha1(f"{asset.get('hash','')}:{left}:{top}:{width}:{height}".encode("utf-8")).hexdigest()[:16]
             target_path = os.path.join(self.bot.ASSETS_DIR, f"visual_pool_crop_{crop_key}.jpg")
             cropped.save(target_path, "JPEG", quality=95)
@@ -1109,6 +1129,7 @@ class DashboardWorkflowController(WorkflowController):
             live_item["original_path"] = source_path
             live_item["path"] = target_path
             live_item["cropped"] = True
+            live_item["crop_mode"] = "free" if str(crop_mode or "").strip().casefold() == "free" else "shorts"
             live_item["crop_box"] = {
                 "left": left,
                 "top": top,
@@ -1773,6 +1794,7 @@ class DashboardWorkflowController(WorkflowController):
         x_center: float = 0.5,
         y_center: float = 0.5,
         crop_box: dict[str, Any] | None = None,
+        crop_mode: str = "shorts",
     ) -> tuple[bool, str]:
         """Apply a dashboard-selected crop to the preserved original visual source or an exact crop box."""
         snapshot = self.snapshot()
@@ -1822,7 +1844,11 @@ class DashboardWorkflowController(WorkflowController):
 
             original = Image.open(source_path).convert("RGB")
             if crop_box:
-                cropped = _manual_crop_box_to_shorts(original, crop_box).convert("RGBA")
+                cropped = _manual_crop_box_to_shorts(
+                    original,
+                    crop_box,
+                    free_size=str(crop_mode or "").strip().casefold() == "free",
+                ).convert("RGBA")
             else:
                 cropped = _manual_crop_to_shorts(original, zoom, x_center, y_center).convert("RGBA")
 
@@ -1878,6 +1904,7 @@ class DashboardWorkflowController(WorkflowController):
                         else dict(layer.get("visual_crop_box") or {})
                     ),
                     "visual_crop_manual": True,
+                    "visual_crop_mode": "free" if str(crop_mode or "").strip().casefold() == "free" else "shorts",
                     "source_credit": source_credit_for_type(
                         str(layer.get("source_type") or "visual")
                     ),
