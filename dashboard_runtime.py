@@ -899,7 +899,7 @@ class DashboardWorkflowController(WorkflowController):
         return None, None, None
 
     def search_visual_pool(self, replacement_query: str) -> tuple[bool, str]:
-        """Fetch five additional identity-checked images for the global QC pool."""
+        """Fetch up to ten additional AI-checked images for the global QC pool."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -973,7 +973,7 @@ class DashboardWorkflowController(WorkflowController):
                 "id": group_id,
                 "query": query,
                 "items": materialized,
-                "target": 5,
+                "target": 10,
             }
             with self._lock:
                 self._visual_search_groups.append(group)
@@ -981,10 +981,10 @@ class DashboardWorkflowController(WorkflowController):
                 self._visual_rejected = False
 
             count = len(materialized)
-            if count == 5:
-                message = f"Found 5 new identity-checked images for '{query}'."
+            if count == 10:
+                message = f"Found 10 new AI-checked images for '{query}'."
             elif count:
-                message = f"Found {count} new identity-checked images for '{query}'; no error was raised because the configured sources were exhausted."
+                message = f"Found {count} new AI-checked images for '{query}'; no error was raised because the configured sources were exhausted."
             else:
                 message = f"No new identity-checked images were returned for '{query}'. Try a different query."
             self.update("visual_approval", 76, message)
