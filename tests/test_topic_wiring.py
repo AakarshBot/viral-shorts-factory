@@ -56,3 +56,44 @@ def test_query_budget_is_parallel_budgeted_not_unbounded():
     assert cfg["india_gnews_q"] in queries
     assert cfg["global_gnews_q"] in queries
     assert len(queries) <= story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_BROAD
+
+
+def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
+    import dashboard_runtime
+    captured = []
+
+    def fake_collect(*args, **kwargs):
+        captured.append(args[2])
+        return ([], [])
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+    monkeypatch.setattr(story_ranker, "rank_discovery_candidates", lambda stories, **kwargs: stories)
+
+    bot = type(
+        "Bot",
+        (),
+        {
+            "CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES,
+            "_active_web_config": {},
+        },
+    )()
+
+    dashboard_runtime.discover_ranked_topics(
+        bot,
+        {"format_mode": "cricket", "cricket_pipeline": True, "cricket_category": "India / Asia"},
+        None,
+        max_candidates=5,
+    )
+    india_cfg = captured[-1]
+    assert india_cfg["global_gnews_q"] == ""
+    assert "India" in india_cfg["india_gnews_q"]
+
+    dashboard_runtime.discover_ranked_topics(
+        bot,
+        {"format_mode": "cricket", "cricket_pipeline": True, "cricket_category": "Global"},
+        None,
+        max_candidates=5,
+    )
+    global_cfg = captured[-1]
+    assert global_cfg["india_gnews_q"] == ""
+    assert "ICC" in global_cfg["global_gnews_q"]
