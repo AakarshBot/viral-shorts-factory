@@ -551,12 +551,18 @@ def select_manual_visual_candidate(
         for asset in candidates
         if str(asset.get("status") or "").strip() != "factory-rejected-resolution"
     ]
-    scene_good = [
+    commercial_verified = [
         asset
         for asset in normal
+        if str(asset.get("provenance_status") or "commercial-verified").strip()
+        == "commercial-verified"
+    ]
+    scene_good = [
+        asset
+        for asset in commercial_verified
         if _manual_candidate_scene_score(asset, scene) >= MANUAL_SCENE_GOOD_SCORE
     ]
-    pool = scene_good or normal
+    pool = scene_good or commercial_verified
     if not pool:
         return None
 
