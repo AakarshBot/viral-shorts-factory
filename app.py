@@ -404,6 +404,30 @@ def load_streamlit_secrets_into_runtime() -> set[str]:
     return loaded
 
 
+
+def _remote_startup_guard() -> None:
+    """Fail fast on Streamlit when required remote-only credentials are absent."""
+    remote_mode = str(os.getenv("VSF_REMOTE_MODE", "")).strip().lower() in {
+        "1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"
+    }
+    if not remote_mode:
+        return
+    if not str(os.getenv("YOUTUBE_TOKEN_JSON", "")).strip():
+        st.error(
+            "Remote mode is enabled, but YOUTUBE_TOKEN_JSON is missing. "
+            "Add the complete refreshable token.json content to Streamlit Secrets before starting production."
+        )
+        st.stop()
+    if not any(
+        str(os.getenv(name, "")).strip()
+        for name in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
+    ):
+        st.error(
+            "Remote mode is enabled, but no script-generation provider key is configured. "
+            "Add GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY to Streamlit Secrets."
+        )
+        st.stop()
+
 def check_required_local_assets() -> list[str]:
     base = ultimate_bot.BASE_DIR
     problems: list[str] = []
@@ -2668,6 +2692,7 @@ def render_demo_page() -> None:
 
 def main() -> None:
     load_streamlit_secrets_into_runtime()
+    _remote_startup_guard()
     initialise_runtime()
 
     try:
