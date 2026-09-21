@@ -45,40 +45,6 @@ def test_dashboard_worker_console_capture():
     assert "synthetic dashboard console line" in controller.console_lines()
 
 
-def test_live_qc_uses_active_format_from_snapshot():
-    from dashboard_runtime import evaluate_live_qc_gates
-
-    snapshot = {
-        "format_mode": "top5",
-        "selected_story": {
-            "title": "Selected story",
-            "story_key": "selected-story",
-            "discovery_rank": 1,
-        },
-        "script_data": {
-            "title": "Selected story",
-            "titles": ["One", "Two", "Three"],
-            "recommended_title_index": 0,
-            "seo_description": "This is a sufficiently long description for the release metadata check.",
-            "script": [
-                {
-                    "voiceover": "A valid scene with enough words.",
-                    "primary_entity": "Subject",
-                    "specific_search_prompt": "Subject event",
-                }
-                for _ in range(8)
-            ],
-        },
-    }
-
-    gates = evaluate_live_qc_gates(
-        snapshot,
-        {
-            "title": "Selected story",
-            "description": "A sufficiently long description for the release metadata check.",
-        },
-    )
-    assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is True
 
 
 def test_dashboard_live_monitor_uses_controlled_polling():
@@ -864,42 +830,6 @@ def test_build_discovery_evidence_summarises_event_support_and_signals():
     assert evidence["channel_history"] == 4.0
     assert len(evidence["sources"]) == 2
 
-def test_live_qc_gates_are_real_blocking_checks(tmp_path):
-    from dashboard_runtime import evaluate_live_qc_gates, live_qc_passes
-
-    video = Path(tmp_path) / "final.mp4"
-    video.write_bytes(b"not a real video")
-    scene = {"voiceover": "One", "primary_entity": "Subject", "specific_search_prompt": "Subject event"}
-    snapshot = {
-        "run_id": "run-test",
-        "selected_story": {"title": "Selected story", "story_key": "selected story", "discovery_rank": 1},
-        "script_data": {
-            "title": "Selected story",
-            "titles": ["One", "Two", "Three"],
-            "recommended_title_index": 0,
-            "seo_description": "This is a sufficiently long description for the release metadata check.",
-            "script": [dict(scene) for _ in range(5)],
-        },
-        "audio_paths": [],
-        "visual_packages": [],
-        "visual_review_approved": False,
-        "video_path": str(video),
-    }
-    metadata = {
-        "title": "Selected story",
-        "description": "This is a sufficiently long description for the release metadata check.",
-        "comment": "",
-    }
-
-    gates = evaluate_live_qc_gates(snapshot, metadata)
-    by_key = {gate["key"]: gate for gate in gates}
-    assert by_key["story_lock"]["passed"] is True
-    assert by_key["script_contract"]["passed"] is True
-    assert by_key["visual_package"]["passed"] is False
-    assert by_key["visual_review"]["passed"] is False
-    assert by_key["artifact_qc"]["passed"] is False
-    assert live_qc_passes(snapshot, metadata) is False
-
 
 
 def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
@@ -1269,16 +1199,6 @@ def test_dashboard_metadata_approval_defers_widget_value_updates_until_rerun():
     assert 'str(pending_metadata.get("run_id") or "").strip() == run_id' in source
 
 
-def test_dashboard_upload_choices_remain_visible_before_metadata_approval():
-    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    start = source.index("def render_upload_panel")
-    end = source.index("\ndef _perform_upload", start)
-    panel = source[start:end]
-    assert "private_ready = metadata_approved and qc_ready" in panel
-    assert "public_ready = private_ready and not public_blocked" in panel
-    assert 'if not metadata_approved:' in panel
-    assert 'st.info("Approve metadata above to unlock upload.")' in panel
-    assert "return" not in panel.split('if not metadata_approved:', 1)[1].split('if metadata_approved:', 1)[0]
 
 
 def test_public_release_policy_cannot_be_bypassed_by_ui():
@@ -1414,47 +1334,6 @@ def test_regular_script_release_structure_rejects_compressed_three_beat_stub():
     assert "compressed" in reason.lower()
 
 
-def test_live_qc_accepts_matching_audio_tracks_and_word_timings(tmp_path):
-    from dashboard_runtime import evaluate_live_qc_gates
-
-    audio = []
-    for index in range(4):
-        path = tmp_path / f"voiceover_{index + 1}.mp3"
-        path.write_bytes(b"audio")
-        audio.append(str(path))
-
-    script = {
-        "title": "A selected story",
-        "titles": ["One", "Two", "Three"],
-        "recommended_title_index": 0,
-        "seo_description": "This is a sufficiently long description for the release metadata check.",
-        "script": [
-            {"voiceover": "The concrete event happened today.", "narrative_role": "hook", "primary_entity": "Subject", "specific_search_prompt": "Subject event"},
-            {"voiceover": "The key development changed the situation.", "narrative_role": "development", "primary_entity": "Subject", "specific_search_prompt": "Subject development"},
-            {"voiceover": "The relevant context explains why it matters.", "narrative_role": "context", "primary_entity": "Subject", "specific_search_prompt": "Subject context"},
-            {"voiceover": "The immediate consequence is now clear.", "narrative_role": "consequence", "primary_entity": "Subject", "specific_search_prompt": "Subject consequence"},
-        ],
-    }
-    gates = evaluate_live_qc_gates(
-        {
-            "format_mode": "regular",
-            "selected_story": {"title": "A selected story", "story_key": "selected", "discovery_rank": 1},
-            "script_data": script,
-            "audio_paths": audio,
-            "word_timings": [
-                [{"word": "The", "start": 0.0, "end": 0.2}],
-                [{"word": "The", "start": 0.0, "end": 0.2}],
-                [{"word": "The", "start": 0.0, "end": 0.2}],
-                [{"word": "The", "start": 0.0, "end": 0.2}],
-            ],
-        },
-        {
-            "title": "A selected story",
-            "description": "A sufficiently long description for the release metadata check.",
-        },
-    )
-    assert next(gate for gate in gates if gate["key"] == "script_contract")["passed"] is True
-    assert next(gate for gate in gates if gate["key"] == "narration")["passed"] is True
 
 
 def test_renderer_has_no_artificial_scene_audio_padding():
@@ -1467,3 +1346,27 @@ def test_script_writer_prompt_requires_precise_first_scene_without_length_quota(
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "Scene 1 is the retention entry point" in source
     assert "Let the story's real complexity determine how many scenes it needs." in source
+
+
+def test_dashboard_upload_unlock_is_metadata_only():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def render_upload_panel")
+    end = source.index("\ndef _perform_upload", start)
+    panel = source[start:end]
+    assert "upload_unlocked = metadata_approved" in panel
+    assert "disabled=not upload_unlocked" in panel
+    assert "Upload is locked until every release QC gate passes." not in panel
+    assert "live_qc_passes(" not in panel
+    assert "evaluate_live_qc_gates(" not in panel
+    assert 'st.info("Approve metadata to unlock upload.")' in panel
+
+
+def test_upload_controller_keeps_real_upload_path_without_dashboard_qc_recheck():
+    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("    def upload_manual(")
+    end = source.index("\n\ndef _validate_selected_story", start)
+    block = source[start:end]
+    assert "dashboard_runtime" not in block
+    assert "live_qc_passes" not in block
+    assert "evaluate_live_qc_gates" not in block
+    assert "self._real_uploader" in block
