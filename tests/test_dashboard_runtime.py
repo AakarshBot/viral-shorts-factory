@@ -1383,3 +1383,12 @@ def test_runtime_initialisation_does_not_repeat_idempotent_installers():
     initialise = source[start:end]
     assert initialise.count("install_visual_qa_bridge(visual_runtime)") == 1
     assert initialise.count("patch_provider_adapters(ultimate_bot)") == 1
+
+
+def test_offline_dashboard_diagnostic_recognizes_event_topic_cards():
+    source = Path(__file__).resolve().parents[1].joinpath("diagnostics_runtime.py").read_text(encoding="utf-8")
+
+    assert '"Event radar" in source' in source
+    assert '"TOPIC #" in source' in source
+    assert '"Use topic →" in source' in source
+    assert "event_topic_ui" in source
