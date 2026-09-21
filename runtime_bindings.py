@@ -216,20 +216,6 @@ def _wrap_editorial_provider_usage(bot):
     return guarded
 
 
-def _patch_research_pipeline(bot):
-    from research_runtime import patch_research_pipeline
-    return patch_research_pipeline(bot)
-
-
-def _wrap_content_dense_script(bot):
-    try:
-        from script_runtime import wrap_write_script
-        return wrap_write_script(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Script runtime unavailable: {exc}", flush=True)
-        return getattr(bot, "write_script", None)
-
-
 def _wrap_content_first_visuals(bot):
     try:
         from visual_content_runtime import patch_content_first_visuals
@@ -266,8 +252,17 @@ def _patch_youtube_creator_comments(bot):
         return getattr(bot, "upload_to_youtube", None)
 
 
+def _install_script_pipeline(bot):
+    try:
+        from script_router_runtime import install_script_pipeline
+        return install_script_pipeline(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Canonical script pipeline unavailable: {exc}", flush=True)
+        return getattr(bot, "write_script", None)
+
+
 def bind_dashboard_patches(bot):
-    """Bind runtime patch surfaces into the production call graph."""
+    """Bind runtime patches to the authoritative production globals."""
     try:
         apply_dashboard_theme()
     except Exception as exc:
@@ -291,8 +286,7 @@ def bind_dashboard_patches(bot):
     _patch_editorial_scoring(bot)
     _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
-    _patch_research_pipeline(bot)
-    _wrap_content_dense_script(bot)
+    _install_script_pipeline(bot)
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
     try:
