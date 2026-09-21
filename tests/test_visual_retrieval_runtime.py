@@ -568,7 +568,10 @@ def test_manual_visual_search_fetches_all_sources_concurrently(monkeypatch):
                 peak = max(peak, active)
             try:
                 candidate = _licensed_candidate(
-                    _jpeg_bytes((1200, 1600), color=(30 + len(name) * 10, 70, 100)),
+                    _jpeg_bytes(
+                        (1200, 1600),
+                        color=(30 + (sum(ord(char) for char in name) % 180), 70, 100),
+                    ),
                     "cc-by-nc",
                 )
                 candidate["source_image_url"] = f"https://{name}.example/{name}.jpg"
