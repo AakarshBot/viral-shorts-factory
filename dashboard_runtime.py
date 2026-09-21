@@ -1725,7 +1725,7 @@ class DashboardWorkflowController(WorkflowController):
             new_layer.update(
                 {
                     "image": replacement_path,
-                    "visual_original_path": selected_path,
+                    "visual_original_path": selected_original_path,
                     "source_type": "verified-bank",
                     "visual_verified": True,
                     "visual_qc_blocked": False,
