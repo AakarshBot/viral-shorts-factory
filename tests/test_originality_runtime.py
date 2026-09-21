@@ -101,7 +101,9 @@ def test_extractive_fallback_reuses_phase2_evidence_text():
             "text": "Rinku Singh joined a new cricket organization.",
             "research_evidence_text": (
                 "Rinku Singh became the first cricket signing for EMW Global. "
-                "The organization announced its expansion into India through cricket."
+                "The organization announced its expansion into India through cricket. "
+                "The signing was part of the organization's newly published regional expansion plan. "
+                "The move gives the organization a named player for its first cricket-focused initiative."
             ),
         },
         {},
