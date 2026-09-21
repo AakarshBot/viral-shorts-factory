@@ -2093,7 +2093,17 @@ def _perform_upload(
                 width="content",
             )
         else:
-            st.error(f"Upload failed: {type(exc).__name__}: {exc}")
+            if publish_mode == "public":
+                st.error(
+                    f"YouTube did not complete the public upload: "
+                    f"{type(exc).__name__}: {message}"
+                )
+                st.info(
+                    "No private fallback upload was created. The Private button remains available "
+                    "for this run."
+                )
+            else:
+                st.error(f"Upload failed: {type(exc).__name__}: {exc}")
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
