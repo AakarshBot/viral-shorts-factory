@@ -297,12 +297,25 @@ def install_production_wrappers(controller) -> None:
 
     real_upload = getattr(controller.bot, "upload_to_youtube", None)
     if callable(real_upload):
-        controller._real_uploader = real_upload
-        def production_blocked_upload(*args, **kwargs):
-            controller._reporter("qc", 98, "Video ready. Waiting for your final QC and upload decision.")
-            print("   [Workflow] Automatic upload blocked. Manual QC is required.", flush=True)
-            return "PENDING_MANUAL_UPLOAD"
-        globals_dict["upload_to_youtube"] = production_blocked_upload
+        if getattr(real_upload, "_workflow_upload_blocker", False):
+            controller._real_uploader = getattr(
+                real_upload, "_workflow_real_uploader", None
+            )
+        else:
+            controller._real_uploader = real_upload
+
+        if not getattr(real_upload, "_workflow_upload_blocker", False):
+            inner_upload = real_upload
+
+            def production_blocked_upload(*args, **kwargs):
+                controller._reporter("qc", 98, "Video ready. Waiting for your final QC and upload decision.")
+                print("   [Workflow] Automatic upload blocked. Manual QC is required.", flush=True)
+                return "PENDING_MANUAL_UPLOAD"
+
+            production_blocked_upload._workflow_upload_blocker = True
+            production_blocked_upload._workflow_controller = controller
+            production_blocked_upload._workflow_real_uploader = inner_upload
+            globals_dict["upload_to_youtube"] = production_blocked_upload
 
     controller._patched = True
 
