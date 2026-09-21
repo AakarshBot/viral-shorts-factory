@@ -179,28 +179,13 @@ def _ensure_script_ready(bot, result: dict[str, Any], story_data: dict[str, Any]
 
 
 def _patch_script_pipeline(bot) -> None:
+    """Verify the canonical script router instead of adding another wrapper."""
     current = getattr(bot, "write_script", None)
-    if not callable(current) or getattr(current, "_scene_contract_bound", False):
+    if callable(current) and getattr(current, "_canonical_script_pipeline", False):
         return
-    run_robot = getattr(bot, "run_robot", None)
-    globals_dict = getattr(run_robot, "__globals__", {}) if run_robot is not None else {}
-
-    def guarded_write(story_data, language_cfg, genre_key, conn, format_mode):
-        result = current(story_data, language_cfg, genre_key, conn, format_mode)
-        if not isinstance(result, dict):
-            raise ValueError("Script generation returned no usable dictionary.")
-        repaired = _ensure_script_ready(bot, result, story_data, language_cfg, genre_key, format_mode)
-        print(f"   [Script Hardening] Narration package: {len(repaired.get('script') or [])}", flush=True)
-        return repaired
-
-    guarded_write._scene_contract_bound = True
-    guarded_write._content_dense_bound = bool(getattr(current, "_content_dense_bound", False))
-    guarded_write._research_layer_live = bool(getattr(current, "_research_layer_live", False))
-    guarded_write._scene_contract_inner_writer = current
-    bot.write_script = guarded_write
-    if globals_dict:
-        globals_dict["write_script"] = guarded_write
-
+    raise RuntimeError(
+        "Canonical script router is not installed; refusing to add a legacy script wrapper."
+    )
 
 def install_production_wrappers(controller) -> None:
     """Install the canonical live workflow wrappers for one controller."""
