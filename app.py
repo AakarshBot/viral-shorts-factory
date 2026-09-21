@@ -320,6 +320,60 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
 .stage-card.done{border-color:#bcd9ca;background:#eef7f1}
 .stage-card.stopped{border-color:#ebcbb1;background:#fcf1e6}
 .empty-state{background:linear-gradient(135deg,#fffdf9 0%,#f4eeea 100%);border-color:#dfd3c8}
+
+/* Live navigation: matte glass pills with an RGB-style edge and a clear active step. */
+.st-key-live_format_menu button,
+.st-key-live_topic_menu button,
+.st-key-live_sports_menu button,
+.st-key-live_cricket_scope_menu button,
+.st-key-test_menu button{
+  min-height:54px!important;
+  padding:11px 22px!important;
+  border-radius:18px!important;
+  border:1.5px solid transparent!important;
+  background:
+    linear-gradient(rgba(255,253,249,.94),rgba(245,239,232,.94)) padding-box,
+    conic-gradient(from 120deg,#ff5a5f,#ffd45a,#58d68d,#56a8ff,#9b6cff,#ff5a5f) border-box!important;
+  color:#252a2d!important;
+  box-shadow:0 10px 24px rgba(69,49,31,.08), inset 0 1px 0 rgba(255,255,255,.85)!important;
+  backdrop-filter:blur(12px)!important;
+  transition:transform .16s ease,box-shadow .16s ease!important;
+}
+.st-key-live_format_menu button:hover,
+.st-key-live_topic_menu button:hover,
+.st-key-live_sports_menu button:hover,
+.st-key-live_cricket_scope_menu button:hover,
+.st-key-test_menu button:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 28px rgba(69,49,31,.11), inset 0 1px 0 rgba(255,255,255,.9)!important;
+}
+.st-key-live_format_menu button[aria-checked="true"],
+.st-key-live_format_menu button[aria-selected="true"],
+.st-key-live_topic_menu button[aria-checked="true"],
+.st-key-live_topic_menu button[aria-selected="true"],
+.st-key-live_sports_menu button[aria-checked="true"],
+.st-key-live_sports_menu button[aria-selected="true"],
+.st-key-live_cricket_scope_menu button[aria-checked="true"],
+.st-key-live_cricket_scope_menu button[aria-selected="true"],
+.st-key-test_menu button[aria-checked="true"],
+.st-key-test_menu button[aria-selected="true"]{
+  transform:scale(1.035);
+  font-weight:900!important;
+  box-shadow:0 14px 30px rgba(47,93,98,.16), inset 0 1px 0 rgba(255,255,255,.9)!important;
+}
+.live-choice-label{color:var(--muted);font-size:.72rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase;margin:12px 0 8px}
+.live-settings{
+  margin-top:18px;
+  padding:14px 16px;
+  background:rgba(255,253,249,.72);
+  border:1px solid var(--line);
+  border-radius:18px;
+  box-shadow:var(--shadow);
+  backdrop-filter:blur(10px);
+}
+.stage-accordion-status{font-size:.68rem;font-weight:850;letter-spacing:.08em;color:var(--muted)}
+[data-testid="stExpander"] summary{min-height:48px}
+[data-testid="stExpander"] summary p{line-height:1.2!important}
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -437,6 +491,13 @@ def _init_state() -> None:
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
         "metadata_loaded_run_id": "",
+        "workspace_mode": "Live",
+        "live_format_selection": "",
+        "live_topic_selection": "",
+        "live_sports_selection": "",
+        "live_cricket_scope": "",
+        "language_label": next(iter(ultimate_bot.LANGUAGES.values()))["label"] if ultimate_bot.LANGUAGES else "English",
+        "visual_pipeline_label": "Option 1 · Current image sourcing",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -475,7 +536,6 @@ DEEP_DIVE_TOPICS = (
     "entertainment",
     "viral_phenomenon",
     "regional_state_news",
-    "sports",
 )
 TOP_FIVE_TOPICS = (
     "national_global_affairs",
@@ -483,7 +543,6 @@ TOP_FIVE_TOPICS = (
     "business_finance",
     "entertainment",
     "viral_phenomenon",
-    "sports",
 )
 
 
@@ -514,58 +573,84 @@ def _selected_visual_pipeline() -> str:
     ).strip()
     return "option2_storyboard" if label.startswith("Option 2") else "option1_scrape"
 
+
 def build_config() -> Dict[str, Any]:
     language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
-    language_label = st.session_state.get("language_label", "English")
+    language_label = st.session_state.get("language_label") or (
+        next(iter(language_options)) if language_options else "English"
+    )
     language_key = language_options.get(language_label, "english")
-    mode = str(st.session_state.get("editorial_mode", "Deep Dive"))
-    if mode == "Top 5":
-        mode = "Top Five"
+    live_format = str(st.session_state.get("live_format_selection") or "").strip()
+    topic_label = str(st.session_state.get("live_topic_selection") or "").strip()
+    sports_mode = str(st.session_state.get("live_sports_selection") or "").strip()
+    cricket_scope = str(st.session_state.get("live_cricket_scope") or "").strip()
 
-    if mode == "Cricket":
-        return {
-            "format_mode": "regular",
-            "display_format": "Cricket",
-            "editorial_mode": "Cricket",
-            "category": "sports_stories_of_day",
-            "language": language_key,
-            "language_label": language_label,
-            "channel": st.session_state.get("selected_channel", _channel_options()[0]),
-            "cricket_pipeline": True,
-            "visual_pipeline": _selected_visual_pipeline(),
-            "cricket_category": st.session_state.get("cricket_category", "AI-assisted top story in cricket"),
-            "requested_topic": str(st.session_state.get("requested_topic", "") or "").strip(),
-        }
+    channel = st.session_state.get("selected_channel", _channel_options()[0])
 
-    if mode == "AI":
-        return {
-            "format_mode": "regular",
-            "display_format": "AI",
-            "editorial_mode": "AI",
-            "category": "ai_recommendation",
-            "language": language_key,
-            "language_label": language_label,
-            "channel": st.session_state.get("selected_channel", _channel_options()[0]),
-            "cricket_pipeline": False,
-            "visual_pipeline": _selected_visual_pipeline(),
-        }
+    if live_format == "Sports":
+        if sports_mode == "Cricket":
+            return {
+                "format_mode": "cricket",
+                "display_format": "Cricket",
+                "editorial_mode": "Cricket",
+                "category": "sports_stories_of_day",
+                "language": language_key,
+                "language_label": language_label,
+                "channel": channel,
+                "cricket_pipeline": True,
+                "visual_pipeline": _selected_visual_pipeline(),
+                "cricket_category": cricket_scope or "India / Asia",
+                "requested_topic": "",
+            }
+        if sports_mode == "Niche Sports":
+            return {
+                "format_mode": "regular",
+                "display_format": "Niche Sports",
+                "editorial_mode": "Niche Sports",
+                "category": "sports",
+                "language": language_key,
+                "language_label": language_label,
+                "channel": channel,
+                "cricket_pipeline": False,
+                "visual_pipeline": _selected_visual_pipeline(),
+                "cricket_category": "",
+                "requested_topic": "",
+            }
+        if sports_mode == "AI":
+            return {
+                "format_mode": "regular",
+                "display_format": "AI",
+                "editorial_mode": "AI",
+                "category": "ai_recommendation",
+                "language": language_key,
+                "language_label": language_label,
+                "channel": channel,
+                "cricket_pipeline": False,
+                "visual_pipeline": _selected_visual_pipeline(),
+                "cricket_category": "",
+                "requested_topic": "",
+            }
 
-    format_mode = "top5" if mode == "Top Five" else "regular"
-    options = category_options(format_mode, mode)
-    default_key = next(iter(options.values()))
-    category_key = st.session_state.get("category_key", default_key)
-    if category_key not in options.values():
-        category_key = default_key
+    format_mode = "top5" if live_format == "Top 5" else "regular"
+    category_key = ""
+    if topic_label:
+        options = category_options(format_mode, live_format or "Deep Dive")
+        category_key = options.get(topic_label, "")
+    if not category_key:
+        category_key = next(iter(category_options(format_mode, live_format or "Deep Dive").values()), "national_global_affairs")
+
     return {
         "format_mode": format_mode,
-        "display_format": mode,
-        "editorial_mode": mode,
+        "display_format": "Top Five" if live_format == "Top 5" else (live_format or "Deep Dive"),
+        "editorial_mode": "Top Five" if live_format == "Top 5" else (live_format or "Deep Dive"),
         "category": category_key,
         "language": language_key,
         "language_label": language_label,
-        "channel": st.session_state.get("selected_channel", _channel_options()[0]),
+        "channel": channel,
         "cricket_pipeline": False,
         "visual_pipeline": _selected_visual_pipeline(),
+        "cricket_category": "",
+        "requested_topic": "",
     }
 
 
@@ -618,181 +703,303 @@ def render_header(action_mode: str) -> None:
             unsafe_allow_html=True,
         )
 
+def _clear_live_downstream() -> None:
+    """Clear only choices that depend on the currently selected Live menu."""
+    for key in (
+        "live_topic_selection",
+        "live_sports_selection",
+        "live_cricket_scope",
+        "live_topic_menu",
+        "live_sports_menu",
+        "live_cricket_scope_menu",
+    ):
+        st.session_state[key] = None if key.endswith("_menu") else ""
+
+
+def _clear_live_run_selection() -> None:
+    """Clear headline/production state when a Live path changes."""
+    st.session_state.candidates = []
+    st.session_state.pending_candidate = None
+    st.session_state.production_started = False
+    st.session_state.upload_result = ""
+    st.session_state.confirm_public_upload = False
+    st.session_state.candidate_page = 0
+    st.session_state.visual_query_story_key = ""
+    st.session_state.visual_query_suggestions = []
+    st.session_state.visual_query_field_count = 0
+
+
 def render_workspace_navigation() -> str:
-    options = [
-        "Live Factory",
-        "Channel Statistics",
-        "Run Offline Diagnostics",
-        "Demo Factory",
-        "Final Branding Preview",
-    ]
-    current = st.session_state.get("dashboard_utility", "Live Factory")
-    if current == "None" or current not in options:
-        current = "Live Factory"
+    options = ["Live", "Test"]
+    current = st.session_state.get("workspace_mode", "Live")
+    if current not in options:
+        current = "Live"
     st.sidebar.markdown("<div class='sidebar-kicker'>Workspace</div>", unsafe_allow_html=True)
-    selected = st.sidebar.selectbox(
-        "Go to",
+    selected = st.sidebar.radio(
+        "Workspace",
         options,
         index=options.index(current),
-        key="dashboard_utility",
-        label_visibility="collapsed",
+        key="workspace_mode",
+        label_visibility="visible",
     )
     return selected
 
-def render_sidebar_controls() -> Dict[str, Any]:
-    st.sidebar.markdown("<div class='sidebar-kicker'>Production workspace</div>", unsafe_allow_html=True)
-    st.sidebar.markdown("<div class='sidebar-title'>Factory setup</div>", unsafe_allow_html=True)
 
-    channel_options = _channel_options()
-    st.sidebar.selectbox("Channel", channel_options, key="selected_channel")
-
-    language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
-    language_labels = list(language_options.keys())
-    current_language = st.session_state.get("language_label", language_labels[0])
-    st.sidebar.selectbox(
-        "Language",
-        language_labels,
-        index=language_labels.index(current_language),
-        key="language_label",
+def render_live_navigation() -> Dict[str, Any]:
+    """Render the deliberate Live hierarchy and return the production config."""
+    _render_section_header(
+        "Live Factory",
+        "Choose your production path",
+        "Open one level at a time. Deeper controls appear only when the current choice needs them.",
     )
 
-    mode_labels = ["Deep Dive", "Top 5", "Cricket", "AI"]
-    current_mode = st.session_state.get("editorial_mode", mode_labels[0])
-    if current_mode == "Top Five":
-        current_mode = "Top 5"
-    st.sidebar.selectbox(
-        "Editorial mode",
-        mode_labels,
-        index=mode_labels.index(current_mode),
-        key="editorial_mode_label",
-        help="Deep Dive and Top Five use curated topic menus. Cricket keeps its dedicated cricket intake. AI ranks current stories against channel history.",
+    format_choice = st.pills(
+        "Live format",
+        ["Deep Dive", "Top 5", "Sports"],
+        selection_mode="single",
+        default=st.session_state.get("live_format_selection") or None,
+        key="live_format_menu",
+        required=False,
+        label_visibility="collapsed",
+        width="stretch",
     )
-    st.session_state.editorial_mode = "Top Five" if st.session_state.editorial_mode_label == "Top 5" else st.session_state.editorial_mode_label
+    previous_format = st.session_state.get("live_format_selection") or ""
+    if format_choice and format_choice != previous_format:
+        st.session_state.live_format_selection = format_choice
+        _clear_live_downstream()
+        _clear_live_run_selection()
 
-    if st.session_state.editorial_mode == "Cricket":
-        st.sidebar.selectbox("Cricket category", list(CRICKET_CATEGORIES.keys()), key="cricket_category")
-        st.sidebar.text_input(
-            "Specific topic (optional)",
-            placeholder="e.g. BCCI to suspend Impact Player rule",
-            key="requested_topic",
+    live_format = st.session_state.get("live_format_selection") or ""
+    if not live_format:
+        st.caption("Choose Deep Dive, Top 5 or Sports to open the next menu.")
+        return build_config()
+
+    st.markdown("<div class='live-choice-label'>Choose a section</div>", unsafe_allow_html=True)
+
+    final_path_ready = False
+    if live_format in {"Deep Dive", "Top 5"}:
+        format_mode = "top5" if live_format == "Top 5" else "regular"
+        options = category_options(format_mode, live_format)
+        topic_choice = st.pills(
+            "Topic",
+            list(options.keys()),
+            selection_mode="single",
+            default=st.session_state.get("live_topic_selection") or None,
+            key="live_topic_menu",
+            label_visibility="collapsed",
+            width="stretch",
+            wrap=True,
         )
-    elif st.session_state.editorial_mode == "AI":
-        with st.sidebar.expander("How AI mode works", expanded=False):
-            st.caption("AI mode blends current news, channel history, genre fit, vault topics and trend signals into a Top 10.")
-    else:
-        options = category_options(
-            "top5" if st.session_state.editorial_mode == "Top Five" else "regular",
-            st.session_state.editorial_mode,
+        previous_topic = st.session_state.get("live_topic_selection") or ""
+        if topic_choice and topic_choice != previous_topic:
+            st.session_state.live_topic_selection = topic_choice
+            _clear_live_run_selection()
+        final_path_ready = bool(st.session_state.get("live_topic_selection"))
+
+    elif live_format == "Sports":
+        sports_choice = st.pills(
+            "Sports mode",
+            ["Cricket", "Niche Sports", "AI"],
+            selection_mode="single",
+            default=st.session_state.get("live_sports_selection") or None,
+            key="live_sports_menu",
+            label_visibility="collapsed",
+            width="stretch",
         )
-        labels = list(options.keys())
-        current_key = st.session_state.get("category_key", next(iter(options.values())))
-        current_label = next((label for label, key in options.items() if key == current_key), labels[0])
-        selected_label = st.sidebar.selectbox(
-            "Topic / category",
-            labels,
-            index=labels.index(current_label),
-            key="category_label",
-        )
-        st.session_state.category_key = options[selected_label]
+        previous_sports = st.session_state.get("live_sports_selection") or ""
+        if sports_choice and sports_choice != previous_sports:
+            st.session_state.live_sports_selection = sports_choice
+            st.session_state.live_cricket_scope = ""
+            st.session_state.live_cricket_scope_menu = None
+            _clear_live_run_selection()
 
+        sports_mode = st.session_state.get("live_sports_selection") or ""
+        if sports_mode == "Cricket":
+            cricket_choice = st.pills(
+                "Cricket scope",
+                ["India / Asia", "Global"],
+                selection_mode="single",
+                default=st.session_state.get("live_cricket_scope") or None,
+                key="live_cricket_scope_menu",
+                label_visibility="collapsed",
+                width="stretch",
+            )
+            if cricket_choice and cricket_choice != (st.session_state.get("live_cricket_scope") or ""):
+                st.session_state.live_cricket_scope = cricket_choice
+                _clear_live_run_selection()
+            final_path_ready = bool(st.session_state.get("live_cricket_scope"))
+        elif sports_mode in {"Niche Sports", "AI"}:
+            final_path_ready = True
 
+    if not final_path_ready:
+        st.caption("Choose the highlighted menu item to open the next level.")
+        return build_config()
 
-    visual_pipeline_labels = [
-        "Option 1 · Current image sourcing",
-        "Option 2 · AI editorial storyboard",
-    ]
-    current_visual_pipeline = str(
-        st.session_state.get("visual_pipeline_label")
-        or visual_pipeline_labels[0]
-    )
-    if current_visual_pipeline not in visual_pipeline_labels:
-        current_visual_pipeline = visual_pipeline_labels[0]
-    st.sidebar.selectbox(
-        "Visual pipeline",
-        visual_pipeline_labels,
-        index=visual_pipeline_labels.index(current_visual_pipeline),
-        key="visual_pipeline_label",
-        help=(
-            "Option 1 uses the existing image-sourcing pipeline. Option 2 builds original "
-            "editorial graphics from the verified story instead of relying on current-news photographs."
-        ),
-    )
+    with st.expander("Production settings", expanded=False):
+        st.caption("These settings are kept out of the navigation until you reach a complete production path.")
+        columns = st.columns(3, gap="medium")
 
-    sidebar_snapshot = st.session_state.workflow_controller.snapshot()
-    st.sidebar.divider()
-    if sidebar_snapshot.get("thread_alive"):
-        status_title = f"Running · {int(sidebar_snapshot.get('percent', 0) or 0)}%"
-        status_copy = str(sidebar_snapshot.get("message") or "Factory production is active.").strip()
-    elif sidebar_snapshot.get("completed"):
-        status_title = "Latest run complete"
-        status_copy = "Review the generated Short below."
-    elif sidebar_snapshot.get("stage") == "error":
-        status_title = "Latest run stopped"
-        status_copy = str(sidebar_snapshot.get("error") or "The factory stopped with an error.").strip()
-    else:
-        status_title = "Ready"
-        status_copy = "No production run is active."
+        language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
+        language_labels = list(language_options.keys())
+        current_language = st.session_state.get("language_label") or (language_labels[0] if language_labels else "English")
+        if current_language not in language_labels and language_labels:
+            current_language = language_labels[0]
+        with columns[0]:
+            st.selectbox(
+                "Language",
+                language_labels or ["English"],
+                index=language_labels.index(current_language) if language_labels else 0,
+                key="language_label",
+            )
 
-    st.sidebar.markdown(
-        f"<div class='sidebar-status'><div class='sidebar-status-title'>{status_title}</div>"
-        f"<div class='sidebar-status-copy'>{_ui_html(status_copy)}</div></div>",
+        channels = _channel_options()
+        current_channel = st.session_state.get("selected_channel") or channels[0]
+        if current_channel not in channels:
+            current_channel = channels[0]
+        with columns[1]:
+            st.selectbox(
+                "Channel",
+                channels,
+                index=channels.index(current_channel),
+                key="selected_channel",
+            )
+
+        visual_pipeline_labels = [
+            "Option 1 · Current image sourcing",
+            "Option 2 · AI editorial storyboard",
+        ]
+        current_visual_pipeline = st.session_state.get("visual_pipeline_label") or visual_pipeline_labels[0]
+        if current_visual_pipeline not in visual_pipeline_labels:
+            current_visual_pipeline = visual_pipeline_labels[0]
+        with columns[2]:
+            st.selectbox(
+                "Visual pipeline",
+                visual_pipeline_labels,
+                index=visual_pipeline_labels.index(current_visual_pipeline),
+                key="visual_pipeline_label",
+            )
+
+    config = build_config()
+    st.markdown(
+        f"<div class='meta-row'><span class='meta-chip'>Path · {_ui_html(config.get('display_format'))}</span>"
+        f"<span class='meta-chip'>Language · {_ui_html(config.get('language_label'))}</span>"
+        f"<span class='meta-chip'>Channel · {_ui_html(config.get('channel'))}</span></div>",
         unsafe_allow_html=True,
     )
+    return config
 
-    if st.sidebar.button(
-        "Reset current run",
-        width="stretch",
-        disabled=bool(sidebar_snapshot.get("thread_alive")),
-    ):
-        reset_run()
-        st.rerun()
-
-    return build_config()
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
+    """Render one accordion per production stage, opening only the active stage."""
     stages = [
-        ("Discovery", "discovery", 10, 14),
+        ("Headlines", "discovery", 0, 14),
         ("Research", "research", 15, 23),
-        ("Script", "script", 24, 38),
-        ("Review", "script_review", 39, 40),
+        ("Script QC", "script", 24, 40),
         ("Voiceover", "audio", 41, 54),
-        ("Visuals", "visuals", 55, 75),
-        ("Visual QC", "visual_approval", 76, 76),
+        ("Visual QC", "visuals", 55, 76),
         ("Render", "render", 77, 95),
         ("Final QC", "qc", 96, 100),
     ]
-    current = str(snapshot.get("stage") or "idle")
-    percent = int(snapshot.get("percent", 0) or 0)
+    current = str(snapshot.get("stage") or "idle").strip()
+    percent = max(0, min(100, int(snapshot.get("percent", 0) or 0)))
+    active_key = {
+        "script_review": "script",
+        "visual_approval": "visuals",
+    }.get(current, current)
+    if active_key not in {item[1] for item in stages}:
+        if current == "error":
+            active_key = next(
+                (key for _label, key, lo, hi in stages if lo <= percent <= hi),
+                "qc",
+            )
+        else:
+            active_key = "discovery"
 
     _render_section_header(
         "Production pipeline",
-        "Factory progress",
-        "One overall progress bar, with each stage reduced to a simple status.",
+        "Run progress",
+        "Each stage contains its own progress and review controls. Only the active stage is opened.",
     )
-    st.progress(max(0.0, min(1.0, percent / 100)), text=f"{percent}% complete")
-
-    cards = []
-    for label, key, _lo, hi in stages:
-        if current == "error":
-            state, css_class, icon = "Stopped", "stopped", "⚠️"
-        elif percent >= hi:
-            state, css_class, icon = "Done", "done", "✓"
-        elif current == key:
-            state, css_class, icon = "Now", "active", "●"
-        else:
-            state, css_class, icon = "Next", "", "○"
-        cards.append(
-            f"<div class='stage-card {css_class}'><div class='stage-name'>{icon} {label}</div>"
-            f"<div class='stage-state'>{state}</div></div>"
-        )
-    st.markdown("<div class='stage-strip'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
 
     message = str(snapshot.get("message") or "").strip()
-    if message:
-        st.markdown(
-            f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {_ui_html(message)}</div></div>",
-            unsafe_allow_html=True,
-        )
+    for label, key, low, high in stages:
+        if percent >= high:
+            stage_progress = 100
+            status = "DONE"
+            icon = "✓"
+        elif active_key == key:
+            span = max(1, high - low)
+            stage_progress = max(0, min(100, int(round(((percent - low) / span) * 100))))
+            status = "IN PROGRESS"
+            icon = "●"
+        else:
+            stage_progress = 0
+            status = "UP NEXT"
+            icon = "○"
+
+        if current == "error" and key == active_key:
+            status = "STOPPED"
+            icon = "⚠️"
+
+        with st.expander(
+            f"{icon} {label}  ·  {status}  ·  {stage_progress}%",
+            expanded=active_key == key,
+        ):
+            st.progress(stage_progress / 100.0, text=f"{stage_progress}% · {label}")
+            if active_key == key and message:
+                st.markdown(
+                    f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {_ui_html(message)}</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+            if key == "discovery":
+                story = snapshot.get("selected_story") or {}
+                if story:
+                    st.markdown(
+                        f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
+                        f"<div class='story-title'>{_ui_html(story.get('title'))}</div></div>",
+                        unsafe_allow_html=True,
+                    )
+                elif active_key == key:
+                    st.caption("Waiting for the selected headline to enter production.")
+
+            elif key == "research":
+                render_research_summary(snapshot)
+
+            elif key == "script":
+                if snapshot.get("script_review_required"):
+                    render_script_visual_query_review(
+                        snapshot.get("_controller") or st.session_state.workflow_controller,
+                        snapshot,
+                    )
+                else:
+                    render_script(snapshot)
+
+            elif key == "audio":
+                render_audio_preview(snapshot)
+
+            elif key == "visuals":
+                controller = snapshot.get("_controller") or st.session_state.workflow_controller
+                if snapshot.get("visual_review_required"):
+                    render_visual_review(controller, snapshot)
+                else:
+                    items = _visual_items(snapshot)
+                    if items:
+                        ready = sum(1 for item in items if item.get("qc_passed"))
+                        st.metric("Verified visuals", f"{ready}/{len(items)}")
+
+            elif key == "render":
+                render_generated_outputs(snapshot)
+                render_console(snapshot)
+
+            elif key == "qc":
+                controller = snapshot.get("_controller") or st.session_state.workflow_controller
+                render_upload_panel(controller, snapshot)
+                if snapshot.get("stage") == "error":
+                    st.error(snapshot.get("error") or "The factory stopped with an error.")
+                if snapshot.get("completed"):
+                    render_logs(snapshot)
+
 
 def _script_text(script_data: Dict[str, Any]) -> str:
     scenes = script_data.get("script", [])
@@ -1161,7 +1368,7 @@ def _render_crop_dialog(
         box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
         return_type="both",
         key=f"crop_dialog_{snapshot.get('run_id','active')}_{target[:32]}",
-        should_resize_image=False,
+        should_resize_image=True,
         stroke_width=3,
     )
     if isinstance(crop_result, tuple) and len(crop_result) == 2:
@@ -1170,7 +1377,7 @@ def _render_crop_dialog(
         crop_preview, crop_box = crop_result, {}
 
     if crop_preview is not None:
-        st.image(crop_preview, width="stretch")
+        st.image(crop_preview, width=260)
 
     action_cols = st.columns([1, 1])
     with action_cols[0]:
@@ -1271,7 +1478,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     if item.get("missing"):
                         st.error("No image file is available for this slide.", icon="⛔")
                     else:
-                        st.image(item["path"], width=280)
+                        st.image(item["path"], width=240)
                     query = str(item.get("query_used") or item.get("manual_query") or "").strip()
                     source = str(item.get("source") or "").strip()
                     if source or query:
@@ -1309,7 +1516,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     path = str(asset.get("path") or "").strip()
                     with st.container(border=True):
                         if path and os.path.isfile(path):
-                            st.image(path, width=260)
+                            st.image(path, width=220)
                         query = str(asset.get("query") or "").strip()
                         source = str(asset.get("source") or "").strip()
                         caption = source or "visual source"
@@ -1892,33 +2099,9 @@ def _perform_upload(
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
     def _render_content(snapshot: Dict[str, Any]) -> None:
-        selected = snapshot.get("selected_story") or {}
-        if selected:
-            st.markdown(
-                f"<div class='panel'><div class='small-muted'>SELECTED TOPIC</div><b>{_ui_html(selected.get('title', ''))}</b></div>",
-                unsafe_allow_html=True,
-            )
-
-        render_research_summary(snapshot)
-        if snapshot.get("script_review_required"):
-            render_script_visual_query_review(controller, snapshot)
-        else:
-            render_script(snapshot)
-        render_audio_preview(snapshot)
-        render_generated_outputs(snapshot)
-
-        if snapshot.get("visual_review_required"):
-            render_visual_review(controller, snapshot)
-        render_visual_details(snapshot)
-
-        render_activity_timeline(snapshot)
-        render_console(snapshot)
-        render_logs(snapshot)
-
-        if snapshot.get("stage") == "error":
-            st.error(snapshot.get("error") or "The factory stopped with an error.")
-
-        render_upload_panel(controller, snapshot)
+        snapshot["_controller"] = controller
+        render_powershell_widget(snapshot)
+        render_stage_progress(snapshot)
 
     snapshot = controller.snapshot()
 
@@ -1936,13 +2119,13 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
             ):
                 st.rerun()
                 return
-            render_powershell_widget(live_snapshot)
             _render_content(live_snapshot)
 
         _live_monitor_fragment()
         return
 
     _render_content(snapshot)
+
 
 def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowController) -> None:
     problems = check_required_local_assets()
@@ -1952,11 +2135,22 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             "Some live provider keys are not configured. Discovery or production may stop when that provider is required."
         )
 
-    _render_section_header(
-        "Step 01 · Discovery",
-        "Build a Short",
-        "Choose a ranked story, optionally guide the visual search, then start production.",
-    )
+    if st.session_state.production_started:
+        render_live_monitor(controller)
+        return
+
+    if st.session_state.candidates:
+        _render_section_header(
+            "Headline stage",
+            "Choose a headline",
+            "The ranked story pool is ready. Select one to continue.",
+        )
+    else:
+        _render_section_header(
+            "Headline stage",
+            "Find today's headlines",
+            "Your selected Live path is locked in above. Search current stories and choose one before production starts.",
+        )
 
     if not st.session_state.candidates:
         mode_label = str(config.get("display_format") or config.get("editorial_mode") or "Deep Dive")
@@ -2010,10 +2204,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Topic discovery failed: {type(exc).__name__}: {exc}")
-        return
-
-    if st.session_state.production_started:
-        render_live_monitor(controller)
         return
 
     pending_candidate = st.session_state.get("pending_candidate")
@@ -2386,6 +2576,45 @@ def render_final_branding_preview() -> None:
         with st.container(border=True):
             st.image(preview_path, caption="Canonical compositor · 1080×1920", width="stretch")
 
+def render_test_page() -> None:
+    """Keep engineering/diagnostic tools out of the Live production flow."""
+    _render_section_header(
+        "Test workspace",
+        "Test",
+        "Safe diagnostics and previews live here. They never replace the Live production flow.",
+    )
+
+    options = [
+        "Channel Statistics",
+        "Offline Diagnostics",
+        "Demo Factory",
+        "Final Branding Preview",
+    ]
+    current = st.session_state.get("test_menu_selection") or "Offline Diagnostics"
+    if current not in options:
+        current = options[0]
+    selected = st.pills(
+        "Test tools",
+        options,
+        selection_mode="single",
+        default=current,
+        key="test_menu",
+        label_visibility="collapsed",
+        width="stretch",
+        wrap=True,
+    )
+    st.session_state.test_menu_selection = selected or current
+
+    if st.session_state.test_menu_selection == "Channel Statistics":
+        render_channel_statistics()
+    elif st.session_state.test_menu_selection == "Offline Diagnostics":
+        render_offline_page()
+    elif st.session_state.test_menu_selection == "Demo Factory":
+        render_demo_page()
+    else:
+        render_final_branding_preview()
+
+
 def render_demo_page() -> None:
     _render_section_header(
         "Engineering lab",
@@ -2460,22 +2689,35 @@ def main() -> None:
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     workspace = render_workspace_navigation()
 
-    if workspace == "Live Factory":
-        config = render_sidebar_controls()
+    if workspace == "Live":
+        snapshot = controller.snapshot()
         render_header("Live Factory")
+        if (
+            not st.session_state.get("production_started")
+            and not st.session_state.get("candidates")
+            and not st.session_state.get("pending_candidate")
+        ):
+            render_powershell_widget(snapshot)
+            config = render_live_navigation()
+        else:
+            config = build_config()
         render_live_factory(config, controller)
-    elif workspace == "Channel Statistics":
-        render_header("Channel Statistics")
-        render_channel_statistics()
-    elif workspace == "Run Offline Diagnostics":
-        render_header("Run Offline Diagnostics")
-        render_offline_page()
-    elif workspace == "Demo Factory":
-        render_header("Demo Factory")
-        render_demo_page()
-    elif workspace == "Final Branding Preview":
-        render_header("Final Branding Preview")
-        render_final_branding_preview()
+        if (
+            st.session_state.get("production_started")
+            and not snapshot.get("thread_alive")
+            and (
+                snapshot.get("completed")
+                or snapshot.get("stage") == "error"
+            )
+        ):
+            st.divider()
+            if st.button("Start a new Live run", width="content", key="reset_live_run_main"):
+                reset_run()
+                st.rerun()
+    else:
+        render_powershell_widget(controller.snapshot())
+        render_header("Test")
+        render_test_page()
 
     st.markdown(
         "<div class='dashboard-footer'>Viral Shorts Factory · dashboard controls the human review gates; "
