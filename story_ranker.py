@@ -1887,6 +1887,8 @@ def collect_high_recall_stories(
         # and secondary signals already run in parallel, so a slow signal source
         # must never add a second wait after the factual intake finishes.
         all_sources = dict(core_sources)
+        if gdelt_future is not None:
+            all_sources[gdelt_future] = "GDELT fallback"
         all_sources.update(signal_sources)
         resolved = _resolve_discovery_futures(
             all_sources,
