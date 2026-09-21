@@ -62,7 +62,11 @@ def _load_prior_topics(db_path):
     try:
         conn = sqlite3.connect(db_path)
         try:
-            rows = conn.execute("SELECT topic FROM vault WHERE topic IS NOT NULL").fetchall()
+            rows = conn.execute(
+                "SELECT topic FROM vault WHERE topic IS NOT NULL AND topic != '' "
+                "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+                "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+            ).fetchall()
             return [row[0] for row in rows if row and row[0]]
         finally:
             conn.close()
