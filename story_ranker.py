@@ -1661,12 +1661,28 @@ def collect_high_recall_stories(
         broad_discovery=broad_discovery,
     )
 
-    trend_geos = GOOGLE_TRENDS_GEOS if broad_discovery else ("IN",)
-    if broad_discovery:
+    if broad_discovery and genre_key:
+        trend_geos = ("IN",)
+        reddit_default = {
+            "sports": "sports",
+            "sports_stories_of_day": "sports",
+            "technology": "technology",
+            "business_finance": "business",
+            "entertainment": "movies",
+            "viral_phenomenon": "popular",
+            "national_global_affairs": "worldnews",
+            "health_lifestyle": "science",
+            "regional_state_news": "india",
+        }.get(genre_key, "")
+        reddit_subreddits = (reddit_default,) if reddit_default else ()
+    elif broad_discovery:
+        trend_geos = GOOGLE_TRENDS_GEOS
         reddit_subreddits = REDDIT_RADAR_SUBREDDITS[:DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD]
     elif configured_reddit_subreddit:
+        trend_geos = ("IN",)
         reddit_subreddits = (configured_reddit_subreddit,)
     else:
+        trend_geos = ("IN",)
         reddit_subreddits = ("",)
 
     official_urls = _official_feed_urls(genre_key, genre_cfg)
