@@ -911,8 +911,12 @@ def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
 def test_dashboard_primary_menu_and_generated_outputs_contract():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert 'mode_labels = ["Deep Dive", "Top 5", "Cricket", "AI"]' in app_source
+    assert 'options = ["Live", "Test"]' in app_source
+    assert '["Deep Dive", "Top 5", "Sports"]' in app_source
+    assert '["Cricket", "Niche Sports", "AI"]' in app_source
+    assert '["India / Asia", "Global"]' in app_source
     assert '["Live Factory", "Channel Statistics", "Run Offline Diagnostics", "Demo Factory"]' not in app_source
+    assert 'def render_sidebar_controls(' not in app_source
     assert 'def render_generated_outputs(snapshot: Dict[str, Any]) -> None:' in app_source
     assert 'render_generated_outputs(snapshot)' in app_source
     assert 'def render_script_visual_query_review(' in app_source
