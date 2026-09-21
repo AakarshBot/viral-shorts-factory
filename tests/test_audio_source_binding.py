@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from pipeline_integrity_loader import patch_pipeline_integrity
+from pipeline_integrity_runtime import patch_pipeline_integrity
 
 
 class _Bot:

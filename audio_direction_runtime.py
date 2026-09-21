@@ -24,7 +24,7 @@ def patch_audio_direction(bot):
     # order and can hide the research/content-density lifecycle markers.
     try:
         if not getattr(bot, "_pipeline_integrity_installed", False):
-            from pipeline_integrity_loader import patch_pipeline_integrity
+            from pipeline_integrity_runtime import patch_pipeline_integrity
             patch_pipeline_integrity(bot)
     except Exception as exc:
         print(f"   [Bindings] Pipeline integrity guard unavailable: {type(exc).__name__}: {exc}", flush=True)
