@@ -119,17 +119,8 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
     assert "<b>" not in scene["voiceover"].lower()
     assert "nbsp" not in scene["voiceover"].lower()
 
-def test_provider_garbage_falls_back_without_leaking_into_script():
+def test_strict_fallback_does_not_leak_provider_noise():
     bot = _Bot()
-
-    def broken_writer(story_data, language_cfg, genre_key, conn, format_mode):
-        return {
-            "script": [
-                {
-                    "voiceover": "[!] Groq API error 429 — return only a valid JSON schema.",
-                }
-            ]
-        }
 
     source = (
         "India announced a new policy today. "
