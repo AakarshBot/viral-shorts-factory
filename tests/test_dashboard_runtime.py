@@ -1399,3 +1399,33 @@ def test_offline_dashboard_diagnostic_recognizes_event_topic_cards():
     assert '"TOPIC #" in source' in source
     assert '"Use topic →" in source' in source
     assert "event_topic_ui" in source
+
+
+
+def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert ".brand-eyebrow" in source
+    assert ".brand-trust-row" in source
+    assert ".learning-strip" in source
+    assert "Factory learning is active" in source
+    assert "Learning {channel_fit:.1f}/10" in source
+    assert "Past topic match" in source
+    assert "st.markdown(" in source
+
+
+def test_dashboard_init_state_does_not_construct_redundant_controller_each_rerun():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def _init_state")
+    end = source.index("
+def reset_run", start)
+    block = source[start:end]
+    assert 'if "workflow_controller" not in st.session_state:' in block
+    assert block.count("DashboardWorkflowController(ultimate_bot)") == 1
+
+
+def test_dashboard_topic_cards_expose_learned_channel_fit_samples():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert 'channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)' in source
+    assert 'historical_topic_matches = candidate.get("historical_topic_matches")' not in source
+    assert 'if channel_fit_samples > 0' in source
