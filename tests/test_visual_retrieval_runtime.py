@@ -1,6 +1,8 @@
 """Regression coverage for the bounded content-first visual retrieval boundary."""
 
 import io
+import threading
+import time
 
 import visual_qa_runtime as visual_qa
 
@@ -431,6 +433,78 @@ def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
     assert any(candidate == provider_one_bytes for candidate in batch_payloads[0])
     assert any(candidate == provider_two_bytes for candidate in batch_payloads[0])
     assert source == "visual-rescue"
+
+
+def test_visual_provider_fetches_overlap_without_sharing_used_url_state(monkeypatch):
+    active = 0
+    peak = 0
+    url_sets = []
+    lock = threading.Lock()
+
+    def provider(name):
+        def fetch(*args):
+            nonlocal active, peak
+            local_used_urls = args[1]
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                url_sets.append(local_used_urls)
+            local_used_urls.add(f"https://{name}.example/image.jpg")
+            time.sleep(0.08)
+            with lock:
+                active -= 1
+            return []
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        VISUAL_MAX_VERIFICATION_ATTEMPTS = 4
+
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+        @staticmethod
+        def get_cached_asset(*args, **kwargs):
+            return None, None
+
+        @staticmethod
+        def save_to_cache(*args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda bot, visual_type, visual_genre="": [
+            ("ProviderOne", provider("one")),
+            ("ProviderTwo", provider("two")),
+        ],
+    )
+
+    used_urls = set()
+    retrieval.run_visual_retrieval(
+        FakeRuntime(),
+        FakeBot(),
+        {
+            "primary_entity": "India",
+            "factual_primary_entity": "India",
+            "visual_intent": "match",
+            "specific_search_prompt": "India match",
+            "voiceover": "India match update.",
+        },
+        "news",
+        used_urls,
+        set(),
+        "India match",
+    )
+
+    assert peak >= 2
+    assert len(url_sets) >= 2
+    assert len({id(item) for item in url_sets}) == len(url_sets)
+    assert "https://one.example/image.jpg" in used_urls
+    assert "https://two.example/image.jpg" in used_urls
 
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
