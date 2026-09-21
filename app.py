@@ -1958,16 +1958,6 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
         "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
     }
-    fallback_mode = str(script_data.get("fallback_mode") or "").strip()
-    public_blocked = fallback_mode == "extractive_source_grounded"
-
-    if public_blocked:
-        st.error(
-            "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
-            "Private upload remains available.",
-            icon="⛔",
-        )
-
     metadata_approved = bool(st.session_state.get("metadata_approved"))
     with st.container(border=True):
         st.markdown("#### 1 · Metadata")
@@ -2021,17 +2011,12 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.markdown("#### 3 · Publish")
         st.caption("Private stays hidden. Public always requires a second confirmation.")
         upload_unlocked = metadata_approved and not bool(st.session_state.get("upload_result")) and not bool(snapshot.get("uploaded_video_id"))
-        public_ready = upload_unlocked and not public_blocked
+        public_ready = upload_unlocked
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
         if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not public_ready):
-            if public_blocked:
-                st.error("Public upload blocked by release policy.")
-            else:
-                st.session_state["confirm_public_upload"] = True
-                st.rerun()
-        if public_blocked:
-            st.caption("Public publishing is currently blocked by a release policy gate.")
+            st.session_state["confirm_public_upload"] = True
+            st.rerun()
         if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not upload_unlocked):
             st.session_state["confirm_public_upload"] = False
             _perform_upload(
@@ -2099,8 +2084,8 @@ def _perform_upload(
         if video_id and "kept it private instead of public" in message:
             st.error(message)
             st.info(
-                "The video was already created on YouTube. Do not retry this run; "
-                "public API publishing requires an eligible/audited Google API project."
+                "YouTube blocked public visibility for this upload. The video already exists and is private, "
+                "so keep this upload private rather than creating a duplicate."
             )
             st.link_button(
                 "Open the YouTube video",
