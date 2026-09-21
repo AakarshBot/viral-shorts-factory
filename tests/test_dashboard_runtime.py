@@ -969,13 +969,17 @@ def test_workflow_error_message_is_dashboard_neutral():
     assert 'self.state.message = "Run stopped with an error."' in source
 
 
-def test_dashboard_replacement_returns_used_pool_asset_without_duplicate():
+def test_dashboard_replacement_returns_used_pool_asset_without_duplicate(tmp_path):
+    from PIL import Image
     from dashboard_runtime import DashboardWorkflowController
+
+    selected = tmp_path / "selected.jpg"
+    Image.new("RGB", (200, 300), "white").save(selected, "JPEG")
 
     controller = DashboardWorkflowController(_Bot())
     controller._visual_pool = [{
-        "path": "/tmp/selected.jpg",
-        "original_path": "/tmp/selected.jpg",
+        "path": str(selected),
+        "original_path": str(selected),
         "hash": "selected-hash",
         "source": "Commons",
         "used": True,
@@ -983,8 +987,8 @@ def test_dashboard_replacement_returns_used_pool_asset_without_duplicate():
     }]
     controller._return_slide_visual_to_pool(
         {
-            "image": "/tmp/selected.jpg",
-            "visual_original_path": "/tmp/selected.jpg",
+            "image": str(selected),
+            "visual_original_path": str(selected),
             "visual_selected_hash": "selected-hash",
             "visual_verified": True,
             "source_type": "Commons",
