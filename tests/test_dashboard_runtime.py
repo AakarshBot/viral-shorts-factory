@@ -742,21 +742,27 @@ def test_recent_topic_cooldown_removes_only_recent_repeats(tmp_path):
         """CREATE TABLE vault (
             topic TEXT,
             date_used TEXT,
-            created_at TEXT
+            created_at TEXT,
+            video_id TEXT,
+            status TEXT
         )"""
     )
     conn.executemany(
-        "INSERT INTO vault (topic, date_used, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO vault (topic, date_used, created_at, video_id, status) VALUES (?, ?, ?, ?, ?)",
         [
             (
                 "Major battery breakthrough announced",
                 (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(),
                 (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(),
+                "youtube-battery",
+                "UPLOADED",
             ),
             (
                 "Old satellite launch story",
                 (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat(),
                 (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat(),
+                "youtube-satellite",
+                "UPLOADED",
             ),
         ],
     )
