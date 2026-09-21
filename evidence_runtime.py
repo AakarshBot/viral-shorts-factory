@@ -292,8 +292,21 @@ def discover_sources(story: Dict[str, Any], max_sources: int = DEFAULT_MAX_SOURC
             "discovery_provider": "event",
             "published_at": story.get("publishedAt") or story.get("published_at"),
         }, "event_source"))
-    candidates.extend(_ddg_sources(event_query(story)))
-    candidates.extend(_openalex_sources(story))
+    query = event_query(story)
+    if science_story(story):
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence-discovery") as pool:
+            ddg_future = pool.submit(_ddg_sources, query)
+            openalex_future = pool.submit(_openalex_sources, story)
+            ddg_sources = ddg_future.result()
+            openalex_sources = openalex_future.result()
+    else:
+        ddg_sources = _ddg_sources(query)
+        openalex_sources = []
+
+    candidates.extend(ddg_sources)
+    candidates.extend(openalex_sources)
     return _distinct_sources(candidates)[:max(1, int(max_sources or DEFAULT_MAX_SOURCES))]
 
 
