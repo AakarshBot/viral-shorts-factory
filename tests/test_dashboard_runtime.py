@@ -1225,7 +1225,7 @@ def test_dashboard_output_summary_reports_visual_qc_readiness():
 def test_dashboard_crop_editor_has_free_rectangle_mode_and_full_source():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert '"Rectangle (free)"' in source
-    assert 'crop_asset.get("original_path")' in source
+    assert 'source_path = str(asset.get("original_path") or asset.get("path") or "").strip()' in source
     assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
 
 
