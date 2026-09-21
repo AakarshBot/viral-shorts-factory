@@ -23,8 +23,6 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from visual_taxonomy_runtime import classify_visual_genre, genre_allows_ai
-from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
-from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
 from visual_licensing_runtime import (
     ai_provenance,
     candidate_bytes,
@@ -877,6 +875,9 @@ def collect_manual_visual_pool(
     allow_auto_backfill: bool = True,
 ) -> dict:
     """Build the shared entity-verified pool from every available manual source."""
+    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
+    from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
+
     parsed_queries = [str(item or "").strip() for item in (manual_queries or []) if str(item or "").strip()]
     default_max = sum(_manual_query_target(index) for index in range(1, len(parsed_queries) + 1))
     requested_max = max(1, int(pool_max)) if pool_max is not None else max(1, default_max or MANUAL_POOL_MAX)
@@ -1231,6 +1232,9 @@ def collect_manual_visual_search(
     and the same identity AI gate used by the production visual pool decides
     which candidates are shown.
     """
+    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
+    from visual_search_intent_runtime import canonical_manual_entity_anchor
+
     exact_query = str(query or "").strip()
     if not exact_query:
         return {"assets": [], "target": 10, "rejection_counts": {}}
