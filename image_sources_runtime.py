@@ -124,6 +124,7 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
     if not q:
         return []
     page = _provider_page(_args)
+    manual_mode = _manual_mode(_args)
     payload = _read_cache("openverse", q, page)
     if payload is None:
         try:
@@ -134,8 +135,14 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
                     "page": page,
                     "page_size": 15,
                     "mature": "false",
-                    "license_type": "commercial",
-                    "license": ["cc0", "pdm", "by", "by-sa"],
+                    **(
+                        {}
+                        if manual_mode
+                        else {
+                            "license_type": "commercial",
+                            "license": ["cc0", "pdm", "by", "by-sa"],
+                        }
+                    ),
                 },
                 timeout=DEFAULT_TIMEOUT,
                 headers={"User-Agent": "ViralShortsFactory/1.0 (+image-retrieval)"},
@@ -154,7 +161,7 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
         if not isinstance(item, dict):
             continue
         license_code = normalize_license_code(item.get("license"))
-        if not is_allowed_license(license_code):
+        if not manual_mode and not is_allowed_license(license_code):
             continue
         raw_tags = item.get("tags") or []
         if isinstance(raw_tags, str):

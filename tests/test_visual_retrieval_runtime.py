@@ -1601,7 +1601,7 @@ def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
     assert result["rejection_counts"]["duplicate"] == 0
 
 
-def test_new_manual_search_applies_monetization_and_identity_filters(monkeypatch):
+def test_new_manual_search_does_not_apply_monetization_filter(monkeypatch):
     values = [
         {
             "bytes": _jpeg_bytes((240, 240)),
@@ -1655,8 +1655,130 @@ def test_new_manual_search_applies_monetization_and_identity_filters(monkeypatch
         FakeBot(),
         "BCCI logo",
     )
-    assert len(result["assets"]) == 5
-    assert result["rejection_counts"]["monetization"] == 1
+    assert len(result["assets"]) == 6
+    assert result["rejection_counts"]["monetization"] == 0
+
+
+
+def test_manual_pool_searches_every_available_provider_before_qa(monkeypatch):
+    calls = []
+
+    def make_provider(name):
+        def fetch(*args):
+            calls.append(name)
+            candidate = _licensed_candidate(_jpeg_bytes((1200, 1600), color=(40 + len(calls) * 20, 70, 100)), "cc-by-nc")
+            candidate["source_image_url"] = f"https://{name}.example/image-{len(calls)}.jpg"
+            candidate["search_title"] = f"{name} result"
+            return [candidate]
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", make_provider("Commons")),
+            ("Wikipedia", make_provider("Wikipedia")),
+            ("Openverse", make_provider("Openverse")),
+            ("Pexels", make_provider("Pexels")),
+            ("Unsplash", make_provider("Unsplash")),
+            ("Pixabay", make_provider("Pixabay")),
+            ("DDG", make_provider("DDG")),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Rishabh Pant", "voiceover": "Rishabh Pant appears."}],
+        ["Rishabh Pant"],
+        "Test story",
+        pool_target=7,
+        pool_max=7,
+        allow_auto_backfill=False,
+    )
+
+    assert calls == [
+        "Commons",
+        "Wikipedia",
+        "Openverse",
+        "Pexels",
+        "Unsplash",
+        "Pixabay",
+        "DDG",
+    ]
+    assert len(result["assets"]) == 7
+    assert result["rejection_counts"]["monetization"] == 0
+
+
+def test_manual_source_plan_can_include_ddg_without_global_unlicensed_flag(monkeypatch):
+    monkeypatch.delenv("ALLOW_UNLICENSED_VISUALS", raising=False)
+    plan = provider_boundary.build_raw_source_plan(
+        "PERSON",
+        "PERSON_ACTION",
+        allow_unlicensed=True,
+    )
+    assert any(name == "DDG" for name, _fetcher in plan)
+
+
+def test_manual_commons_qc_does_not_filter_noncommercial_license(monkeypatch):
+    image_bytes = _jpeg_bytes()
+    monkeypatch.setattr(
+        provider_boundary,
+        "_api_json",
+        lambda *args, **kwargs: {
+            "query": {
+                "pages": {
+                    "1": {
+                        "title": "File:Test.jpg",
+                        "imageinfo": [{
+                            "thumburl": "https://commons.example/test.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Test.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC BY-NC 4.0"},
+                                "Artist": {"value": "Test"},
+                                "ImageDescription": {"value": "Test Person"},
+                            },
+                        }],
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        provider_boundary,
+        "_download_image",
+        lambda url, used_urls=None, metadata=None: {
+            "bytes": image_bytes,
+            "provenance": dict(metadata or {}),
+            **dict(metadata or {}),
+        },
+    )
+
+    candidates = provider_boundary.fetch_commons_candidates(
+        "Test Person",
+        set(),
+        "",
+        "",
+        "PERSON",
+        "PERSON_ACTION",
+        True,
+    )
+
+    assert candidates
+    assert candidates[0]["provenance"]["license"] == "by-nc"
 
 
 def test_manual_query_planner_has_non_network_fallback(monkeypatch):

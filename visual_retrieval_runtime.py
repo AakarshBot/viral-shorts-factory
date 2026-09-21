@@ -87,10 +87,15 @@ def _hash_image(bot, img_bytes: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
 
-def _source_plan(_bot, visual_type: str, visual_genre: str = ""):
+def _source_plan(
+    _bot,
+    visual_type: str,
+    visual_genre: str = "",
+    allow_unlicensed: bool = False,
+):
     """Compatibility boundary backed only by the authoritative raw provider plan."""
     from visual_provider_boundary_runtime import build_raw_source_plan
-    return build_raw_source_plan(visual_type, visual_genre)
+    return build_raw_source_plan(visual_type, visual_genre, allow_unlicensed=allow_unlicensed)
 
 
 def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
@@ -546,18 +551,12 @@ def select_manual_visual_candidate(
         for asset in candidates
         if str(asset.get("status") or "").strip() != "factory-rejected-resolution"
     ]
-    commercial_verified = [
-        asset
-        for asset in normal
-        if str(asset.get("provenance_status") or "commercial-verified").strip()
-        == "commercial-verified"
-    ]
     scene_good = [
         asset
-        for asset in commercial_verified
+        for asset in normal
         if _manual_candidate_scene_score(asset, scene) >= MANUAL_SCENE_GOOD_SCORE
     ]
-    pool = scene_good or commercial_verified
+    pool = scene_good or normal
     if not pool:
         return None
 
@@ -812,10 +811,9 @@ def _manual_candidate_from_data(
         return None
 
     record = candidate_provenance(data)
-    if not provenance_is_usable(record):
-        if not provenance_is_retainable(record):
-            rejected_counts["monetization"] += 1
-            return None
+    # Manual visual selection is a human-QC surface. Licensing/provenance is
+    # retained as metadata, but it must not prevent a useful image from
+    # reaching the dashboard.
 
     valid, reason, normalized = _preflight_image(normalized)
     if not valid or normalized is None:
@@ -870,7 +868,7 @@ def collect_manual_visual_pool(
     pool_max: int | None = None,
     allow_auto_backfill: bool = True,
 ) -> dict:
-    """Build the shared entity-verified pool from the user's ordered queries."""
+    """Build the shared entity-verified pool from every available manual source."""
     from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
     from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
 
@@ -979,21 +977,28 @@ def collect_manual_visual_pool(
         entity_anchor = str(canonical_manual_entity_anchor(exact_query, "") or exact_query).strip()
         visual_type, visual_genre = _manual_query_visual_context(exact_query, scenes)
         try:
-            source_plan = _source_plan(bot, visual_type, visual_genre)
+            source_plan = _source_plan(
+                bot,
+                visual_type,
+                visual_genre,
+                allow_unlicensed=True,
+            )
         except TypeError:
-            source_plan = _source_plan(bot, visual_type)
+            try:
+                source_plan = _source_plan(bot, visual_type, visual_genre)
+            except TypeError:
+                source_plan = _source_plan(bot, visual_type)
 
         target = _manual_query_target(query_index)
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
-        source_attempts = 0
         qa_requests = 0
         verified_for_query = 0
 
         for source_name, fetcher in source_plan:
-            if not callable(fetcher) or source_attempts >= 2 or verified_for_query >= target:
-                break
+            if not callable(fetcher):
+                continue
             source_key = str(source_name or "").strip().casefold()
             if not source_key:
                 continue
@@ -1023,8 +1028,6 @@ def collect_manual_visual_pool(
                     )
                     raw_data = []
                 search_cache[cache_key] = list(_raw_items(raw_data))
-            source_attempts += 1
-
             for data in search_cache.get(cache_key) or []:
                 candidate = _manual_candidate_from_data(
                     str(source_name),
@@ -1040,33 +1043,25 @@ def collect_manual_visual_pool(
                 if candidate is None:
                     continue
                 query_candidates.append(candidate)
-                if len(query_candidates) >= target * 2:
-                    break
 
-            if not query_candidates:
-                continue
-
-            # Verify the strongest current candidates before paying for another source.
-            query_candidates.sort(
-                key=lambda item: (
-                    -float(item.get("priority") or 0.0),
-                    str(item.get("source") or "").casefold(),
-                )
+        # Search every available provider before QA so the strongest result can
+        # win globally instead of being pre-empted by the first provider.
+        query_candidates.sort(
+            key=lambda item: (
+                -float(item.get("priority") or 0.0),
+                str(item.get("source") or "").casefold(),
             )
-            before = len(assets)
-            added, requests_made = _verify(
-                query_candidates,
-                entity_anchor,
-                query_index,
-                target,
-                f"manual:{query_index}",
-            )
-            qa_requests += requests_made
-            verified_for_query = len(assets) - before
-
-            if verified_for_query < target and source_attempts < 2:
-                continue
-            break
+        )
+        before = len(assets)
+        added, requests_made = _verify(
+            query_candidates,
+            entity_anchor,
+            query_index,
+            target,
+            f"manual:{query_index}",
+        )
+        qa_requests += requests_made
+        verified_for_query = len(assets) - before
 
         # Carry forward the actual accepted identity-approved candidates into the
         # run-wide dedupe sets. Multiple distinct images from one article are allowed.
@@ -1224,7 +1219,7 @@ def collect_manual_visual_search(
     used_hashes: set[str] | None = None,
     used_source_image_urls: set[str] | None = None,
 ) -> dict:
-    """Fetch up to ten new images that pass monetization and identity AI checks.
+    """Fetch up to ten new images from every available manual source with identity AI checks.
 
     The dashboard search intentionally has no scene/context acceptance gate.
     The exact user query is preserved, restrictive monetization is rejected,
@@ -1264,17 +1259,25 @@ def collect_manual_visual_search(
     fetch_used_urls: set[str] = set(used_source_image_urls or set())
 
     try:
-        source_plan = _source_plan(bot, visual_type, visual_genre)
+        source_plan = _source_plan(
+            bot,
+            visual_type,
+            visual_genre,
+            allow_unlicensed=True,
+        )
     except TypeError:
-        source_plan = _source_plan(bot, visual_type)
+        try:
+            source_plan = _source_plan(bot, visual_type, visual_genre)
+        except TypeError:
+            source_plan = _source_plan(bot, visual_type)
 
     # Keep this cheap: at most two providers and at most ten raw candidates per
     # provider page. If the first page contains only images already used by the
     # dashboard, advance once so a replacement search can actually return new
     # choices without turning this into an open-ended crawl.
-    for source_name, fetcher in source_plan[:2]:
+    for source_name, fetcher in source_plan:
         if len(candidates) >= 20 or not callable(fetcher):
-            break
+            continue
         source_key = str(source_name or "").strip().casefold()
         provider_added = 0
         for page in (1, 2):
