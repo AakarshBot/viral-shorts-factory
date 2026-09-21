@@ -2530,7 +2530,6 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 reason = str(candidate.get("discovery_reason") or "").strip()
                 score = float(candidate.get("candidate_score") or 0.0)
                 evidence = build_discovery_evidence(candidate)
-                history_fit = float(evidence.get("channel_history") or 0.0)
                 channel_fit = float(candidate.get("channel_fit_score") or 0.0)
                 channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)
                 history_matches = int(candidate.get("historical_topic_matches") or 0)
