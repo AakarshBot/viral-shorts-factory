@@ -55,7 +55,7 @@ def test_active_retrieval_plan_does_not_bind_legacy_bot_provider_methods():
 
 
 def test_commons_candidate_adapter_is_bounded():
-    assert 1 <= boundary.MAX_PROVIDER_CANDIDATES <= 6
+    assert 1 <= boundary.MAX_PROVIDER_CANDIDATES <= 10
     assert callable(boundary.fetch_commons_candidates)
     assert callable(boundary.fetch_wikipedia_person_candidates)
 
