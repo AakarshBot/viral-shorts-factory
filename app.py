@@ -2637,7 +2637,7 @@ def render_channel_statistics() -> None:
         "<div class='learning-strip'>"
         "<div class='learning-strip-dot'></div>"
         "<div><div class='learning-strip-title'>Factory learning is active</div>"
-        "<div class='learning-strip-copy'>Completed factory uploads with synced retention data influence topic ranking and format/category selection. Analytics refresh stays manual so a dashboard visit does not consume YouTube quota.</div></div>"
+        "<div class='learning-strip-copy'>Completed factory uploads with synced retention data influence topic ranking and format/category selection. Production auto-syncs analytics at most once every 24 hours; the dashboard refresh is manual.</div></div>"
         "</div>",
         unsafe_allow_html=True,
     )
