@@ -182,7 +182,12 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
     used_topics = _load_used_topics(conn)
     language = str(web_config.get("language", "english"))
     requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-    ai_sports_mode = str(web_config.get("discovery_mode", "") or "").strip().lower() == "ai_sports"
+    configured_category = str(web_config.get("category", "") or "").strip().lower()
+    editorial_mode = str(web_config.get("editorial_mode", "") or "").strip().lower()
+    ai_sports_mode = (
+        str(web_config.get("discovery_mode", "") or "").strip().lower() == "ai_sports"
+        or (editorial_mode == "ai" and configured_category in {"sports", "ai_recommendation"})
+    )
 
     # The dashboard's AI choice is nested inside Sports. Keep it on the Sports
     # discovery lanes and let the AI ranking decide which current sports event
