@@ -44,6 +44,7 @@ from dashboard_runtime import (
     run_demo_section,
     upload_ready_for_manual_decision,
     live_monitor_should_poll,
+    _manual_crop_box_to_shorts,
 )
 
 
@@ -71,7 +72,7 @@ def _ui_html(value: Any, fallback: str = "") -> str:
     return html.escape(_ui_text(value, fallback), quote=False)
 
 
-st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Shorts Studio", page_icon="🎬", layout="wide")
 
 st.markdown("""<style>
 :root{
@@ -240,7 +241,25 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 }
 .story-title,.output-card{line-height:1.5}
 .story-reason{max-height:7.5rem;overflow:auto;padding-right:4px}
-.topic-card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:17px 17px 15px;box-shadow:var(--shadow);height:100%}
+.topic-card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:17px 17px 15px;box-shadow:var(--shadow);height:100%;min-height:232px;display:flex;flex-direction:column}
+.topic-card-actions{margin-top:auto}
+.progress-hero{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px;box-shadow:var(--shadow);margin:12px 0 16px}
+.progress-hero-head{display:flex;justify-content:space-between;gap:16px;align-items:baseline}
+.progress-hero-title{font-size:.95rem;font-weight:900;color:var(--text)}
+.progress-hero-value{font-size:1.45rem;font-weight:900;color:var(--accent-deep);letter-spacing:-.04em}
+.progress-track{height:9px;background:#ebe8e3;border-radius:999px;overflow:hidden;margin:11px 0 14px}
+.progress-track-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#3d6f74,#7e9f96);transition:width .35s ease}
+.progress-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:.71rem}
+.progress-steps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:14px}
+.progress-step{min-width:0;background:#f7f3ed;border:1px solid #e7ddd1;border-radius:11px;padding:8px 9px}
+.progress-step.active{background:#eaf2f1;border-color:#95b5b2}
+.progress-step.done{background:#eef7f1;border-color:#bcd9ca}
+.progress-step.stopped{background:#fcf1e6;border-color:#ebcbb1}
+.progress-step-index{font-size:.58rem;font-weight:900;letter-spacing:.12em;color:var(--muted-2)}
+.progress-step-name{font-size:.69rem;font-weight:850;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.progress-step-state{font-size:.61rem;color:var(--muted);margin-top:3px}
+@media(max-width:1100px){.progress-steps{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:700px){.progress-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .topic-kicker{display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--accent);font-size:.64rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
 .topic-title{font-size:1.08rem;font-weight:850;line-height:1.34;color:var(--text);overflow-wrap:anywhere}
 .topic-subtitle{font-size:.76rem;line-height:1.45;color:var(--muted)}
@@ -373,6 +392,719 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.brand-card{
+  position:relative;
+  overflow:hidden;
+  isolation:isolate;
+}
+.brand-card::after{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  width:7px;
+  height:100%;
+  background:linear-gradient(180deg,#77a8a3,#3d6f74 55%,#294f53);
+  border-radius:22px 0 0 22px;
+}
+.brand-eyebrow{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#6a625a;
+  font-size:.62rem;
+  font-weight:900;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  margin-bottom:8px;
+}
+.brand-dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#4e9188;
+  box-shadow:0 0 0 4px rgba(78,145,136,.12);
+}
+.brand-trust-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.brand-trust-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid #dfd4c9;
+  background:rgba(255,253,249,.78);
+  color:#665e55;
+  font-size:.66rem;
+  font-weight:850;
+  box-shadow:0 4px 14px rgba(69,49,31,.04);
+}
+.brand-trust-chip strong{color:#31565a}
+.factory-status{
+  position:relative;
+  overflow:hidden;
+}
+.factory-status::before{
+  content:"";
+  position:absolute;
+  inset:0 0 auto auto;
+  width:92px;
+  height:92px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(78,145,136,.13) 0%,rgba(78,145,136,0) 68%);
+  pointer-events:none;
+}
+.topic-card,.story-card,.output-card,.release-card,.panel{
+  transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;
+}
+.topic-card:hover,.story-card:hover,.output-card:hover,.release-card:hover,.panel:hover{
+  transform:translateY(-2px);
+  border-color:#d4c7ba;
+  box-shadow:0 16px 34px rgba(69,49,31,.10);
+}
+.topic-kicker{margin-bottom:7px}
+.topic-title{letter-spacing:-.025em}
+.topic-subtitle{margin-top:7px}
+.topic-chips{margin-top:12px}
+.topic-chip{box-shadow:inset 0 1px 0 rgba(255,255,255,.72)}
+[data-testid="stMetric"]{
+  transition:transform .16s ease,box-shadow .16s ease;
+}
+[data-testid="stMetric"]:hover{
+  transform:translateY(-1px);
+  box-shadow:0 14px 28px rgba(69,49,31,.09);
+}
+[data-testid="stProgress"] div[role="progressbar"]{
+  height:10px!important;
+  border-radius:999px!important;
+  overflow:hidden!important;
+}
+[data-testid="stProgress"] div[role="progressbar"] > div{
+  border-radius:999px!important;
+}
+.stButton>button,.stLinkButton>a{
+  transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease,background .14s ease!important;
+}
+.stButton>button:hover,.stLinkButton>a:hover{
+  transform:translateY(-1px);
+  box-shadow:0 8px 18px rgba(69,49,31,.08);
+}
+.stButton>button[kind="primary"]{
+  letter-spacing:-.01em;
+}
+section[data-testid="stSidebar"]{
+  box-shadow:12px 0 30px rgba(69,49,31,.035);
+}
+section[data-testid="stSidebar"] .stRadio > div{
+  gap:7px!important;
+}
+section[data-testid="stSidebar"] .stRadio label{
+  border-radius:12px!important;
+  padding:7px 9px!important;
+}
+.live-settings{
+  position:relative;
+  overflow:hidden;
+}
+.live-settings::before{
+  content:"";
+  position:absolute;
+  inset:0 auto auto 0;
+  width:100%;
+  height:1px;
+  background:linear-gradient(90deg,transparent,#d7c8bb 30%,#d7c8bb 70%,transparent);
+}
+.empty-state{
+  position:relative;
+  overflow:hidden;
+}
+.empty-state::after{
+  content:"SS";
+  position:absolute;
+  right:22px;
+  bottom:-12px;
+  font-size:5.5rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.08em;
+  color:rgba(47,93,98,.05);
+  pointer-events:none;
+}
+.timeline{
+  backdrop-filter:blur(8px);
+}
+.dashboard-footer{
+  border-top:1px solid #e7ddd1;
+  margin-top:24px;
+}
+.learning-strip{
+  display:flex;
+  align-items:flex-start;
+  gap:11px;
+  margin:16px 0 18px;
+  padding:13px 15px;
+  border:1px solid #d9e3e0;
+  border-radius:16px;
+  background:linear-gradient(135deg,#f5faf8 0%,#eef5f2 100%);
+  box-shadow:0 8px 22px rgba(47,93,98,.055);
+}
+.learning-strip-dot{
+  width:9px;
+  height:9px;
+  margin-top:4px;
+  flex:0 0 9px;
+  border-radius:50%;
+  background:#4e9188;
+  box-shadow:0 0 0 5px rgba(78,145,136,.10);
+}
+.learning-strip-title{
+  font-size:.78rem;
+  font-weight:900;
+  color:#31565a;
+  letter-spacing:.01em;
+}
+.learning-strip-copy{
+  margin-top:2px;
+  color:#6b655d;
+  font-size:.72rem;
+  line-height:1.45;
+}
+.learning-chip{
+  background:#edf5f2;
+  border-color:#cfe0dc;
+  color:#31565a;
+}
+
+/* 2026 studio layer: visual-only polish. No widget state or production behaviour is changed. */
+:root{
+  --studio-ink:#182023;
+  --studio-teal:#2f6f70;
+  --studio-mint:#7fb7aa;
+  --studio-lilac:#c1b5ff;
+  --studio-cream:#fbf6ee;
+  --studio-glass:rgba(255,253,249,.68);
+  --studio-glass-strong:rgba(255,253,249,.84);
+  --studio-shadow:0 24px 70px rgba(40,31,22,.10);
+}
+html{scroll-behavior:smooth}
+::selection{background:rgba(78,145,136,.20);color:var(--studio-ink)}
+body{
+  background:
+    radial-gradient(circle at 12% 5%,rgba(127,183,170,.14),transparent 27%),
+    radial-gradient(circle at 86% 4%,rgba(193,181,255,.14),transparent 30%),
+    radial-gradient(circle at 64% 78%,rgba(255,211,155,.11),transparent 25%),
+    var(--bg)!important;
+}
+.stApp{
+  background:
+    radial-gradient(circle at 15% 18%,rgba(127,183,170,.09),transparent 22%),
+    radial-gradient(circle at 88% 28%,rgba(193,181,255,.08),transparent 24%),
+    transparent!important;
+  position:relative;
+}
+.stApp::before{
+  content:"";
+  position:fixed;
+  inset:-18% -8% auto;
+  height:48vh;
+  pointer-events:none;
+  z-index:0;
+  background:
+    radial-gradient(ellipse at 22% 30%,rgba(79,145,136,.10),transparent 42%),
+    radial-gradient(ellipse at 76% 22%,rgba(132,111,208,.08),transparent 40%);
+  filter:blur(12px);
+  animation:studio-drift 18s ease-in-out infinite alternate;
+}
+@keyframes studio-drift{
+  from{transform:translate3d(-1%,0,0) scale(1)}
+  to{transform:translate3d(1.4%,1.5%,0) scale(1.035)}
+}
+[data-testid="stAppViewContainer"] .main{position:relative;z-index:1}
+.block-container{padding-top:1.2rem!important}
+.brand-card{
+  background:
+    linear-gradient(rgba(255,253,249,.86),rgba(248,241,233,.78)) padding-box,
+    conic-gradient(from 210deg,#5d958e,#b9c9ff,#e7ca96,#78aaa0,#5d958e) border-box!important;
+  border:1px solid transparent!important;
+  box-shadow:var(--studio-shadow),inset 0 1px 0 rgba(255,255,255,.92)!important;
+  backdrop-filter:blur(22px) saturate(1.08);
+  -webkit-backdrop-filter:blur(22px) saturate(1.08);
+  min-height:100px!important;
+}
+.brand-card::before{
+  content:"";
+  position:absolute;
+  width:180px;height:180px;
+  right:-70px;top:-88px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(127,183,170,.18),rgba(127,183,170,0) 68%);
+  pointer-events:none;
+}
+.brand-title-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.brand-signature{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  border:1px solid rgba(49,86,90,.12);
+  background:rgba(255,255,255,.48);
+  color:#6d655c;
+  padding:5px 8px;
+  border-radius:999px;
+  font-size:.57rem;
+  line-height:1;
+  font-weight:900;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.76);
+}
+.brand-signature::after{
+  content:"control deck unlocked";
+  position:absolute;
+  right:0;top:calc(100% + 8px);
+  padding:7px 9px;
+  border:1px solid #d9cec1;
+  border-radius:9px;
+  background:rgba(31,39,41,.94);
+  color:#f6f1ea;
+  font-size:.58rem;
+  letter-spacing:.04em;
+  font-weight:800;
+  text-transform:none;
+  opacity:0;
+  transform:translateY(-3px);
+  transition:opacity .16s ease,transform .16s ease;
+  pointer-events:none;
+  white-space:nowrap;
+  z-index:20;
+}
+.brand-signature:hover::after{opacity:1;transform:translateY(0)}
+.brand-trust-row{margin-top:8px}
+.brand-trust-chip{
+  padding:5px 9px!important;
+  background:rgba(255,253,249,.58)!important;
+  border-color:rgba(95,126,125,.18)!important;
+}
+.brand-trust-chip::first-letter{color:#3f7f78}
+.factory-status{
+  min-height:100px;
+  background:
+    linear-gradient(rgba(255,253,249,.82),rgba(248,243,236,.72)) padding-box,
+    conic-gradient(from 100deg,#a8cfc8,#d8cfff,#efddba,#a8cfc8) border-box!important;
+  border:1px solid transparent!important;
+  box-shadow:var(--studio-shadow),inset 0 1px 0 rgba(255,255,255,.9)!important;
+  backdrop-filter:blur(22px) saturate(1.08);
+  -webkit-backdrop-filter:blur(22px) saturate(1.08);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  text-align:left!important;
+}
+.factory-status.status-running .factory-status-label,
+.factory-status.status-running .factory-status-value{color:#2f6c67}
+.factory-status.status-running::after{
+  content:"LIVE PULSE";
+  position:absolute;
+  right:12px;bottom:10px;
+  color:#4f817c;
+  font-size:.51rem;
+  letter-spacing:.12em;
+  font-weight:900;
+}
+.factory-status.status-ready::after{content:"READY TO CREATE"}
+.factory-status.status-done::after{content:"COMPLETE"}
+.factory-status.status-ready::after,
+.factory-status.status-done::after{
+  position:absolute;
+  right:12px;bottom:10px;
+  color:#81776b;
+  font-size:.49rem;
+  letter-spacing:.10em;
+  font-weight:900;
+}
+.factory-status-label{position:relative;z-index:1}
+.factory-status-value{position:relative;z-index:1}
+.factory-status-detail{
+  margin-top:4px;
+  color:#756c61;
+  font-size:.65rem;
+  font-weight:750;
+  line-height:1.35;
+  max-width:12rem;
+}
+.status-orb{
+  display:inline-block;
+  width:7px;height:7px;
+  margin-right:6px;
+  border-radius:50%;
+  vertical-align:middle;
+  background:#7d8f8c;
+  box-shadow:0 0 0 4px rgba(125,143,140,.10);
+}
+.status-orb.running{
+  background:#4e9188;
+  box-shadow:0 0 0 4px rgba(78,145,136,.12),0 0 18px rgba(78,145,136,.26);
+  animation:status-pulse 1.9s ease-in-out infinite;
+}
+@keyframes status-pulse{
+  0%,100%{transform:scale(1);opacity:.86}
+  50%{transform:scale(1.25);opacity:1}
+}
+section[data-testid="stSidebar"]{
+  background:
+    linear-gradient(180deg,rgba(247,240,230,.92),rgba(233,224,212,.82))!important;
+  backdrop-filter:blur(18px) saturate(1.05);
+  -webkit-backdrop-filter:blur(18px) saturate(1.05);
+}
+section[data-testid="stSidebar"]>div{
+  position:relative;
+}
+.sidebar-brand{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:11px;
+  padding:11px 11px 12px;
+  margin-bottom:14px;
+  border:1px solid rgba(125,106,85,.15);
+  border-radius:16px;
+  background:rgba(255,253,249,.50);
+  box-shadow:0 12px 28px rgba(74,52,34,.05),inset 0 1px 0 rgba(255,255,255,.9);
+  backdrop-filter:blur(14px);
+  overflow:visible;
+}
+.sidebar-brand-mark{
+  display:grid;
+  place-items:center;
+  width:37px;height:37px;
+  border-radius:12px;
+  color:#fff;
+  font-size:.73rem;
+  font-weight:950;
+  letter-spacing:-.06em;
+  background:
+    linear-gradient(135deg,#355e62,#5b8e89 58%,#7384c1);
+  box-shadow:0 9px 20px rgba(47,93,98,.18),inset 0 1px 0 rgba(255,255,255,.36);
+}
+.sidebar-brand-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sidebar-brand-name{
+  color:#252a2d;
+  font-size:.79rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.02em;
+}
+.sidebar-brand-meta{
+  color:#80766b;
+  font-size:.54rem;
+  line-height:1.2;
+  font-weight:850;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.sidebar-brand::after{
+  content:"quietly making better shorts";
+  position:absolute;
+  left:10px;bottom:-25px;
+  color:#948a7e;
+  font-size:.51rem;
+  letter-spacing:.05em;
+  opacity:.72;
+}
+section[data-testid="stSidebar"] .stRadio [role="radiogroup"]{
+  gap:8px!important;
+}
+section[data-testid="stSidebar"] .stRadio label{
+  position:relative;
+  border:1px solid transparent!important;
+  background:rgba(255,253,249,.24)!important;
+  box-shadow:none!important;
+  transition:transform .15s ease,border-color .15s ease,background .15s ease,box-shadow .15s ease!important;
+}
+section[data-testid="stSidebar"] .stRadio label:hover{
+  transform:translateX(2px);
+  background:rgba(255,253,249,.58)!important;
+  border-color:rgba(47,93,98,.10)!important;
+}
+section[data-testid="stSidebar"] .stRadio label:has(input[aria-checked="true"]),
+section[data-testid="stSidebar"] .stRadio label:has(input:checked){
+  background:linear-gradient(90deg,rgba(255,253,249,.86),rgba(226,239,236,.70))!important;
+  border-color:rgba(47,93,98,.18)!important;
+  box-shadow:0 7px 17px rgba(47,93,98,.07)!important;
+}
+section[data-testid="stSidebar"] .stRadio label:has(input[aria-checked="true"])::before,
+section[data-testid="stSidebar"] .stRadio label:has(input:checked)::before{
+  content:"";
+  position:absolute;
+  left:-1px;top:7px;bottom:7px;
+  width:3px;
+  border-radius:99px;
+  background:linear-gradient(180deg,#6b9b95,#385e61);
+}
+[data-testid="stVerticalBlockBorderWrapper"]{
+  border-radius:18px!important;
+  border-color:rgba(210,197,183,.78)!important;
+  background:
+    linear-gradient(180deg,rgba(255,253,249,.74),rgba(252,247,240,.58))!important;
+  box-shadow:0 13px 34px rgba(69,49,31,.06),inset 0 1px 0 rgba(255,255,255,.84)!important;
+  backdrop-filter:blur(13px) saturate(1.02);
+  -webkit-backdrop-filter:blur(13px) saturate(1.02);
+}
+[data-testid="stVerticalBlockBorderWrapper"] > div{
+  border-radius:inherit;
+}
+.topic-card,.story-card,.output-card,.release-card,.panel,.progress-hero,.live-settings{
+  box-shadow:var(--studio-shadow),inset 0 1px 0 rgba(255,255,255,.75)!important;
+  background:
+    linear-gradient(145deg,rgba(255,253,249,.84),rgba(247,240,232,.66))!important;
+  backdrop-filter:blur(15px) saturate(1.04);
+  -webkit-backdrop-filter:blur(15px) saturate(1.04);
+}
+.topic-card:hover,.story-card:hover,.output-card:hover,.release-card:hover,.panel:hover{
+  transform:translateY(-3px)!important;
+  box-shadow:0 28px 58px rgba(58,46,34,.12),inset 0 1px 0 rgba(255,255,255,.85)!important;
+}
+.stButton>button,.stLinkButton>a{
+  position:relative;
+  overflow:hidden;
+}
+.stButton>button::after,.stLinkButton>a::after{
+  content:"";
+  position:absolute;
+  inset:0 auto 0 -38%;
+  width:34%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),transparent);
+  transform:skewX(-18deg);
+  transition:left .5s ease;
+  pointer-events:none;
+}
+.stButton>button:hover::after,.stLinkButton>a:hover::after{left:115%}
+.stButton>button:focus-visible,.stLinkButton>a:focus-visible,
+.stTextInput input:focus-visible,.stTextArea textarea:focus-visible,
+[data-baseweb="select"]:focus-within{
+  outline:2px solid rgba(65,118,114,.54)!important;
+  outline-offset:2px!important;
+}
+.stButton>button[kind="primary"]{
+  background:
+    linear-gradient(135deg,#355f63 0%,#477f7b 55%,#5f78a7 120%)!important;
+  border-color:rgba(38,83,86,.9)!important;
+  box-shadow:0 13px 28px rgba(47,93,98,.19),inset 0 1px 0 rgba(255,255,255,.20)!important;
+}
+.stButton>button[kind="primary"]:hover{
+  background:
+    linear-gradient(135deg,#2f595d 0%,#3e716e 55%,#536990 120%)!important;
+}
+.stButton>button[kind="primary"]:active{transform:translateY(1px)}
+.st-key-live_format_menu button,
+.st-key-live_topic_menu button,
+.st-key-live_sports_menu button,
+.st-key-live_cricket_scope_menu button,
+.st-key-test_menu button{
+  position:relative;
+  overflow:hidden;
+  background:
+    linear-gradient(rgba(255,253,249,.72),rgba(245,239,232,.62)) padding-box,
+    conic-gradient(from 120deg,#e58d92,#e7cc83,#82b99f,#79a9db,#a49be0,#e58d92) border-box!important;
+  border:1.5px solid transparent!important;
+  box-shadow:0 14px 30px rgba(69,49,31,.09),inset 0 1px 0 rgba(255,255,255,.88)!important;
+  backdrop-filter:blur(16px) saturate(1.08)!important;
+}
+.st-key-live_format_menu button::after,
+.st-key-live_topic_menu button::after,
+.st-key-live_sports_menu button::after,
+.st-key-live_cricket_scope_menu button::after,
+.st-key-test_menu button::after{
+  content:"";
+  position:absolute;
+  top:0;bottom:0;left:-40%;
+  width:28%;
+  transform:skewX(-16deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.30),transparent);
+  transition:left .6s ease;
+  pointer-events:none;
+}
+.st-key-live_format_menu button:hover::after,
+.st-key-live_topic_menu button:hover::after,
+.st-key-live_sports_menu button:hover::after,
+.st-key-live_cricket_scope_menu button:hover::after,
+.st-key-test_menu button:hover::after{left:115%}
+.st-key-live_format_menu button[aria-pressed="true"],
+.st-key-live_topic_menu button[aria-pressed="true"],
+.st-key-live_sports_menu button[aria-pressed="true"],
+.st-key-live_cricket_scope_menu button[aria-pressed="true"],
+.st-key-test_menu button[aria-pressed="true"]{
+  box-shadow:0 18px 36px rgba(47,93,98,.16),inset 0 1px 0 rgba(255,255,255,.92)!important;
+}
+.stSelectbox [data-baseweb="select"]>div,
+.stMultiSelect [data-baseweb="select"]>div{
+  min-height:44px!important;
+  border-radius:13px!important;
+  background:rgba(255,253,249,.72)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.75)!important;
+}
+[data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea{
+  background:rgba(255,253,249,.72)!important;
+  border-radius:13px!important;
+  border-color:#ddd1c4!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.76)!important;
+  transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;
+}
+[data-testid="stTextInput"] input:hover,[data-testid="stTextArea"] textarea:hover{
+  background:rgba(255,253,249,.84)!important;
+}
+[data-testid="stExpander"]{
+  background:rgba(255,253,249,.42)!important;
+  border-radius:16px!important;
+  overflow:hidden;
+}
+[data-testid="stExpander"] summary:hover{
+  background:rgba(255,253,249,.48)!important;
+}
+[data-testid="stMetric"]{
+  background:
+    linear-gradient(145deg,rgba(255,253,249,.86),rgba(241,247,245,.66))!important;
+  border-color:rgba(205,213,207,.78)!important;
+  box-shadow:0 13px 30px rgba(47,93,98,.065),inset 0 1px 0 rgba(255,255,255,.88)!important;
+  backdrop-filter:blur(15px);
+}
+[data-testid="stMetricValue"]{letter-spacing:-.055em!important}
+[data-testid="stProgress"] div[role="progressbar"]{
+  background:rgba(217,211,202,.66)!important;
+  box-shadow:inset 0 1px 2px rgba(51,44,35,.07);
+}
+[data-testid="stProgress"] div[role="progressbar"] > div{
+  background:linear-gradient(90deg,#477f7b,#79a9db,#9b92d2)!important;
+  box-shadow:0 0 18px rgba(89,125,157,.22);
+}
+.progress-track-fill{
+  background:linear-gradient(90deg,#3c706e 0%,#74a89d 48%,#7a7bb8 100%)!important;
+  box-shadow:0 0 18px rgba(90,122,151,.18);
+}
+.progress-hero{
+  border-color:rgba(202,211,208,.72)!important;
+  overflow:hidden;
+}
+.progress-hero::after{
+  content:"";
+  position:absolute;
+  top:0;left:-24%;
+  width:22%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.96),transparent);
+  animation:progress-sheen 4.4s linear infinite;
+}
+@keyframes progress-sheen{
+  to{left:120%}
+}
+.progress-step{
+  background:rgba(246,241,234,.62)!important;
+  border-color:rgba(211,201,190,.74)!important;
+}
+.progress-step.active{
+  background:linear-gradient(135deg,rgba(231,244,241,.86),rgba(234,235,250,.72))!important;
+  border-color:rgba(107,152,148,.38)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.80),0 8px 22px rgba(77,110,113,.06);
+}
+.progress-step.done{
+  background:linear-gradient(135deg,rgba(237,247,242,.84),rgba(236,243,238,.70))!important;
+}
+.progress-step.stopped{
+  background:linear-gradient(135deg,rgba(252,239,226,.88),rgba(251,232,222,.70))!important;
+}
+.crop-shell{
+  background:linear-gradient(145deg,rgba(255,253,249,.84),rgba(239,245,242,.66))!important;
+  border-color:rgba(198,211,206,.80)!important;
+  box-shadow:var(--studio-shadow)!important;
+}
+[data-testid="stImage"] img{
+  border-radius:14px;
+  box-shadow:0 11px 26px rgba(36,29,22,.10);
+}
+[data-testid="stDataFrame"]{
+  box-shadow:0 13px 30px rgba(69,49,31,.06)!important;
+  background:rgba(255,253,249,.70)!important;
+}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{
+  background:linear-gradient(180deg,#bdb3a6,#809e99);
+  border:3px solid transparent;
+  background-clip:padding-box;
+  border-radius:999px;
+}
+@media (max-width:900px){
+  .brand-title-row{align-items:flex-start}
+  .brand-signature{display:none}
+  .sidebar-brand::after{display:none}
+  .factory-status{min-height:86px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .stApp::before,.status-orb.running,.progress-hero::after{animation:none!important}
+  .topic-card,.story-card,.output-card,.release-card,.panel,
+  .stButton>button,.stLinkButton>a,.brand-signature::after{transition:none!important}
+}
+
+/* Final composition pass: shared rails, section rhythm and tactile focus states. */
+.section-title{
+  position:relative;
+  display:inline-block;
+  padding-bottom:7px;
+}
+.section-title::after{
+  content:"";
+  position:absolute;
+  left:0;bottom:0;
+  width:46px;height:2px;
+  border-radius:999px;
+  background:linear-gradient(90deg,#4c8882,#8c82c5,transparent);
+}
+[data-testid="stPills"]{
+  margin-top:3px;
+}
+[data-testid="stPills"] [role="group"]{
+  padding:5px!important;
+  gap:8px!important;
+  border-radius:21px!important;
+  background:rgba(255,253,249,.34)!important;
+  border:1px solid rgba(210,197,183,.46)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important;
+  backdrop-filter:blur(11px);
+  -webkit-backdrop-filter:blur(11px);
+}
+[data-testid="stPills"] button{
+  min-height:48px!important;
+  border-radius:15px!important;
+}
+[data-testid="stPills"] button[aria-pressed="true"]{
+  transform:translateY(-1px)!important;
+  border-color:rgba(70,112,110,.28)!important;
+  background:linear-gradient(135deg,rgba(237,247,243,.90),rgba(235,234,249,.84))!important;
+  box-shadow:0 11px 23px rgba(47,93,98,.10),inset 0 1px 0 rgba(255,255,255,.94)!important;
+}
+.brand-card:hover,.factory-status:hover{
+  transform:translateY(-1px);
+  box-shadow:0 28px 76px rgba(40,31,22,.12),inset 0 1px 0 rgba(255,255,255,.94)!important;
+}
+.stButton>button:disabled,.stLinkButton>a[aria-disabled="true"]{
+  opacity:.58!important;
+  filter:saturate(.72);
+  box-shadow:none!important;
+}
+[data-testid="stAlert"]{
+  border-radius:15px!important;
+  box-shadow:0 10px 28px rgba(69,49,31,.055)!important;
+}
 </style>""", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
@@ -496,9 +1228,12 @@ def _channel_options() -> list[str]:
 
 
 def _init_state() -> None:
+    if "workflow_controller" not in st.session_state:
+        st.session_state.workflow_controller = DashboardWorkflowController(ultimate_bot)
+
     defaults = {
-        "workflow_controller": DashboardWorkflowController(ultimate_bot),
         "candidates": [],
+        "retained_topics": [],
         "web_config": {},
         "production_started": False,
         "upload_result": "",
@@ -531,8 +1266,51 @@ def _init_state() -> None:
             st.session_state[key] = value
 
 
+def _topic_identity(candidate: Dict[str, Any]) -> str:
+    story_key = str(candidate.get("story_key") or "").strip().casefold()
+    if story_key:
+        return story_key
+    title = str(candidate.get("title") or "").strip().casefold()
+    url = str(candidate.get("story_url") or candidate.get("url") or candidate.get("link") or "").strip().casefold()
+    return re.sub(r"[^a-z0-9]+", " ", f"{title} {url}").strip()
+
+
+def _remember_unpublished_topic(candidate: Dict[str, Any]) -> None:
+    if not isinstance(candidate, dict) or not str(candidate.get("title") or "").strip():
+        return
+    key = _topic_identity(candidate)
+    if not key:
+        return
+    retained = [
+        dict(item)
+        for item in (st.session_state.get("retained_topics") or [])
+        if isinstance(item, dict) and _topic_identity(item) != key
+    ]
+    copy = dict(candidate)
+    copy["retained_from_previous_run"] = True
+    retained.insert(0, copy)
+    st.session_state.retained_topics = retained[:40]
+
+
+def _forget_unpublished_topic(candidate: Dict[str, Any]) -> None:
+    if not isinstance(candidate, dict):
+        return
+    key = _topic_identity(candidate)
+    if not key:
+        return
+    st.session_state.retained_topics = [
+        dict(item)
+        for item in (st.session_state.get("retained_topics") or [])
+        if isinstance(item, dict) and _topic_identity(item) != key
+    ]
+
+
 def reset_run() -> None:
     controller: DashboardWorkflowController = st.session_state.workflow_controller
+    before_reset = controller.snapshot()
+    selected_story = before_reset.get("selected_story") or {}
+    if selected_story and not str(before_reset.get("uploaded_video_id") or "").strip():
+        _remember_unpublished_topic(selected_story)
     controller.reset()
     for key, value in {
         "candidates": [],
@@ -553,7 +1331,6 @@ def reset_run() -> None:
         "metadata_pending_values": None,
     }.items():
         st.session_state[key] = value
-
 
 DEEP_DIVE_TOPICS = (
     "national_global_affairs",
@@ -649,7 +1426,11 @@ def build_config() -> Dict[str, Any]:
                 "format_mode": "regular",
                 "display_format": "AI",
                 "editorial_mode": "AI",
-                "category": "ai_recommendation",
+                # AI is a smart-selection mode inside Sports, not a separate
+                # production genre. Keep the real category key so downstream
+                # metadata/script routing cannot fall back to national affairs.
+                "category": "sports",
+                "discovery_mode": "ai_sports",
                 "language": language_key,
                 "language_label": language_label,
                 "channel": channel,
@@ -692,14 +1473,14 @@ def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
 
 def render_header(action_mode: str) -> None:
     titles = {
-        "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Live": ("Live", "Current stories, review controls and release."),
         "Test": ("Test", "Diagnostics, previews and engineering checks."),
-        "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
-        "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
-        "Demo Factory": ("Demo Factory", "Controlled tests for factory components."),
-        "Final Branding Preview": ("Final Branding Preview", "Inspect the canonical branding compositor."),
+        "Channel Statistics": ("Analytics", "Connected-channel totals and performance history."),
+        "Offline Diagnostics": ("Diagnostics", "Safe code and runtime checks."),
+        "Demo": ("Demo", "Controlled checks for selected components."),
+        "Final Branding Preview": ("Brand preview", "Inspect the canonical branding compositor."),
     }
-    title, subtitle = titles.get(action_mode, ("Dashboard", "Viral Shorts Factory"))
+    title, subtitle = titles.get(action_mode, ("Studio", "Editorial workspace"))
 
     logo_path = ""
     brand_dir = getattr(ultimate_bot, "BRAND_ASSETS_DIR", None)
@@ -710,27 +1491,43 @@ def render_header(action_mode: str) -> None:
                 logo_path = candidate_path
                 break
 
-    left, middle, right = st.columns([0.75, 5.45, 1.4], gap="medium")
+    left, middle, right = st.columns([0.55, 5.8, 1.35], gap="medium")
     with left:
         if logo_path:
-            st.image(logo_path, width=72)
+            st.image(logo_path, width=62)
         else:
-            st.markdown("<div style='font-size:2.3rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:2rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
+    snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
+    status = "RUNNING" if snapshot.get("thread_alive") else ("READY" if not snapshot.get("completed") else "DONE")
+    status_class = status.lower()
+    percent = max(0, min(100, int(snapshot.get("percent", 0) or 0)))
+    stage = _ui_text(snapshot.get("stage"), "ready").replace("_", " ").title()
     with middle:
         st.markdown(
-            f"<div class='brand-card'><span class='brand-pill'>{title}</span>"
-            f"<div class='brand-title'>Viral Shorts Factory</div>"
-            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>",
+            f"<div class='brand-card' title='Shorts Studio · editorial control deck'>"
+            f"<div class='brand-eyebrow'><span class='brand-dot'></span> Editorial workspace</div>"
+            f"<div class='brand-title-row'><span class='brand-pill'>{title}</span>"
+            f"<span class='brand-signature'>2026 editorial OS</span></div>"
+            f"<div class='brand-title'>Shorts Studio</div>"
+            f"<div class='brand-sub'>{_ui_html(subtitle)}</div>"
+            f"<div class='brand-trust-row'>"
+            f"<span class='brand-trust-chip'>◉ <strong>Human review</strong></span>"
+            f"<span class='brand-trust-chip'>◌ Release gate</span>"
+            f"<span class='brand-trust-chip'>✦ Originality aware</span>"
+            f"</div></div>",
             unsafe_allow_html=True,
         )
     with right:
-        snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
-        status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
+        detail = f"{percent}% · {stage}" if status == "RUNNING" else ("Review controls ready" if status == "READY" else "Final state recorded")
+        orb_class = "running" if status == "RUNNING" else ""
         st.markdown(
-            f"<div class='factory-status'><div class='factory-status-label'>FACTORY STATUS</div>"
-            f"<div class='factory-status-value'>{_ui_html(status)}</div></div>",
+            f"<div class='factory-status status-{status_class}'>"
+            f"<div class='factory-status-label'><span class='status-orb {orb_class}'></span>WORKSPACE STATUS</div>"
+            f"<div class='factory-status-value'>{_ui_html(status)}</div>"
+            f"<div class='factory-status-detail'>{_ui_html(detail)}</div></div>",
             unsafe_allow_html=True,
         )
+
 
 def _clear_live_downstream() -> None:
     """Clear only choices that depend on the currently selected Live menu."""
@@ -763,13 +1560,20 @@ def render_workspace_navigation() -> str:
     current = st.session_state.get("workspace_mode", "Live")
     if current not in options:
         current = "Live"
+    st.sidebar.markdown(
+        "<div class='sidebar-brand' title='You found the control deck.'>"
+        "<div class='sidebar-brand-mark'>SS</div>"
+        "<div class='sidebar-brand-copy'><div class='sidebar-brand-name'>Shorts Studio</div>"
+        "<div class='sidebar-brand-meta'>Editorial control deck</div></div></div>",
+        unsafe_allow_html=True,
+    )
     st.sidebar.markdown("<div class='sidebar-kicker'>Workspace</div>", unsafe_allow_html=True)
     selected = st.sidebar.radio(
         "Workspace",
         options,
         index=options.index(current),
         key="workspace_mode",
-        label_visibility="visible",
+        label_visibility="collapsed",
     )
     return selected
 
@@ -778,9 +1582,9 @@ def render_live_navigation() -> Dict[str, Any]:
     """Render the deliberate Live hierarchy and return the production config."""
     st.session_state["live_path_ready"] = False
     _render_section_header(
-        "Live Factory",
-        "Choose your production path",
-        "Open one level at a time. Deeper controls appear only when the current choice needs them.",
+        "Live",
+        "Build a Short",
+        "Choose a format, then a topic lane.",
     )
 
     format_choice = st.pills(
@@ -801,10 +1605,10 @@ def render_live_navigation() -> Dict[str, Any]:
 
     live_format = st.session_state.get("live_format_selection") or ""
     if not live_format:
-        st.caption("Choose Deep Dive, Top 5 or Sports to open the next menu.")
+        st.caption("Choose a format to continue.")
         return build_config()
 
-    st.markdown("<div class='live-choice-label'>Choose a section</div>", unsafe_allow_html=True)
+    st.markdown("<div class='live-choice-label'>Topic lane</div>", unsafe_allow_html=True)
 
     final_path_ready = False
     if live_format in {"Deep Dive", "Top 5"}:
@@ -865,11 +1669,11 @@ def render_live_navigation() -> Dict[str, Any]:
             st.session_state["live_path_ready"] = True
 
     if not final_path_ready:
-        st.caption("Choose the highlighted menu item to open the next level.")
+        st.caption("Choose a topic lane to continue.")
         return build_config()
 
     with st.expander("Production settings", expanded=False):
-        st.caption("These settings are kept out of the navigation until you reach a complete production path.")
+        st.caption("Optional release settings.")
         columns = st.columns(3, gap="medium")
 
         language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
@@ -923,115 +1727,93 @@ def render_live_navigation() -> Dict[str, Any]:
 
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
-    """Render one accordion per production stage, opening only the active stage."""
     stages = [
-        ("Headlines", "discovery", 0, 14),
-        ("Research", "research", 15, 23),
-        ("Script QC", "script", 24, 40),
-        ("Voiceover", "audio", 41, 54),
-        ("Visual QC", "visuals", 55, 76),
-        ("Render", "render", 77, 95),
-        ("Final QC", "qc", 96, 100),
+        ("Headlines", "discovery"),
+        ("Research", "research"),
+        ("Script", "script_review"),
+        ("Voiceover", "audio"),
+        ("Visuals", "visual_approval"),
+        ("Render", "render"),
+        ("Final QC", "qc"),
     ]
     current = str(snapshot.get("stage") or "idle").strip()
     percent = max(0, min(100, int(snapshot.get("percent", 0) or 0)))
-    active_key = {
-        "script_review": "script",
-        "visual_approval": "visuals",
-    }.get(current, current)
-    if active_key not in {item[1] for item in stages}:
-        if current == "error":
-            active_key = next(
-                (key for _label, key, lo, hi in stages if lo <= percent <= hi),
-                "qc",
-            )
-        else:
-            active_key = "discovery"
+    current_key = {"script": "script_review", "visuals": "visual_approval"}.get(current, current)
+    bounds = {
+        "discovery": (0, 14),
+        "research": (15, 23),
+        "script_review": (24, 40),
+        "audio": (41, 54),
+        "visual_approval": (55, 76),
+        "render": (77, 95),
+        "qc": (96, 100),
+    }
+    if current == "error":
+        current_key = next((key for key, (lo, hi) in bounds.items() if lo <= percent <= hi), "qc")
 
-    _render_section_header(
-        "Production pipeline",
-        "Run progress",
-        "Each stage contains its own progress and review controls. Only the active stage is opened.",
+    active_index = next((i for i, (_label, key) in enumerate(stages) if key == current_key), -1)
+    if snapshot.get("completed"):
+        current_key = "qc"
+        active_index = len(stages) - 1
+
+    label_map = dict((key, label) for label, key in stages)
+    current_label = label_map.get(current_key, "Ready")
+    message = _ui_text(snapshot.get("message"), "Ready.")
+    if current == "error":
+        message = _ui_text(snapshot.get("error") or message, "The run stopped before completion.")
+
+    cards = []
+    for index, (label, key) in enumerate(stages):
+        if snapshot.get("completed") or (active_index >= 0 and index < active_index):
+            state, status = "done", "Done"
+        elif key == current_key:
+            state = "stopped" if current == "error" else "active"
+            status = "Stopped" if current == "error" else "Now"
+        else:
+            state, status = "", "Next"
+        cards.append(
+            f"<div class='progress-step {state}'>"
+            f"<div class='progress-step-index'>{index + 1:02d}</div>"
+            f"<div class='progress-step-name'>{_ui_html(label)}</div>"
+            f"<div class='progress-step-state'>{status}</div></div>"
+        )
+
+    _render_section_header("Progress", "Production", "")
+    st.markdown(
+        f"<div class='progress-hero'>"
+        f"<div class='progress-hero-head'><div class='progress-hero-title'>{_ui_html(current_label)}</div>"
+        f"<div class='progress-hero-value'>{percent}%</div></div>"
+        f"<div class='progress-track'><div class='progress-track-fill' style='width:{percent}%'></div></div>"
+        f"<div class='progress-meta'><span>{_ui_html(message)}</span><span>Step {max(1, active_index + 1)} of {len(stages)}</span></div>"
+        f"<div class='progress-steps'>{''.join(cards)}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
-    message = str(snapshot.get("message") or "").strip()
-    for label, key, low, high in stages:
-        if percent >= high:
-            stage_progress = 100
-            status = "DONE"
-            icon = "✓"
-        elif active_key == key:
-            span = max(1, high - low)
-            stage_progress = max(0, min(100, int(round(((percent - low) / span) * 100))))
-            status = "IN PROGRESS"
-            icon = "●"
+    controller = snapshot.get("_controller") or st.session_state.workflow_controller
+    if current_key == "research":
+        render_research_summary(snapshot)
+    elif current_key == "script_review":
+        render_script_visual_query_review(controller, snapshot)
+    elif current_key == "audio":
+        render_audio_preview(snapshot)
+    elif current_key == "visual_approval":
+        if snapshot.get("visual_review_required"):
+            render_visual_review(controller, snapshot)
         else:
-            stage_progress = 0
-            status = "UP NEXT"
-            icon = "○"
-
-        if current == "error" and key == active_key:
-            status = "STOPPED"
-            icon = "⚠️"
-
-        with st.expander(
-            f"{icon} {label}  ·  {status}  ·  {stage_progress}%",
-            expanded=active_key == key,
-        ):
-            st.progress(stage_progress / 100.0, text=f"{stage_progress}% · {label}")
-            if active_key == key and message:
-                st.markdown(
-                    f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {_ui_html(message)}</div></div>",
-                    unsafe_allow_html=True,
-                )
-
-            if key == "discovery":
-                story = snapshot.get("selected_story") or {}
-                if story:
-                    st.markdown(
-                        f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
-                        f"<div class='story-title'>{_ui_html(story.get('title'))}</div></div>",
-                        unsafe_allow_html=True,
-                    )
-                elif active_key == key:
-                    st.caption("Waiting for the selected headline to enter production.")
-
-            elif key == "research":
-                render_research_summary(snapshot)
-
-            elif key == "script":
-                if snapshot.get("script_review_required"):
-                    render_script_visual_query_review(
-                        snapshot.get("_controller") or st.session_state.workflow_controller,
-                        snapshot,
-                    )
-                else:
-                    render_script(snapshot)
-
-            elif key == "audio":
-                render_audio_preview(snapshot)
-
-            elif key == "visuals":
-                controller = snapshot.get("_controller") or st.session_state.workflow_controller
-                if snapshot.get("visual_review_required"):
-                    render_visual_review(controller, snapshot)
-                else:
-                    items = _visual_items(snapshot)
-                    if items:
-                        ready = sum(1 for item in items if item.get("qc_passed"))
-                        st.metric("Verified visuals", f"{ready}/{len(items)}")
-
-            elif key == "render":
-                render_generated_outputs(snapshot)
-                render_console(snapshot)
-
-            elif key == "qc":
-                controller = snapshot.get("_controller") or st.session_state.workflow_controller
-                render_upload_panel(controller, snapshot)
-                if snapshot.get("stage") == "error":
-                    st.error(snapshot.get("error") or "The factory stopped with an error.")
-                if snapshot.get("completed"):
-                    render_logs(snapshot)
+            items = _visual_items(snapshot)
+            if items:
+                ready = sum(1 for item in items if item.get("qc_passed"))
+                st.caption(f"{ready}/{len(items)} visuals ready")
+    elif current_key == "render":
+        render_generated_outputs(snapshot)
+        render_console(snapshot)
+    elif current_key == "qc":
+        render_upload_panel(controller, snapshot)
+        if snapshot.get("stage") == "error":
+            st.error(snapshot.get("error") or "The run stopped with an error.")
+        elif snapshot.get("completed"):
+            render_logs(snapshot)
 
 
 def _script_text(script_data: Dict[str, Any]) -> str:
@@ -1146,7 +1928,7 @@ def render_script_visual_query_review(
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not isinstance(scenes, list) or not scenes:
         st.warning("The script is not available for review yet.")
-        st.info("The factory is paused at script QC. Once the script payload is available, this review will appear here; PowerShell remains active while it waits.")
+        st.info("The run is paused at script review. Once the script payload is available, the review appears here; PowerShell remains active while it waits.")
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
@@ -1395,18 +2177,25 @@ def _render_crop_dialog(
         box_color="#177fd1",
         aspect_ratio=(9, 16) if crop_is_shorts else None,
         box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
-        return_type="both",
+        return_type="box",
         key=f"crop_dialog_{snapshot.get('run_id','active')}_{target[:32]}",
         should_resize_image=True,
         stroke_width=3,
     )
-    if isinstance(crop_result, tuple) and len(crop_result) == 2:
-        crop_preview, crop_box = crop_result
-    else:
-        crop_preview, crop_box = crop_result, {}
+    crop_box = crop_result if isinstance(crop_result, dict) else {}
+    crop_preview = None
+    if crop_box:
+        try:
+            crop_preview = _manual_crop_box_to_shorts(
+                image,
+                crop_box,
+                free_size=not crop_is_shorts,
+            )
+        except (TypeError, ValueError):
+            crop_preview = None
 
     if crop_preview is not None:
-        st.image(crop_preview, width=260)
+        st.image(crop_preview, width=280)
 
     action_cols = st.columns([1, 1])
     with action_cols[0]:
@@ -1778,7 +2567,7 @@ def render_powershell_widget(snapshot: Dict[str, Any]) -> None:
                 st.code("\n".join(visible), language="powershell")
                 st.caption(f"{len(visible)} lines · stage: {_ui_text(stage, 'ready')}")
             else:
-                st.info("No factory PowerShell output captured yet.")
+                st.info("No worker output captured yet.")
 
 def render_console(snapshot: Dict[str, Any]) -> None:
     lines = snapshot.get("console_lines") or []
@@ -1802,7 +2591,7 @@ def render_console(snapshot: Dict[str, Any]) -> None:
             operation_label = "Final video render"
             break
 
-    st.markdown("### Live factory activity")
+    st.markdown("### Live activity")
     if operation_percent is not None:
         st.markdown(f"**{operation_label}** · {operation_percent}%")
         st.progress(max(0.0, min(1.0, operation_percent / 100)))
@@ -2123,13 +2912,13 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         _render_section_header(
             "Headline stage",
             "Choose a topic",
-            "The event-backed topic pool is ready. Select one to continue.",
+            "Current, event-backed stories are ready.",
         )
     else:
         _render_section_header(
             "Headline stage",
             "Find today's headlines",
-            "Your selected Live path is locked in above. Search current events and choose a topic before production starts.",
+            "Choose a story from the current event radar.",
         )
 
     if not st.session_state.candidates:
@@ -2139,13 +2928,11 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         with st.container():
             st.markdown(
                 "<div class='empty-state'><div class='empty-title'>Ready for a new Short</div>"
-                "<div class='empty-copy'>Search current stories and keep the final story choice in your hands. "
-                "The factory handles the ranking; you handle the decision.</div></div>",
+                "<div class='empty-copy'>Choose a current story. Ranking is automatic; the final choice is yours.</div></div>",
                 unsafe_allow_html=True,
             )
             st.markdown(
                 f"<div class='meta-row'><span class='meta-chip'>Mode · {_ui_html(mode_label)}</span>"
-                f"<span class='meta-chip'>Language · {_ui_html(language_label)}</span>"
                 f"<span class='meta-chip'>Category · {_ui_html(category_label)}</span></div>",
                 unsafe_allow_html=True,
             )
@@ -2163,6 +2950,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                                 config,
                                 conn,
                                 max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                                retained_candidates=st.session_state.get("retained_topics", []),
                             )
                         else:
                             candidates = discover_ranked_topics(
@@ -2170,6 +2958,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                                 config,
                                 conn,
                                 max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                                retained_candidates=st.session_state.get("retained_topics", []),
                             )
                     finally:
                         conn.close()
@@ -2198,7 +2987,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         _render_section_header(
             "Step 02",
             "Review your story & search terms",
-            "The factory has pre-built ranked image-search phrases. Edit them before production; only the terms left here will be searched.",
+            "Review the prepared image-search phrases before production.",
         )
         with st.container(border=True):
             st.markdown("<div class='story-rank'>SELECTED TOPIC</div>", unsafe_allow_html=True)
@@ -2283,7 +3072,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
-    page_size = 5
+    page_size = 6
     page_count = max(1, (total + page_size - 1) // page_size)
     page = max(0, min(int(st.session_state.get("candidate_page", 0) or 0), page_count - 1))
     start_index = page * page_size
@@ -2304,8 +3093,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         unsafe_allow_html=True,
     )
 
-    for row_start in range(0, len(visible), 2):
-        row = visible[row_start:row_start + 2]
+    for row_start in range(0, len(visible), 3):
+        row = visible[row_start:row_start + 3]
         cols = st.columns(len(row), gap="medium")
         for local_index, candidate in enumerate(row):
             absolute_index = start_index + row_start + local_index
@@ -2315,7 +3104,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 reason = str(candidate.get("discovery_reason") or "").strip()
                 score = float(candidate.get("candidate_score") or 0.0)
                 evidence = build_discovery_evidence(candidate)
-                history_fit = float(evidence.get("channel_history") or 0.0)
+                channel_fit = float(candidate.get("channel_fit_score") or 0.0)
+                channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)
                 source = str(candidate.get("source_label") or "News source").strip()
                 url = str(candidate.get("story_url") or "").strip()
 
@@ -2336,11 +3126,20 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         f"<div class='topic-title'>{_ui_html(title)}</div>"
                         f"<div class='topic-subtitle'>{_ui_html(topic_descriptor)}</div>"
                         f"<div class='topic-chips'>"
-                        f"<span class='topic-chip strong'>Event {actionability:.1f}/10</span>"
-                        f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}/10</span>"
-                        f"<span class='topic-chip'>India focus {india_focus:.1f}/10</span>"
-                        f"<span class='topic-chip'>Rank {score:.1f}</span>"
-                        f"</div>"
+                        f"<span class='topic-chip strong'>Event {actionability:.1f}</span>"
+                        f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}</span>"
+                        f"<span class='topic-chip'>India {india_focus:.1f}</span>"
+                        + (
+                            f"<span class='topic-chip learning-chip'>Learning {channel_fit:.1f}/10 · {channel_fit_samples} upload(s)</span>"
+                            if channel_fit_samples > 0
+                            else ""
+                        )
+                        + (
+                            f"<span class='topic-chip learning-chip'>Held · previous run</span>"
+                            if candidate.get("retained_from_previous_run")
+                            else ""
+                        )
+                        + f"</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )
@@ -2354,6 +3153,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                             st.link_button("Open source", url, width="stretch")
                     with action_cols[1]:
                         if st.button("Use topic →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
+                            _remember_unpublished_topic(candidate)
                             st.session_state.pending_candidate = dict(candidate)
                             st.session_state.visual_search_queries = ""
                             st.session_state.visual_query_story_key = ""
@@ -2380,7 +3180,7 @@ def render_channel_statistics() -> None:
     _render_section_header(
         "Analytics",
         "Channel performance",
-        "Live YouTube totals plus the factory's historical vault, retention and CTR data.",
+        "Live YouTube totals plus performance history, retention and CTR data.",
     )
 
     if not st.session_state.get("live_channel_stats"):
@@ -2405,6 +3205,15 @@ def render_channel_statistics() -> None:
         f"{stats['avg_ctr']:.2f}%" if stats["avg_ctr"] is not None else "—",
     )
 
+    st.markdown(
+        "<div class='learning-strip'>"
+        "<div class='learning-strip-dot'></div>"
+        "<div><div class='learning-strip-title'>Channel learning is active</div>"
+        "<div class='learning-strip-copy'>Published results with synced retention data influence topic ranking and format/category selection. Analytics syncs automatically at most once every 24 hours; refresh here is manual.</div></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
     st.markdown("### Live channel")
     live = st.session_state.get("live_channel_stats") or {}
     if live.get("error"):
@@ -2425,7 +3234,7 @@ def render_channel_statistics() -> None:
             st.session_state.live_channel_stats = collect_live_channel_statistics(ultimate_bot)
             st.rerun()
     with sync_col:
-        if st.button("Refresh factory analytics", width="stretch", key="refresh_factory_analytics"):
+        if st.button("Refresh analytics", width="stretch", key="refresh_factory_analytics"):
             try:
                 from learning_runtime import sync_factory_analytics
                 conn = sqlite3.connect(ultimate_bot.DB_PATH)
@@ -2437,12 +3246,12 @@ def render_channel_statistics() -> None:
                 st.session_state.analytics_refresh_result = result
                 st.rerun()
             except Exception as exc:
-                st.error(f"Factory analytics refresh failed: {type(exc).__name__}: {exc}")
+                st.error(f"Analytics refresh failed: {type(exc).__name__}: {exc}")
 
     refresh_result = st.session_state.get("analytics_refresh_result")
     if isinstance(refresh_result, dict):
         st.caption(
-            f"Factory analytics refresh: {int(refresh_result.get('updated', 0) or 0)} videos updated; "
+            f"Analytics refresh: {int(refresh_result.get('updated', 0) or 0)} videos updated; "
             f"{int(refresh_result.get('retention_ready', 0) or 0)} with retention; "
             f"{int(refresh_result.get('analytics_errors', 0) or 0)} analytics issue(s)."
         )
@@ -2450,9 +3259,9 @@ def render_channel_statistics() -> None:
     for label, table in (
         ("By format", stats["by_format"]),
         ("By language", stats["by_language"]),
-        ("Recent factory history", stats["recent"]),
+        ("Recent history", stats["recent"]),
     ):
-        with st.expander(label, expanded=(label == "Recent factory history")):
+        with st.expander(label, expanded=(label == "Recent history")):
             if table:
                 st.dataframe(table, width="stretch", hide_index=True)
             else:
@@ -2467,9 +3276,9 @@ def render_channel_statistics() -> None:
         finally:
             conn.close()
 
-        st.markdown("### Factory learning")
+        st.markdown("### Channel learning")
         learning_cols = st.columns(3)
-        learning_cols[0].metric("Published factory videos", intelligence["videos"])
+        learning_cols[0].metric("Published videos", intelligence["videos"])
         learning_cols[1].metric("Videos with view data", intelligence["reported"])
         learning_cols[2].metric("Videos with retention", intelligence["retention_ready"])
 
@@ -2478,22 +3287,22 @@ def render_channel_statistics() -> None:
                 with st.expander(f"Learning · {label}", expanded=False):
                     st.dataframe(table[:8], width="stretch", hide_index=True)
                     st.caption(
-                        "These historical factory patterns are already used by the editorial/ranking system. "
+                        "These historical patterns are shown here for analysis. Active ranking currently uses retention, category/format/language fit and prior-topic similarity; deeper hook/structure patterns are analytics only. "
                         "Small samples are directional rather than causal."
                     )
     except Exception as exc:
-        st.warning(f"Factory learning summaries could not be loaded: {type(exc).__name__}: {exc}")
+        st.warning(f"Learning summaries could not be loaded: {type(exc).__name__}: {exc}")
 
 
 def render_offline_page() -> None:
     _render_section_header(
         "Engineering",
         "Offline diagnostics",
-        "Safe checks for the dashboard and factory contracts. No provider/API calls are made.",
+        "Safe checks for the dashboard and production contracts. No provider/API calls are made.",
     )
 
     if st.button("Run offline diagnostics", type="primary", width="content"):
-        with st.spinner("Running offline factory checks..."):
+        with st.spinner("Running offline checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
         st.rerun()
 
@@ -2528,11 +3337,11 @@ def render_factory_function_coverage() -> None:
     report = factory_function_coverage()
     _render_section_header(
         "Engineering",
-        "Factory function coverage",
+        "Function coverage",
         "A read-only map of the functions exposed by ultimate_bot.py.",
     )
     if report.get("complete"):
-        st.success(f"All {report['total']} factory functions are accounted for.")
+        st.success(f"All {report['total']} functions are accounted for.")
     else:
         st.error(
             f"Coverage is incomplete: {len(report.get('unmapped', []))} unmapped and "
@@ -2541,7 +3350,7 @@ def render_factory_function_coverage() -> None:
 
     buckets = report.get("by_surface") or {}
     cols = st.columns(4)
-    labels = ["Live Factory", "Channel Statistics", "Demo / Diagnostics", "Internal"]
+    labels = ["Live", "Analytics", "Demo / Diagnostics", "Internal"]
     for col, label in zip(cols, labels):
         col.metric(label, len(buckets.get(label, [])))
 
@@ -2590,7 +3399,7 @@ def render_test_page() -> None:
     options = [
         "Channel Statistics",
         "Offline Diagnostics",
-        "Demo Factory",
+        "Demo",
         "Final Branding Preview",
     ]
     current = st.session_state.get("test_menu_selection") or "Offline Diagnostics"
@@ -2612,7 +3421,7 @@ def render_test_page() -> None:
         render_channel_statistics()
     elif st.session_state.test_menu_selection == "Offline Diagnostics":
         render_offline_page()
-    elif st.session_state.test_menu_selection == "Demo Factory":
+    elif st.session_state.test_menu_selection == "Demo":
         render_demo_page()
     else:
         render_final_branding_preview()
@@ -2621,7 +3430,7 @@ def render_test_page() -> None:
 def render_demo_page() -> None:
     _render_section_header(
         "Engineering lab",
-        "Demo Factory",
+        "Demo",
         "Controlled component checks. These never perform a production upload.",
     )
 
@@ -2637,7 +3446,7 @@ def render_demo_page() -> None:
         ("provider_boundary", "Raw provider boundary"),
         ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
         ("dashboard_architecture", "Dashboard architecture"),
-        ("factory_function_coverage", "Factory function coverage"),
+        ("factory_function_coverage", "Function coverage"),
     ]
 
     if st.button("Run all demo checks", type="primary", width="content"):
@@ -2695,7 +3504,7 @@ def main() -> None:
 
     if workspace == "Live":
         snapshot = controller.snapshot()
-        render_header("Live Factory")
+        render_header("Live")
         if (
             not st.session_state.get("production_started")
             and not st.session_state.get("candidates")
@@ -2724,8 +3533,8 @@ def main() -> None:
         render_test_page()
 
     st.markdown(
-        "<div class='dashboard-footer'>Viral Shorts Factory · dashboard controls the human review gates; "
-        "the underlying factory generation logic remains the production source of truth.</div>",
+        "<div class='dashboard-footer'>Shorts Studio · human review gates remain in your hands; "
+        "the underlying production logic remains the source of truth.</div>",
         unsafe_allow_html=True,
     )
 

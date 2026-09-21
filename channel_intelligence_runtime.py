@@ -219,7 +219,7 @@ def _render_intelligence(st) -> None:
             continue
         st.markdown(f"**{label}**")
         st.dataframe(table[:8], width="stretch", hide_index=True)
-        st.caption("Patterns require at least two factory videos. Treat small samples as directional, not causal.")
+        st.caption("Patterns require at least two factory videos. Retention/category/format/language fit and prior-topic similarity can influence selection; hook, structure, pace and other deeper patterns are currently analytics-only.")
 
 
 __all__ = ["build_intelligence", "install_channel_intelligence_dialog"]

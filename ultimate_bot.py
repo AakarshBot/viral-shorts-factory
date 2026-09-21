@@ -126,9 +126,9 @@ CONTENT_CATEGORIES = {
     },
     "sports": {
         "label": "Asian & Global Sports Highlights",
-        "gnews_q": "(India OR Indian) (cricket OR tennis OR football OR badminton OR hockey OR athletics) OR (global sports major)",
-        "india_gnews_q": "(India OR Indian) (cricket OR football OR tennis OR badminton OR hockey OR athletics OR ISL OR kabaddi OR Olympics)",
-        "global_gnews_q": "(global OR world) (sports major OR tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
+        "gnews_q": "(India OR Indian) (cricket OR tennis OR football OR soccer OR badminton OR hockey OR athletics OR basketball OR golf OR rugby OR volleyball OR wrestling OR boxing OR motorsport OR Formula 1 OR F1 OR MotoGP) OR (global OR world) (sports OR tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
+        "india_gnews_q": "(India OR Indian) (cricket OR football OR tennis OR badminton OR hockey OR athletics OR basketball OR kabaddi OR wrestling OR boxing OR motorsport OR Formula 1 OR F1 OR golf OR Olympics)",
+        "global_gnews_q": "(global OR world) (sports OR tennis OR football OR soccer OR basketball OR golf OR rugby OR volleyball OR athletics OR motorsport OR Formula 1 OR F1 OR MotoGP OR boxing OR wrestling) (tournament OR final OR record OR championship OR transfer OR Grand Slam OR Olympics)",
         "rss_url": "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en",
         "category_id": "17", 
         "hashtags": ["#Cricket", "#Tennis", "#BGMI", "#Badminton", "#Football", "#SportsHighlights"],
@@ -555,11 +555,27 @@ def calculate_smart_score(records):
 def get_smart_metrics(conn, dimension_col, metric_col="views"):
     try:
         c = conn.cursor()
-        c.execute("SELECT date_used, views, avg_view_percentage FROM vault WHERE video_id NOT IN ('PENDING_QC', 'REJECTED')")
+        c.execute(
+            "SELECT date_used, views, avg_view_percentage FROM vault "
+            "WHERE video_id IS NOT NULL "
+            "AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+        )
         all_videos = c.fetchall()
         if not all_videos: return {}
         
-        c.execute(f"SELECT {dimension_col}, date_used, {metric_col}, views FROM vault WHERE {dimension_col} IS NOT NULL AND video_id NOT IN ('PENDING_QC', 'REJECTED')")
+        allowed_dimensions = {
+            "genre", "format_used", "language_used", "hook_style_used", "trend_keyword"
+        }
+        if dimension_col not in allowed_dimensions:
+            return {}
+        c.execute(
+            f"SELECT {dimension_col}, date_used, {metric_col}, views FROM vault "
+            f"WHERE {dimension_col} IS NOT NULL "
+            "AND video_id IS NOT NULL "
+            "AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+        )
         target_data = c.fetchall()
         
         grouped_records = {}
@@ -1892,6 +1908,10 @@ def run_robot(web_config=None):
             print("\n🌐 WEB DASHBOARD MODE ACTIVATED: Pulling settings from Streamlit.")
             format_mode = web_config.get("format_mode", "regular")
             cat_choice = web_config.get("category", "national_global_affairs")
+            # Older dashboard sessions used a virtual AI category. Normalize
+            # it before every production lookup so the real Sports config is used.
+            if str(cat_choice or "").strip().lower() == "ai_recommendation":
+                cat_choice = "sports"
             lang_key = web_config.get("language", "english")
             lang_cfg = LANGUAGES.get(lang_key, LANGUAGES["english"])
             combo_key = f"{format_mode}|{cat_choice}|{lang_key}"

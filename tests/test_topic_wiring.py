@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 import ultimate_bot
 import story_ranker
 from workflow_runtime import CRICKET_CATEGORIES
@@ -110,3 +114,234 @@ def test_dual_geo_genre_query_budget_skips_redundant_base_lane():
     assert cfg["global_gnews_q"] in queries
     assert cfg["gnews_q"] not in queries
     assert len(queries) <= story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_BROAD
+
+
+
+def test_all_dashboard_topic_catalog_entries_have_valid_production_categories():
+    import app
+
+    for mode, topics in (
+        ("regular", app.DEEP_DIVE_TOPICS),
+        ("top5", app.TOP_FIVE_TOPICS),
+    ):
+        labels = app.category_options(mode, "Top 5" if mode == "top5" else "Deep Dive")
+        assert labels
+        assert set(labels.values()).issubset(set(ultimate_bot.CONTENT_CATEGORIES))
+        assert set(topics).issubset(set(labels.values()))
+
+
+def test_sports_ai_discovery_routes_through_real_sports_lanes(monkeypatch):
+    import dashboard_runtime
+
+    captured = {}
+
+    def fake_collect(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        broad_discovery=False,
+    ):
+        captured["genre_key"] = genre_key
+        captured["genre_cfg"] = dict(genre_cfg)
+        captured["broad_discovery"] = broad_discovery
+        return [], []
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+
+    bot = type(
+        "Bot",
+        (),
+        {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES},
+    )()
+
+    dashboard_runtime.discover_ai_topics(
+        bot,
+        {
+            "format_mode": "regular",
+            "editorial_mode": "AI",
+            "discovery_mode": "ai_sports",
+            "category": "sports",
+            "language": "english",
+        },
+        None,
+        max_candidates=5,
+    )
+
+    assert captured["genre_key"] == "sports"
+    assert captured["genre_cfg"]["india_gnews_q"]
+    assert captured["genre_cfg"]["global_gnews_q"]
+    assert captured["broad_discovery"] is True
+
+
+def test_sports_ai_discovery_tolerates_legacy_virtual_category(monkeypatch):
+    import dashboard_runtime
+
+    captured = {}
+
+    def fake_collect(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        broad_discovery=False,
+    ):
+        captured["genre_key"] = genre_key
+        return [], []
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+
+    bot = type(
+        "Bot",
+        (),
+        {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES},
+    )()
+
+    dashboard_runtime.discover_ai_topics(
+        bot,
+        {
+            "format_mode": "regular",
+            "editorial_mode": "AI",
+            "category": "ai_recommendation",
+            "language": "english",
+        },
+        None,
+        max_candidates=5,
+    )
+
+    assert captured["genre_key"] == "sports"
+
+
+def test_legacy_ai_category_is_normalized_before_production_lookup():
+    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
+    start = source.index('cat_choice = web_config.get("category", "national_global_affairs")')
+    window = source[start:start + 700]
+    assert 'if str(cat_choice or "").strip().lower() == "ai_recommendation":' in window
+    assert 'cat_choice = "sports"' in window
+
+
+
+@pytest.mark.parametrize(
+    "category,format_mode",
+    [
+        ("national_global_affairs", "regular"),
+        ("technology", "regular"),
+        ("business_finance", "regular"),
+        ("entertainment", "regular"),
+        ("viral_phenomenon", "regular"),
+        ("health_lifestyle", "regular"),
+        ("regional_state_news", "regular"),
+        ("national_global_affairs", "top5"),
+        ("technology", "top5"),
+        ("business_finance", "top5"),
+        ("entertainment", "top5"),
+        ("viral_phenomenon", "top5"),
+    ],
+)
+
+def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, category, format_mode):
+    import dashboard_runtime
+
+    captured = {}
+
+    def fake_collect(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        broad_discovery=False,
+    ):
+        captured["genre_key"] = genre_key
+        captured["genre_cfg"] = dict(genre_cfg)
+        captured["broad_discovery"] = broad_discovery
+        return [], []
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+    monkeypatch.setattr(
+        story_ranker,
+        "rank_discovery_candidates",
+        lambda stories, **kwargs: stories,
+    )
+
+    bot = type(
+        "Bot",
+        (),
+        {
+            "CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES,
+            "_active_web_config": {},
+        },
+    )()
+
+    dashboard_runtime.discover_ranked_topics(
+        bot,
+        {
+            "format_mode": format_mode,
+            "category": category,
+            "language": "english",
+        },
+        None,
+        max_candidates=5,
+    )
+
+    assert captured["genre_key"] == category
+    assert captured["genre_cfg"] == ultimate_bot.CONTENT_CATEGORIES[category]
+    assert captured["broad_discovery"] is True
+
+
+
+def test_niche_sports_discovery_routes_through_sports_category(monkeypatch):
+    import dashboard_runtime
+
+    captured = {}
+
+    def fake_collect(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        broad_discovery=False,
+    ):
+        captured["genre_key"] = genre_key
+        captured["genre_cfg"] = dict(genre_cfg)
+        captured["broad_discovery"] = broad_discovery
+        return [], []
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+    monkeypatch.setattr(
+        story_ranker,
+        "rank_discovery_candidates",
+        lambda stories, **kwargs: stories,
+    )
+
+    bot = type(
+        "Bot",
+        (),
+        {
+            "CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES,
+            "_active_web_config": {},
+        },
+    )()
+
+    dashboard_runtime.discover_ranked_topics(
+        bot,
+        {
+            "format_mode": "regular",
+            "editorial_mode": "Niche Sports",
+            "category": "sports",
+            "language": "english",
+        },
+        None,
+        max_candidates=5,
+    )
+
+    assert captured["genre_key"] == "sports"
+    assert captured["genre_cfg"] == ultimate_bot.CONTENT_CATEGORIES["sports"]
+    assert captured["broad_discovery"] is True

@@ -62,7 +62,10 @@ def _extract_rows(conn):
         """SELECT status, video_id, avg_view_percentage, genre, format_used,
                   language_used, combo_key
            FROM vault
-           WHERE avg_view_percentage IS NOT NULL"""
+           WHERE avg_view_percentage IS NOT NULL
+             AND video_id IS NOT NULL
+             AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')
+             AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"""
     ).fetchall()
     return [dict(r) for r in rows]
 

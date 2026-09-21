@@ -300,10 +300,11 @@ class WorkflowController:
                     self.state.completed = True
             except Exception as exc:
                 with self._lock:
+                    last_percent = self.state.percent
                     self.state.error = f"{type(exc).__name__}: {exc}"
                     self.state.stage = "error"
-                    self.state.percent = 100
-                    self.state.message = "Factory stopped with an error."
+                    self.state.percent = last_percent
+                    self.state.message = "Run stopped with an error."
             finally:
                 try:
                     self._worker_finished()

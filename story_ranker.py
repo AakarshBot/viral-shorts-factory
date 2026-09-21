@@ -98,23 +98,17 @@ def _source_domain(story):
 
 def _published_datetime(story):
     """Return the newest trustworthy publication/update timestamp available."""
-    candidates = []
-    for key in (
-        "updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated",
-        "published_at", "publishedAt", "published", "pub_date", "date", "timestamp",
-    ):
-        raw = story.get(key)
+    def _parse_timestamp(raw):
         if raw in (None, ""):
-            continue
+            return None
         if isinstance(raw, (int, float)):
             try:
-                candidates.append(datetime.fromtimestamp(float(raw), tz=timezone.utc))
+                return datetime.fromtimestamp(float(raw), tz=timezone.utc)
             except (TypeError, ValueError, OSError, OverflowError):
-                continue
-            continue
+                return None
         text = str(raw).strip()
         if not text:
-            continue
+            return None
         parsed = None
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -124,10 +118,19 @@ def _published_datetime(story):
             except (TypeError, ValueError, OverflowError):
                 parsed = None
         if parsed is None:
-            continue
+            return None
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        candidates.append(parsed.astimezone(timezone.utc))
+        return parsed.astimezone(timezone.utc)
+
+    candidates = []
+    for key in (
+        "updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated",
+        "published_at", "publishedAt", "published", "pub_date", "date", "timestamp",
+    ):
+        parsed = _parse_timestamp(story.get(key))
+        if parsed is not None:
+            candidates.append(parsed)
 
     now = datetime.now(timezone.utc)
     future_cutoff = now.timestamp() + (15 * 60)
@@ -393,7 +396,10 @@ def _load_history(conn):
             """SELECT status, video_id, avg_view_percentage, genre,
                       format_used, language_used, combo_key, topic
                FROM vault
-               WHERE avg_view_percentage IS NOT NULL"""
+               WHERE avg_view_percentage IS NOT NULL
+                 AND video_id IS NOT NULL
+                 AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')
+                 AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"""
         )
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -570,8 +576,7 @@ GOOGLE_NEWS_RADAR_QUERIES = (
 GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
 REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
 
-DISCOVERY_SOURCE_WAIT_SECONDS = 10.0
-DISCOVERY_SIGNAL_WAIT_SECONDS = 8.0
+DISCOVERY_OVERALL_WAIT_SECONDS = 10.0
 DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
 DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
 DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
@@ -753,18 +758,51 @@ def _rss_items(url, genre_key, collection_source="rss", max_items=60):
         if response.status_code != 200:
             return []
         root = ET.fromstring(response.content)
+
+        # Support both RSS 2.0 (<item>) and Atom (<entry>) feeds. A provider
+        # switching feed format must not silently disappear from discovery.
+        rss_items = root.findall(".//item")
+        atom_items = root.findall(".//{*}entry")
+        feed_items = rss_items or atom_items
+
         items = []
-        for item in root.findall(".//item")[:max_items]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            description = (item.findtext("description") or "").strip()
-            published = (item.findtext("pubDate") or "").strip()
-            source_node = item.find("source")
-            publisher = (
-                (source_node.text or "").strip()
-                if source_node is not None and source_node.text
-                else _source_domain({"url": link}) or "RSS"
-            )
+        for item in feed_items[:max_items]:
+            is_atom = item.tag.endswith("entry")
+            if is_atom:
+                title = (item.findtext("{*}title") or "").strip()
+                link_node = item.find("{*}link")
+                link = (
+                    str(link_node.get("href") or "").strip()
+                    if link_node is not None
+                    else ""
+                )
+                description = (
+                    item.findtext("{*}summary")
+                    or item.findtext("{*}content")
+                    or ""
+                ).strip()
+                published = (
+                    item.findtext("{*}published")
+                    or item.findtext("{*}updated")
+                    or ""
+                ).strip()
+                publisher = (
+                    item.findtext("{*}author/{*}name")
+                    or _source_domain({"url": link})
+                    or "Atom"
+                ).strip()
+            else:
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                description = (item.findtext("description") or "").strip()
+                published = (item.findtext("pubDate") or "").strip()
+                source_node = item.find("source")
+                publisher = (
+                    (source_node.text or "").strip()
+                    if source_node is not None and source_node.text
+                    else _source_domain({"url": link}) or "RSS"
+                )
+
             if title and link:
                 items.append({
                     "title": title,
@@ -1135,7 +1173,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + topic_actionability * 0.65
         + originality * 0.45
         + visual * 0.20
-        + india_relevance * 0.55
+        + india_relevance * INDIA_FOCUS_SCORE_WEIGHT
         + channel_history * 0.70
         + channel_fit * 0.45
         + niche * 0.20
@@ -1228,11 +1266,16 @@ def _candidate_quality_pass(story):
     source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
 
+    if not _headline_noise_pass(story):
+        return False
     if freshness < 2.0 and momentum < 2.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
     if importance < 3.5:
         story["discovery_rejection"] = "Insufficient editorial importance"
+        return False
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Insufficient story substance behind headline"
         return False
     if shorts < 3.0:
         story["discovery_rejection"] = "Weak Shorts viability"
@@ -1259,20 +1302,16 @@ def _discovery_portfolio_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
     actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
-    event_sources = int(story.get("event_source_count") or 0)
-    body = " ".join(
-        str(story.get(key) or "")
-        for key in ("description", "summary", "snippet", "text")
-    ).strip()
-
+    if not _headline_noise_pass(story):
+        return False
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
     if actionability < 3.0:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
         return False
-    if event_sources <= 1 and len(body) < 50 and not (story.get("event_actions") or _event_actions(story.get("title") or "")):
-        story["discovery_rejection"] = "Insufficient story detail behind headline"
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Headline lacks enough story substance behind the event"
         return False
     if score < 6.0:
         story["discovery_rejection"] = "Below exploration quality floor"
@@ -1523,6 +1562,8 @@ INDIA_SIGNAL_TERMS = {
     "modi", "government of india",
 }
 
+INDIA_FOCUS_SCORE_WEIGHT = 0.90
+
 CLICKBAIT_TITLE_TERMS = {
     "you won't believe", "you will not believe", "what happens next", "watch this",
     "shocking", "craziest", "insane", "unbelievable", "must see", "viral video",
@@ -1541,6 +1582,52 @@ def _india_relevance_score(story):
     ):
         score += 1.0
     return _clamp_score(score)
+
+NON_EVENT_HEADLINE_PATTERNS = (
+    r"\blive updates?\b",
+    r"\blive blog\b",
+    r"\bphotos?\s+(?:gallery|collection)\b",
+    r"\bphotos?:\s",
+    r"\bwatch( the)? video\b",
+    r"\bvideo gallery\b",
+    r"\bexplainer\b",
+    r"\bexplained\b",
+    r"\bwhat you need to know\b",
+    r"\bthings to know\b",
+    r"\btop \d+\b",
+    r"\bopinion\b",
+)
+
+
+def _headline_noise_pass(story):
+    """Reject presentation/SEO headlines that are not themselves a concrete event."""
+    title = _clean(story.get("title") or "")
+    if any(re.search(pattern, title) for pattern in NON_EVENT_HEADLINE_PATTERNS):
+        story["discovery_rejection"] = "Non-event/SEO headline"
+        story["headline_noise_pass"] = False
+        return False
+    story["headline_noise_pass"] = True
+    return True
+
+
+def _story_substance_pass(story, minimum_body_chars=120):
+    """Reject headline-only candidates unless the event is independently corroborated."""
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).strip()
+    body_chars = len(re.sub(r"\s+", " ", body))
+    source_count = int(story.get("event_source_count") or 0)
+    article_count = int(story.get("event_article_count") or 0)
+    collection_source = _clean(story.get("collection_source"))
+
+    story["story_substance_chars"] = body_chars
+    if source_count >= 2 and article_count >= 2:
+        return True
+    if collection_source == "official" and body_chars >= max(80, int(minimum_body_chars)):
+        return True
+    return body_chars >= max(180, int(minimum_body_chars) + 60)
+
 
 def _topic_actionability(story):
     text = _text_blob(story)
@@ -1703,7 +1790,10 @@ def collect_high_recall_stories(
     )
 
     if broad_discovery and genre_key:
-        trend_geos = ("IN",)
+        # Use a small multi-market trend radar for every category. The candidate
+        # gate below keeps unrelated trend stories out, while this catches major
+        # English-language stories that can spike before India searches catch up.
+        trend_geos = GOOGLE_TRENDS_GEOS
         reddit_default = {
             "sports": "sports",
             "sports_stories_of_day": "sports",
@@ -1728,8 +1818,9 @@ def collect_high_recall_stories(
 
     official_urls = _official_feed_urls(genre_key, genre_cfg)
     core_job_count = len(google_queries) + bool(selected_rss) + bool(official_urls)
+    prelaunch_gdelt = len(google_queries) <= 2
     core_pool = ThreadPoolExecutor(
-        max_workers=max(1, core_job_count),
+        max_workers=max(1, core_job_count + int(prelaunch_gdelt)),
         thread_name_prefix="discovery-core",
     )
     signal_job_count = len(trend_geos) + len(reddit_subreddits)
@@ -1743,6 +1834,7 @@ def collect_high_recall_stories(
     official_futures = []
     trend_futures = []
     reddit_futures = []
+    gdelt_future = None
 
     try:
         google_futures = [
@@ -1767,6 +1859,25 @@ def collect_high_recall_stories(
             for subreddit in reddit_subreddits
         ]
 
+        # Start the only supplemental fallback early when the normal category
+        # intake is small enough that it is likely to need help. It shares the
+        # same overall deadline, so a slow GDELT response can never add another
+        # wait after the factual sources finish.
+        if len(google_queries) <= 2:
+            gdelt_query = (
+                str(trend_keyword or "").strip()
+                or str(custom_gnews_q or "").strip()
+                or str(genre_cfg.get("gnews_q") or "").strip()
+                or GOOGLE_NEWS_RADAR_QUERIES[0]
+            )
+            gdelt_future = core_pool.submit(
+                fetch_gdelt_articles,
+                gdelt_query,
+                timespan="48h",
+                max_records=75,
+                timeout=3.0,
+            )
+
         core_sources = {future: "Google News" for future in google_futures}
         core_sources.update({future: "RSS" for future in rss_futures})
         core_sources.update({future: "official feeds" for future in official_futures})
@@ -1775,17 +1886,23 @@ def collect_high_recall_stories(
             f"   [Discovery] Factual intake: {len(core_sources)} bounded source job(s).",
             flush=True,
         )
-        resolved_core = _resolve_discovery_futures(
-            core_sources,
-            DISCOVERY_SOURCE_WAIT_SECONDS,
-        )
 
         signal_sources = {future: "Google Trends" for future in trend_futures}
         signal_sources.update({future: "Reddit" for future in reddit_futures})
-        resolved_signals = _resolve_discovery_futures(
-            signal_sources,
-            DISCOVERY_SIGNAL_WAIT_SECONDS,
+
+        # One wall-clock budget for the whole discovery pass. Factual sources
+        # and secondary signals already run in parallel, so a slow signal source
+        # must never add a second wait after the factual intake finishes.
+        all_sources = dict(core_sources)
+        if gdelt_future is not None:
+            all_sources[gdelt_future] = "GDELT fallback"
+        all_sources.update(signal_sources)
+        resolved = _resolve_discovery_futures(
+            all_sources,
+            DISCOVERY_OVERALL_WAIT_SECONDS,
         )
+        resolved_core = {future: resolved.get(future) for future in core_sources}
+        resolved_signals = {future: resolved.get(future) for future in signal_sources}
 
         raw = []
         for future in (*google_futures, *rss_futures, *official_futures):
@@ -1823,22 +1940,11 @@ def collect_high_recall_stories(
             seen.add(key)
             compacted.append(story)
 
-        if len(compacted) < DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT:
-            gdelt_query = (
-                str(trend_keyword or "").strip()
-                or str(custom_gnews_q or "").strip()
-                or str(genre_cfg.get("gnews_q") or "").strip()
-                or GOOGLE_NEWS_RADAR_QUERIES[0]
-            )
+        gdelt_rows = resolved.get(gdelt_future) or [] if gdelt_future is not None else []
+        if len(compacted) < DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT and gdelt_rows:
             print(
-                f"   [Discovery] Core factual intake is light ({len(compacted)}); using one bounded GDELT fallback.",
+                f"   [Discovery] Core factual intake is light ({len(compacted)}); using completed bounded GDELT fallback.",
                 flush=True,
-            )
-            gdelt_rows = fetch_gdelt_articles(
-                gdelt_query,
-                timespan="48h",
-                max_records=75,
-                timeout=3.0,
             )
             for row in gdelt_rows:
                 if not _discovery_category_allowed(genre_key, row):
@@ -1882,7 +1988,11 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
     stage50 = _recent_topic_cooldown(conn, stage60, hours=72)
     stage30 = _deduplicate_stage(stage50, max_items=30)
     stage15 = _fact_source_stage(stage30, max_items=15)
-    stage8 = _originality_stage(stage15, used_topics, max_items=8)
+    stage12 = [
+        item for item in stage15
+        if _headline_noise_pass(item) and _story_substance_pass(item)
+    ]
+    stage8 = _originality_stage(stage12, used_topics, max_items=8)
     ranked = [_editorial_score(item, rows, target_category, target_format, target_language, social_titles, ai_cricket) for item in stage8]
     ranked.sort(key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0, reverse=True)
     ranked = [item for item in ranked if _candidate_quality_pass(item)]
@@ -1891,8 +2001,8 @@ def rank_story_candidates(stories, conn=None, target_category="", target_format=
         story["discovery_reason"] = _candidate_reason(story)
 
     print(
-        "   [Discovery Funnel] %d -> %d -> %d -> %d -> %d -> ranked top %d"
-        % (len(stories), len(stage60), len(stage50), len(stage30), len(stage15), min(3, len(ranked))),
+        "   [Discovery Funnel] %d -> %d -> %d -> %d -> %d -> %d -> ranked top %d"
+        % (len(stories), len(stage60), len(stage50), len(stage30), len(stage15), len(stage12), min(3, len(ranked))),
         flush=True,
     )
     return ranked[:3]
@@ -1921,7 +2031,12 @@ def rank_discovery_candidates(
         item for item in stage80
         if _discovery_source_pass(item)
     ]
-    stage50 = _originality_stage(stage60, used_topics, max_items=60)
+    stage50 = _fact_source_stage(stage60, max_items=60)
+    stage40 = [
+        item for item in stage50
+        if _headline_noise_pass(item) and _story_substance_pass(item)
+    ]
+    stage30 = _originality_stage(stage40, used_topics, max_items=60)
 
     ranked = [
         _editorial_score(
@@ -1933,7 +2048,7 @@ def rank_discovery_candidates(
             social_titles,
             ai_cricket,
         )
-        for item in stage50
+        for item in stage30
     ]
     ranked.sort(
         key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0,
@@ -1946,7 +2061,7 @@ def rank_discovery_candidates(
         story["discovery_reason"] = _candidate_reason(story)
 
     print(
-        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
+        "   [Discovery Portfolio] %d -> %d -> %d -> %d -> %d -> %d -> %d scored -> %d diverse dashboard stories"
         % (
             len(stories),
             len(stage120),
@@ -1954,6 +2069,7 @@ def rank_discovery_candidates(
             len(stage80),
             len(stage60),
             len(stage50),
+            len(stage30),
             len(selected),
         ),
         flush=True,

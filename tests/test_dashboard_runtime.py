@@ -872,7 +872,8 @@ def test_dashboard_ai_discovery_uses_shared_broad_radar():
     assert "_cheap_filter(raw, max_items=120, max_age_hours=48)" in source
     assert "_infer_discovery_category(item)" in source
     assert "diversity_rerank(ranked, max_items=max_candidates)" in source
-    assert "category inferred after discovery, not used as an intake gate." in source
+    assert 'category = "sports" if ai_sports_mode else _infer_discovery_category(item)' in source
+    assert "Sports-scoped AI ranking is active." in source
 
 
 def test_dashboard_manual_crop_returns_shorts_frame():
@@ -890,7 +891,6 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
 
     assert "Choose from the visual pool" in source
     assert "Available verified images" in source
-    assert "Available verified images" in source
     assert "Search up to 10 new images" in source
     assert '@st.dialog("Crop / reframe selected image", width="large")' in source
     assert 'st.session_state["visual_crop_target"]' in source
@@ -899,7 +899,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     assert "controller.crop_visual_pool_asset(" in source
     assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
     assert 'crop_mode=mode_value' in source
-    assert 'return_type="both"' in source
+    assert 'return_type="box"' in source
     assert 'should_resize_image=True' in source
     assert "Use on slide" in source
     assert "Crop / reframe selected image" in source
@@ -918,6 +918,137 @@ def test_repository_does_not_use_deprecated_streamlit_container_width():
             offenders.append(str(path.relative_to(repo_root)))
     assert offenders == []
 
+
+
+def test_dashboard_six_topic_grid_uses_three_column_rows():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def render_live_factory")
+    end = source.index("def render_channel_statistics", start)
+    block = source[start:end]
+    assert "page_size = 6" in block
+    assert "range(0, len(visible), 3)" in block
+
+
+def test_dashboard_retained_topics_are_sent_back_through_current_discovery():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert 'retained_candidates=st.session_state.get("retained_topics", [])' in source
+    runtime = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
+    assert "def _merge_retained_topics(" in runtime
+    assert "rank_discovery_candidates(" in runtime
+
+
+def test_dashboard_error_progress_preserves_last_known_percent():
+    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("except Exception as exc:", source.index("def start_production"))
+    block = source[start:source.index("finally:", start)]
+    assert "last_percent = self.state.percent" in block
+    assert "self.state.percent = last_percent" in block
+    assert "self.state.percent = 100" not in block
+
+
+def test_dashboard_crop_preview_uses_the_same_server_crop_logic():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def _render_crop_dialog")
+    end = source.index("def render_visual_review", start)
+    block = source[start:end]
+    assert 'return_type="box"' in block
+    assert "_manual_crop_box_to_shorts(" in block
+    assert "crop_preview = crop_result" not in block
+
+
+def test_dashboard_visual_replacement_returns_old_image_to_global_pool():
+    source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
+    assert "def _return_slide_visual_to_pool(" in source
+    assert "self._return_slide_visual_to_pool(layer, scene)" in source
+    assert "self._return_slide_visual_to_pool(old_layer, replacement_scene)" in source
+    assert 'live_item.get("original_path") or live_item.get("path")' in source
+
+
+def test_workflow_error_message_is_dashboard_neutral():
+    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
+    assert 'self.state.message = "Run stopped with an error."' in source
+
+
+def test_dashboard_replacement_returns_used_pool_asset_without_duplicate(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    selected = tmp_path / "selected.jpg"
+    Image.new("RGB", (200, 300), "white").save(selected, "JPEG")
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._visual_pool = [{
+        "path": str(selected),
+        "original_path": str(selected),
+        "hash": "selected-hash",
+        "source": "Commons",
+        "used": True,
+        "assigned_slide": 2,
+    }]
+    controller._return_slide_visual_to_pool(
+        {
+            "image": str(selected),
+            "visual_original_path": str(selected),
+            "visual_selected_hash": "selected-hash",
+            "visual_verified": True,
+            "source_type": "Commons",
+        },
+        {"primary_entity": "Subject"},
+    )
+
+    assert len(controller._visual_pool) == 1
+    assert controller._visual_pool[0]["hash"] == "selected-hash"
+    assert controller._visual_pool[0]["used"] is False
+    assert controller._visual_pool[0]["assigned_slide"] == 0
+
+
+def test_dashboard_retained_topic_is_revalidated_before_reappearing(monkeypatch):
+    import story_ranker
+    from dashboard_runtime import _merge_retained_topics
+
+    retained = {
+        "title": "Retained current story",
+        "story_url": "https://example.com/retained",
+        "story_key": "retained-current-story",
+        "discovery_dimensions": {
+            "freshness": 8,
+            "event_momentum": 5,
+            "importance": 7,
+            "shorts_viability": 7,
+            "corroboration": 2,
+            "source_quality": 2,
+        },
+        "candidate_score": 18,
+        "topic_actionability_score": 7,
+    }
+    fresh = {
+        "title": "Fresh story",
+        "story_url": "https://example.com/fresh",
+        "story_key": "fresh-story",
+    }
+
+    monkeypatch.setattr(
+        story_ranker,
+        "rank_discovery_candidates",
+        lambda candidates, **_kwargs: [dict(item) for item in candidates],
+    )
+    bot = type(
+        "Bot",
+        (),
+        {"CONTENT_CATEGORIES": {"national_global_affairs": {}}},
+    )()
+    merged = _merge_retained_topics(
+        bot,
+        {"category": "national_global_affairs", "format_mode": "regular", "language": "english"},
+        object(),
+        [fresh],
+        [retained],
+        max_candidates=2,
+    )
+
+    assert merged[0]["story_key"] == "retained-current-story"
+    assert merged[0]["retained_from_previous_run"] is True
+    assert merged[1]["story_key"] == "fresh-story"
 
 
 def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, tmp_path):
@@ -1398,3 +1529,79 @@ def test_offline_dashboard_diagnostic_recognizes_event_topic_cards():
     assert '"TOPIC #" in source' in source
     assert '"Use topic →" in source' in source
     assert "event_topic_ui" in source
+
+
+
+def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert ".brand-eyebrow" in source
+    assert ".brand-trust-row" in source
+    assert ".brand-signature" in source
+    assert ".sidebar-brand" in source
+    assert "--studio-" in source
+    assert "prefers-reduced-motion" in source
+    assert "backdrop-filter" in source
+    assert "2026 editorial os" in source.lower()
+    assert ".learning-strip" in source
+    assert "Channel learning is active" in source
+    assert "Learning {channel_fit:.1f}/10" in source
+    assert "Held · previous run" in source
+    assert "st.markdown(" in source
+
+
+def test_dashboard_init_state_does_not_construct_redundant_controller_each_rerun():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def _init_state")
+    end = source.index("\ndef reset_run", start)
+    block = source[start:end]
+    assert 'if "workflow_controller" not in st.session_state:' in block
+    assert block.count("DashboardWorkflowController(ultimate_bot)") == 1
+
+
+def test_dashboard_topic_cards_expose_learned_channel_fit_samples():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert 'channel_fit_samples = int(candidate.get("channel_fit_samples") or 0)' in source
+    assert 'historical_topic_matches = candidate.get("historical_topic_matches")' not in source
+    assert 'if channel_fit_samples > 0' in source
+
+
+
+def test_legacy_learning_metrics_ignore_non_publishable_rows(tmp_path):
+    import ultimate_bot
+
+    db_path = Path(tmp_path) / "learning.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE vault (
+            genre TEXT,
+            format_used TEXT,
+            language_used TEXT,
+            hook_style_used TEXT,
+            trend_keyword TEXT,
+            date_used TEXT,
+            views INTEGER,
+            avg_view_percentage REAL,
+            video_id TEXT,
+            status TEXT
+        )"""
+    )
+    rows = [
+        ("technology", "regular", "english", "direct", "ai", "2026-09-20", 1000, 70.0, "good-1", "COMPLETED"),
+        ("technology", "regular", "english", "direct", "ai", "2026-09-19", 500, 10.0, "bad-pending", "PENDING_QC"),
+        ("technology", "regular", "english", "direct", "ai", "2026-09-18", 200, 5.0, "bad-failed", "FAILED"),
+    ]
+    conn.executemany(
+        "INSERT INTO vault VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+
+    scores = ultimate_bot.get_smart_metrics(
+        conn,
+        "genre",
+        metric_col="avg_view_percentage",
+    )
+
+    assert scores["technology"]["count"] == 1
+    conn.close()
