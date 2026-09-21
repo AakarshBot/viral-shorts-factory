@@ -87,6 +87,7 @@ def test_dashboard_live_monitor_uses_controlled_polling():
     assert '@st.fragment(run_every="2s")' in app_source
     assert 'run_every="1s"' not in app_source
     assert "live_monitor_should_poll(snapshot)" in app_source
+    assert "_render_content(live_snapshot)" in app_source
 
 
 def test_dashboard_script_review_preserves_research_layer_marker(monkeypatch):
@@ -944,16 +945,20 @@ def test_dashboard_manual_crop_returns_shorts_frame():
     assert cropped.size == (1080, 1920)
 
 
-def test_dashboard_visual_review_exposes_manual_pool_and_crop_controls():
+def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     assert "Choose from the visual pool" in source
     assert "Available verified images" in source
     assert "Available verified images" in source
     assert "Search up to 10 new images" in source
+    assert '@st.dialog("Crop / reframe selected image", width="large")' in source
+    assert 'st.session_state["visual_crop_target"]' in source
     assert "Apply crop" in source
     assert "controller.crop_visual(" in source
-    assert 'aspect_ratio=(9, 16)' in source
+    assert "controller.crop_visual_pool_asset(" in source
+    assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
+    assert 'crop_mode=mode_value' in source
     assert 'return_type="both"' in source
     assert 'should_resize_image=False' in source
     assert "Use on slide" in source
@@ -1045,7 +1050,7 @@ def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, 
     assert "already assigned to slide 2" in message
 
 
-def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_path):
+def test_dashboard_new_visual_search_uses_ten_image_contract(monkeypatch, tmp_path):
     from dashboard_runtime import DashboardWorkflowController
 
     bot = _Bot()
@@ -1082,7 +1087,7 @@ def test_dashboard_new_visual_search_uses_five_image_contract(monkeypatch, tmp_p
                 }
                 for i in range(1, 6)
             ],
-            "target": 5,
+            "target": 10,
         },
     )
     materialized = [
@@ -1222,6 +1227,58 @@ def test_dashboard_crop_editor_has_free_rectangle_mode_and_full_source():
     assert '"Rectangle (free)"' in source
     assert 'crop_asset.get("original_path")' in source
     assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
+
+
+def test_dashboard_free_crop_accepts_non_916_selection(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import _manual_crop_box_to_shorts
+
+    source = Image.new("RGB", (1600, 1000), (20, 80, 140))
+    cropped = _manual_crop_box_to_shorts(
+        source,
+        {"left": 100, "top": 100, "width": 1000, "height": 400},
+        free_size=True,
+    )
+    assert cropped.size == (1080, 1920)
+
+
+def test_dashboard_controller_free_crop_writes_renderable_output(tmp_path):
+    from PIL import Image
+    from dashboard_runtime import DashboardWorkflowController
+
+    source_path = tmp_path / "original.jpg"
+    Image.new("RGB", (1600, 1000), (40, 90, 130)).save(source_path, "JPEG")
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Free crop",
+        "script": [{"voiceover": "A test scene.", "primary_entity": "Subject"}],
+    }
+    controller._visual_packages = [[{
+        "image": str(source_path),
+        "visual_original_path": str(source_path),
+        "visual_verified": True,
+    }]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, message = controller.crop_visual(
+        1,
+        crop_box={"left": 100, "top": 100, "width": 1000, "height": 400},
+        crop_mode="free",
+    )
+    assert ok is True, message
+
+    layer = controller._visual_packages[0][0]
+    output_path = Path(layer["image"])
+    assert output_path.is_file()
+    assert Image.open(output_path).size == (1080, 1920)
+    assert layer["visual_crop_mode"] == "free"
+    assert Path(layer["visual_original_path"]) == source_path
 
 
 def test_upload_panel_keeps_public_private_controls_and_comment_override_path():
