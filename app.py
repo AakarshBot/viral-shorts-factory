@@ -1949,36 +1949,15 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
         "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
     }
-    gates = evaluate_live_qc_gates(snapshot, current_metadata)
-    passed_count = sum(1 for gate in gates if gate["passed"])
-    qc_ready = passed_count == len(gates)
-    public_blocked = any(bool(gate.get("public_blocked")) for gate in gates)
     fallback_mode = str(script_data.get("fallback_mode") or "").strip()
+    public_blocked = fallback_mode == "extractive_source_grounded"
 
-    if fallback_mode == "extractive_source_grounded":
+    if public_blocked:
         st.error(
             "PUBLIC UPLOAD BLOCKED — this run used an extractive source-grounded fallback. "
-            "Private upload remains available after the other QC gates pass.",
+            "Private upload remains available.",
             icon="⛔",
         )
-
-    st.markdown(
-        f"<div class='live-bar'><div class='live-bar-copy'><b>Release QC</b> · "
-        f"{passed_count}/{len(gates)} gates passing</div><div class='small-muted'>"
-        f"{'READY' if qc_ready else 'LOCKED'}</div></div>",
-        unsafe_allow_html=True,
-    )
-
-    gate_html = []
-    for gate in gates:
-        passed = bool(gate.get("passed"))
-        gate_class = "pass" if passed else "block"
-        gate_html.append(
-            f"<div class='release-gate {gate_class}'><div class='release-gate-name'>"
-            f"{'✓' if passed else '✕'} {_ui_html(gate.get('label', ''))}</div>"
-            f"<div class='release-gate-detail'>{_ui_html(gate.get('detail', ''))}</div></div>"
-        )
-    st.markdown("<div class='release-gates'>" + "".join(gate_html) + "</div>", unsafe_allow_html=True)
 
     metadata_approved = bool(st.session_state.get("metadata_approved"))
     with st.container(border=True):
@@ -2032,53 +2011,43 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     with publish_col:
         st.markdown("#### 3 · Publish")
         st.caption("Private stays hidden. Public always requires a second confirmation.")
-        private_ready = metadata_approved and qc_ready
-        public_ready = private_ready and not public_blocked
+        upload_unlocked = metadata_approved
+        public_ready = upload_unlocked and not public_blocked
         if not metadata_approved:
-            st.info("Approve metadata above to unlock upload.")
-        elif not qc_ready:
-            st.warning("Upload is locked until every release QC gate passes.")
+            st.info("Approve metadata to unlock upload.")
         if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not public_ready):
             if public_blocked:
-                st.error("Public upload blocked by a release policy gate.")
-            elif not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
-                st.error("Public upload blocked: release QC is no longer passing.")
+                st.error("Public upload blocked by release policy.")
             else:
                 st.session_state["confirm_public_upload"] = True
                 st.rerun()
         if public_blocked:
             st.caption("Public publishing is currently blocked by a release policy gate.")
-        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not private_ready):
-            if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
-                st.error("Private upload blocked: release QC is no longer passing.")
-            else:
-                st.session_state["confirm_public_upload"] = False
-                _perform_upload(
-                    controller,
-                    snapshot,
-                    st.session_state["final_title"],
-                    st.session_state["final_description"],
-                    st.session_state["final_comment"],
-                    "private",
-                )
+        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not upload_unlocked):
+            st.session_state["confirm_public_upload"] = False
+            _perform_upload(
+                controller,
+                snapshot,
+                st.session_state["final_title"],
+                st.session_state["final_description"],
+                st.session_state["final_comment"],
+                "private",
+            )
 
         if st.session_state.get("confirm_public_upload"):
             st.warning("You are about to publish this video publicly. Continue?")
             confirm_col, cancel_col = st.columns(2)
             with confirm_col:
                 if st.button("Yes, publish", type="primary", width="stretch", key="confirm_upload_public"):
-                    if not live_qc_passes(snapshot, {"title": title, "description": description, "comment": comment}):
-                        st.error("Upload blocked: one or more live QC gates are not passing.")
-                    else:
-                        st.session_state["confirm_public_upload"] = False
-                        _perform_upload(
-                            controller,
-                            snapshot,
-                            st.session_state["final_title"],
-                            st.session_state["final_description"],
-                            st.session_state["final_comment"],
-                            "public",
-                        )
+                    st.session_state["confirm_public_upload"] = False
+                    _perform_upload(
+                        controller,
+                        snapshot,
+                        st.session_state["final_title"],
+                        st.session_state["final_description"],
+                        st.session_state["final_comment"],
+                        "public",
+                    )
             with cancel_col:
                 if st.button("Cancel", width="stretch", key="cancel_upload_public"):
                     st.session_state["confirm_public_upload"] = False
