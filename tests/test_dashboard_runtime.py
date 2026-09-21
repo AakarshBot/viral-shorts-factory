@@ -47,6 +47,18 @@ def test_dashboard_worker_console_capture():
 
 
 
+def test_dashboard_workspace_navigation_uses_pills():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = app_source.index("def render_workspace_navigation() -> str:")
+    end = app_source.index("\ndef render_live_navigation()", start)
+    source = app_source[start:end]
+
+    assert "st.sidebar.pills(" in source
+    assert "st.sidebar.radio(" not in source
+    assert 'key="workspace_mode"' in source
+    assert "return selected or current" in source
+
+
 def test_dashboard_live_monitor_uses_controlled_polling():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
