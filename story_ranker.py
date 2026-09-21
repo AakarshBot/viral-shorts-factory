@@ -97,24 +97,18 @@ def _source_domain(story):
 
 
 def _published_datetime(story):
-    """Return the newest trustworthy publication/update timestamp available."""
-    candidates = []
-    for key in (
-        "updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated",
-        "published_at", "publishedAt", "published", "pub_date", "date", "timestamp",
-    ):
-        raw = story.get(key)
+    """Return the best publication timestamp, using update time only as a fallback."""
+    def _parse_timestamp(raw):
         if raw in (None, ""):
-            continue
+            return None
         if isinstance(raw, (int, float)):
             try:
-                candidates.append(datetime.fromtimestamp(float(raw), tz=timezone.utc))
+                return datetime.fromtimestamp(float(raw), tz=timezone.utc)
             except (TypeError, ValueError, OSError, OverflowError):
-                continue
-            continue
+                return None
         text = str(raw).strip()
         if not text:
-            continue
+            return None
         parsed = None
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -124,18 +118,26 @@ def _published_datetime(story):
             except (TypeError, ValueError, OverflowError):
                 parsed = None
         if parsed is None:
-            continue
+            return None
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        candidates.append(parsed.astimezone(timezone.utc))
+        return parsed.astimezone(timezone.utc)
 
-    now = datetime.now(timezone.utc)
-    future_cutoff = now.timestamp() + (15 * 60)
-    trustworthy = [
-        value for value in candidates
-        if value.timestamp() <= future_cutoff
-    ]
-    return max(trustworthy) if trustworthy else None
+    # Publication time is the primary freshness clock. Treating a routine
+    # page edit as a brand-new story can surface an old article as "today".
+    for key in ("published_at", "publishedAt", "published", "pub_date", "date", "timestamp"):
+        parsed = _parse_timestamp(story.get(key))
+        if parsed is not None:
+            return parsed
+
+    # Some feeds omit publication time but expose a trustworthy update time.
+    # Keep that as a fallback rather than losing the candidate entirely.
+    for key in ("updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated"):
+        parsed = _parse_timestamp(story.get(key))
+        if parsed is not None:
+            return parsed
+
+    return None
 
 
 def _age_hours(story):
@@ -570,8 +572,7 @@ GOOGLE_NEWS_RADAR_QUERIES = (
 GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
 REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
 
-DISCOVERY_SOURCE_WAIT_SECONDS = 10.0
-DISCOVERY_SIGNAL_WAIT_SECONDS = 8.0
+DISCOVERY_OVERALL_WAIT_SECONDS = 10.0
 DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
 DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
 DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
@@ -753,18 +754,51 @@ def _rss_items(url, genre_key, collection_source="rss", max_items=60):
         if response.status_code != 200:
             return []
         root = ET.fromstring(response.content)
+
+        # Support both RSS 2.0 (<item>) and Atom (<entry>) feeds. A provider
+        # switching feed format must not silently disappear from discovery.
+        rss_items = root.findall(".//item")
+        atom_items = root.findall(".//{*}entry")
+        feed_items = rss_items or atom_items
+
         items = []
-        for item in root.findall(".//item")[:max_items]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            description = (item.findtext("description") or "").strip()
-            published = (item.findtext("pubDate") or "").strip()
-            source_node = item.find("source")
-            publisher = (
-                (source_node.text or "").strip()
-                if source_node is not None and source_node.text
-                else _source_domain({"url": link}) or "RSS"
-            )
+        for item in feed_items[:max_items]:
+            is_atom = item.tag.endswith("entry")
+            if is_atom:
+                title = (item.findtext("{*}title") or "").strip()
+                link_node = item.find("{*}link")
+                link = (
+                    str(link_node.get("href") or "").strip()
+                    if link_node is not None
+                    else ""
+                )
+                description = (
+                    item.findtext("{*}summary")
+                    or item.findtext("{*}content")
+                    or ""
+                ).strip()
+                published = (
+                    item.findtext("{*}published")
+                    or item.findtext("{*}updated")
+                    or ""
+                ).strip()
+                publisher = (
+                    item.findtext("{*}author/{*}name")
+                    or _source_domain({"url": link})
+                    or "Atom"
+                ).strip()
+            else:
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                description = (item.findtext("description") or "").strip()
+                published = (item.findtext("pubDate") or "").strip()
+                source_node = item.find("source")
+                publisher = (
+                    (source_node.text or "").strip()
+                    if source_node is not None and source_node.text
+                    else _source_domain({"url": link}) or "RSS"
+                )
+
             if title and link:
                 items.append({
                     "title": title,
@@ -1703,7 +1737,10 @@ def collect_high_recall_stories(
     )
 
     if broad_discovery and genre_key:
-        trend_geos = ("IN",)
+        # Use a small multi-market trend radar for every category. The candidate
+        # gate below keeps unrelated trend stories out, while this catches major
+        # English-language stories that can spike before India searches catch up.
+        trend_geos = GOOGLE_TRENDS_GEOS
         reddit_default = {
             "sports": "sports",
             "sports_stories_of_day": "sports",
@@ -1775,17 +1812,21 @@ def collect_high_recall_stories(
             f"   [Discovery] Factual intake: {len(core_sources)} bounded source job(s).",
             flush=True,
         )
-        resolved_core = _resolve_discovery_futures(
-            core_sources,
-            DISCOVERY_SOURCE_WAIT_SECONDS,
-        )
 
         signal_sources = {future: "Google Trends" for future in trend_futures}
         signal_sources.update({future: "Reddit" for future in reddit_futures})
-        resolved_signals = _resolve_discovery_futures(
-            signal_sources,
-            DISCOVERY_SIGNAL_WAIT_SECONDS,
+
+        # One wall-clock budget for the whole discovery pass. Factual sources
+        # and secondary signals already run in parallel, so a slow signal source
+        # must never add a second wait after the factual intake finishes.
+        all_sources = dict(core_sources)
+        all_sources.update(signal_sources)
+        resolved = _resolve_discovery_futures(
+            all_sources,
+            DISCOVERY_OVERALL_WAIT_SECONDS,
         )
+        resolved_core = {future: resolved.get(future) for future in core_sources}
+        resolved_signals = {future: resolved.get(future) for future in signal_sources}
 
         raw = []
         for future in (*google_futures, *rss_futures, *official_futures):
