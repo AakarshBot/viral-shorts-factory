@@ -3484,15 +3484,6 @@ def render_demo_page() -> None:
     render_factory_function_coverage()
 
 def main() -> None:
-    boot = st.empty()
-    boot.markdown(
-        "<div class='studio-boot-shell'>"
-        "<div class='studio-boot-eyebrow'>Shorts Studio · control deck</div>"
-        "<div class='studio-boot-title'>Loading your editorial workspace</div>"
-        "<div class='studio-boot-copy'>Preparing the dashboard without starting a production run.</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
     load_streamlit_secrets_into_runtime()
     _remote_startup_guard()
     initialise_runtime()
