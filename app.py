@@ -1225,9 +1225,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         dict(group) for group in (snapshot.get("visual_search_groups") or [])
         if isinstance(group, dict)
     ]
-    # Every retained image that passed AI identity verification and the
-    # lenient monetization/provenance gate is displayed. Context, scene score
-    # and soft resolution are deliberately not acceptance filters here.
+    # Every retained image that passed AI identity verification is displayed.
+    # Provider rights/provenance stay visible as metadata for the human reviewer;
+    # they are not an automatic manual-QC acceptance filter.
     available = [
         item for item in pool
         if not bool(item.get("used"))
@@ -1248,8 +1248,8 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         unsafe_allow_html=True,
     )
     st.caption(
-        "Every slide already has an image. The shared pools below contain additional choices; "
-        "assign any unused image to one slide, then reframe it with the drag cropper when needed."
+        "Every slide already has an image. The pools below collect identity-checked choices from the available image sources. "
+        "Assign any unused image to one slide, then reframe it with the cropper when needed."
     )
 
     metric_cols = st.columns(4, gap="small")
