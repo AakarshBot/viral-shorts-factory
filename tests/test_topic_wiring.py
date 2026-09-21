@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import ultimate_bot
 import story_ranker
 from workflow_runtime import CRICKET_CATEGORIES
@@ -220,3 +222,74 @@ def test_legacy_ai_category_is_normalized_before_production_lookup():
     window = source[start:start + 700]
     assert 'if str(cat_choice or "").strip().lower() == "ai_recommendation":' in window
     assert 'cat_choice = "sports"' in window
+
+
+
+@pytest.mark.parametrize(
+    "category,format_mode",
+    sorted(
+        {
+            "national_global_affairs": "regular",
+            "technology": "regular",
+            "business_finance": "regular",
+            "entertainment": "regular",
+            "viral_phenomenon": "regular",
+            "health_lifestyle": "regular",
+            "regional_state_news": "regular",
+            "national_global_affairs": "top5",
+            "technology": "top5",
+            "business_finance": "top5",
+            "entertainment": "top5",
+            "viral_phenomenon": "top5",
+        }.items()
+    ),
+)
+def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, category, format_mode):
+    import dashboard_runtime
+
+    captured = {}
+
+    def fake_collect(
+        bot,
+        genre_key,
+        genre_cfg,
+        trend_keyword=None,
+        custom_gnews_q=None,
+        custom_rss_url=None,
+        broad_discovery=False,
+    ):
+        captured["genre_key"] = genre_key
+        captured["genre_cfg"] = dict(genre_cfg)
+        captured["broad_discovery"] = broad_discovery
+        return [], []
+
+    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+    monkeypatch.setattr(
+        story_ranker,
+        "rank_discovery_candidates",
+        lambda stories, **kwargs: stories,
+    )
+
+    bot = type(
+        "Bot",
+        (),
+        {
+            "CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES,
+            "_active_web_config": {},
+        },
+    )()
+
+    dashboard_runtime.discover_ranked_topics(
+        bot,
+        {
+            "format_mode": format_mode,
+            "category": category,
+            "language": "english",
+        },
+        None,
+        max_candidates=5,
+    )
+
+    assert captured["genre_key"] == category
+    assert captured["genre_cfg"] == ultimate_bot.CONTENT_CATEGORIES[category]
+    assert captured["broad_discovery"] is True
