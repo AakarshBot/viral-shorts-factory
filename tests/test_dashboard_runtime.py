@@ -1234,6 +1234,18 @@ def test_final_artifact_qc_export_is_available():
     assert "missing" in detail.lower()
 
 
+def test_dashboard_metadata_approval_defers_widget_value_updates_until_rerun():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    render_start = source.index("def render_upload_panel")
+    title_widget = source.index('key="final_title"', render_start)
+    approval_button = source.index('key="approve_metadata"', render_start)
+    assert title_widget < approval_button
+    assert 'st.session_state["metadata_pending_values"] = {' in source
+    pending = source.index('st.session_state["metadata_pending_values"] = {', approval_button)
+    assert 'st.session_state["final_title"] = clean_title' not in source[pending:]
+    assert 'str(pending_metadata.get("run_id") or "").strip() == run_id' in source
+
+
 def test_dashboard_upload_choices_remain_visible_before_metadata_approval():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = source.index("def render_upload_panel")
