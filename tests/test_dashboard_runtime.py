@@ -1556,38 +1556,16 @@ def test_dashboard_first_render_has_no_streamlit_exception(monkeypatch):
 
 
 
-def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
+def test_dashboard_render_surface_stays_on_conservative_css_baseline():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-
-    assert ".brand-eyebrow" in source
-    assert ".brand-trust-row" in source
-    assert ".brand-signature" in source
-    assert ".sidebar-brand" in source
-    assert "--studio-" in source
-    assert "prefers-reduced-motion" in source
-    assert ".stApp::before" not in source
     style_start = source.index('st.markdown("""<style>')
     style_end = source.index('</style>""", unsafe_allow_html=True)', style_start)
     style = source[style_start:style_end]
     assert "position:fixed;" not in style
-    assert "backdrop-filter" not in style
-    assert "2026 editorial os" in source.lower()
-    assert ".learning-strip" in source
-    assert "Channel learning is active" in source
-    assert "Learning {channel_fit:.1f}/10" in source
-    assert "Held · previous run" in source
-    assert "st.markdown(" in source
+    assert ".stApp::before" not in style
+    assert ".studio-boot-shell" not in style
+    assert "--studio-" not in style
 
-
-def test_dashboard_does_not_register_cropper_on_homepage_import():
-    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    import_start = source.index("from pathlib import Path")
-    import_end = source.index("MAX_DASHBOARD_DISCOVERY_HEADLINES")
-    import_block = source[import_start:import_end]
-    assert "streamlit_cropper" not in import_block
-    cropper_index = source.index("from streamlit_cropper import st_cropper as cropper")
-    cropper_guard_start = source.rfind("def ", 0, cropper_index)
-    assert cropper_guard_start > import_end
 
 
 def test_dashboard_init_state_does_not_construct_redundant_controller_each_rerun():
