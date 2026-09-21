@@ -1577,7 +1577,14 @@ def _build_discovery_google_queries(
     has_category_query = bool(str(genre_cfg.get("gnews_q") or "").strip())
 
     if broad_discovery:
-        radar_budget = 2 if targeted or has_category_query else len(GOOGLE_NEWS_RADAR_QUERIES)
+        # Explicit dashboard genres already have India-first + global + category
+        # lanes. Generic radar queries would leak unrelated genres into the pool.
+        if genre_key and (india_query or global_query or has_category_query):
+            return _dedupe_discovery_queries(
+                candidates,
+                DISCOVERY_MAX_GOOGLE_QUERIES_BROAD,
+            )
+        radar_budget = 4 if targeted else len(GOOGLE_NEWS_RADAR_QUERIES)
         candidates.extend(GOOGLE_NEWS_RADAR_QUERIES[:radar_budget])
         return _dedupe_discovery_queries(candidates, DISCOVERY_MAX_GOOGLE_QUERIES_BROAD)
 
