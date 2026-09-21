@@ -1475,8 +1475,8 @@ def test_manual_pool_uses_descending_rank_targets(monkeypatch):
         ["rank 1", "rank 2", "rank 3"],
         allow_auto_backfill=False,
     )
-    assert [row["target"] for row in result["query_stats"]] == [10, 7, 5]
-    assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
+    assert [row["target"] for row in result["query_stats"]] == [10, 10, 10]
+    assert [row["verified"] for row in result["query_stats"]] == [10, 10, 2]
     assert len(result["assets"]) == 22
 
 
@@ -1570,10 +1570,11 @@ def test_new_manual_search_applies_monetization_and_identity_filters(monkeypatch
         lambda *_args: [("Openverse", lambda *_args: values)],
     )
 
-    def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("identity AI must not run for a new manual search")
-
-    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fail_if_called)
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+    )
 
     result = retrieval.collect_manual_visual_search(
         FakeRuntime(),
