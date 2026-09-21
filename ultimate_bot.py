@@ -1296,7 +1296,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
     )
     from moviepy.audio.AudioClip import CompositeAudioClip
     from moviepy.audio.fx import AudioLoop
-    from moviepy.video.fx import FadeIn, FadeOut
 
     width, height = 1080, 1920
     final_clips = []
