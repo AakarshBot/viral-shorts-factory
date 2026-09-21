@@ -1547,7 +1547,7 @@ def test_dashboard_first_render_has_no_streamlit_exception(monkeypatch):
         for element in at.markdown
         if getattr(element, "value", None) is not None
     )
-    assert len(at.button) > 0, "Live homepage did not render any interactive controls."
+    assert len(at.pills) > 0, "Live homepage did not render its workspace controls."
 
 
 
