@@ -982,12 +982,10 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             bank_path = str(bank_item.get("path") or "").strip()
             if bank_path and os.path.isfile(bank_path):
                 bank.append(dict(bank_item))
-        # Dashboard display is intentionally simple: if the image passed the
-        # identity AI gate and the lenient monetization/provenance gate, show it.
-        # Context suitability and soft resolution are not display filters.
-        # Every retained bank image is displayable once it has passed the
-        # upstream AI identity and lenient monetization checks. Scene context
-        # is deliberately not used to hide dashboard choices.
+        # Dashboard display is intentionally simple: identity AI verification
+        # is the acceptance boundary; provider rights/provenance remain visible
+        # as metadata for the human reviewer. Context suitability and soft
+        # resolution are deliberately not display filters.
         unused_verified = [dict(item) for item in bank]
         factory_rejected = []
         scene_rejected = []
