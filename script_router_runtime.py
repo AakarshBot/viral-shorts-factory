@@ -27,6 +27,7 @@ def install_script_pipeline(bot):
 
     import script_runtime as sr
     import research_runtime as rr
+    import pipeline_integrity_runtime as pir
 
     def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         data = dict(story_data or {})
@@ -79,7 +80,17 @@ def install_script_pipeline(bot):
 
         # Provider fallback stays inside this one routing layer. It never
         # re-enters the research wrapper, so one run gets one evidence pack.
-        result = current(prepared, language_cfg, genre_key, conn, format_mode)
+        try:
+            result = current(prepared, language_cfg, genre_key, conn, format_mode)
+        except Exception as exc:
+            print(
+                f"   [Script Pipeline] Primary writer failed: {type(exc).__name__}: {exc}. "
+                "Using strict source-grounded fallback.",
+                flush=True,
+            )
+            result = pir.strict_fallback(
+                data, language_cfg, genre_key, format_mode
+            )
         if result is None:
             print("   [Script Pipeline] Trying OpenRouter free fallback.", flush=True)
             result = rr._openrouter_script_fallback(
@@ -102,6 +113,11 @@ def install_script_pipeline(bot):
                     "research_synthesis_required": True,
                 }
             )
+
+        # Pipeline-integrity normalization is now a helper, not another
+        # write_script wrapper. It preserves authoritative narration metadata
+        # for the downstream audio/visual guards.
+        result = pir._clean_script_result(result, data, format_mode)
 
         # Canonical post-generation cleanup/validation. This is the only
         # content-quality wrapper in the active production path.
