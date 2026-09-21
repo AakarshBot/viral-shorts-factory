@@ -201,6 +201,64 @@ def test_workflow_controller_rejects_duplicate_upload_for_same_run(monkeypatch, 
         raise AssertionError("Duplicate upload must be blocked.")
 
 
+def test_workflow_controller_records_private_video_after_public_visibility_enforcement(monkeypatch, tmp_path):
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"synthetic mp4")
+
+    controller = WorkflowController(type("Bot", (), {})())
+    controller.state.completed = True
+    controller.state.thread_alive = False
+    controller.state.video_path = str(video_path)
+
+    def forced_private_uploader(*args, **kwargs):
+        raise ultimate_bot.YouTubePublicVisibilityError(
+            "YouTube accepted video video-private-789 but persisted privacyStatus='private' instead of 'public'."
+        )
+
+    controller.bot.upload_to_youtube = forced_private_uploader
+
+    import final_qc_runtime
+
+    monkeypatch.setattr(final_qc_runtime, "validate_final_video", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        final_qc_runtime,
+        "validate_final_upload_metadata",
+        lambda title, description, comment: (title, description, comment),
+    )
+
+    try:
+        controller.upload_manual(
+            str(video_path),
+            {"title": "Approved title"},
+            "Approved title",
+            "Approved description",
+            "Approved comment",
+            "public",
+            {"label": "News", "category_id": "25", "hashtags": []},
+        )
+    except RuntimeError as exc:
+        assert "already exists; do not retry" in str(exc)
+    else:
+        raise AssertionError("A public-visibility-enforced upload must stop without inviting a duplicate retry.")
+
+    assert controller.state.uploaded_video_id == "video-private-789"
+
+    try:
+        controller.upload_manual(
+            str(video_path),
+            {"title": "Approved title"},
+            "Approved title",
+            "Approved description",
+            "Approved comment",
+            "public",
+            {"label": "News", "category_id": "25", "hashtags": []},
+        )
+    except RuntimeError as exc:
+        assert "already been uploaded" in str(exc)
+    else:
+        raise AssertionError("The same run must not be uploaded a second time.")
+
+
 def test_workflow_controller_upload_delegates_approved_payload(monkeypatch, tmp_path):
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"synthetic mp4")
