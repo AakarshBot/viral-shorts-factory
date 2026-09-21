@@ -1311,15 +1311,15 @@ class DashboardWorkflowController(WorkflowController):
             self.update(
                 "visual_approval",
                 76,
-                f"Found 3 verified alternatives for visual {index}. Choose one before continuing.",
+                f"Found {len(options)} AI-checked alternatives for visual {index}. Choose one before continuing.",
             )
-            return True, f"Found 3 verified alternatives for visual {index}."
+            return True, f"Found {len(options)} AI-checked alternatives for visual {index}."
 
         except Exception as exc:
             return False, f"Visual option search failed: {type(exc).__name__}: {exc}"
 
     def replace_visual_from_search_option(self, visual_index: int, option_index: int) -> tuple[bool, str]:
-        """Replace a visual with one of the three verified manual-query choices."""
+        """Replace a visual with one of the AI-checked manual-query choices."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -1951,7 +1951,7 @@ class DashboardWorkflowController(WorkflowController):
                             "id": str(group.get("id") or ""),
                             "query": str(group.get("query") or ""),
                             "items": [dict(item) for item in (group.get("items") or [])],
-                            "target": int(group.get("target") or 5),
+                            "target": int(group.get("target") or 10),
                             "available": len(
                                 [item for item in (group.get("items") or []) if not bool(item.get("used"))]
                             ),
