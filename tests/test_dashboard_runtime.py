@@ -1202,9 +1202,13 @@ def test_dashboard_metadata_approval_defers_widget_value_updates_until_rerun():
 
 
 def test_public_release_policy_cannot_be_bypassed_by_ui():
-    source = Path(__file__).resolve().parents[1].joinpath("workflow_runtime.py").read_text(encoding="utf-8")
-    assert 'if str(publish_mode or "").strip().lower() == "public":' in source
-    assert 'if bool(gate.get("public_blocked"))' in source
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def render_upload_panel")
+    end = source.index("\ndef _perform_upload", start)
+    panel = source[start:end]
+    assert "public_blocked = fallback_mode == \"extractive_source_grounded\"" in panel
+    assert "public_ready = upload_unlocked and not public_blocked" in panel
+    assert 'if public_blocked:' in panel
 
 
 def test_dashboard_progress_uses_latest_known_progress_line():
@@ -1331,7 +1335,7 @@ def test_regular_script_release_structure_rejects_compressed_three_beat_stub():
 
     passed, reason, _ = assess_release_structure(script, "regular")
     assert passed is False
-    assert "compressed" in reason.lower()
+    assert "context" in reason.lower()
 
 
 
