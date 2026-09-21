@@ -106,3 +106,30 @@ def test_insufficient_page_extraction_is_not_silent(monkeypatch):
 
     assert pack["status"] == "insufficient_evidence"
     assert pack["counts"]["usable_sources"] == 0
+
+def test_discover_sources_overlaps_independent_research_calls(monkeypatch):
+    import threading
+
+    barrier = threading.Barrier(2, timeout=1.0)
+    calls = []
+
+    def fake_ddg(query):
+        calls.append(("ddg", query))
+        barrier.wait()
+        return [_source("https://reuters.com/example", "Reuters", "A Reuters page with useful evidence.")]
+
+    def fake_openalex(story):
+        calls.append(("openalex", story.get("title")))
+        barrier.wait()
+        return [_source("https://nature.com/example", "Nature", "A Nature research page with useful evidence.")]
+
+    monkeypatch.setattr("evidence_runtime._ddg_sources", fake_ddg)
+    monkeypatch.setattr("evidence_runtime._openalex_sources", fake_openalex)
+
+    result = __import__("evidence_runtime").discover_sources(
+        {"title": "New cancer research study", "description": "Scientists published a new clinical study with results."},
+        max_sources=5,
+    )
+
+    assert [item["publisher"] for item in result] == ["Reuters", "Nature"]
+    assert {kind for kind, _ in calls} == {"ddg", "openalex"}
