@@ -373,6 +373,171 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.app-shell-glow{
+  position:relative;
+}
+.app-shell-glow::before{
+  content:"";
+  position:fixed;
+  top:-180px;
+  right:-140px;
+  width:520px;
+  height:520px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(61,111,116,.10) 0%,rgba(61,111,116,0) 70%);
+  pointer-events:none;
+  z-index:-1;
+}
+.brand-card{
+  position:relative;
+  overflow:hidden;
+  isolation:isolate;
+}
+.brand-card::after{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  width:7px;
+  height:100%;
+  background:linear-gradient(180deg,#77a8a3,#3d6f74 55%,#294f53);
+  border-radius:22px 0 0 22px;
+}
+.brand-eyebrow{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#6a625a;
+  font-size:.62rem;
+  font-weight:900;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  margin-bottom:8px;
+}
+.brand-dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#4e9188;
+  box-shadow:0 0 0 4px rgba(78,145,136,.12);
+}
+.brand-trust-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.brand-trust-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid #dfd4c9;
+  background:rgba(255,253,249,.78);
+  color:#665e55;
+  font-size:.66rem;
+  font-weight:850;
+  box-shadow:0 4px 14px rgba(69,49,31,.04);
+}
+.brand-trust-chip strong{color:#31565a}
+.factory-status{
+  position:relative;
+  overflow:hidden;
+}
+.factory-status::before{
+  content:"";
+  position:absolute;
+  inset:0 0 auto auto;
+  width:92px;
+  height:92px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(78,145,136,.13) 0%,rgba(78,145,136,0) 68%);
+  pointer-events:none;
+}
+.topic-card,.story-card,.output-card,.release-card,.panel{
+  transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;
+}
+.topic-card:hover,.story-card:hover,.output-card:hover,.release-card:hover,.panel:hover{
+  transform:translateY(-2px);
+  border-color:#d4c7ba;
+  box-shadow:0 16px 34px rgba(69,49,31,.10);
+}
+.topic-kicker{margin-bottom:7px}
+.topic-title{letter-spacing:-.025em}
+.topic-subtitle{margin-top:7px}
+.topic-chips{margin-top:12px}
+.topic-chip{box-shadow:inset 0 1px 0 rgba(255,255,255,.72)}
+[data-testid="stMetric"]{
+  transition:transform .16s ease,box-shadow .16s ease;
+}
+[data-testid="stMetric"]:hover{
+  transform:translateY(-1px);
+  box-shadow:0 14px 28px rgba(69,49,31,.09);
+}
+[data-testid="stProgress"] div[role="progressbar"]{
+  height:10px!important;
+  border-radius:999px!important;
+  overflow:hidden!important;
+}
+[data-testid="stProgress"] div[role="progressbar"] > div{
+  border-radius:999px!important;
+}
+.stButton>button,.stLinkButton>a{
+  transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease,background .14s ease!important;
+}
+.stButton>button:hover,.stLinkButton>a:hover{
+  transform:translateY(-1px);
+  box-shadow:0 8px 18px rgba(69,49,31,.08);
+}
+.stButton>button[kind="primary"]{
+  letter-spacing:-.01em;
+}
+section[data-testid="stSidebar"]{
+  box-shadow:12px 0 30px rgba(69,49,31,.035);
+}
+section[data-testid="stSidebar"] .stRadio > div{
+  gap:7px!important;
+}
+section[data-testid="stSidebar"] .stRadio label{
+  border-radius:12px!important;
+  padding:7px 9px!important;
+}
+.live-settings{
+  position:relative;
+  overflow:hidden;
+}
+.live-settings::before{
+  content:"";
+  position:absolute;
+  inset:0 auto auto 0;
+  width:100%;
+  height:1px;
+  background:linear-gradient(90deg,transparent,#d7c8bb 30%,#d7c8bb 70%,transparent);
+}
+.empty-state{
+  position:relative;
+  overflow:hidden;
+}
+.empty-state::after{
+  content:"VSF";
+  position:absolute;
+  right:22px;
+  bottom:-12px;
+  font-size:5.5rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.08em;
+  color:rgba(47,93,98,.05);
+  pointer-events:none;
+}
+.timeline{
+  backdrop-filter:blur(8px);
+}
+.dashboard-footer{
+  border-top:1px solid #e7ddd1;
+  margin-top:24px;
+}
 </style>""", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
@@ -722,9 +887,16 @@ def render_header(action_mode: str) -> None:
             st.markdown("<div style='font-size:2.3rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
     with middle:
         st.markdown(
-            f"<div class='brand-card'><span class='brand-pill'>{title}</span>"
+            f"<div class='brand-card'>"
+            f"<div class='brand-eyebrow'><span class='brand-dot'></span> Editorial studio · Human review</div>"
+            f"<span class='brand-pill'>{title}</span>"
             f"<div class='brand-title'>Viral Shorts Factory</div>"
-            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>",
+            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>"
+            f"<div class='brand-trust-row'>"
+            f"<span class='brand-trust-chip'>◌ <strong>India-first</strong> discovery</span>"
+            f"<span class='brand-trust-chip'>✓ Human approval gates</span>"
+            f"<span class='brand-trust-chip'>⚡ Parallel discovery radar</span>"
+            f"</div>",
             unsafe_allow_html=True,
         )
     with right:
