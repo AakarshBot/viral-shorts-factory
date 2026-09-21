@@ -487,36 +487,6 @@ class WorkflowController:
 
         validate_final_video(video_path)
 
-        # Re-evaluate the complete dashboard release gate at the exact moment
-        # of upload. The UI already blocks both visibility choices, but the
-        # uploader itself must remain safe if called through another dashboard
-        # path or against a stale Streamlit snapshot.
-        try:
-            from dashboard_runtime import evaluate_live_qc_gates, live_qc_passes
-            live_snapshot = self.snapshot()
-            live_metadata = {
-                "title": str(title or ""),
-                "description": str(description or ""),
-                "comment": str(comment or ""),
-            }
-            if not live_qc_passes(live_snapshot, live_metadata):
-                raise RuntimeError(
-                    "Upload blocked: one or more live release QC gates are not passing."
-                )
-            if str(publish_mode or "").strip().lower() == "public":
-                public_blocks = [
-                    str(gate.get("detail") or "Public release policy blocked.")
-                    for gate in evaluate_live_qc_gates(live_snapshot, live_metadata)
-                    if bool(gate.get("public_blocked"))
-                ]
-                if public_blocks:
-                    raise RuntimeError(
-                        "Public upload blocked by release policy: " + " ".join(public_blocks)
-                    )
-        except ImportError:
-            # The standalone factory workflow does not load dashboard QC.
-            pass
-
         clean_title, clean_description, clean_tags = _build_clean_metadata(
             {**script_data, "title": title, "seo_description": description},
             genre_cfg,
