@@ -574,9 +574,6 @@ GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
 REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
 
 DISCOVERY_OVERALL_WAIT_SECONDS = 10.0
-# Backward-compatible test/diagnostic name; discovery uses the single overall
-# wall-clock budget above and never waits on the signal lane separately.
-DISCOVERY_SIGNAL_WAIT_SECONDS = 8.0
 DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
 DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
 DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
