@@ -1322,7 +1322,10 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                 audio = AudioFileClip(audio_paths[idx])
                 audio_clips.append(audio)
 
-            scene_duration = max(0.1, (audio.duration + 0.25) if audio else 4.0)
+            # Visual scene boundaries must not create artificial narration gaps.
+            # Audio is already encoded at its natural duration, so concatenate
+            # scene clips without an extra silence tail.
+            scene_duration = max(0.1, audio.duration if audio else 4.0)
             bg_image_file = layer_paths[0]["image"]
             scene_source_type = layer_paths[0].get("source_type", "bg")
             segment_count = _scene_visual_segment_count(scene_duration)
