@@ -666,7 +666,7 @@ def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
 
 def render_header(action_mode: str) -> None:
     titles = {
-            "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Live Factory": ("Live Factory", "Create, review and release a Short."),
         "Test": ("Test", "Diagnostics, previews and engineering checks."),
         "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
         "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
