@@ -1547,6 +1547,7 @@ def test_dashboard_first_render_has_no_streamlit_exception(monkeypatch):
         for element in at.markdown
         if getattr(element, "value", None) is not None
     )
+    assert at.button("Find today's ranked topics"), "Live homepage did not render its primary action."
 
 
 
