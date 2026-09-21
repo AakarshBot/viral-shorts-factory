@@ -1539,7 +1539,7 @@ def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
     assert ".brand-trust-row" in source
     assert ".brand-signature" in source
     assert ".sidebar-brand" in source
-    assert ".studio-" in source
+    assert "--studio-" in source
     assert "prefers-reduced-motion" in source
     assert "backdrop-filter" in source
     assert "2026 editorial OS" in source.lower()
