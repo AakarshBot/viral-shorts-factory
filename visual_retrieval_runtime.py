@@ -992,7 +992,7 @@ def collect_manual_visual_pool(
         target = _manual_query_target(query_index)
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
-        query_seen_urls: set[str] = set()
+        query_seen_urls: set[str] = set(seen_image_urls)
         qa_requests = 0
         verified_for_query = 0
 
