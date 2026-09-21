@@ -1114,8 +1114,8 @@ def test_dashboard_contains_generated_text_safety_and_overflow_guards():
     assert '_arrow(?:_(?:right|left|up|down))?' in source
     assert 'overflow-wrap:anywhere' in source
     assert 'word-break:break-word' in source
-    assert "f\"<div class='story-title'>{_ui_html(title)}</div>\"" in source
-    assert "with st.expander(\"Why this story\", expanded=False)" in source
+    assert "f\"<div class='topic-title'>{_ui_html(title)}</div>\"" in source
+    assert "with st.expander(\"Why this topic\", expanded=False)" in source
     assert "section[data-testid=\"stSidebar\"]{" in source
 
 
