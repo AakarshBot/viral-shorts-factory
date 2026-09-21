@@ -146,13 +146,29 @@ class _ConnectionProxy:
         return getattr(self._conn, name)
 
 
+class _SqliteModuleProxy:
+    """Route sqlite3.connect only inside the legacy run_robot globals."""
+    def __init__(self, module, connect):
+        self._module = module
+        self.connect = connect
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+
 def run_robot_with_exact_identity(bot, web_config=None):
     """Run the factory and guarantee that a created run cannot remain pending."""
-    original_connect = bot.sqlite3.connect
     state = _IdentityState()
     bot._last_run_identity = state
     bot._last_run_row_id = None
     bot._last_run_run_id = state.run_id
+
+    run_robot = getattr(bot, "run_robot", None)
+    globals_dict = getattr(run_robot, "__globals__", {}) if run_robot is not None else {}
+    sqlite_module = globals_dict.get("sqlite3") or getattr(bot, "sqlite3", None)
+    original_connect = getattr(sqlite_module, "connect", None)
+    if original_connect is None:
+        raise RuntimeError("Exact-run identity bridge cannot find sqlite3.connect.")
 
     def connect(*args, **kwargs):
         conn = original_connect(*args, **kwargs)
@@ -166,27 +182,32 @@ def run_robot_with_exact_identity(bot, web_config=None):
             pass
         return conn
 
-    bot.sqlite3.connect = connect
+    previous_sqlite_binding = globals_dict.get("sqlite3")
+    if previous_sqlite_binding is sqlite_module:
+        globals_dict["sqlite3"] = _SqliteModuleProxy(sqlite_module, connect)
+
     try:
-        result = bot.run_robot(web_config=web_config)
-    except Exception as exc:
-        if state.row_id is not None:
-            try:
-                raw = original_connect(bot.DB_PATH)
-                migrate_vault(raw)
-                update_run_record(
-                    raw,
-                    state.row_id,
-                    status="FAILED",
-                    reported=1,
-                    rejected_reason=f"{type(exc).__name__}: {str(exc)[:500]}",
-                )
-                raw.close()
-            except Exception as db_exc:
-                print(f"   [DB] Could not mark run FAILED: {db_exc}")
-        raise
+        try:
+            result = bot.run_robot(web_config=web_config)
+        except Exception as exc:
+            if state.row_id is not None:
+                try:
+                    raw = original_connect(bot.DB_PATH)
+                    migrate_vault(raw)
+                    update_run_record(
+                        raw,
+                        state.row_id,
+                        status="FAILED",
+                        reported=1,
+                        rejected_reason=f"{type(exc).__name__}: {str(exc)[:500]}",
+                    )
+                    raw.close()
+                except Exception as db_exc:
+                    print(f"   [DB] Could not mark run FAILED: {db_exc}")
+            raise
     finally:
-        bot.sqlite3.connect = original_connect
+        if previous_sqlite_binding is sqlite_module:
+            globals_dict["sqlite3"] = previous_sqlite_binding
 
     bot._last_run_row_id = state.row_id
     bot._last_run_run_id = state.run_id
@@ -223,3 +244,4 @@ def run_robot_with_exact_identity(bot, web_config=None):
             print(f"   [DB] Could not finalise run status: {db_exc}")
 
     return result
+
