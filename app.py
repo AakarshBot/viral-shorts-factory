@@ -1879,8 +1879,6 @@ def _perform_upload(
 
 
 def render_live_monitor(controller: DashboardWorkflowController) -> None:
-    snapshot = controller.snapshot()
-
     def _render_content(snapshot: Dict[str, Any]) -> None:
         selected = snapshot.get("selected_story") or {}
         if selected:
@@ -1910,14 +1908,15 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
 
         render_upload_panel(controller, snapshot)
 
+    snapshot = controller.snapshot()
+
     if live_monitor_should_poll(snapshot):
         poll_stage = str(snapshot.get("stage") or "").strip()
 
         @st.fragment(run_every="2s")
-        def _polling_fragment():
+        def _live_monitor_fragment():
             live_snapshot = controller.snapshot()
             live_stage = str(live_snapshot.get("stage") or "").strip()
-            render_powershell_widget(live_snapshot)
             if (
                 not live_snapshot.get("thread_alive")
                 or live_stage != poll_stage
@@ -1925,12 +1924,10 @@ def render_live_monitor(controller: DashboardWorkflowController) -> None:
             ):
                 st.rerun()
                 return
-            render_stage_progress(live_snapshot)
+            _render_content(live_snapshot)
 
-        _polling_fragment()
-    else:
-        render_stage_progress(snapshot)
-        render_powershell_widget(snapshot)
+        _live_monitor_fragment()
+        return
 
     _render_content(snapshot)
 
