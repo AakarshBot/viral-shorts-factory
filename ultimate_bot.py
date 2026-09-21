@@ -45,9 +45,6 @@ try:
 except ImportError:
     cv2 = None
 
-IMAGEMAGICK_BINARY_PATH = ""  
-if IMAGEMAGICK_BINARY_PATH:
-    os.environ["IMAGEMAGICK_BINARY"] = IMAGEMAGICK_BINARY_PATH
 os.environ["IMAGEIO_FFMPEG_EXE"] = "ffmpeg"
 
 from PIL import Image, UnidentifiedImageError, ImageFilter, ImageDraw, ImageFont
@@ -62,9 +59,7 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
 PALETTE = {
     "bg": (15, 20, 35),
