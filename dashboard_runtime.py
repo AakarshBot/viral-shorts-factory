@@ -157,7 +157,7 @@ def _recent_topic_cooldown(conn, stories: list[dict[str, Any]], *, hours: int = 
 
 
 def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28) -> list[dict[str, Any]]:
-    """Build an AI-mode topic portfolio from the same broad free discovery radar."""
+    """Build the Sports-AI topic portfolio from the canonical sports discovery radar."""
     from story_ranker import (
         _candidate_reason,
         _cheap_filter,
