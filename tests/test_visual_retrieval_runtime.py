@@ -1103,16 +1103,16 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
         "Test story",
     )
 
-    assert len(result["assets"]) == 19
-    assert len({item["hash"] for item in result["assets"]}) == 19
-    assert result["hard_max"] == 19
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 4]
+    assert len(result["assets"]) == 20
+    assert len({item["hash"] for item in result["assets"]}) == 20
+    assert result["hard_max"] == 20
+    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
     assert len(result["query_stats"]) == 4
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
 
 
-def test_manual_visual_options_returns_three_unique_choices_without_backfill(monkeypatch):
+def test_manual_visual_options_returns_up_to_ten_unique_choices_without_backfill(monkeypatch):
     from visual_retrieval_runtime import collect_manual_visual_options
 
     image_candidates = []
@@ -1159,16 +1159,16 @@ def test_manual_visual_options_returns_three_unique_choices_without_backfill(mon
             "voiceover": "Shafali Verma batting for India.",
         },
         "Shafali Verma",
-        min_options=3,
-        max_options=3,
+        min_options=0,
+        max_options=10,
     )
 
     assets = result["assets"]
-    assert len(assets) == 3
-    assert len({item["hash"] for item in assets}) == 3
-    assert result["target"] == 3
-    assert result["hard_max"] == 3
-    assert result["available_options"] == 3
+    assert len(assets) == 5
+    assert len({item["hash"] for item in assets}) == 5
+    assert result["target"] == 10
+    assert result["hard_max"] == 10
+    assert result["available_options"] == 5
     assert result["enough_options"] is True
     assert all(stat["pool_origin"] == "manual" for stat in result["query_stats"])
     assert len(result["query_stats"]) == 1
@@ -1527,7 +1527,7 @@ def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
     assert result["rejection_counts"]["duplicate"] == 0
 
 
-def test_new_manual_search_applies_only_monetization_filter(monkeypatch):
+def test_new_manual_search_applies_monetization_and_identity_filters(monkeypatch):
     values = [
         {
             "bytes": _jpeg_bytes((240, 240)),
