@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import re
 
-from script_runtime import check_script_originality
 
 def _validate_final_artifact(path: str) -> tuple[bool, str]:
     if not path or not os.path.isfile(path):
@@ -31,48 +30,6 @@ def _validate_metadata(title: str, description: str, comment: str = "") -> tuple
     if len(comment) > 4900:
         return False, "creator comment exceeds 4900 characters"
     return True, "metadata checks passed"
-
-
-def evaluate_originality_gate(script_data: dict) -> dict:
-    """Validate originality/factuality for the final public-release decision."""
-    data = script_data if isinstance(script_data, dict) else {}
-    fallback = str(data.get("fallback_mode") or "") == "extractive_source_grounded"
-    if data.get("public_publish_blocked"):
-        return {
-            "passed": True,
-            "public_blocked": True,
-            "label": "Originality + factuality",
-            "detail": "Private/manual release is allowed, but public publication is blocked by an upstream safety gate.",
-        }
-    if fallback:
-        return {
-            "passed": True,
-            "public_blocked": True,
-            "label": "Originality + factuality",
-            "detail": "PASS for private-only release. Extractive source-grounded fallback blocks public upload.",
-        }
-    originality = check_script_originality(data, data)
-    if not originality.get("passed"):
-        return {
-            "passed": False,
-            "public_blocked": True,
-            "label": "Originality + factuality",
-            "detail": f"Verbatim-overlap gate failed in {len(originality.get('failures') or [])} scene(s).",
-        }
-    critique = data.get("originality_critique") or {}
-    if critique.get("unsupported_claims"):
-        return {
-            "passed": False,
-            "public_blocked": True,
-            "label": "Originality + factuality",
-            "detail": "Factual critique found unsupported claims or the critique provider was unavailable.",
-        }
-    return {
-        "passed": True,
-        "public_blocked": False,
-        "label": "Originality + factuality",
-        "detail": "Originality overlap and factual critique passed.",
-    }
 
 
 def validate_final_video(path: str) -> None:
