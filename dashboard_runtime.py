@@ -1887,7 +1887,7 @@ class DashboardWorkflowController(WorkflowController):
             new_layer.update(
                 {
                     "image": output_path,
-                    "visual_original_path": selected_original_path,
+                    "visual_original_path": source_path,
                     "visual_crop_zoom": float(max(1.0, min(4.0, zoom))),
                     "visual_crop_x": float(max(0.0, min(1.0, x_center))),
                     "visual_crop_y": float(max(0.0, min(1.0, y_center))),
