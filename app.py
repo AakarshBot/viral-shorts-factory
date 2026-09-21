@@ -121,6 +121,20 @@ def render_live_navigation() -> Dict[str, Any]:
             final_path_ready = True
             st.session_state["live_path_ready"] = True
 
+    if live_format and final_path_ready:
+        path_parts = [live_format]
+        if live_format in {"Deep Dive", "Top 5"}:
+            path_parts.append(st.session_state.get("live_topic_selection") or "")
+        else:
+            path_parts.append(st.session_state.get("live_sports_selection") or "")
+            if sports_mode == "Cricket":
+                path_parts.append(st.session_state.get("live_cricket_scope") or "")
+        path_text = " · ".join(part for part in path_parts if part)
+        st.markdown(
+            f"<div style='margin:12px 0 4px;color:var(--muted);font-size:.72rem;line-height:1.45'><span style='color:var(--accent);font-weight:900'>Selected path</span> · {_ui_html(path_text)}</div>",
+            unsafe_allow_html=True,
+        )
+
     if not final_path_ready:
         st.caption("Choose a topic lane to continue.")
         return build_config()
