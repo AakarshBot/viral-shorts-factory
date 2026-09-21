@@ -1379,7 +1379,7 @@ def test_upload_controller_keeps_real_upload_path_without_dashboard_qc_recheck()
 def test_runtime_initialisation_does_not_repeat_idempotent_installers():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = source.index("def initialise_runtime")
-    end = source.index("\ndef check_required_local_assets", start)
+    end = source.index("\ndef _channel_options", start)
     initialise = source[start:end]
     assert initialise.count("install_visual_qa_bridge(visual_runtime)") == 1
     assert initialise.count("patch_provider_adapters(ultimate_bot)") == 1
