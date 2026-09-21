@@ -787,9 +787,6 @@ def reset_run() -> None:
         _remember_unpublished_topic(selected_story)
     controller.reset()
     for key, value in {
-    controller: DashboardWorkflowController = st.session_state.workflow_controller
-    controller.reset()
-    for key, value in {
         "candidates": [],
         "web_config": {},
         "production_started": False,
@@ -808,7 +805,6 @@ def reset_run() -> None:
         "metadata_pending_values": None,
     }.items():
         st.session_state[key] = value
-
 
 DEEP_DIVE_TOPICS = (
     "national_global_affairs",
