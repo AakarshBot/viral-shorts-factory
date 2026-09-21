@@ -16,11 +16,6 @@ from typing import Any, Dict
 
 import streamlit as st
 
-try:
-    from streamlit_cropper import st_cropper
-except ModuleNotFoundError:
-    st_cropper = None
-
 import ultimate_bot
 from db_architecture import migrate_vault
 from diagnostics_runtime import run_offline_diagnostics
@@ -2137,7 +2132,9 @@ def _render_crop_dialog(
             st.rerun()
         return
 
-    if st_cropper is None:
+    try:
+        from streamlit_cropper import st_cropper as cropper
+    except ModuleNotFoundError:
         st.error("Interactive cropping is unavailable in this Python environment.")
         if st.button("Close", width="stretch", key=f"close_crop_unavailable_{target[:32]}"):
             st.session_state["visual_crop_target"] = ""
@@ -2167,7 +2164,7 @@ def _render_crop_dialog(
         key=f"crop_dialog_mode_{snapshot.get('run_id','active')}_{target[:32]}",
     )
     crop_is_shorts = crop_mode == "Shorts 9:16"
-    crop_result = st_cropper(
+    crop_result = cropper(
         img_file=image,
         realtime_update=True,
         default_coords=default_coords,
