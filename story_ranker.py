@@ -2045,7 +2045,7 @@ def rank_discovery_candidates(
             social_titles,
             ai_cricket,
         )
-        for item in stage50
+        for item in stage30
     ]
     ranked.sort(
         key=lambda item: _safe_float(item.get("candidate_score")) or -9999.0,
