@@ -35,17 +35,17 @@ FORMAT_OPTIONS = {
 CRICKET_CATEGORIES = {
     "India / Asia": {
         "key": "cricket_india_asia",
-        "query": "India Cricket OR Pakistan Cricket OR Sri Lanka Cricket OR Bangladesh Cricket OR BCCI OR PCB OR SLC OR BCB OR ACB",
+        "query": "(India OR Indian OR BCCI OR IPL OR WPL OR Pakistan OR Sri Lanka OR Bangladesh) (cricket OR Test OR ODI OR T20) (match OR result OR squad OR selection OR injury OR record OR series OR final OR win OR loss)",
         "rss": "https://news.google.com/rss/search?q=India+Cricket+OR+Pakistan+Cricket+OR+BCCI+OR+PCB&hl=en-IN&gl=IN&ceid=IN:en",
     },
     "Global": {
         "key": "cricket_global",
-        "query": "ICC Cricket OR Australia Cricket OR England Cricket OR New Zealand Cricket OR South Africa Cricket OR West Indies Cricket OR Test Cricket OR T20 Cricket",
+        "query": "(ICC OR Australia Cricket OR England Cricket OR New Zealand Cricket OR South Africa Cricket OR West Indies Cricket OR Test Cricket OR T20 Cricket) (match OR result OR squad OR series OR final OR record OR win OR loss OR tournament)",
         "rss": "https://news.google.com/rss/search?q=ICC+Cricket+OR+Australia+Cricket+OR+England+Cricket+OR+Test+Cricket&hl=en-IN&gl=IN&ceid=IN:en",
     },
     "AI-assisted top story in cricket": {
         "key": "cricket_ai_today",
-        "query": "Cricket OR ICC OR BCCI OR Test Cricket OR T20 Cricket OR IPL OR PSL OR Big Bash",
+        "query": "(Cricket OR ICC OR BCCI OR IPL OR WPL OR PSL OR Big Bash) (match OR result OR squad OR selection OR record OR series OR final OR win OR loss OR tournament)",
         "rss": "https://news.google.com/rss/search?q=Cricket+OR+ICC+OR+BCCI+OR+Test+Cricket+OR+T20+Cricket&hl=en-IN&gl=IN&ceid=IN:en",
     },
 }
