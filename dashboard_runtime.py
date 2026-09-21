@@ -1674,8 +1674,6 @@ class DashboardWorkflowController(WorkflowController):
             old_path = str(layer.get("image") or "").strip()
             old_query = str(layer.get("manual_visual_query") or layer.get("visual_query_used") or "").strip()
 
-            self._return_slide_visual_to_pool(layer, scene)
-
             new_bank = [
                 item for item in bank
                 if str(item.get("path") or "").strip() != selected_path
@@ -1715,6 +1713,8 @@ class DashboardWorkflowController(WorkflowController):
                 f"scene_{index}_bank_replacement_{attempt}.jpg",
             )
             rendered.convert("RGBA").convert("RGB").save(replacement_path, "JPEG", quality=95)
+
+            self._return_slide_visual_to_pool(layer, scene)
 
             selected_source = str(selected.get("source") or "verified-bank").strip()
             selected_query = str(selected.get("query") or "").strip()
