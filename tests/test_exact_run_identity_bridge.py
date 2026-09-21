@@ -42,3 +42,25 @@ def test_production_runner_uses_identity_bridge_for_raw_runner(monkeypatch):
 
     assert workflow_runtime._run_production_runner(bot, config) == "bridged"
     assert calls == [(bot, config)]
+
+
+def test_exact_identity_does_not_patch_process_wide_sqlite(monkeypatch):
+    import sqlite3
+    from types import SimpleNamespace
+    import db_runtime
+
+    module_connect = sqlite3.connect
+    seen = []
+
+    def raw_runner(**_kwargs):
+        seen.append(sqlite3.connect is module_connect)
+        return "ran"
+
+    bot = SimpleNamespace(run_robot=raw_runner, sqlite3=sqlite3, DB_PATH=":memory:")
+    monkeypatch.setattr(db_runtime, "migrate_vault", lambda _conn: None)
+
+    assert db_runtime.run_robot_with_exact_identity(
+        bot, {"selected_story": {"title": "Test"}}
+    ) == "ran"
+    assert seen == [False]
+    assert sqlite3.connect is module_connect
