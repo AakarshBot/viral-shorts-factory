@@ -44,6 +44,7 @@ from dashboard_runtime import (
     run_demo_section,
     upload_ready_for_manual_decision,
     live_monitor_should_poll,
+    _manual_crop_box_to_shorts,
 )
 
 
@@ -1634,18 +1635,25 @@ def _render_crop_dialog(
         box_color="#177fd1",
         aspect_ratio=(9, 16) if crop_is_shorts else None,
         box_algorithm=_recommended_shorts_crop_box if crop_is_shorts else None,
-        return_type="both",
+        return_type="box",
         key=f"crop_dialog_{snapshot.get('run_id','active')}_{target[:32]}",
         should_resize_image=True,
         stroke_width=3,
     )
-    if isinstance(crop_result, tuple) and len(crop_result) == 2:
-        crop_preview, crop_box = crop_result
-    else:
-        crop_preview, crop_box = crop_result, {}
+    crop_box = crop_result if isinstance(crop_result, dict) else {}
+    crop_preview = None
+    if crop_box:
+        try:
+            crop_preview = _manual_crop_box_to_shorts(
+                image,
+                crop_box,
+                free_size=not crop_is_shorts,
+            )
+        except (TypeError, ValueError):
+            crop_preview = None
 
     if crop_preview is not None:
-        st.image(crop_preview, width=260)
+        st.image(crop_preview, width=280)
 
     action_cols = st.columns([1, 1])
     with action_cols[0]:
