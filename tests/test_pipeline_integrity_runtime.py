@@ -57,6 +57,7 @@ def test_strict_fallback_uses_only_source_words():
         "hook", "development", "context", "consequence"
     ]
 
+
 def test_strict_fallback_refuses_thin_source_instead_of_inventing_text():
     try:
         strict_fallback({"title": "Short story", "text": "Only a few words."})
@@ -119,9 +120,8 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
     assert "<b>" not in scene["voiceover"].lower()
     assert "nbsp" not in scene["voiceover"].lower()
 
-def test_strict_fallback_does_not_leak_provider_noise():
-    bot = _Bot()
 
+def test_strict_fallback_does_not_leak_provider_noise():
     source = (
         "India announced a new policy today. "
         "The ministry said the measure will begin next month after the published timetable is finalized. "
@@ -133,16 +133,15 @@ def test_strict_fallback_does_not_leak_provider_noise():
         genre_key="news",
         format_mode="regular",
     )
+    cleaned = _clean_script_result(
+        result,
+        {"title": "India announces new policy", "text": source},
+        "regular",
+    )
 
-    assert result["fallback_mode"] == "strict_source_only"
-    assert result["authoritative_narration"] is True
-    assert result["public_publish_blocked"] is True
-    assert all("Groq" not in scene["voiceover"] for scene in result["script"])
-    assert all("JSON schema" not in scene["voiceover"] for scene in result["script"])
-    assert all(scene["narration_source"] == "validated_script" for scene in result["script"])
-
-
-
-
-
-
+    assert cleaned["authoritative_narration"] is True
+    assert cleaned["fallback_mode"] == "strict_source_only"
+    assert cleaned["public_publish_blocked"] is True
+    assert all("Groq" not in scene["voiceover"] for scene in cleaned["script"])
+    assert all("JSON schema" not in scene["voiceover"] for scene in cleaned["script"])
+    assert all(scene["narration_source"] == "validated_script" for scene in cleaned["script"])
