@@ -22,24 +22,24 @@ def apply_dashboard_theme() -> None:
 <style>
 /* VSF EDITORIAL UI — presentation only */
 :root{
-  --vsf-bg:#f5f1ea;
-  --vsf-surface:#fffdf9;
-  --vsf-surface-2:#faf6ef;
-  --vsf-ink:#202629;
-  --vsf-muted:#777168;
-  --vsf-faint:#a49a8d;
-  --vsf-line:#e5dbcf;
-  --vsf-line-2:#d5c7b8;
-  --vsf-teal:#2f6265;
-  --vsf-teal-dark:#244d50;
-  --vsf-teal-soft:#e8f1ef;
-  --vsf-coral:#c56a4c;
-  --vsf-green:#39765e;
+  --vsf-bg:#f2f5f4;
+  --vsf-surface:#ffffff;
+  --vsf-surface-2:#f7f9f8;
+  --vsf-ink:#182326;
+  --vsf-muted:#677278;
+  --vsf-faint:#96a1a4;
+  --vsf-line:#dfe6e5;
+  --vsf-line-2:#cbd7d5;
+  --vsf-teal:#256b6d;
+  --vsf-teal-dark:#1d5052;
+  --vsf-teal-soft:#e8f2f1;
+  --vsf-coral:#c95f43;
+  --vsf-green:#2f7359;
   --vsf-green-soft:#eaf4ee;
   --vsf-amber:#a96c32;
   --vsf-amber-soft:#fbf0e3;
-  --vsf-shadow:0 12px 34px rgba(60,45,30,.065);
-  --vsf-shadow-hover:0 20px 46px rgba(60,45,30,.105);
+  --vsf-shadow:0 14px 38px rgba(22,44,48,.065);
+  --vsf-shadow-hover:0 22px 50px rgba(22,44,48,.105);
 }
 
 /* Calm canvas: fewer competing surfaces, softer contrast. */
@@ -51,7 +51,7 @@ html,body,[data-testid="stAppViewContainer"],.stApp{
   color:var(--vsf-ink)!important;
 }
 [data-testid="stHeader"]{
-  background:rgba(245,241,234,.84)!important;
+  background:rgba(242,245,244,.84)!important;
   border-bottom:1px solid rgba(213,199,184,.55)!important;
   backdrop-filter:blur(14px)!important;
 }
@@ -87,7 +87,7 @@ p{color:var(--vsf-ink)!important}
   padding:16px 22px!important;
   border-radius:20px!important;
   border:1px solid var(--vsf-line)!important;
-  background:linear-gradient(135deg,#fffdf9,#f7efe5)!important;
+  background:linear-gradient(135deg,#ffffff,#eef5f4)!important;
   box-shadow:var(--vsf-shadow)!important;
 }
 .brand-card:after{
@@ -339,14 +339,14 @@ p{color:var(--vsf-ink)!important}
 
 /* Sidebar becomes a warm control rail, not a second dark app. */
 section[data-testid="stSidebar"]{
-  background:#eee5da!important;
-  border-right:1px solid #d9ccbd!important;
+  background:#e7efed!important;
+  border-right:1px solid #d2dedc!important;
 }
 section[data-testid="stSidebar"]>div{padding-top:1rem!important}
 section[data-testid="stSidebar"] .stMarkdown p,
 section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
-  color:#665f56!important;
+  color:#5f6b70!important;
 }
 .sidebar-kicker{
   color:var(--vsf-teal)!important;
@@ -359,8 +359,8 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
   font-weight:900!important;
 }
 .sidebar-status{
-  background:rgba(255,253,249,.86)!important;
-  border:1px solid #d8cbbd!important;
+  background:rgba(255,255,255,.90)!important;
+  border:1px solid #d2dedd!important;
   border-radius:12px!important;
   padding:10px 11px!important;
 }
