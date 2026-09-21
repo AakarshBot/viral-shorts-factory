@@ -12,13 +12,13 @@ class _FakeResponse:
 
 def test_latest_trustworthy_publication_or_update_time_drives_freshness():
     story = {
-        "publishedAt": "2026-09-20T10:00:00+00:00",
-        "updated_at": "2026-09-22T09:00:00+00:00",
+        "publishedAt": "2026-09-17T10:00:00+00:00",
+        "updated_at": "2026-09-21T18:00:00+00:00",
     }
 
     observed = story_ranker._published_datetime(story)
 
-    assert observed == datetime(2026, 9, 22, 9, 0, tzinfo=timezone.utc)
+    assert observed == datetime(2026, 9, 21, 18, 0, tzinfo=timezone.utc)
 
 
 def test_rss_adapter_accepts_atom_entries(monkeypatch):
