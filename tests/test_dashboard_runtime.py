@@ -1374,3 +1374,30 @@ def test_upload_controller_keeps_real_upload_path_without_dashboard_qc_recheck()
     assert "live_qc_passes" not in block
     assert "evaluate_live_qc_gates" not in block
     assert "self._real_uploader" in block
+
+
+def test_dashboard_mobile_responsive_contract():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert '@media(max-width:768px)' in app_source
+    assert '@media(max-width:480px)' in app_source
+    assert 'st.image(item["path"], width="stretch")' in app_source
+    assert 'st.image(path, width="stretch")' in app_source
+    assert 'st.image(crop_preview, width="stretch")' in app_source
+    assert '.stButton>button,.stLinkButton>a{width:100%!important}' in app_source
+    assert 'font-size:16px!important' in app_source
+    assert 'section[data-testid="stSidebar"] .stRadio label{min-height:44px}' in app_source
+
+
+def test_live_navigation_pills_wrap_on_narrow_screens():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    for key in (
+        'key="live_format_menu"',
+        'key="live_topic_menu"',
+        'key="live_sports_menu"',
+        'key="live_cricket_scope_menu"',
+    ):
+        position = app_source.index(key)
+        block = app_source[position:position + 180]
+        assert 'wrap=True' in block
