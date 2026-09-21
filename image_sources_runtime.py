@@ -125,7 +125,8 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
         return []
     page = _provider_page(_args)
     manual_mode = _manual_mode(_args)
-    payload = _read_cache("openverse", q, page)
+    cache_provider = "openverse-manual" if manual_mode else "openverse"
+    payload = _read_cache(cache_provider, q, page)
     if payload is None:
         try:
             response = requests.get(
@@ -151,7 +152,7 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
             payload = response.json()
             if not isinstance(payload, dict):
                 return []
-            _write_cache("openverse", q, payload, page)
+            _write_cache(cache_provider, q, payload, page)
         except Exception as exc:
             print(f"   [Visual Source] Openverse | failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
             return []
