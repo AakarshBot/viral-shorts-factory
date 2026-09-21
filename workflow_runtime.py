@@ -116,7 +116,11 @@ def _story_key(story: Dict[str, Any]) -> str:
 
 def _load_used_topics(conn) -> List[str]:
     try:
-        rows = conn.execute("SELECT topic FROM vault WHERE topic IS NOT NULL").fetchall()
+        rows = conn.execute(
+            "SELECT topic FROM vault WHERE topic IS NOT NULL AND topic != '' "
+            "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+        ).fetchall()
         return [str(row[0]) for row in rows if row and row[0]]
     except Exception as exc:
         print(f"   [Workflow] Could not load used topics: {exc}")
