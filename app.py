@@ -1355,33 +1355,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
 
     st.markdown("### Available verified images")
     render_pool_section(
-        "Unused verified pool",
-        "Images that passed monetization and identity checks but are not currently assigned to a slide.",
+        "All AI-checked images",
+        "Every unused image that passed the AI identity check and lenient monetization check is shown here, regardless of context or soft resolution.",
         available,
         "verified",
     )
 
-    st.markdown("### Provenance review images")
-    st.caption(
-        "These images passed identity checks but their commercial-use licence could not be verified automatically. "
-        "They remain available for your manual choice, but the factory will not auto-select them."
-    )
-    render_pool_section(
-        "Provenance review",
-        "Identity-verified alternatives retained instead of being discarded. Confirm the usage rights yourself before choosing one.",
-        provenance_review,
-        "provenance-review",
-    )
-
-    st.markdown("### Identity-verified, lower-resolution images")
-    render_pool_section(
-        "Resolution review",
-        "These passed the identity test but fell below the normal resolution target; you can still use them manually.",
-        rejected,
-        "rejected",
-        rejected_section=True,
-    )
-
+    # All retained images are already shown in the single pool above.
     st.markdown("### New manual searches")
     st.caption("Each search returns up to 10 NEW images that passed the AI identity check and lenient monetization check. Context suitability is left to you.")
     for group in search_groups:
