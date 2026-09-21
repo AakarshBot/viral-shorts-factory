@@ -97,7 +97,7 @@ def _source_domain(story):
 
 
 def _published_datetime(story):
-    """Return the best publication timestamp, using update time only as a fallback."""
+    """Return the newest trustworthy publication/update timestamp available."""
     def _parse_timestamp(raw):
         if raw in (None, ""):
             return None
@@ -123,21 +123,22 @@ def _published_datetime(story):
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
-    # Publication time is the primary freshness clock. Treating a routine
-    # page edit as a brand-new story can surface an old article as "today".
-    for key in ("published_at", "publishedAt", "published", "pub_date", "date", "timestamp"):
+    candidates = []
+    for key in (
+        "updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated",
+        "published_at", "publishedAt", "published", "pub_date", "date", "timestamp",
+    ):
         parsed = _parse_timestamp(story.get(key))
         if parsed is not None:
-            return parsed
+            candidates.append(parsed)
 
-    # Some feeds omit publication time but expose a trustworthy update time.
-    # Keep that as a fallback rather than losing the candidate entirely.
-    for key in ("updated_at", "updatedAt", "modified_at", "modifiedAt", "last_updated"):
-        parsed = _parse_timestamp(story.get(key))
-        if parsed is not None:
-            return parsed
-
-    return None
+    now = datetime.now(timezone.utc)
+    future_cutoff = now.timestamp() + (15 * 60)
+    trustworthy = [
+        value for value in candidates
+        if value.timestamp() <= future_cutoff
+    ]
+    return max(trustworthy) if trustworthy else None
 
 
 def _age_hours(story):
@@ -573,6 +574,9 @@ GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
 REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
 
 DISCOVERY_OVERALL_WAIT_SECONDS = 10.0
+# Backward-compatible test/diagnostic name; discovery uses the single overall
+# wall-clock budget above and never waits on the signal lane separately.
+DISCOVERY_SIGNAL_WAIT_SECONDS = 8.0
 DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
 DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
 DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
