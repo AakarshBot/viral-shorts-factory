@@ -520,6 +520,10 @@ def patch_content_first_visuals(bot):
                 allow_auto_backfill=False,
             )
             for asset in manual_pool_result.get("assets") or []:
+                if str(asset.get("provenance_status") or "").strip() != "commercial-verified":
+                    # Rights-review images remain available to the human QC pool,
+                    # but must never enter the verified automatic cache.
+                    continue
                 try:
                     visual_runtime.save_to_cache(
                         bot,
