@@ -71,7 +71,7 @@ def _ui_html(value: Any, fallback: str = "") -> str:
     return html.escape(_ui_text(value, fallback), quote=False)
 
 
-st.set_page_config(page_title="Viral Shorts Factory", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Shorts Studio", page_icon="🎬", layout="wide")
 
 st.markdown("""<style>
 :root{
@@ -240,7 +240,25 @@ div[data-testid="stExpander"] summary p{font-size:.8rem;font-weight:800;color:va
 }
 .story-title,.output-card{line-height:1.5}
 .story-reason{max-height:7.5rem;overflow:auto;padding-right:4px}
-.topic-card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:17px 17px 15px;box-shadow:var(--shadow);height:100%}
+.topic-card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:17px 17px 15px;box-shadow:var(--shadow);height:100%;min-height:232px;display:flex;flex-direction:column}
+.topic-card-actions{margin-top:auto}
+.progress-hero{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px;box-shadow:var(--shadow);margin:12px 0 16px}
+.progress-hero-head{display:flex;justify-content:space-between;gap:16px;align-items:baseline}
+.progress-hero-title{font-size:.95rem;font-weight:900;color:var(--text)}
+.progress-hero-value{font-size:1.45rem;font-weight:900;color:var(--accent-deep);letter-spacing:-.04em}
+.progress-track{height:9px;background:#ebe8e3;border-radius:999px;overflow:hidden;margin:11px 0 14px}
+.progress-track-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#3d6f74,#7e9f96);transition:width .35s ease}
+.progress-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:.71rem}
+.progress-steps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:14px}
+.progress-step{min-width:0;background:#f7f3ed;border:1px solid #e7ddd1;border-radius:11px;padding:8px 9px}
+.progress-step.active{background:#eaf2f1;border-color:#95b5b2}
+.progress-step.done{background:#eef7f1;border-color:#bcd9ca}
+.progress-step.stopped{background:#fcf1e6;border-color:#ebcbb1}
+.progress-step-index{font-size:.58rem;font-weight:900;letter-spacing:.12em;color:var(--muted-2)}
+.progress-step-name{font-size:.69rem;font-weight:850;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.progress-step-state{font-size:.61rem;color:var(--muted);margin-top:3px}
+@media(max-width:1100px){.progress-steps{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:700px){.progress-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .topic-kicker{display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--accent);font-size:.64rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
 .topic-title{font-size:1.08rem;font-weight:850;line-height:1.34;color:var(--text);overflow-wrap:anywhere}
 .topic-subtitle{font-size:.76rem;line-height:1.45;color:var(--muted)}
@@ -688,6 +706,7 @@ def _init_state() -> None:
 
     defaults = {
         "candidates": [],
+        "retained_topics": [],
         "web_config": {},
         "production_started": False,
         "upload_result": "",
@@ -720,7 +739,53 @@ def _init_state() -> None:
             st.session_state[key] = value
 
 
+def _topic_identity(candidate: Dict[str, Any]) -> str:
+    story_key = str(candidate.get("story_key") or "").strip().casefold()
+    if story_key:
+        return story_key
+    title = str(candidate.get("title") or "").strip().casefold()
+    url = str(candidate.get("story_url") or candidate.get("url") or candidate.get("link") or "").strip().casefold()
+    return re.sub(r"[^a-z0-9]+", " ", f"{title} {url}").strip()
+
+
+def _remember_unpublished_topic(candidate: Dict[str, Any]) -> None:
+    if not isinstance(candidate, dict) or not str(candidate.get("title") or "").strip():
+        return
+    key = _topic_identity(candidate)
+    if not key:
+        return
+    retained = [
+        dict(item)
+        for item in (st.session_state.get("retained_topics") or [])
+        if isinstance(item, dict) and _topic_identity(item) != key
+    ]
+    copy = dict(candidate)
+    copy["retained_from_previous_run"] = True
+    retained.insert(0, copy)
+    st.session_state.retained_topics = retained[:40]
+
+
+def _forget_unpublished_topic(candidate: Dict[str, Any]) -> None:
+    if not isinstance(candidate, dict):
+        return
+    key = _topic_identity(candidate)
+    if not key:
+        return
+    st.session_state.retained_topics = [
+        dict(item)
+        for item in (st.session_state.get("retained_topics") or [])
+        if isinstance(item, dict) and _topic_identity(item) != key
+    ]
+
+
 def reset_run() -> None:
+    controller: DashboardWorkflowController = st.session_state.workflow_controller
+    before_reset = controller.snapshot()
+    selected_story = before_reset.get("selected_story") or {}
+    if selected_story and not str(before_reset.get("uploaded_video_id") or "").strip():
+        _remember_unpublished_topic(selected_story)
+    controller.reset()
+    for key, value in {
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     controller.reset()
     for key, value in {
@@ -885,14 +950,14 @@ def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
 
 def render_header(action_mode: str) -> None:
     titles = {
-        "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Live": ("Live", "Current stories, review controls and release."),
         "Test": ("Test", "Diagnostics, previews and engineering checks."),
-        "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
-        "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
-        "Demo Factory": ("Demo Factory", "Controlled tests for factory components."),
-        "Final Branding Preview": ("Final Branding Preview", "Inspect the canonical branding compositor."),
+        "Channel Statistics": ("Analytics", "Connected-channel totals and performance history."),
+        "Offline Diagnostics": ("Diagnostics", "Safe code and runtime checks."),
+        "Demo": ("Demo", "Controlled checks for selected components."),
+        "Final Branding Preview": ("Brand preview", "Inspect the canonical branding compositor."),
     }
-    title, subtitle = titles.get(action_mode, ("Dashboard", "Viral Shorts Factory"))
+    title, subtitle = titles.get(action_mode, ("Studio", "Editorial workspace"))
 
     logo_path = ""
     brand_dir = getattr(ultimate_bot, "BRAND_ASSETS_DIR", None)
@@ -903,34 +968,30 @@ def render_header(action_mode: str) -> None:
                 logo_path = candidate_path
                 break
 
-    left, middle, right = st.columns([0.75, 5.45, 1.4], gap="medium")
+    left, middle, right = st.columns([0.55, 5.8, 1.35], gap="medium")
     with left:
         if logo_path:
-            st.image(logo_path, width=72)
+            st.image(logo_path, width=62)
         else:
-            st.markdown("<div style='font-size:2.3rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:2rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
     with middle:
         st.markdown(
             f"<div class='brand-card'>"
-            f"<div class='brand-eyebrow'><span class='brand-dot'></span> Editorial studio · Human review</div>"
+            f"<div class='brand-eyebrow'><span class='brand-dot'></span> Editorial workspace</div>"
             f"<span class='brand-pill'>{title}</span>"
-            f"<div class='brand-title'>Viral Shorts Factory</div>"
-            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>"
-            f"<div class='brand-trust-row'>"
-            f"<span class='brand-trust-chip'>◌ <strong>India-first</strong> discovery</span>"
-            f"<span class='brand-trust-chip'>✓ Human approval gates</span>"
-            f"<span class='brand-trust-chip'>⚡ Parallel discovery radar</span>"
-            f"</div>",
+            f"<div class='brand-title'>Shorts Studio</div>"
+            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>",
             unsafe_allow_html=True,
         )
     with right:
         snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
-        status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
+        status = "RUNNING" if snapshot.get("thread_alive") else ("READY" if not snapshot.get("completed") else "DONE")
         st.markdown(
-            f"<div class='factory-status'><div class='factory-status-label'>FACTORY STATUS</div>"
+            f"<div class='factory-status'><div class='factory-status-label'>WORKSPACE STATUS</div>"
             f"<div class='factory-status-value'>{_ui_html(status)}</div></div>",
             unsafe_allow_html=True,
         )
+
 
 def _clear_live_downstream() -> None:
     """Clear only choices that depend on the currently selected Live menu."""
@@ -978,9 +1039,9 @@ def render_live_navigation() -> Dict[str, Any]:
     """Render the deliberate Live hierarchy and return the production config."""
     st.session_state["live_path_ready"] = False
     _render_section_header(
-        "Live Factory",
-        "Choose your production path",
-        "Open one level at a time. Deeper controls appear only when the current choice needs them.",
+        "Live",
+        "Build a Short",
+        "Choose a format, then a topic lane.",
     )
 
     format_choice = st.pills(
@@ -1001,10 +1062,10 @@ def render_live_navigation() -> Dict[str, Any]:
 
     live_format = st.session_state.get("live_format_selection") or ""
     if not live_format:
-        st.caption("Choose Deep Dive, Top 5 or Sports to open the next menu.")
+        st.caption("Choose a format to continue.")
         return build_config()
 
-    st.markdown("<div class='live-choice-label'>Choose a section</div>", unsafe_allow_html=True)
+    st.markdown("<div class='live-choice-label'>Topic lane</div>", unsafe_allow_html=True)
 
     final_path_ready = False
     if live_format in {"Deep Dive", "Top 5"}:
@@ -1065,11 +1126,11 @@ def render_live_navigation() -> Dict[str, Any]:
             st.session_state["live_path_ready"] = True
 
     if not final_path_ready:
-        st.caption("Choose the highlighted menu item to open the next level.")
+        st.caption("Choose a topic lane to continue.")
         return build_config()
 
     with st.expander("Production settings", expanded=False):
-        st.caption("These settings are kept out of the navigation until you reach a complete production path.")
+        st.caption("Optional release settings.")
         columns = st.columns(3, gap="medium")
 
         language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
@@ -1123,115 +1184,93 @@ def render_live_navigation() -> Dict[str, Any]:
 
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
-    """Render one accordion per production stage, opening only the active stage."""
     stages = [
-        ("Headlines", "discovery", 0, 14),
-        ("Research", "research", 15, 23),
-        ("Script QC", "script", 24, 40),
-        ("Voiceover", "audio", 41, 54),
-        ("Visual QC", "visuals", 55, 76),
-        ("Render", "render", 77, 95),
-        ("Final QC", "qc", 96, 100),
+        ("Headlines", "discovery"),
+        ("Research", "research"),
+        ("Script", "script_review"),
+        ("Voiceover", "audio"),
+        ("Visuals", "visual_approval"),
+        ("Render", "render"),
+        ("Final QC", "qc"),
     ]
     current = str(snapshot.get("stage") or "idle").strip()
     percent = max(0, min(100, int(snapshot.get("percent", 0) or 0)))
-    active_key = {
-        "script_review": "script",
-        "visual_approval": "visuals",
-    }.get(current, current)
-    if active_key not in {item[1] for item in stages}:
-        if current == "error":
-            active_key = next(
-                (key for _label, key, lo, hi in stages if lo <= percent <= hi),
-                "qc",
-            )
-        else:
-            active_key = "discovery"
+    current_key = {"script": "script_review", "visuals": "visual_approval"}.get(current, current)
+    bounds = {
+        "discovery": (0, 14),
+        "research": (15, 23),
+        "script_review": (24, 40),
+        "audio": (41, 54),
+        "visual_approval": (55, 76),
+        "render": (77, 95),
+        "qc": (96, 100),
+    }
+    if current == "error":
+        current_key = next((key for key, (lo, hi) in bounds.items() if lo <= percent <= hi), "qc")
 
-    _render_section_header(
-        "Production pipeline",
-        "Run progress",
-        "Each stage contains its own progress and review controls. Only the active stage is opened.",
+    active_index = next((i for i, (_label, key) in enumerate(stages) if key == current_key), -1)
+    if snapshot.get("completed"):
+        current_key = "qc"
+        active_index = len(stages) - 1
+
+    label_map = dict((key, label) for label, key in stages)
+    current_label = label_map.get(current_key, "Ready")
+    message = _ui_text(snapshot.get("message"), "Ready.")
+    if current == "error":
+        message = _ui_text(snapshot.get("error") or message, "The run stopped before completion.")
+
+    cards = []
+    for index, (label, key) in enumerate(stages):
+        if snapshot.get("completed") or (active_index >= 0 and index < active_index):
+            state, status = "done", "Done"
+        elif key == current_key:
+            state = "stopped" if current == "error" else "active"
+            status = "Stopped" if current == "error" else "Now"
+        else:
+            state, status = "", "Next"
+        cards.append(
+            f"<div class='progress-step {state}'>"
+            f"<div class='progress-step-index'>{index + 1:02d}</div>"
+            f"<div class='progress-step-name'>{_ui_html(label)}</div>"
+            f"<div class='progress-step-state'>{status}</div></div>"
+        )
+
+    _render_section_header("Progress", "Production", "")
+    st.markdown(
+        f"<div class='progress-hero'>"
+        f"<div class='progress-hero-head'><div class='progress-hero-title'>{_ui_html(current_label)}</div>"
+        f"<div class='progress-hero-value'>{percent}%</div></div>"
+        f"<div class='progress-track'><div class='progress-track-fill' style='width:{percent}%'></div></div>"
+        f"<div class='progress-meta'><span>{_ui_html(message)}</span><span>Step {max(1, active_index + 1)} of {len(stages)}</span></div>"
+        f"<div class='progress-steps'>{''.join(cards)}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
-    message = str(snapshot.get("message") or "").strip()
-    for label, key, low, high in stages:
-        if percent >= high:
-            stage_progress = 100
-            status = "DONE"
-            icon = "✓"
-        elif active_key == key:
-            span = max(1, high - low)
-            stage_progress = max(0, min(100, int(round(((percent - low) / span) * 100))))
-            status = "IN PROGRESS"
-            icon = "●"
+    controller = snapshot.get("_controller") or st.session_state.workflow_controller
+    if current_key == "research":
+        render_research_summary(snapshot)
+    elif current_key == "script_review":
+        render_script_visual_query_review(controller, snapshot)
+    elif current_key == "audio":
+        render_audio_preview(snapshot)
+    elif current_key == "visual_approval":
+        if snapshot.get("visual_review_required"):
+            render_visual_review(controller, snapshot)
         else:
-            stage_progress = 0
-            status = "UP NEXT"
-            icon = "○"
-
-        if current == "error" and key == active_key:
-            status = "STOPPED"
-            icon = "⚠️"
-
-        with st.expander(
-            f"{icon} {label}  ·  {status}  ·  {stage_progress}%",
-            expanded=active_key == key,
-        ):
-            st.progress(stage_progress / 100.0, text=f"{stage_progress}% · {label}")
-            if active_key == key and message:
-                st.markdown(
-                    f"<div class='live-bar'><div class='live-bar-copy'><b>Now</b> · {_ui_html(message)}</div></div>",
-                    unsafe_allow_html=True,
-                )
-
-            if key == "discovery":
-                story = snapshot.get("selected_story") or {}
-                if story:
-                    st.markdown(
-                        f"<div class='panel'><div class='small-muted'>SELECTED HEADLINE</div>"
-                        f"<div class='story-title'>{_ui_html(story.get('title'))}</div></div>",
-                        unsafe_allow_html=True,
-                    )
-                elif active_key == key:
-                    st.caption("Waiting for the selected headline to enter production.")
-
-            elif key == "research":
-                render_research_summary(snapshot)
-
-            elif key == "script":
-                if snapshot.get("script_review_required"):
-                    render_script_visual_query_review(
-                        snapshot.get("_controller") or st.session_state.workflow_controller,
-                        snapshot,
-                    )
-                else:
-                    render_script(snapshot)
-
-            elif key == "audio":
-                render_audio_preview(snapshot)
-
-            elif key == "visuals":
-                controller = snapshot.get("_controller") or st.session_state.workflow_controller
-                if snapshot.get("visual_review_required"):
-                    render_visual_review(controller, snapshot)
-                else:
-                    items = _visual_items(snapshot)
-                    if items:
-                        ready = sum(1 for item in items if item.get("qc_passed"))
-                        st.metric("Verified visuals", f"{ready}/{len(items)}")
-
-            elif key == "render":
-                render_generated_outputs(snapshot)
-                render_console(snapshot)
-
-            elif key == "qc":
-                controller = snapshot.get("_controller") or st.session_state.workflow_controller
-                render_upload_panel(controller, snapshot)
-                if snapshot.get("stage") == "error":
-                    st.error(snapshot.get("error") or "The factory stopped with an error.")
-                if snapshot.get("completed"):
-                    render_logs(snapshot)
+            items = _visual_items(snapshot)
+            if items:
+                ready = sum(1 for item in items if item.get("qc_passed"))
+                st.caption(f"{ready}/{len(items)} visuals ready")
+    elif current_key == "render":
+        render_generated_outputs(snapshot)
+        render_console(snapshot)
+    elif current_key == "qc":
+        render_upload_panel(controller, snapshot)
+        if snapshot.get("stage") == "error":
+            st.error(snapshot.get("error") or "The run stopped with an error.")
+        elif snapshot.get("completed"):
+            render_logs(snapshot)
 
 
 def _script_text(script_data: Dict[str, Any]) -> str:
@@ -1346,7 +1385,7 @@ def render_script_visual_query_review(
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not isinstance(scenes, list) or not scenes:
         st.warning("The script is not available for review yet.")
-        st.info("The factory is paused at script QC. Once the script payload is available, this review will appear here; PowerShell remains active while it waits.")
+        st.info("The run is paused at script review. Once the script payload is available, the review appears here; PowerShell remains active while it waits.")
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
@@ -1978,7 +2017,7 @@ def render_powershell_widget(snapshot: Dict[str, Any]) -> None:
                 st.code("\n".join(visible), language="powershell")
                 st.caption(f"{len(visible)} lines · stage: {_ui_text(stage, 'ready')}")
             else:
-                st.info("No factory PowerShell output captured yet.")
+                st.info("No worker output captured yet.")
 
 def render_console(snapshot: Dict[str, Any]) -> None:
     lines = snapshot.get("console_lines") or []
@@ -2002,7 +2041,7 @@ def render_console(snapshot: Dict[str, Any]) -> None:
             operation_label = "Final video render"
             break
 
-    st.markdown("### Live factory activity")
+    st.markdown("### Live activity")
     if operation_percent is not None:
         st.markdown(f"**{operation_label}** · {operation_percent}%")
         st.progress(max(0.0, min(1.0, operation_percent / 100)))
@@ -2323,13 +2362,13 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         _render_section_header(
             "Headline stage",
             "Choose a topic",
-            "The event-backed topic pool is ready. Select one to continue.",
+            "Current, event-backed stories are ready.",
         )
     else:
         _render_section_header(
             "Headline stage",
             "Find today's headlines",
-            "Your selected Live path is locked in above. Search current events and choose a topic before production starts.",
+            "Choose a story from the current event radar.",
         )
 
     if not st.session_state.candidates:
@@ -2339,13 +2378,12 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         with st.container():
             st.markdown(
                 "<div class='empty-state'><div class='empty-title'>Ready for a new Short</div>"
-                "<div class='empty-copy'>Search current stories and keep the final story choice in your hands. "
-                "The factory handles the ranking; you handle the decision.</div></div>",
+                "<div class='empty-copy'>Choose a current story. 
+                "Ranking is automatic; the final choice is yours.</div></div>",
                 unsafe_allow_html=True,
             )
             st.markdown(
                 f"<div class='meta-row'><span class='meta-chip'>Mode · {_ui_html(mode_label)}</span>"
-                f"<span class='meta-chip'>Language · {_ui_html(language_label)}</span>"
                 f"<span class='meta-chip'>Category · {_ui_html(category_label)}</span></div>",
                 unsafe_allow_html=True,
             )
@@ -2370,6 +2408,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                                 config,
                                 conn,
                                 max_candidates=MAX_DASHBOARD_DISCOVERY_HEADLINES,
+                                retained_candidates=st.session_state.get("retained_topics", []),
                             )
                     finally:
                         conn.close()
@@ -2398,7 +2437,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         _render_section_header(
             "Step 02",
             "Review your story & search terms",
-            "The factory has pre-built ranked image-search phrases. Edit them before production; only the terms left here will be searched.",
+            "Review the prepared image-search phrases before production.",
         )
         with st.container(border=True):
             st.markdown("<div class='story-rank'>SELECTED TOPIC</div>", unsafe_allow_html=True)
@@ -2483,7 +2522,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
     candidates = st.session_state.candidates
     total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
-    page_size = 5
+    page_size = 6
     page_count = max(1, (total + page_size - 1) // page_size)
     page = max(0, min(int(st.session_state.get("candidate_page", 0) or 0), page_count - 1))
     start_index = page * page_size
@@ -2504,7 +2543,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         unsafe_allow_html=True,
     )
 
-    for row_start in range(0, len(visible), 2):
+    for row_start in range(0, len(visible), 3):
         row = visible[row_start:row_start + 2]
         cols = st.columns(len(row), gap="medium")
         for local_index, candidate in enumerate(row):
@@ -2538,20 +2577,24 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         f"<div class='topic-title'>{_ui_html(title)}</div>"
                         f"<div class='topic-subtitle'>{_ui_html(topic_descriptor)}</div>"
                         f"<div class='topic-chips'>"
-                        f"<span class='topic-chip strong'>Event {actionability:.1f}/10</span>"
-                        f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}/10</span>"
-                        f"<span class='topic-chip'>India focus {india_focus:.1f}/10</span>"
+                        f"<span class='topic-chip strong'>Event {actionability:.1f}</span>"
+                        f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}</span>"
+                        f"<span class='topic-chip'>India {india_focus:.1f}</span>"
                         + (
                             f"<span class='topic-chip learning-chip'>Learning {channel_fit:.1f}/10 · {channel_fit_samples} upload(s)</span>"
                             if channel_fit_samples > 0
                             else ""
                         )
                         + (
-                            f"<span class='topic-chip learning-chip'>Past topic match · {history_matches}</span>"
-                            if history_matches > 0
+                            f"<span class='topic-chip learning-chip'>Held · previous run</span>"
+                            if candidate.get("retained_from_previous_run")
                             else ""
                         )
-                        + f"<span class='topic-chip'>Rank {score:.1f}</span>"
+                        + (
+                            f"<span class='topic-chip learning-chip'>Learning {channel_fit:.1f} · {channel_fit_samples}</span>"
+                            if channel_fit_samples > 0
+                            else ""
+                        )
                         f"</div>"
                         "</div>",
                         unsafe_allow_html=True,
@@ -2566,6 +2609,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                             st.link_button("Open source", url, width="stretch")
                     with action_cols[1]:
                         if st.button("Use topic →", type="primary", width="stretch", key=f"use_candidate_{absolute_index}"):
+                            _remember_unpublished_topic(candidate)
                             st.session_state.pending_candidate = dict(candidate)
                             st.session_state.visual_search_queries = ""
                             st.session_state.visual_query_story_key = ""
@@ -2592,7 +2636,7 @@ def render_channel_statistics() -> None:
     _render_section_header(
         "Analytics",
         "Channel performance",
-        "Live YouTube totals plus the factory's historical vault, retention and CTR data.",
+        "Live YouTube totals plus performance history, retention and CTR data.",
     )
 
     if not st.session_state.get("live_channel_stats"):
@@ -2620,8 +2664,8 @@ def render_channel_statistics() -> None:
     st.markdown(
         "<div class='learning-strip'>"
         "<div class='learning-strip-dot'></div>"
-        "<div><div class='learning-strip-title'>Factory learning is active</div>"
-        "<div class='learning-strip-copy'>Completed factory uploads with synced retention data influence topic ranking and format/category selection. Production auto-syncs analytics at most once every 24 hours; the dashboard refresh is manual.</div></div>"
+        "<div><div class='learning-strip-title'>Channel learning is active</div>"
+        "<div class='learning-strip-copy'>Published results with synced retention data influence topic ranking and format/category selection. Analytics syncs automatically at most once every 24 hours; refresh here is manual.</div></div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -2663,7 +2707,7 @@ def render_channel_statistics() -> None:
     refresh_result = st.session_state.get("analytics_refresh_result")
     if isinstance(refresh_result, dict):
         st.caption(
-            f"Factory analytics refresh: {int(refresh_result.get('updated', 0) or 0)} videos updated; "
+            f"Analytics refresh: {int(refresh_result.get('updated', 0) or 0)} videos updated; "
             f"{int(refresh_result.get('retention_ready', 0) or 0)} with retention; "
             f"{int(refresh_result.get('analytics_errors', 0) or 0)} analytics issue(s)."
         )
@@ -2671,7 +2715,7 @@ def render_channel_statistics() -> None:
     for label, table in (
         ("By format", stats["by_format"]),
         ("By language", stats["by_language"]),
-        ("Recent factory history", stats["recent"]),
+        ("Recent history", stats["recent"]),
     ):
         with st.expander(label, expanded=(label == "Recent factory history")):
             if table:
@@ -2688,9 +2732,9 @@ def render_channel_statistics() -> None:
         finally:
             conn.close()
 
-        st.markdown("### Factory learning")
+        st.markdown("### Channel learning")
         learning_cols = st.columns(3)
-        learning_cols[0].metric("Published factory videos", intelligence["videos"])
+        learning_cols[0].metric("Published videos", intelligence["videos"])
         learning_cols[1].metric("Videos with view data", intelligence["reported"])
         learning_cols[2].metric("Videos with retention", intelligence["retention_ready"])
 
@@ -2703,18 +2747,18 @@ def render_channel_statistics() -> None:
                         "Small samples are directional rather than causal."
                     )
     except Exception as exc:
-        st.warning(f"Factory learning summaries could not be loaded: {type(exc).__name__}: {exc}")
+        st.warning(f"Learning summaries could not be loaded: {type(exc).__name__}: {exc}")
 
 
 def render_offline_page() -> None:
     _render_section_header(
         "Engineering",
         "Offline diagnostics",
-        "Safe checks for the dashboard and factory contracts. No provider/API calls are made.",
+        "Safe checks for the dashboard and production contracts. No provider/API calls are made.",
     )
 
     if st.button("Run offline diagnostics", type="primary", width="content"):
-        with st.spinner("Running offline factory checks..."):
+        with st.spinner("Running offline checks..."):
             st.session_state.offline_diagnostics = run_offline_diagnostics()
         st.rerun()
 
@@ -2749,11 +2793,11 @@ def render_factory_function_coverage() -> None:
     report = factory_function_coverage()
     _render_section_header(
         "Engineering",
-        "Factory function coverage",
+        "Function coverage",
         "A read-only map of the functions exposed by ultimate_bot.py.",
     )
     if report.get("complete"):
-        st.success(f"All {report['total']} factory functions are accounted for.")
+        st.success(f"All {report['total']} functions are accounted for.")
     else:
         st.error(
             f"Coverage is incomplete: {len(report.get('unmapped', []))} unmapped and "
@@ -2762,7 +2806,7 @@ def render_factory_function_coverage() -> None:
 
     buckets = report.get("by_surface") or {}
     cols = st.columns(4)
-    labels = ["Live Factory", "Channel Statistics", "Demo / Diagnostics", "Internal"]
+    labels = ["Live", "Analytics", "Demo / Diagnostics", "Internal"]
     for col, label in zip(cols, labels):
         col.metric(label, len(buckets.get(label, [])))
 
@@ -2811,7 +2855,7 @@ def render_test_page() -> None:
     options = [
         "Channel Statistics",
         "Offline Diagnostics",
-        "Demo Factory",
+        "Demo",
         "Final Branding Preview",
     ]
     current = st.session_state.get("test_menu_selection") or "Offline Diagnostics"
@@ -2842,7 +2886,7 @@ def render_test_page() -> None:
 def render_demo_page() -> None:
     _render_section_header(
         "Engineering lab",
-        "Demo Factory",
+        "Demo",
         "Controlled component checks. These never perform a production upload.",
     )
 
@@ -2858,7 +2902,7 @@ def render_demo_page() -> None:
         ("provider_boundary", "Raw provider boundary"),
         ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
         ("dashboard_architecture", "Dashboard architecture"),
-        ("factory_function_coverage", "Factory function coverage"),
+        ("factory_function_coverage", "Function coverage"),
     ]
 
     if st.button("Run all demo checks", type="primary", width="content"):
@@ -2916,7 +2960,7 @@ def main() -> None:
 
     if workspace == "Live":
         snapshot = controller.snapshot()
-        render_header("Live Factory")
+        render_header("Live")
         if (
             not st.session_state.get("production_started")
             and not st.session_state.get("candidates")
@@ -2945,8 +2989,8 @@ def main() -> None:
         render_test_page()
 
     st.markdown(
-        "<div class='dashboard-footer'>Viral Shorts Factory · dashboard controls the human review gates; "
-        "the underlying factory generation logic remains the production source of truth.</div>",
+        "<div class='dashboard-footer'>Shorts Studio · human review gates remain in your hands; "
+        "the underlying production logic remains the source of truth.</div>",
         unsafe_allow_html=True,
     )
 
