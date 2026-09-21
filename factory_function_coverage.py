@@ -25,7 +25,6 @@ SURFACE_MAP: dict[str, str] = {
     "safe_text": "Live Factory",
     "get_google_credentials": "Channel Statistics",
     "get_genre_bonuses": "Live Factory",
-    "infer_genre_from_title": "Demo / Diagnostics",
     "calculate_smart_score": "Live Factory",
     "get_smart_metrics": "Channel Statistics",
     "print_metric_recommendations": "Demo / Diagnostics",
