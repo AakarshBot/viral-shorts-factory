@@ -134,3 +134,28 @@ def test_explicit_genre_does_not_add_generic_cross_genre_radar():
     )
     assert " (sports OR cricket OR football OR tennis)" not in " ".join(queries).lower()
     assert story_ranker.GOOGLE_NEWS_RADAR_QUERIES[0] not in queries
+
+def test_used_topic_history_contains_only_posted_runs(tmp_path):
+    db_path = tmp_path / "vault.db"
+    conn = sqlite3.connect(db_path)
+    migrate_vault(conn)
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO vault (run_id, topic, date_used, video_id, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("clicked", "Clicked cricket story", now, "READY_FOR_UPLOAD", "READY_FOR_UPLOAD", now, now),
+    )
+    conn.execute(
+        "INSERT INTO vault (run_id, topic, date_used, video_id, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("posted", "Posted cricket story", now, "youtube-456", "UPLOADED", now, now),
+    )
+    conn.commit()
+
+    try:
+        topics = story_ranker._load_used_topics(conn)
+    finally:
+        conn.close()
+
+    assert "Posted cricket story" in topics
+    assert "Clicked cricket story" not in topics
