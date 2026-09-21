@@ -269,6 +269,68 @@ def _audience_potential(story, social, google_trend, event_momentum, originality
     )
 
 
+def _channel_performance_prior(rows, target_category="", target_format="", target_language=""):
+    """Learn a small channel-fit prior from the factory's own completed uploads.
+
+    The prior is intentionally conservative: it shrinks sparse category/format/language
+    results toward the overall channel baseline so a single unusually good or bad Short
+    cannot dominate current-event ranking.
+    """
+    eligible = [row for row in (rows or []) if _eligible(row)]
+    if not eligible:
+        return 5.0, 0
+
+    def _value(row):
+        return _safe_float(row.get("avg_view_percentage"))
+
+    values = [value for value in (_value(row) for row in eligible) if value is not None]
+    if not values:
+        return 5.0, 0
+
+    global_mean = sum(values) / len(values)
+
+    category = _clean(target_category)
+    fmt = _clean(target_format)
+    language = _clean(target_language)
+
+    def matches(row, require_all=True):
+        row_category = _clean(row.get("genre"))
+        row_format = _clean(row.get("format_used"))
+        row_language = _clean(row.get("language_used"))
+        checks = []
+        if category:
+            checks.append(row_category == category)
+        if fmt:
+            checks.append(row_format == fmt)
+        if language:
+            checks.append(row_language == language)
+        return all(checks) if require_all else any(checks)
+
+    context_rows = [row for row in eligible if matches(row, require_all=True)]
+    if not context_rows and category:
+        context_rows = [row for row in eligible if _clean(row.get("genre")) == category]
+    if not context_rows and fmt:
+        context_rows = [row for row in eligible if _clean(row.get("format_used")) == fmt]
+    if not context_rows and language:
+        context_rows = [row for row in eligible if _clean(row.get("language_used")) == language]
+
+    context_values = [value for value in (_value(row) for row in context_rows) if value is not None]
+    if not context_values:
+        return 5.0, 0
+
+    # Hierarchical shrinkage: context mean gets only as much influence as the
+    # observed sample supports, with five virtual observations at the channel mean.
+    prior_weight = 5.0
+    context_mean = (
+        sum(context_values) + global_mean * prior_weight
+    ) / (len(context_values) + prior_weight)
+
+    # Convert the percentage-point lift/loss against the channel baseline into
+    # a neutral 0-10 signal. A 10pp difference changes the score by about 2 points.
+    score = 5.0 + max(-4.0, min(4.0, (context_mean - global_mean) / 5.0))
+    return round(score, 2), len(context_values)
+
+
 def _historical_context_score(story, rows, target_category, target_format, target_language):
     """Keep history useful without letting token overlap dominate ranking."""
     history, matches = _historical_score(
@@ -1007,6 +1069,12 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     )
     shorts_viability = _shorts_viability(story, visual)
     channel_history = history
+    channel_fit, channel_fit_samples = _channel_performance_prior(
+        rows,
+        target_category,
+        target_format,
+        target_language,
+    )
     momentum_weight = 1.08 if ai_cricket else 1.0
 
     # candidate_score remains a single ranking score, but its components are
@@ -1019,6 +1087,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + originality * 0.45
         + visual * 0.20
         + channel_history * 0.70
+        + channel_fit * 0.45
         + niche * 0.20
         + (0.60 if discovery_gap else 0.0)
         - risk * 0.55
@@ -1028,6 +1097,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["independent_corroboration_score"] = independent_corroboration
     story["historical_topic_signal"] = round(history, 3)
     story["historical_topic_matches"] = history_matches
+    story["channel_fit_score"] = channel_fit
+    story["channel_fit_samples"] = channel_fit_samples
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
     story["shorts_viability_score"] = round(shorts_viability, 2)
@@ -1051,6 +1122,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "social_signal": round(social, 2),
         "google_trends": round(google_trend, 2),
         "channel_history": round(history, 2),
+        "channel_fit": round(channel_fit, 2),
+        "channel_fit_samples": channel_fit_samples,
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
         "safety_risk": risk,
