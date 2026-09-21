@@ -497,7 +497,7 @@ def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     assert batch_calls["count"] >= 1
 
 
-def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatch):
+def test_person_action_reuses_verified_cache_without_duplicate_semantic_qa(monkeypatch):
     image_bytes = _jpeg_bytes()
 
     class FakeBot:
@@ -552,7 +552,11 @@ def test_person_action_canonical_source_and_cache_require_semantic_qa(monkeypatc
         "Pat Cummins interview",
     )
 
-    assert calls["qa"] >= 1
+    assert calls["qa"] == 0
+    assert source == "cached"
+    assert used_ai is False
+    assert scene["visual_verified"] is True
+    assert scene["visual_cache_reused"] is True
     assert image.size == (1080, 1920)
     assert used_ai is False
     assert source == "visual-rescue"
