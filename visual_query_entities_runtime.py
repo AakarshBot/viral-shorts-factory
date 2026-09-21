@@ -4,13 +4,14 @@ from __future__ import annotations
 from visual_semantic_guard_runtime import clean_text, infer_role, resolve_subject
 from visual_retrieval_runtime import run_visual_retrieval
 from visual_taxonomy_runtime import classify_visual_genre
-from visual_search_intent_runtime import resolve_visual_search_intent
 
 _INVALID = {"", "none", "unknown", "na", "n/a"}
 
 
 def _build_identity_first_queries(seg: dict, resolution: dict) -> list[str]:
     """Compatibility shim: return the canonical bounded query set."""
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
     scene = dict(seg or {})
     if resolution and not scene.get("primary_entity"):
         scene["primary_entity"] = resolution.get("factual_entity") or resolution.get("subject", "")
