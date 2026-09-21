@@ -1778,7 +1778,7 @@ def test_manual_commons_qc_does_not_filter_noncommercial_license(monkeypatch):
     )
 
     assert candidates
-    assert candidates[0]["provenance"]["license"] == "CC BY-NC 4.0"
+    assert candidates[0]["provenance"]["license"] == "by-nc"
 
 
 def test_manual_query_planner_has_non_network_fallback(monkeypatch):
