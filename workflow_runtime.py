@@ -16,6 +16,16 @@ from db_architecture import migrate_vault, update_run_record
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
 MAX_DISCOVERY_CANDIDATES = 28
 
+
+def _run_production_runner(bot, web_config: Dict[str, Any]):
+    """Execute the production runner exactly once with the identity bridge."""
+    production_runner = getattr(bot, "run_robot", None)
+    if not callable(production_runner):
+        raise RuntimeError("Legacy run_robot() is not available.")
+    if getattr(production_runner, "_exact_identity_runner", False):
+        return production_runner(web_config=web_config)
+    return run_robot_with_exact_identity(bot, web_config=web_config)
+
 FORMAT_OPTIONS = {
     "Deep Dive": "regular",
     "Top-5": "top5",
@@ -386,7 +396,7 @@ class WorkflowController:
                     config["selected_story"] = dict(selected_story)
                 try:
                     self._reporter("research", 18, "Selected story locked. Preparing the production pipeline…")
-                    run_robot_with_exact_identity(self.bot, web_config=config)
+                    _run_production_runner(self.bot, config)
                 finally:
                     if original_gather is not None:
                         globals_dict["gather_and_filter_stories"] = original_gather
