@@ -1562,9 +1562,9 @@ def test_dashboard_render_surface_stays_on_conservative_css_baseline():
     style_end = source.index('</style>""", unsafe_allow_html=True)', style_start)
     style = source[style_start:style_end]
     assert "position:fixed;" not in style
-    assert "backdrop-filter" not in style
     assert ".stApp::before" not in style
     assert ".studio-boot-shell" not in style
+    assert "--studio-" not in style
 
 
 
