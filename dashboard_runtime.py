@@ -246,7 +246,8 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
         collect_high_recall_stories,
         rank_discovery_candidates,
     )
-    from workflow_runtime import CRICKET_CATEGORIES, _candidate_reason, _source_label, _story_key, _story_url
+    from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
+    from workflow_runtime import CRICKET_CATEGORIES
 
     max_candidates = max(1, min(28, int(max_candidates or 28)))
     fmt = str(web_config.get("format_mode", "regular"))
