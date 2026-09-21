@@ -964,7 +964,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     assert 'aspect_ratio=(9, 16) if crop_is_shorts else None' in source
     assert 'crop_mode=mode_value' in source
     assert 'return_type="both"' in source
-    assert 'should_resize_image=False' in source
+    assert 'should_resize_image=True' in source
     assert "Use on slide" in source
     assert "Crop / reframe selected image" in source
 
@@ -1166,7 +1166,7 @@ def test_dashboard_has_collapsible_live_powershell_widget():
     assert 'with st.sidebar:' in source
     assert 'st.expander(f"🖥️ PowerShell · {status}"' in source
     assert 'st.code("\\n".join(visible), language="powershell")' in source
-    assert 'render_powershell_widget(live_snapshot)' in source
+    assert 'render_powershell_widget(snapshot)' in source
     assert 'render_powershell_output(' not in source
 
 
