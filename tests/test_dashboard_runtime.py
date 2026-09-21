@@ -1417,8 +1417,7 @@ def test_dashboard_aesthetic_system_and_learning_indicators_are_present():
 def test_dashboard_init_state_does_not_construct_redundant_controller_each_rerun():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = source.index("def _init_state")
-    end = source.index("
-def reset_run", start)
+    end = source.index("\ndef reset_run", start)
     block = source[start:end]
     assert 'if "workflow_controller" not in st.session_state:' in block
     assert block.count("DashboardWorkflowController(ultimate_bot)") == 1
