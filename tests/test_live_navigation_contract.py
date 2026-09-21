@@ -55,3 +55,14 @@ def test_live_navigation_shows_a_compact_three_level_visual_hierarchy():
 
     assert format_step < topic_step < scope_step
     assert format_step < sports_step < scope_step
+
+def test_live_navigation_shows_selected_path_only_when_ready():
+    source = _live_navigation_source()
+
+    ready = source.index('if live_format and final_path_ready:')
+    path_parts = source.index('path_parts = [live_format]')
+    production = source.index('with st.expander("Production settings"')
+
+    assert ready < path_parts < production
+    assert '"Selected path"' in source
+    assert 'path_text = " · ".join(part for part in path_parts if part)' in source
