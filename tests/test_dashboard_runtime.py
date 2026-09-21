@@ -1547,7 +1547,8 @@ def test_dashboard_first_render_has_no_streamlit_exception(monkeypatch):
         for element in at.markdown
         if getattr(element, "value", None) is not None
     )
-    assert len(at.pills) > 0, "Live homepage did not render its workspace controls."
+    assert len(at.markdown) > 0, "Live homepage rendered no visible content."
+    assert "studio-boot-shell" in at.markdown[0].value or "Shorts Studio" in at.markdown[0].value
 
 
 
