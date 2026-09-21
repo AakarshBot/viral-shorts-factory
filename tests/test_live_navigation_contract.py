@@ -44,3 +44,14 @@ def test_live_navigation_does_not_require_the_large_css_surface():
 
     assert "<style>" not in source
     assert "unsafe_allow_html" in source or "_render_section_header" in source
+
+def test_live_navigation_shows_a_compact_three_level_visual_hierarchy():
+    source = _live_navigation_source()
+
+    format_step = source.index("01 · Format")
+    topic_step = source.index("02 · Topic")
+    sports_step = source.index("02 · Sports lane")
+    scope_step = source.index("03 · Cricket scope")
+
+    assert format_step < topic_step < scope_step
+    assert format_step < sports_step < scope_step
