@@ -1291,7 +1291,6 @@ def collect_manual_visual_search(
         local_used_urls = set(used_source_image_urls or set())
         cache_updates: dict[tuple, list] = {}
         provider_items: list = []
-        provider_added = 0
 
         for page in (1, 2):
             cache_key = ("dashboard-query", source_key, exact_query.casefold(), page)
@@ -1329,8 +1328,6 @@ def collect_manual_visual_search(
             if normalized:
                 # Preserve the old bounded behavior: only ask for page 2 when
                 # page 1 produced no usable raw candidates.
-                break
-            if provider_added:
                 break
 
         return source_index, source_name, provider_items, local_used_urls, cache_updates
