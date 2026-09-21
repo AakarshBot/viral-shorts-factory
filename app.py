@@ -367,6 +367,71 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{
 @media(max-width:1100px){.stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:900px){.qc-guide{grid-template-columns:1fr}.release-gates{grid-template-columns:1fr}.brand-title{font-size:1.6rem}}
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Mobile-first touch/layout pass. Keep the same controls and state machine; only
+   change presentation so phones and narrow tablets never need desktop scrolling. */
+[data-testid="stImage"] img{max-width:100%!important;height:auto!important}
+[data-testid="stVideo"] video{max-width:100%!important}
+@media(max-width:768px){
+  .block-container{max-width:100%;padding:.8rem .7rem 2rem}
+  .section-kicker{font-size:.6rem;letter-spacing:.12em}
+  .section-title{font-size:1.38rem;line-height:1.12}
+  .section-subtitle{font-size:.82rem;line-height:1.45;margin-bottom:.9rem}
+  .brand-card{padding:13px 15px;border-radius:16px;min-height:auto}
+  .brand-title{font-size:1.42rem;line-height:1.05}
+  .brand-sub{font-size:.78rem;line-height:1.4}
+  .factory-status{padding:10px 12px;border-radius:13px;text-align:left}
+  .factory-status-label{font-size:.58rem}
+  .factory-status-value{font-size:.88rem}
+  .panel,.candidate,.story-card,.output-card,.release-card{border-radius:13px}
+  .panel,.story-card,.release-card{padding:13px 14px}
+  .output-card{padding:12px 13px}
+  .meta-row{gap:6px;margin-top:10px}
+  .meta-chip{width:100%;font-size:.67rem;line-height:1.35}
+  .live-choice-label{font-size:.66rem;margin:10px 0 7px}
+  .live-settings{padding:11px 12px;border-radius:14px}
+  .stage-strip{grid-template-columns:1fr}
+  .stage-card{padding:9px 10px}
+  .stage-name{white-space:normal}
+  .qc-guide{gap:7px;margin:10px 0 14px}
+  .qc-guide-step{padding:10px 11px}
+  .qc-guide-step span{font-size:.68rem}
+  .timeline{padding:3px 11px}
+  .timeline-row{gap:9px;padding:9px 0}
+  .timeline-dot{width:18px;flex-basis:18px}
+  .timeline-message{font-size:.73rem}
+  [data-testid="stMetric"]{padding:9px 10px;border-radius:11px}
+  [data-testid="stMetricLabel"]{font-size:.64rem!important}
+  [data-testid="stMetricValue"]{font-size:1.08rem!important;line-height:1.1!important}
+  .stButton>button,.stLinkButton>a{min-height:44px!important;font-size:.84rem!important;padding:.58rem .7rem!important}
+  .stButton>button,.stLinkButton>a{width:100%!important}
+  .stTextInput input,.stTextArea textarea,
+  [data-baseweb="select"] input,[data-baseweb="select"] [role="combobox"]{
+    font-size:16px!important;
+  }
+  .stTextArea textarea{min-height:118px!important}
+  [data-baseweb="popover"] [role="option"]{min-height:44px!important}
+  section[data-testid="stSidebar"] .stRadio label{min-height:44px}
+  section[data-testid="stSidebar"] [data-testid="stExpander"] pre{max-height:280px!important}
+  .story-reason{max-height:6.5rem}
+}
+@media(max-width:480px){
+  .block-container{padding-left:.55rem;padding-right:.55rem}
+  .brand-title{font-size:1.3rem}
+  .brand-pill{font-size:.57rem;padding:4px 7px;margin-bottom:6px}
+  .section-title{font-size:1.25rem}
+  .section-subtitle{font-size:.76rem}
+  .stage-strip{gap:6px}
+  .stage-card{padding:8px 9px}
+  .stage-state{font-size:.62rem}
+  .small-muted{font-size:.72rem}
+  .story-title{font-size:.96rem}
+  .story-reason{font-size:.77rem}
+  .qc-status{font-size:.58rem}
+  .live-choice-label{font-size:.62rem}
+  [data-testid="stMetricValue"]{font-size:1rem!important}
+  .stTextArea textarea{min-height:104px!important}
+}
 </style>""", unsafe_allow_html=True)
 
 REQUIRED_SECRET_NAMES = (
@@ -787,6 +852,7 @@ def render_live_navigation() -> Dict[str, Any]:
         selection_mode="single",
         default=st.session_state.get("live_format_selection") or None,
         key="live_format_menu",
+        wrap=True,
         required=False,
         label_visibility="collapsed",
         width="stretch",
@@ -832,6 +898,7 @@ def render_live_navigation() -> Dict[str, Any]:
             selection_mode="single",
             default=st.session_state.get("live_sports_selection") or None,
             key="live_sports_menu",
+            wrap=True,
             label_visibility="collapsed",
             width="stretch",
         )
@@ -850,6 +917,7 @@ def render_live_navigation() -> Dict[str, Any]:
                 selection_mode="single",
                 default=st.session_state.get("live_cricket_scope") or None,
                 key="live_cricket_scope_menu",
+                wrap=True,
                 label_visibility="collapsed",
                 width="stretch",
             )
@@ -1408,7 +1476,7 @@ def _render_crop_dialog(
         crop_preview, crop_box = crop_result, {}
 
     if crop_preview is not None:
-        st.image(crop_preview, width=260)
+        st.image(crop_preview, width="stretch")
 
     action_cols = st.columns([1, 1])
     with action_cols[0]:
@@ -1509,7 +1577,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     if item.get("missing"):
                         st.error("No image file is available for this slide.", icon="⛔")
                     else:
-                        st.image(item["path"], width=240)
+                        st.image(item["path"], width="stretch")
                     query = str(item.get("query_used") or item.get("manual_query") or "").strip()
                     source = str(item.get("source") or "").strip()
                     if source or query:
@@ -1547,7 +1615,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     path = str(asset.get("path") or "").strip()
                     with st.container(border=True):
                         if path and os.path.isfile(path):
-                            st.image(path, width=220)
+                            st.image(path, width="stretch")
                         query = str(asset.get("query") or "").strip()
                         source = str(asset.get("source") or "").strip()
                         caption = source or "visual source"
@@ -1648,7 +1716,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     path = str(asset.get("path") or "").strip()
                     with st.container(border=True):
                         if path and os.path.isfile(path):
-                            st.image(path, width=260)
+                            st.image(path, width="stretch")
                         provenance_state = str(asset.get("provenance_status") or "commercial-verified").strip()
                         caption = str(asset.get("source") or "visual source").strip()
                         if provenance_state == "provenance-review":
