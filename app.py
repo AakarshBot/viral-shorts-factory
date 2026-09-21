@@ -3498,7 +3498,6 @@ def main() -> None:
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     workspace = render_workspace_navigation()
-    boot.empty()
 
     if workspace == "Live":
         snapshot = controller.snapshot()
