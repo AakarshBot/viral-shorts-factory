@@ -264,9 +264,21 @@ def discover_ranked_topics(bot, web_config: dict[str, Any], conn, max_candidates
             CRICKET_CATEGORIES["AI-assisted top story in cricket"],
         )
         genre_key = "sports_stories_of_day"
-        genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key, {})
+        genre_cfg = dict(bot.CONTENT_CATEGORIES.get(genre_key, {}))
+        if cricket_name == "India / Asia":
+            # Scope-specific cricket discovery: do not mix the global lane into
+            # the India/Asia result set.
+            genre_cfg["india_gnews_q"] = cricket_cfg["query"]
+            genre_cfg["global_gnews_q"] = ""
+        elif cricket_name == "Global":
+            # Scope-specific cricket discovery: keep the selected result set
+            # on the global lane rather than re-adding India-first headlines.
+            genre_cfg["india_gnews_q"] = ""
+            genre_cfg["global_gnews_q"] = cricket_cfg["query"]
         requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-        custom_q = requested_topic or cricket_cfg["query"]
+        custom_q = requested_topic or None if cricket_name != "AI-assisted top story in cricket" else (
+            requested_topic or cricket_cfg["query"]
+        )
         custom_rss = cricket_cfg["rss"]
     else:
         genre_key = category or "national_global_affairs"
