@@ -146,7 +146,13 @@ def dashboard_architecture_audit() -> list[str]:
         and "Use headline →" in source
         and "candidate_page" in source
     )
-    if not (legacy_paging_ui or ranked_headline_ui):
+    event_topic_ui = (
+        "Event radar" in source
+        and "TOPIC #" in source
+        and "Use topic →" in source
+        and "candidate_page" in source
+    )
+    if not (legacy_paging_ui or ranked_headline_ui or event_topic_ui):
         errors.append("app.py: discovery topic-selection UI is missing")
     for artifact in OBSOLETE_REPOSITORY_ARTIFACTS:
         if (root / artifact).exists():
