@@ -180,7 +180,7 @@ def test_hook_quality_prefers_immediate_conflict_over_generic_setup():
     assert "generic setup" in weak_score["reasons"]
 
 
-def test_high_potential_story_rejects_weak_opening_hook():
+def test_high_potential_story_warns_on_weak_opening_hook():
     from script_runtime import validate_content_density
 
     script = {
@@ -222,8 +222,10 @@ def test_high_potential_story_rejects_weak_opening_hook():
         "regular",
     )
 
-    assert valid is False
+    assert valid is True
     assert "hook" in reason.lower()
+    assert "hook_quality_warning" in script
+
 
 
 def test_title_packaging_rewards_compact_hook_aligned_title():
