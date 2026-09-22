@@ -149,3 +149,78 @@ def test_subtitle_renderer_uses_active_word_parameter(tmp_path):
         str(path),
     )
     assert path.is_file()
+
+
+def test_hook_quality_prefers_immediate_conflict_over_generic_setup():
+    from script_runtime import _hook_quality_score
+
+    story = {
+        "title": "Former Pakistan batter calls India arrogant after clash",
+        "summary": "The former Pakistan batter called India arrogant after the latest clash.",
+        "hook_potential_score": 8.0,
+    }
+    strong = {
+        "script": [{
+            "voiceover": "A former Pakistan batter just called India arrogant after the clash.",
+            "narrative_role": "hook",
+        }]
+    }
+    weak = {
+        "script": [{
+            "voiceover": "Here is the latest update on India cricket and what happened today.",
+            "narrative_role": "hook",
+        }]
+    }
+
+    strong_score = _hook_quality_score(strong, story)
+    weak_score = _hook_quality_score(weak, story)
+
+    assert strong_score["score"] > weak_score["score"]
+    assert "tension stated immediately" in strong_score["reasons"]
+    assert "generic setup" in weak_score["reasons"]
+
+
+def test_high_potential_story_rejects_weak_opening_hook():
+    from script_runtime import validate_content_density
+
+    script = {
+        "editorial_angle": "This explains the development, the relevant context, and its consequence.",
+        "script": [
+            {
+                "voiceover": "Here is the latest update on India cricket and what happened today.",
+                "narrative_role": "hook",
+                "primary_entity": "India",
+                "specific_search_prompt": "India cricket latest development",
+            },
+            {
+                "voiceover": "The former batter criticised India's approach after the clash.",
+                "narrative_role": "development",
+                "primary_entity": "Former Pakistan batter",
+                "specific_search_prompt": "former Pakistan batter India criticism",
+            },
+            {
+                "voiceover": "The comments matter because the rivalry has generated repeated debate.",
+                "narrative_role": "context",
+                "primary_entity": "India Pakistan cricket",
+                "specific_search_prompt": "India Pakistan cricket rivalry debate",
+            },
+            {
+                "voiceover": "The immediate consequence is renewed attention on the rivalry and the comments.",
+                "narrative_role": "consequence",
+                "primary_entity": "India Pakistan cricket",
+                "specific_search_prompt": "India Pakistan cricket comments reaction",
+            },
+        ],
+    }
+    valid, reason = validate_content_density(
+        script,
+        {
+            "title": "Former Pakistan batter calls India arrogant after clash",
+            "summary": "The former Pakistan batter called India arrogant after the latest clash.",
+            "hook_potential_score": 8.0,
+        },
+        "regular",
+    )
+
+    assert valid is False
+    assert "hook" in reason.lower()
