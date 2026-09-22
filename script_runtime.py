@@ -175,6 +175,54 @@ def assess_narrative_completeness(script_data):
 def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
+
+def classify_hook_style(value):
+    """Classify the actual opening hook family for channel learning and diagnostics."""
+    if isinstance(value, dict):
+        scenes = value.get("script") or []
+        if scenes and isinstance(scenes[0], dict):
+            text = str(scenes[0].get("voiceover") or "").strip()
+        else:
+            text = str(value.get("title") or value.get("topic") or "").strip()
+    else:
+        text = str(value or "").strip()
+
+    lower = text.casefold()
+    if not lower:
+        return "Unknown"
+
+    conflict_terms = (
+        "accused", "accusation", "criticized", "criticised", "slammed",
+        "blasted", "arrogant", "controversy", "dispute", "feud", "clash",
+        "mocked", "insulted", "hits back", "hit back", "rivalry", "warned",
+    )
+    result_terms = (
+        "won", "wins", "lost", "loses", "beat", "beats", "defeated",
+        "clinched", "qualified", "eliminated", "secured", "record",
+        "milestone", "first", "fastest", "youngest", "oldest",
+    )
+    quote_terms = (
+        "said", "says", "called", "claimed", "claims", "declared",
+        "praised", "hailed", "revealed", "admitted", "responded",
+    )
+    surprise_terms = (
+        "unexpected", "surprise", "stuns", "stunned", "comeback",
+        "debut", "rare", "unprecedented", "unlikely", "uncapped",
+    )
+
+    if "?" in text:
+        return "Curiosity Question"
+    if any(term in lower for term in conflict_terms):
+        return "Conflict / Accusation"
+    if any(term in lower for term in quote_terms) or bool(re.search(r'["“”]', text)):
+        return "Bold Quote / Statement"
+    if any(term in lower for term in surprise_terms):
+        return "Surprise / Human Angle"
+    if any(term in lower for term in result_terms):
+        return "Result / Record"
+    return "Direct Factual Headline"
+
+
 def _story_structure(story_data, format_mode):
     text = " ".join(
         str(story_data.get(key, ""))
@@ -815,6 +863,8 @@ def clean_script_data(script_data, story_data, format_mode):
     result["script_structure"] = _story_structure(story_data, format_mode)
     _clean_titles(result)
     result["hook_quality"] = _hook_quality_score(result, story_data)
+    result["hook_type"] = classify_hook_style(result)
+    result["hook_style_used"] = result["hook_type"]
     return result, {
         "removed_cta": removed_cta,
         "removed_scenes": removed_scenes,
