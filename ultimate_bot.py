@@ -435,7 +435,7 @@ class YouTubePublicVisibilityError(RuntimeError):
 
 
 def _report_youtube_upload_visibility(response, video_id, requested_privacy):
-    """Report an actual YouTube visibility override without adding a factory release gate."""
+    """Raise when YouTube did not persist the requested public visibility."""
     expected = str(requested_privacy or "").strip().lower()
     if expected != "public" or not isinstance(response, dict):
         return
@@ -450,6 +450,91 @@ def _report_youtube_upload_visibility(response, video_id, requested_privacy):
             video_id=video_id,
         )
 
+
+def _ensure_youtube_public_visibility(youtube, response, video_id):
+    """Confirm public visibility, with one in-place API update before failing.
+
+    The upload is never retried through videos.insert. If YouTube initially
+    persists the requested public upload as private, update that same video
+    once, then verify the returned resource. This avoids duplicate uploads
+    while allowing an otherwise eligible channel/project to recover from a
+    stale or overridden insert response.
+    """
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        raise RuntimeError("Cannot verify public visibility without a YouTube video ID.")
+
+    initial_status = str(
+        (response.get("status") or {}).get("privacyStatus") or ""
+    ).strip().lower() if isinstance(response, dict) else ""
+    if initial_status == "public":
+        return response
+
+    current_status = response.get("status") if isinstance(response, dict) else {}
+    if not isinstance(current_status, dict):
+        current_status = {}
+
+    update_body = {
+        "id": video_id,
+        "status": {
+            "privacyStatus": "public",
+            "selfDeclaredMadeForKids": bool(
+                current_status.get("selfDeclaredMadeForKids", False)
+            ),
+        },
+    }
+
+    print(
+        f"   [YouTube] Upload returned privacyStatus={initial_status or 'unknown'}; "
+        "updating the existing video to public once.",
+        flush=True,
+    )
+    try:
+        updated = youtube.videos().update(
+            part="status",
+            body=update_body,
+        ).execute()
+    except Exception as exc:
+        raise YouTubePublicVisibilityError(
+            f"YouTube accepted video {video_id} but could not make it public: "
+            f"{type(exc).__name__}: {exc}. The existing video was not retried or duplicated. "
+            "If this project is unverified, YouTube requires its API project to pass the "
+            "YouTube API Services audit before videos.insert uploads can be made public.",
+            video_id=video_id,
+        ) from exc
+
+    updated_status = str(
+        (updated.get("status") or {}).get("privacyStatus") or ""
+    ).strip().lower() if isinstance(updated, dict) else ""
+
+    if updated_status != "public":
+        try:
+            verification = youtube.videos().list(
+                part="status",
+                id=video_id,
+            ).execute()
+            items = verification.get("items") if isinstance(verification, dict) else []
+            if isinstance(items, list) and items and isinstance(items[0], dict):
+                updated_status = str(
+                    (items[0].get("status") or {}).get("privacyStatus") or ""
+                ).strip().lower()
+                if updated_status == "public":
+                    return items[0]
+        except Exception as exc:
+            raise YouTubePublicVisibilityError(
+                f"YouTube accepted video {video_id}, but the public visibility could not be "
+                f"confirmed after update: {type(exc).__name__}: {exc}.",
+                video_id=video_id,
+            ) from exc
+
+    if updated_status != "public":
+        raise YouTubePublicVisibilityError(
+            f"YouTube accepted video {video_id} but kept it {updated_status or 'unknown'} "
+            "instead of public. The existing video was not retried or duplicated.",
+            video_id=video_id,
+        )
+
+    return updated
 
 def get_google_credentials():
     from google.oauth2.credentials import Credentials
@@ -1740,6 +1825,8 @@ def upload_to_youtube(
         if not vid_id:
             raise RuntimeError("YouTube upload completed without a video ID.")
 
+        if privacy == "public":
+            response = _ensure_youtube_public_visibility(youtube, response, vid_id)
         _report_youtube_upload_visibility(response, vid_id, privacy)
 
         print(f"   [+] Successfully uploaded to YouTube! Video ID: {vid_id}")
