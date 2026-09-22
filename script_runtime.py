@@ -1034,8 +1034,7 @@ def tighten_script_for_duration_once(
         if isinstance(original, dict) and str(original.get("voiceover") or "").strip()
     ]
 
-    cleaned, _diagnostics = clean_script_data(rewritten, story_data, format_mode)
-    valid, reason = validate_content_density(cleaned, story_data, format_mode)
+    valid, reason = validate_content_density(rewritten, story_data, format_mode)
     if not valid:
         print(
             f"   [Script Duration] Compression rewrite failed validation: {reason}; retaining the validated draft.",
@@ -1043,10 +1042,8 @@ def tighten_script_for_duration_once(
         )
         return None
 
-    if not cleaned.get("editorial_angle"):
-        cleaned["editorial_angle"] = script_data.get("editorial_angle", "")
-    cleaned["duration_compression_only"] = True
-    return cleaned
+    rewritten["duration_compression_only"] = True
+    return rewritten
 
 
 def _normalise_critique(value, provider):
