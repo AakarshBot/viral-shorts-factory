@@ -2081,7 +2081,11 @@ def _discovery_portfolio_pass(story):
         return False
     if not _headline_noise_pass(story):
         return False
-    if not _story_substance_pass(story):
+    # The dashboard is intentionally broader than automatic production
+    # selection. A concrete 120+ character description is enough to keep a
+    # valid niche event visible; the production scorer retains the stricter
+    # evidence/quality gates.
+    if not _story_substance_pass(story, minimum_body_chars=120):
         story["discovery_rejection"] = "Insufficient story substance behind headline"
         return False
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day":
