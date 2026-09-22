@@ -293,3 +293,12 @@ def test_workflow_controller_upload_delegates_approved_payload(monkeypatch, tmp_
     assert calls["kwargs"]["title_override"] == "Approved title"
     assert calls["kwargs"]["description_override"] == "Approved description"
     assert calls["kwargs"]["comment_override"] == "Approved comment"
+
+
+
+def test_dashboard_binding_does_not_replace_canonical_youtube_uploader():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("runtime_bindings.py").read_text(encoding="utf-8")
+    assert "_patch_youtube_creator_comments(bot)" not in source
+    assert '"upload_to_youtube"' in source
