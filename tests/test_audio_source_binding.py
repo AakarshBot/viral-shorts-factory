@@ -91,3 +91,21 @@ def test_audio_rejects_missing_authoritative_marker_even_with_scene_text():
 
     with pytest.raises(ValueError, match="validated generated script"):
         asyncio.run(bot.generate_voiceover_and_timestamps(unmarked, {}))
+
+
+def test_audio_retry_policy_skips_deterministic_timing_failures():
+    from audio_runtime import _is_retryable_audio_error
+
+    assert _is_retryable_audio_error(
+        RuntimeError("Word-boundary timing coverage is too low (4/10).")
+    ) is False
+    assert _is_retryable_audio_error(
+        RuntimeError("Unable to determine encoded audio duration.")
+    ) is False
+
+
+def test_audio_retry_policy_keeps_transient_failures_retryable():
+    from audio_runtime import _is_retryable_audio_error
+
+    assert _is_retryable_audio_error(asyncio.TimeoutError()) is True
+    assert _is_retryable_audio_error(RuntimeError("HTTP 503 service unavailable")) is True
