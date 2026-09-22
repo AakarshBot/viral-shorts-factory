@@ -72,7 +72,7 @@ def install() -> bool:
 
         original_validate = script_runtime.validate_content_density
 
-        def guarded_validator(script_data, story_data, format_mode):
+        def guarded_validator(script_data, story_data, format_mode, *args, **kwargs):
             scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
             for index, scene in enumerate(scenes, 1):
                 voiceover = str(scene.get("voiceover") or "").strip() if isinstance(scene, dict) else ""
@@ -80,7 +80,7 @@ def install() -> bool:
                     return False, f"Scene {index} contains prompt/instruction/code text instead of narration."
                 if script_runtime.contains_retention_bait(voiceover):
                     return False, f"Scene {index} contains prohibited retention-bait phrasing."
-            return original_validate(script_data, story_data, format_mode)
+            return original_validate(script_data, story_data, format_mode, *args, **kwargs)
 
         script_runtime.validate_content_density = guarded_validator
         script_runtime.SCRIPT_OUTPUT_GUARD_VERSION = "2026-09-20-semantic"
