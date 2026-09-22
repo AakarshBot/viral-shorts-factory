@@ -175,6 +175,99 @@ def assess_narrative_completeness(script_data):
 def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
+NARRATION_BASE_WPM = 150.0
+NARRATION_IDEAL_MIN_SECONDS = 20.0
+NARRATION_IDEAL_MAX_SECONDS = 30.0
+NARRATION_ACCEPTABLE_MAX_SECONDS = 35.0
+
+
+def estimate_narration_duration(script_data, persona_profile=None, base_wpm=NARRATION_BASE_WPM):
+    """Estimate spoken duration before TTS using the selected persona's Edge-TTS rate."""
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    text = " ".join(
+        str(scene.get("voiceover") or "").strip()
+        for scene in scenes
+        if isinstance(scene, dict)
+    ).strip()
+    words = re.findall(r"\b[\w]+(?:['’][\w]+)?\b", text, flags=re.UNICODE)
+    word_count = len(words)
+    try:
+        rate = float(str((persona_profile or {}).get("rate", "0")).replace("%", "").strip() or 0)
+    except (TypeError, ValueError):
+        rate = 0.0
+    try:
+        wpm = max(60.0, float(base_wpm) * (1.0 + rate / 100.0))
+    except (TypeError, ValueError):
+        wpm = NARRATION_BASE_WPM
+    sentence_count = len(re.findall(r"[.!?]+(?=\s|$)", text))
+    duration = (word_count / wpm) * 60.0 + max(0, sentence_count - 1) * 0.08
+    return {
+        "seconds": round(max(0.0, duration), 2),
+        "word_count": word_count,
+        "effective_wpm": round(wpm, 2),
+        "persona_rate": rate,
+        "sentence_count": sentence_count,
+    }
+
+
+def classify_narration_duration(seconds):
+    """Classify the pre-TTS estimate without forcing padding or post-approval rewrites."""
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return "unknown"
+    if value > NARRATION_ACCEPTABLE_MAX_SECONDS:
+        return "too_long"
+    if value >= NARRATION_IDEAL_MIN_SECONDS:
+        return "ideal_or_acceptable"
+    return "short_but_valid"
+
+
+def measure_audio_duration(audio_paths):
+    """Measure the actual duration of TTS output files without regenerating them."""
+    durations = []
+    for path in audio_paths if isinstance(audio_paths, (list, tuple)) else []:
+        if not path or not os.path.exists(path):
+            raise FileNotFoundError(f"Audio file not found: {path}")
+        try:
+            from moviepy import AudioFileClip
+            clip = AudioFileClip(path)
+            try:
+                durations.append(float(clip.duration or 0.0))
+            finally:
+                clip.close()
+        except Exception as exc:
+            raise RuntimeError(f"Could not measure synthesized audio duration: {path}") from exc
+    return {
+        "scene_durations": [round(value, 3) for value in durations],
+        "total_seconds": round(sum(durations), 3),
+        "scene_count": len(durations),
+    }
+
+
+def validate_tts_duration(estimated_seconds, actual_seconds, tolerance_ratio=0.15, minimum_tolerance=2.0):
+    """Fail closed only when synthesized audio materially disagrees with the estimate."""
+    try:
+        estimated = float(estimated_seconds)
+        actual = float(actual_seconds)
+    except (TypeError, ValueError):
+        return {"passed": False, "reason": "TTS duration values are unavailable."}
+    tolerance = max(float(minimum_tolerance), abs(estimated) * float(tolerance_ratio))
+    delta = actual - estimated
+    return {
+        "passed": abs(delta) <= tolerance,
+        "estimated_seconds": round(estimated, 2),
+        "actual_seconds": round(actual, 2),
+        "delta_seconds": round(delta, 2),
+        "tolerance_seconds": round(tolerance, 2),
+        "reason": (
+            "Synthesized duration is within the expected variance."
+            if abs(delta) <= tolerance
+            else "Synthesized duration materially differs from the pre-TTS estimate."
+        ),
+    }
+
+
 
 def classify_hook_style(value):
     """Classify the actual opening hook family for channel learning and diagnostics."""
