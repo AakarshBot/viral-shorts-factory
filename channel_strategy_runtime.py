@@ -66,11 +66,6 @@ _MARQUEE_PERSON_TERMS = {
     "cristiano ronaldo", "lebron james",
 }
 
-_MAJOR_EVENT_TERMS = {
-    "world cup", "us open", "wimbledon", "olympics", "grand slam",
-    "champions trophy", "asia cup", "final", "semifinal", "semi-final",
-}
-
 _SCOPE_TERMS = {
     "history", "timeline", "background", "origins", "all you need to know",
     "everything you need to know", "explained in detail", "complete guide",
@@ -96,7 +91,7 @@ def _headline_scope_score(story: dict) -> float:
     """Estimate whether the headline describes one clean 20–30s narrative."""
     story = story if isinstance(story, dict) else {}
     title = str(story.get("title") or "")
-    words = len(re.findall(r"\\w+", title))
+    words = len(re.findall(r"\w+", title))
     actions = story.get("event_actions") or []
     action_count = len({str(item).strip().casefold() for item in actions if str(item).strip()})
 
@@ -145,7 +140,7 @@ def _freshfeed_pattern_score(story: dict, conflict: int, quote: int, surprise: i
     if rivalry:
         score += 1.50
         reasons.append("India-Pakistan rivalry")
-    if question and len(re.findall(r"\\w+", title)) >= 5:
+    if question and len(re.findall(r"\w+", title)) >= 5:
         score += 1.25
         reasons.append("provocative question")
     if surprise:
@@ -166,9 +161,7 @@ def _freshfeed_pattern_score(story: dict, conflict: int, quote: int, surprise: i
         score += 0.75
         reasons.append("conflict + quote synergy")
 
-    if 1 <= scope_score <= 0:
-        pass
-    elif scope_score >= 7.0:
+    if scope_score >= 7.0:
         score += 0.80
         reasons.append("strong 20–30s scope")
     elif scope_score >= 5.5:
@@ -187,7 +180,7 @@ def _freshfeed_pattern_score(story: dict, conflict: int, quote: int, surprise: i
         score -= min(1.75, generic * 0.75)
         reasons.append("generic-headline penalty")
 
-    words = len(re.findall(r"\\w+", title))
+    words = len(re.findall(r"\w+", title))
     if 20 <= len(title) <= CHANNEL_TITLE_MAX_CHARS:
         score += 0.45
         reasons.append("compact title")
