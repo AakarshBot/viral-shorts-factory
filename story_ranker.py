@@ -1522,11 +1522,17 @@ def _originality_stage(stories, used_topics, max_items=5):
             default=0.0,
         )
         if title_overlap >= 0.58:
-            distinct_event = bool(
+            similar_old = [
+                old
+                for old in selected
+                if _topic_overlap(story.get("title", ""), old.get("title", "")) >= 0.58
+            ]
+            distinct_event = any(
                 story.get("event_id")
                 and old.get("event_id")
                 and str(story.get("event_id")) != str(old.get("event_id"))
-            ) if selected else False
+                for old in similar_old
+            )
             if not distinct_event:
                 story["discovery_rejection"] = "Residual similar topic"
                 continue
