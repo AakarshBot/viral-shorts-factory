@@ -163,6 +163,44 @@ def test_cricket_worthiness_accepts_quote_and_conflict_story_without_result_keyw
     assert score >= 5.0
     assert story_ranker._cricket_story_worthiness_pass(story, minimum_score=5.0) is True
 
+def test_dashboard_fact_source_stage_keeps_strong_hook_single_source():
+    story = {
+        "title": "Former Pakistan batter calls India arrogant",
+        "description": "The former batter criticised India's approach and called the rivalry unusually heated.",
+        "url": "https://example.com/cricket/story",
+        "source": "ESPNcricinfo",
+        "event_clustered": True,
+        "event_article_count": 1,
+        "event_source_count": 1,
+        "event_source_domains": ["espncricinfo.com"],
+        "event_publishers": ["ESPNcricinfo"],
+        "event_entities": ["Pakistan batter", "India"],
+        "event_actions": [],
+    }
+    result = story_ranker._fact_source_stage(
+        [story],
+        max_items=1,
+        allow_strong_hook_single_source=True,
+    )
+    assert result == [story]
+    assert story["fact_source_pass"] is True
+
+
+def test_originality_keeps_distinct_event_ids_with_similar_headlines():
+    stories = [
+        {
+            "title": "India batter responds to strong criticism",
+            "event_id": "event-1",
+        },
+        {
+            "title": "India batter responds to strong criticism after new row",
+            "event_id": "event-2",
+        },
+    ]
+    selected = story_ranker._originality_stage(stories, used_topics=[], max_items=2)
+    assert len(selected) == 2
+
+
 def test_niche_discovery_query_lanes_are_defined():
     import story_ranker
     for genre in (
