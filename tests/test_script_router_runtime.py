@@ -42,7 +42,7 @@ def test_duration_rewrite_contract_passes_the_actual_previous_draft():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert 'duration_story["previous_script"]' in source
     assert "PREVIOUS DRAFT TO TIGHTEN:" in source
-    assert "preserve the previous draft's supported facts" in source
+    assert "Preserve every supported essential fact" in source
 
 
 def test_duration_fallbacks_receive_the_previous_draft_too():
@@ -64,7 +64,8 @@ def test_script_validation_does_not_require_visual_search_metadata():
         "editorial_angle": "The result explains the immediate change and why it matters.",
         "script": [
             {"voiceover": "India were called arrogant after the latest cricket clash.", "narrative_role": "hook"},
-            {"voiceover": "The comment triggered a direct response and put the dispute back in focus.", "narrative_role": "consequence"},
+            {"voiceover": "The comment triggered a direct response and put the dispute back in focus.", "narrative_role": "development"},
+            {"voiceover": "The immediate consequence is a renewed debate around the rivalry.", "narrative_role": "consequence"},
         ],
     }
 
