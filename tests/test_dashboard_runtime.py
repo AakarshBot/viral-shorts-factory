@@ -133,7 +133,7 @@ def test_dashboard_script_review_pauses_and_applies_queries(monkeypatch):
     def runner():
         result["script"] = namespace["write_script"]()
 
-    thread = threading.Thread(target=runner)
+    thread = threading.Thread(target=runner, daemon=True)
     thread.start()
 
     deadline = time.time() + 2
@@ -186,7 +186,7 @@ def test_dashboard_manual_slide_query_alignment(monkeypatch):
     def runner():
         result["script"] = namespace["write_script"]()
 
-    thread = threading.Thread(target=runner)
+    thread = threading.Thread(target=runner, daemon=True)
     thread.start()
 
     deadline = time.time() + 2
@@ -317,7 +317,7 @@ def test_dashboard_controller_pauses_after_visuals_until_approval(monkeypatch, t
             controller.bot.run_robot.__globals__["process_visuals_async"]()
         )
 
-    thread = threading.Thread(target=runner)
+    thread = threading.Thread(target=runner, daemon=True)
     thread.start()
 
     deadline = time.time() + 2
@@ -562,7 +562,7 @@ def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
         except Exception as exc:
             result["error"] = str(exc)
 
-    thread = threading.Thread(target=runner)
+    thread = threading.Thread(target=runner, daemon=True)
     thread.start()
 
     deadline = time.time() + 2
