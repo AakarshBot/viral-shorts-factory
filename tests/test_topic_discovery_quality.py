@@ -327,3 +327,96 @@ def test_cricket_worthiness_is_not_satisfied_by_routine_headline_alone():
     assert _cricket_story_worthiness_score(strong) > _cricket_story_worthiness_score(routine)
     assert _cricket_story_worthiness_pass(strong, minimum_score=5.0) is True
     assert _cricket_story_worthiness_pass(routine, minimum_score=5.0) is False
+
+def test_cricket_event_family_groups_asian_games_and_known_competitions():
+    from story_ranker import _cricket_event_family
+
+    assert _cricket_event_family({"title": "India Women win cricket gold at the Asian Games"}) == "asian_games"
+    assert _cricket_event_family({"title": "India-Pakistan clash sparks a fresh cricket row"}) == "india_pakistan_rivalry"
+    assert _cricket_event_family({"title": "Virat Kohli responds to criticism over India selection"}) == "person:virat_kohli"
+
+
+def test_cricket_diversity_caps_one_umbrella_event_in_the_first_page():
+    stories = []
+    for index in range(5):
+        stories.append({
+            "title": f"India cricket Asian Games story {index}",
+            "event_entities": ["Asian Games", f"Player {index}"],
+            "event_actions": ["win"],
+            "candidate_score": 40 - index,
+            "niche_opportunity_score": 2.0,
+            "freshness_score": 9.0,
+            "discovery_target_category": "sports_stories_of_day",
+            "cricket_story_worthiness_score": 7.0,
+        })
+    for index, title in enumerate([
+        "Gautam Gambhir called India arrogant after major rivalry clash",
+        "Rashid Khan praises an Indian star in a stunning statement",
+        "India selection row erupts after major squad shock",
+        "Virat Kohli responds to fresh criticism from a former batter",
+    ]):
+        stories.append({
+            "title": title,
+            "event_entities": ["India", f"Different Entity {index}"],
+            "event_actions": ["comment"],
+            "candidate_score": 35 - index,
+            "niche_opportunity_score": 4.0,
+            "freshness_score": 9.0,
+            "discovery_target_category": "sports_stories_of_day",
+            "cricket_story_worthiness_score": 7.0,
+        })
+
+    selected = diversity_rerank(stories, max_items=6)
+    families = [
+        item.get("cricket_event_family") or story_ranker._cricket_event_family(item)
+        for item in selected
+    ]
+    assert families.count("asian_games") <= 2
+    assert any(family != "asian_games" for family in families[:6])
+
+
+def test_cricket_diversity_does_not_pad_when_only_one_family_exists():
+    stories = [
+        {
+            "title": f"Asian Games India cricket story {index}",
+            "event_entities": ["Asian Games", f"Player {index}"],
+            "event_actions": ["win"],
+            "candidate_score": 30 - index,
+            "niche_opportunity_score": 2.0,
+            "freshness_score": 9.0,
+            "discovery_target_category": "sports_stories_of_day",
+            "cricket_story_worthiness_score": 7.0,
+        }
+        for index in range(5)
+    ]
+    selected = diversity_rerank(stories, max_items=5)
+    assert len(selected) == 5
+
+
+def test_cricket_headline_hook_ignores_clustered_body_quotes():
+    story = {
+        "title": "India women win cricket gold at Asian Games",
+        "event_search_text": "Former Pakistan batter calls India arrogant in separate coverage",
+        "description": "The gold medal capped a successful tournament.",
+        "event_entities": ["India Women", "Asian Games"],
+        "event_actions": ["win"],
+    }
+    score = story_ranker._hook_potential_score(story)
+    assert "conflict/tension" not in story["hook_potential_signals"]
+    assert score < 5.0
+
+
+def test_cricket_marquee_quote_outscores_plain_result_for_youtube_fit():
+    quote = {
+        "title": "Rashid Khan calls Indian sensation God-gifted",
+        "description": "Rashid Khan praised the Indian batter after the match.",
+        "event_entities": ["Rashid Khan", "India"],
+        "event_actions": ["comment"],
+    }
+    result = {
+        "title": "India win another Asian Games cricket match",
+        "description": "India won the match to move closer to the medal round.",
+        "event_entities": ["India", "Asian Games"],
+        "event_actions": ["win"],
+    }
+    assert story_ranker._cricket_story_worthiness_score(quote) > story_ranker._cricket_story_worthiness_score(result)
