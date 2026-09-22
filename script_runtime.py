@@ -920,6 +920,135 @@ def _originality_llm(url, payload, headers):
         return None
 
 
+def tighten_script_for_duration_once(
+    script_data,
+    story_data,
+    language_cfg,
+    format_mode,
+    *,
+    target_seconds=30.0,
+):
+    """Perform one lightweight compression pass on an already validated script.
+
+    This intentionally does not research, rerun the provider chain, run originality
+    QC, or run critique. A failed/invalid rewrite returns None so the caller can
+    retain the already-valid original draft.
+    """
+    if not isinstance(script_data, dict):
+        return None
+
+    scenes = [
+        {
+            "index": index,
+            "voiceover": str(scene.get("voiceover") or "").strip(),
+            "narrative_role": str(scene.get("narrative_role") or "").strip(),
+        }
+        for index, scene in enumerate(script_data.get("script") or [], 1)
+        if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
+    ]
+    if not scenes:
+        return None
+
+    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
+    if not groq:
+        print("   [Script Duration] Groq unavailable; retaining the validated draft.", flush=True)
+        return None
+
+    language_instruction = ""
+    if isinstance(language_cfg, dict):
+        language_instruction = str(language_cfg.get("script_instruction") or "").strip()
+
+    prompt = (
+        "Compress this already validated Shorts script once. "
+        f"Target roughly 20–30 seconds and never exceed 35 seconds. "
+        f"Current target is about {float(target_seconds):.1f} seconds. "
+        "Preserve every supported essential fact, the central hook, editorial angle and factual order. "
+        "Remove repetition, generic setup and nonessential context. Do not add, infer or invent facts. "
+        "Do not create a new story or change the angle. "
+        "Return ONLY JSON with a 'script' array containing exactly one replacement voiceover "
+        "for each existing scene, using the same numeric index values. "
+        "Keep the existing narrative roles. "
+        + (f"Language: {language_instruction}\n" if language_instruction else "")
+        + "\nPREVIOUS VALIDATED SCRIPT:\n"
+        + json.dumps(scenes, ensure_ascii=False)
+    )
+
+    payload = {
+        "model": "openai/gpt-oss-120b",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are performing a surgical duration edit on an already approved news script. "
+                    "Shorten wording only. Never alter factual meaning."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.15,
+    }
+
+    try:
+        request = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": "Bearer " + groq,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            body = json.loads(response.read().decode())
+        raw = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        parsed = _originality_json(raw)
+    except Exception as exc:
+        print(
+            f"   [Script Duration] Compression rewrite unavailable: {type(exc).__name__}; retaining the validated draft.",
+            flush=True,
+        )
+        return None
+
+    replacements = {}
+    if isinstance(parsed, dict) and isinstance(parsed.get("script"), list):
+        for scene in parsed["script"]:
+            if not isinstance(scene, dict):
+                continue
+            try:
+                index = int(scene.get("index"))
+            except (TypeError, ValueError):
+                continue
+            voiceover = str(scene.get("voiceover") or "").strip()
+            if index > 0 and voiceover:
+                replacements[index] = voiceover
+
+    if set(replacements) != {item["index"] for item in scenes}:
+        print("   [Script Duration] Compression rewrite returned incomplete scene coverage; retaining the validated draft.", flush=True)
+        return None
+
+    rewritten = dict(script_data)
+    rewritten["script"] = [
+        dict(original, voiceover=replacements[original_index])
+        for original_index, original in enumerate(script_data.get("script") or [], 1)
+        if isinstance(original, dict) and str(original.get("voiceover") or "").strip()
+    ]
+
+    cleaned, _diagnostics = clean_script_data(rewritten, story_data, format_mode)
+    valid, reason = validate_content_density(cleaned, story_data, format_mode)
+    if not valid:
+        print(
+            f"   [Script Duration] Compression rewrite failed validation: {reason}; retaining the validated draft.",
+            flush=True,
+        )
+        return None
+
+    if not cleaned.get("editorial_angle"):
+        cleaned["editorial_angle"] = script_data.get("editorial_angle", "")
+    cleaned["duration_compression_only"] = True
+    return cleaned
+
+
 def _normalise_critique(value, provider):
     unsupported = value.get("unsupported_claims") if isinstance(value.get("unsupported_claims"), list) else []
     exaggerations = value.get("exaggerations") if isinstance(value.get("exaggerations"), list) else []
