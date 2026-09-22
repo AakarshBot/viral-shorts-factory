@@ -26,6 +26,7 @@ from visual_licensing_runtime import append_image_credits
 from script_runtime import (
     append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
     estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
+    tighten_script_for_duration_once,
 )
 
 
@@ -2242,8 +2243,8 @@ def run_robot(web_config=None):
             return
 
         # Pre-TTS duration control: estimate from the selected persona/rate.
-        # Only an over-35s estimate triggers one tightening rewrite; there is no
-        # audio-generation loop and no padding of short scripts.
+        # Anything over 30s gets one lightweight compression attempt toward the
+        # 20–30s sweet spot; there is no audio-generation loop or repeated rewrite.
         persona_key = str(script_data.get("persona_used") or "LISTICLE HOST").upper()
         persona_profile = PERSONA_PROFILES.get(persona_key, PERSONA_PROFILES["LISTICLE HOST"])
         duration_estimate = estimate_narration_duration(script_data, persona_profile)
@@ -2292,22 +2293,31 @@ def run_robot(web_config=None):
                 "and the editorial angle. Remove repetition, generic setup and nonessential context; "
                 "do not add filler or invent facts. Return a complete replacement script, not commentary about the rewrite."
             )
-            print("   [Script Duration] Over 30s; performing exactly one pre-TTS tightening rewrite toward the 20–30s sweet spot.", flush=True)
-            rewritten = write_script(
-                duration_story, lang_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
+            print(
+                "   [Script Duration] Over 30s; performing exactly one lightweight compression pass "
+                "on the validated draft (no research/provider-chain rerun).",
+                flush=True,
+            )
+            rewritten = tighten_script_for_duration_once(
+                script_data,
+                duration_story,
+                lang_cfg,
+                format_mode,
+                target_seconds=30.0,
             )
             if not rewritten:
                 if duration_estimate["seconds"] <= 35.0:
                     print(
-                        "   [Script Duration] Tightening rewrite failed; retaining the original "
-                        "within-35s draft rather than stopping production.",
+                        "   [Script Duration] Compression pass unavailable or rejected; retaining the "
+                        "already-validated draft within the 35s soft maximum.",
                         flush=True,
                     )
                     rewritten = script_data
                 else:
                     raise RuntimeError(
-                        "Pre-TTS duration rewrite failed while the original draft was already over 35s."
+                        "Pre-TTS duration compression failed while the original draft was already over 35s."
                     )
+
             rewritten_estimate = estimate_narration_duration(rewritten, persona_profile)
             rewritten["estimated_duration_seconds"] = rewritten_estimate["seconds"]
             rewritten["estimated_duration_word_count"] = rewritten_estimate["word_count"]
@@ -2315,13 +2325,14 @@ def run_robot(web_config=None):
             rewritten["duration_band"] = classify_narration_duration(rewritten_estimate["seconds"])
             rewritten["duration_rewrite_attempted"] = True
             print(
-                f"   [Script Duration] Rewritten estimate: {rewritten_estimate['seconds']:.1f}s.",
+                f"   [Script Duration] Compressed estimate: {rewritten_estimate['seconds']:.1f}s.",
                 flush=True,
             )
+
             if rewritten_estimate["seconds"] > 35.0:
                 if duration_estimate["seconds"] <= 35.0:
                     print(
-                        f"   [Script Duration] Rewrite remained over 35s ({rewritten_estimate['seconds']:.1f}s); "
+                        f"   [Script Duration] Compression remained over 35s ({rewritten_estimate['seconds']:.1f}s); "
                         "retaining the original within-limit draft.",
                         flush=True,
                     )
@@ -2330,7 +2341,7 @@ def run_robot(web_config=None):
                 else:
                     raise RuntimeError(
                         f"Pre-TTS duration control could not bring the already-overlong script below 35s "
-                        f"(rewrite estimated {rewritten_estimate['seconds']:.1f}s)."
+                        f"(compression estimated {rewritten_estimate['seconds']:.1f}s)."
                     )
             script_data = rewritten
 
