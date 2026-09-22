@@ -2065,17 +2065,17 @@ def run_robot(web_config=None):
                 return
             story_payload, main_topic = cands[0], cands[0]["title"]
 
-        conn.execute(
+        insert_cursor = conn.execute(
             "INSERT OR IGNORE INTO vault "
             "(topic, date_used, genre, video_id) VALUES (?, ?, ?, ?)",
             (main_topic, datetime.now(), cat_choice, "PENDING_QC"),
         )
-        if conn.total_changes < 1:
+        if getattr(insert_cursor, "rowcount", 1) != 1:
             raise RuntimeError(
                 "Production run record was not created as a new vault row; "
                 "refusing to continue with ambiguous run identity."
             )
-        run_row_id = c.lastrowid
+        run_row_id = getattr(insert_cursor, "lastrowid", None)
         if not run_row_id:
             raise RuntimeError(
                 "Production run row identity is unavailable; refusing to continue."
