@@ -23,7 +23,7 @@ import subprocess
 load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
-from script_runtime import append_research_sources, choose_editorial_angle, validate_content_density
+from script_runtime import append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density
 
 
 def global_exception_hook(exctype, value, tb):
@@ -1020,7 +1020,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported tension, surprising result, consequential change, or attributed quote. Never manufacture suspense by withholding the actual information.\n"
         "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Never open with a generic 'latest update', 'here is what happened', or setup sentence.\n"
         "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs.\n"
-        "- Prefer a roughly 25–35 second finished cut when the complete story can be explained accurately within that span. Do not pad a short story, and do not force a complex story into an arbitrary duration.\n"
+        "- Prefer roughly 20–30 seconds for a focused single-event story, and allow up to roughly 35 seconds when a second perspective or necessary context genuinely improves the explanation. Do not pad a short story or force a complex story into an arbitrary duration.\n"
         "- Start with a factual hook. Build through the important development and relevant context. End with the most useful consequence, implication, limitation, comparison, or final fact.\n\n"
         "RETENTION-BAIT BAN:\n"
         "- Never use phrases such as 'wait till the end', 'wait until the end', 'wait for it', 'stay tuned', 'keep watching', "
@@ -1101,8 +1101,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 format_mode,
             )
             if valid:
-                data["hook_type"] = "Direct Factual Headline"
-                data["hook_style_used"] = "Direct Factual Headline"
+                data["hook_type"] = classify_hook_style(data)
+                data["hook_style_used"] = data["hook_type"]
                 data["editorial_angle_strategy"] = angle_strategy
                 data["structure_used"] = "Top 5" if format_mode == "top5" else "Editorial Explainer"
                 data["persona_used"] = persona_name.title()
