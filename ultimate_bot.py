@@ -2210,10 +2210,24 @@ def run_robot(web_config=None):
 
         if duration_estimate["seconds"] > 30.0:
             duration_story = dict(story_payload)
+            # Reuse the first evidence pack during the tightening rewrite. A
+            # transient research fetch failure must not kill an otherwise valid script.
+            for key in (
+                "research_sources",
+                "research_source_count",
+                "research_distinct_domains",
+                "research_evidence_pack",
+                "research_evidence_text",
+                "research_evidence_status",
+                "research_synthesis_required",
+                "research_fallback_source_used",
+            ):
+                if key in script_data:
+                    duration_story[key] = script_data[key]
             duration_story["duration_control_instruction"] = (
                 f"Previous draft is estimated at {duration_estimate['seconds']:.1f} seconds. "
                 "Tighten it once before human review toward the channel's 20–30 second sweet spot. "
-                "The final narration must not exceed 35 seconds. Preserve every supported essential fact "
+                "The final narration should not exceed 35 seconds. Preserve every supported essential fact "
                 "and the editorial angle. Remove repetition, generic setup and nonessential context; "
                 "do not add filler or invent facts. Return a complete replacement script, not commentary about the rewrite."
             )
@@ -2222,7 +2236,17 @@ def run_robot(web_config=None):
                 duration_story, language_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
             )
             if not rewritten:
-                raise RuntimeError("Pre-TTS duration rewrite failed; refusing to send an overlong script to human approval.")
+                if duration_estimate["seconds"] <= 35.0:
+                    print(
+                        "   [Script Duration] Tightening rewrite failed; retaining the original "
+                        "within-35s draft rather than stopping production.",
+                        flush=True,
+                    )
+                    rewritten = script_data
+                else:
+                    raise RuntimeError(
+                        "Pre-TTS duration rewrite failed while the original draft was already over 35s."
+                    )
             rewritten_estimate = estimate_narration_duration(rewritten, persona_profile)
             rewritten["estimated_duration_seconds"] = rewritten_estimate["seconds"]
             rewritten["estimated_duration_word_count"] = rewritten_estimate["word_count"]
@@ -2234,10 +2258,19 @@ def run_robot(web_config=None):
                 flush=True,
             )
             if rewritten_estimate["seconds"] > 35.0:
-                raise RuntimeError(
-                    f"Pre-TTS duration control could not bring the script below 35s "
-                    f"(estimated {rewritten_estimate['seconds']:.1f}s); no second rewrite will be attempted."
-                )
+                if duration_estimate["seconds"] <= 35.0:
+                    print(
+                        f"   [Script Duration] Rewrite remained over 35s ({rewritten_estimate['seconds']:.1f}s); "
+                        "retaining the original within-limit draft.",
+                        flush=True,
+                    )
+                    rewritten = script_data
+                    rewritten_estimate = duration_estimate
+                else:
+                    raise RuntimeError(
+                        f"Pre-TTS duration control could not bring the already-overlong script below 35s "
+                        f"(rewrite estimated {rewritten_estimate['seconds']:.1f}s)."
+                    )
             script_data = rewritten
 
         if dashboard_manual_control:
