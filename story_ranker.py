@@ -1174,6 +1174,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     )
     niche = _apply_sports_niche_bonus(story, target_category)
     niche_opportunity = _niche_opportunity_score(story)
+    major_event_score = _major_event_score(story)
     originality = _safe_float(story.get("originality_score")) or 5.0
     event_momentum = _event_momentum_score(story)
     independent_corroboration = _independent_corroboration_score(story)
@@ -1253,6 +1254,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["google_trends_signal"] = round(google_trend, 2)
     story["sports_niche_bonus"] = niche
     story["niche_opportunity_score"] = niche_opportunity
+    story["major_event_score"] = major_event_score
     story["discovery_dimensions"] = {
         "importance": round(importance, 2),
         "audience_potential": round(audience, 2),
@@ -1272,6 +1274,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "channel_fit": round(channel_fit, 2),
         "channel_fit_samples": channel_fit_samples,
         "niche_opportunity": round(niche_opportunity, 2),
+        "major_event": round(major_event_score, 2),
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
         "safety_risk": risk,
@@ -1566,12 +1569,19 @@ def diversity_rerank(stories, max_items=28):
             portfolio_penalty = min(3.0, max(0, same_genre_repeats - 2) * 0.75)
 
             niche_score = _safe_float(candidate.get("niche_opportunity_score")) or 0.0
+            major_score = _safe_float(candidate.get("major_event_score")) or 0.0
             niche_bonus = min(2.5, max(0.0, niche_score - 5.0) * 0.5)
+            mega_event_penalty = (
+                min(2.5, max(0.0, major_score - 2.0) * 0.55)
+                if niche_score < 5.0
+                else 0.0
+            )
 
             adjusted = (
                 base_score
                 + novelty_bonus
                 + niche_bonus
+                - mega_event_penalty
                 - repetition_penalty
                 - repeated_entity_penalty
                 - portfolio_penalty
@@ -1726,6 +1736,7 @@ NON_ARTICLE_PATH_PATTERNS = (
     r"/(?:page|p)/\d+(?:/|$)",
     r"/(?:latest|live|live-updates?|liveblog)(?:/|$)",
     r"/(?:gallery|galleries|photos?|photo|videos?)(?:/|$)",
+    r"/(?:news|articles?|stories|content)$",
 )
 
 
@@ -1810,6 +1821,27 @@ def _niche_opportunity_score(story):
         score += 1.0
     if major_hits >= 2 and source_count >= 4:
         score -= 3.0
+    return _clamp_score(score)
+
+
+def _major_event_score(story):
+    """Estimate whether a candidate is already saturated by mass-news signals."""
+    title = _clean(story.get("title") or "")
+    text = _text_blob(story)
+    combined = f"{title} {text}"
+    major_hits = sum(
+        1 for term in MAJOR_EVENT_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    source_count = int(story.get("event_source_count") or 0)
+    article_count = int(story.get("event_article_count") or 0)
+    score = min(4.0, major_hits * 0.8)
+    if source_count >= 6:
+        score += 1.5
+    elif source_count >= 4:
+        score += 0.8
+    if article_count >= 10:
+        score += 0.8
     return _clamp_score(score)
 
 
