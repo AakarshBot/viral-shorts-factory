@@ -23,7 +23,7 @@ import subprocess
 load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
-from script_runtime import append_research_sources, validate_content_density
+from script_runtime import append_research_sources, choose_editorial_angle, validate_content_density
 
 
 def global_exception_hook(exctype, value, tb):
@@ -993,6 +993,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             for s in stories_list if isinstance(s, dict)
         )
 
+    angle_strategy = choose_editorial_angle(story_data, format_mode)
+
     persona_name = (
         "LISTICLE HOST" if format_mode == "top5"
         else "TECH REVIEWER" if genre_key == "tech_reviews"
@@ -1025,6 +1027,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "'you won't believe', 'you'll never guess', 'find out at the end', 'what happens next', 'don't go anywhere', "
         "'that's not all', 'watch until the end', 'stay till the end', 'don't miss what comes next', or similar wording that deliberately withholds information to force retention.\n"
         "- Curiosity is allowed only when the same sentence also gives substantive information.\n\n"
+        "EDITORIAL ANGLE CONTROL:\n"
+        f"- Recommended narrative lens: {angle_strategy['type']}. {angle_strategy['instruction']}\n"
+        "- Use that lens only when the evidence supports it; never invent conflict, surprise, comparison, or consequences just to make the story more dramatic.\n\n"
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
@@ -1098,6 +1103,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             if valid:
                 data["hook_type"] = "Direct Factual Headline"
                 data["hook_style_used"] = "Direct Factual Headline"
+                data["editorial_angle_strategy"] = angle_strategy
                 data["structure_used"] = "Top 5" if format_mode == "top5" else "Editorial Explainer"
                 data["persona_used"] = persona_name.title()
                 return data
