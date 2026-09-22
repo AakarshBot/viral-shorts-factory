@@ -1340,6 +1340,32 @@ def render_script_visual_query_review(
             for item in unsupported[:6]:
                 st.markdown(f"- {_ui_text(item)}")
 
+    research_sources = script_data.get("research_sources") or []
+    if research_sources:
+        with st.expander("Open research sources", expanded=False):
+            for source in research_sources[:5]:
+                if not isinstance(source, dict):
+                    continue
+                source_title = _ui_text(
+                    source.get("title") or source.get("source_name") or source.get("publisher"),
+                    "Research source",
+                )
+                source_url = str(source.get("url") or "").strip()
+                publisher = _ui_text(
+                    source.get("publisher") or source.get("source_name") or "",
+                    "",
+                )
+                if source_url.startswith(("http://", "https://")):
+                    st.link_button(
+                        source_title,
+                        source_url,
+                        width="stretch",
+                    )
+                    if publisher:
+                        st.caption(f"Source · {publisher}")
+                else:
+                    st.caption(source_title)
+
     titles = [
         str(title or "").strip()
         for title in (script_data.get("titles") or [])
