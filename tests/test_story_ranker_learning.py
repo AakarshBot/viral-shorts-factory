@@ -1,7 +1,7 @@
 import story_ranker
 
 
-def _row(value, genre="technology", fmt="regular", language="english", stayed_to_watch=None):
+def _row(value, genre="technology", fmt="regular", language="english", stayed_to_watch=None, hook_style=None):
     return {
         "status": "COMPLETED",
         "video_id": f"video-{value}",
@@ -11,6 +11,8 @@ def _row(value, genre="technology", fmt="regular", language="english", stayed_to
         "format_used": fmt,
         "language_used": language,
         "topic": f"topic {value}",
+        "hook_style_used": hook_style,
+        "hook_type": hook_style,
     }
 
 
@@ -65,3 +67,49 @@ def test_channel_performance_prior_blends_stayed_to_watch_when_available():
 
     assert samples == 1
     assert 5.0 < score < 6.0
+
+
+
+def test_channel_performance_prior_can_learn_hook_family():
+    rows = [
+        _row(88, genre="sports", stayed_to_watch=55, hook_style="Conflict / Accusation"),
+        _row(84, genre="sports", stayed_to_watch=52, hook_style="Conflict / Accusation"),
+        _row(45, genre="sports", stayed_to_watch=20, hook_style="Direct Factual Headline"),
+        _row(50, genre="technology", stayed_to_watch=25, hook_style="Direct Factual Headline"),
+        _row(50, genre="entertainment", stayed_to_watch=25, hook_style="Direct Factual Headline"),
+    ]
+
+    conflict_score, conflict_samples = story_ranker._channel_performance_prior(
+        rows, "sports", "regular", "english", "Conflict / Accusation"
+    )
+    direct_score, direct_samples = story_ranker._channel_performance_prior(
+        rows, "sports", "regular", "english", "Direct Factual Headline"
+    )
+
+    assert conflict_samples == 2
+    assert direct_samples == 3
+    assert conflict_score > direct_score
+
+
+
+def test_channel_performance_prior_accepts_stayed_to_watch_without_retention():
+    rows = [
+        {
+            "status": "COMPLETED",
+            "video_id": "video-stayed-only",
+            "avg_view_percentage": None,
+            "stayed_to_watch": 60,
+            "genre": "sports",
+            "format_used": "regular",
+            "language_used": "english",
+            "topic": "conflict story",
+        },
+        _row(40, genre="technology"),
+    ]
+
+    score, samples = story_ranker._channel_performance_prior(
+        rows, "sports", "regular", "english"
+    )
+
+    assert samples == 1
+    assert score > 5.0
