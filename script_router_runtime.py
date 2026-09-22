@@ -10,6 +10,25 @@ from __future__ import annotations
 from typing import Any, Dict
 
 
+def _story_source_text(story: Dict[str, Any]) -> str:
+    """Return the selected story's own factual text for degraded-evidence recovery."""
+    story = story if isinstance(story, dict) else {}
+    values = []
+    title = str(story.get("title") or story.get("topic") or "").strip()
+    if title:
+        values.append(title)
+    for key in ("text", "summary", "description", "snippet"):
+        value = str(story.get(key) or "").strip()
+        if value:
+            values.append(value)
+    return "\n\n".join(values)[:12000]
+
+
+def _usable_story_source_fallback(story: Dict[str, Any]) -> bool:
+    """Allow script generation when page extraction failed but the selected story has real text."""
+    return len(_story_source_text(story)) >= 220
+
+
 def install_script_pipeline(bot):
     """Install exactly one canonical write_script wrapper on the production bot."""
     current = getattr(bot, "write_script", None)
@@ -37,10 +56,15 @@ def install_script_pipeline(bot):
             flush=True,
         )
 
-        # Phase 2 evidence is prepared once. The primary writer receives the
-        # enriched story, while provider fallbacks reuse the same evidence pack.
-        sources = rr.discover_sources(data, max_sources=rr.DEFAULT_MAX_SOURCES)
-        pack = rr.build_evidence_pack(data, sources=sources)
+        # Phase 2 evidence is prepared once. Duration rewrites and provider
+        # fallbacks can reuse an existing pack instead of re-fetching the same story.
+        existing_pack = data.get("research_evidence_pack")
+        if isinstance(existing_pack, dict) and existing_pack.get("status"):
+            pack = existing_pack
+            print("   [Script Pipeline] Reusing existing evidence pack.", flush=True)
+        else:
+            sources = rr.discover_sources(data, max_sources=rr.DEFAULT_MAX_SOURCES)
+            pack = rr.build_evidence_pack(data, sources=sources)
         status = pack.get("status", "unknown")
         counts = pack.get("counts") or {}
         print(
@@ -52,12 +76,27 @@ def install_script_pipeline(bot):
             f"{counts.get('conflicted_claims', 0)} conflicted.",
             flush=True,
         )
+        evidence_fallback_used = False
         if status == "insufficient_evidence":
-            raise RuntimeError(
-                "Phase 2 evidence gate failed: no usable A/B source page produced extractable evidence."
+            if not _usable_story_source_fallback(data):
+                raise RuntimeError(
+                    "Phase 2 evidence gate failed and the selected story contains too little "
+                    "source text for a safe script fallback."
+                )
+            evidence_fallback_used = True
+            evidence_text = (
+                "STORY-SOURCE FALLBACK — page extraction was unavailable. "
+                "Use only the factual information contained below; do not invent missing context. "
+                "Treat this as a single-source draft and keep public publishing blocked until human review.\n\n"
+                + _story_source_text(data)
             )
-
-        evidence_text = rr.format_evidence_pack_for_script(pack)
+            print(
+                "   [Script Pipeline] Evidence pages were unavailable; using the selected story's "
+                "source text as a single-source drafting fallback.",
+                flush=True,
+            )
+        else:
+            evidence_text = rr.format_evidence_pack_for_script(pack)
         data.update(
             {
                 "research_sources": pack.get("sources", []),
@@ -66,6 +105,7 @@ def install_script_pipeline(bot):
                 "research_evidence_pack": pack,
                 "research_evidence_text": evidence_text,
                 "research_synthesis_required": True,
+                "research_fallback_source_used": evidence_fallback_used,
                 "research_instruction": (
                     "PHASE 2 EVIDENCE RULES: A = primary authority/research; "
                     "B = reputable independent reporting; C = discovery only. "
@@ -119,6 +159,7 @@ def install_script_pipeline(bot):
                     "research_evidence_pack": pack,
                     "research_evidence_status": status,
                     "research_synthesis_required": True,
+                    "research_fallback_source_used": evidence_fallback_used,
                 }
             )
 
@@ -126,6 +167,8 @@ def install_script_pipeline(bot):
         # write_script wrapper. It preserves authoritative narration metadata
         # for the downstream audio/visual guards.
         result = pir._clean_script_result(result, data, format_mode)
+        if evidence_fallback_used:
+            result["public_publish_blocked"] = True
 
         # Canonical post-generation cleanup/validation. This is the only
         # content-quality wrapper in the active production path.
