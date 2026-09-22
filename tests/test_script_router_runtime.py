@@ -40,4 +40,4 @@ def test_duration_rewrite_contract_reuses_existing_evidence_and_preserves_valid_
     assert "Re-use the first evidence pack" not in source
     assert "Reuse the first evidence pack during the tightening rewrite." in source
     assert "retaining the original within-limit draft" in source
-    assert "if duration_estimate["seconds"] <= 35.0" in source
+    assert 'if duration_estimate["seconds"] <= 35.0' in source
