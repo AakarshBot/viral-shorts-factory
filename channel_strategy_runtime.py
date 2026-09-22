@@ -71,15 +71,23 @@ def _hits(terms: set[str], text: str) -> int:
 
 def score_story(story: dict) -> dict:
     story = story if isinstance(story, dict) else {}
-    title = _clean(story.get("title") or story.get("event_search_text"))
-    combined = f"{title} {_text_blob(story)}"
-    conflict = _hits(_CONFLICT_TERMS, combined)
-    quote = _hits(_QUOTE_TERMS, combined)
-    surprise = _hits(_SURPRISE_TERMS, combined)
-    result = _hits(_RESULT_TERMS, combined)
-    routine = _hits(_ROUTINE_TERMS, combined)
-    admin = _hits(_ADMIN_TERMS, combined)
-    generic = _hits(_GENERIC_TERMS, combined)
+    headline = _clean(
+        " ".join(
+            str(story.get(key) or "")
+            for key in ("title", "source_headline", "canonical_title", "event_search_text")
+        )
+    )
+    # Hook evidence is deliberately headline-first. Article body text is useful
+    # for factual grounding, but body mentions such as "said" must not masquerade
+    # as the kind of opening hook that actually drove the channel's retention.
+    conflict = _hits(_CONFLICT_TERMS, headline)
+    quote = _hits(_QUOTE_TERMS, headline)
+    surprise = _hits(_SURPRISE_TERMS, headline)
+    result = _hits(_RESULT_TERMS, headline)
+    routine = _hits(_ROUTINE_TERMS, headline)
+    admin = _hits(_ADMIN_TERMS, headline)
+    generic = _hits(_GENERIC_TERMS, headline)
+    combined = f"{headline} {_text_blob(story)}"
 
     score = 0.0
     reasons: list[str] = []
