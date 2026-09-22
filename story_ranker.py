@@ -812,6 +812,62 @@ def _recent_topic_cooldown(conn, stories, hours=72):
     return stories
 
 
+    """Remove recently covered topics while allowing genuinely new developments."""
+    if conn is None:
+        return list(stories or [])
+    try:
+        rows = conn.execute(
+            "SELECT topic, COALESCE(date_used, created_at) FROM vault "
+            "WHERE topic IS NOT NULL AND topic != '' "
+            "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
+            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
+        ).fetchall()
+    except Exception:
+        return list(stories or [])
+    now = datetime.now(timezone.utc)
+    recent = []
+    for topic, raw_date in rows:
+        if not topic or not raw_date:
+            continue
+        try:
+            when = raw_date if isinstance(raw_date, datetime) else datetime.fromisoformat(
+                str(raw_date).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            try:
+                when = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d")
+            except ValueError:
+                continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        age = (now - when.astimezone(timezone.utc)).total_seconds() / 3600.0
+        if 0 <= age <= hours:
+            recent.append(str(topic))
+    if not recent:
+        return list(stories or [])
+    kept = []
+    for story in stories or []:
+        title = str(story.get("title") or "")
+        current_tokens = _tokens(title)
+        candidate_actions = set(story.get("event_actions") or _event_actions(title))
+        repeated = False
+        for old_topic in recent:
+            overlap = _topic_overlap(title, old_topic)
+            shared = len(current_tokens & _tokens(old_topic))
+            if overlap < 0.55 and not (shared >= 3 and overlap >= 0.32):
+                continue
+            old_actions = set(_event_actions(old_topic))
+            if candidate_actions and old_actions and candidate_actions - old_actions:
+                continue
+            repeated = True
+            break
+        if repeated:
+            story["discovery_rejection"] = "Recent topic cooldown"
+            continue
+        kept.append(story)
+    return kept
+
+
 def _eligible(row):
     status = _clean(row.get("status"))
     video_id = _clean(row.get("video_id"))
@@ -962,6 +1018,1122 @@ def _cricket_story_worthiness_pass(story, minimum_score=5.0):
         story["discovery_rejection"] = "Low-value cricket service article"
         return False
     story["cricket_service_article_pass"] = True
+    return True
+
+
+    score = _cricket_story_worthiness_score(story)
+    story["cricket_story_worthiness_score"] = score
+    if not _cricket_service_title_pass(story):
+        story["cricket_service_article_pass"] = False
+        story["discovery_rejection"] = "Low-value cricket service article"
+        return False
+    story["cricket_service_article_pass"] = True
+    if score < float(minimum_score):
+        story["discovery_rejection"] = "Weak cricket editorial development"
+        return False
+    return True
+
+def _apply_sports_niche_bonus(story, target_category):
+    if _clean(target_category) != "sports":
+        return 0.0
+    return 3.0 if any(term in _text_blob(story) for term in SPORTS_NICHE_TERMS) else 0.0
+
+
+def _requested_topic_pass(story, requested_topic):
+    topic_terms = _tokens(requested_topic)
+    if not topic_terms:
+        return True
+    story_terms = _tokens(_text_blob(story))
+    overlap = len(topic_terms & story_terms)
+    required = 2 if len(topic_terms) >= 3 else 1
+    if overlap >= required:
+        story["requested_topic_overlap"] = overlap
+        return True
+    story["discovery_rejection"] = "Does not match requested topic"
+    story["requested_topic_overlap"] = overlap
+    return False
+
+
+def _cricket_relevance_pass(story, genre_key):
+    if _clean(genre_key) != "sports_stories_of_day":
+        return True
+    story_terms = _tokens(_text_blob(story))
+    if story_terms & {term for term in CRICKET_TERMS if " " not in term}:
+        return True
+    if "test cricket" in _text_blob(story) or "formula 1" in _text_blob(story):
+        return False
+    story["discovery_rejection"] = "Not cricket-relevant"
+    return False
+
+
+CRICKET_SERVICE_QUERY_EXCLUSIONS = (
+    ' -"live score" -"live scores" -"live updates" -"where to watch"'
+    ' -"live streaming" -telecast -"tv channel" -"playing XI"'
+    ' -"probable XI" -"predicted XI" -"match preview" -"match prediction"'
+    ' -prediction -fantasy -Dream11 -tickets -fixtures -schedule -scorecard'
+)
+
+CRICKET_INDIA_DISCOVERY_QUERY_LANES = (
+    '(India OR Indian OR BCCI OR IPL OR WPL OR "Team India" OR Pakistan OR Sri Lanka OR Bangladesh) cricket',
+    '("India cricket" OR "Team India" OR BCCI OR IPL OR WPL) (said OR says OR called OR claimed OR praised OR warned OR revealed OR admitted OR criticised OR criticized OR slammed OR blasted OR controversy OR dispute OR row)',
+    '("India cricket" OR "Team India" OR BCCI) (selection OR selected OR dropped OR recalled OR return OR injury OR injured OR captain OR coach OR retirement OR retired OR contract OR appointment OR suspended OR banned)',
+    '("India cricket" OR "Team India") (record OR milestone OR first OR fastest OR historic OR upset OR comeback OR thriller OR scare OR shock OR stuns OR survived)',
+    '("India Women" OR women cricket OR WPL) India (said OR says OR called OR controversy OR selection OR debut OR record OR milestone OR upset OR comeback)',
+    '(Ranji OR Duleep OR DPL OR "India A" OR U19 OR U23 OR domestic cricket OR state league) India (debut OR selected OR recalled OR injury OR record OR milestone OR controversy OR upset OR comeback)',
+    '("India Pakistan cricket" OR "India vs Pakistan" OR "India Pakistan") (controversy OR dispute OR row OR clash OR rivalry OR accused OR called OR slammed OR trophy OR sponsor)',
+)
+
+CRICKET_GLOBAL_DISCOVERY_QUERY_LANES = (
+    '(ICC OR "Australia cricket" OR "England cricket" OR "South Africa cricket" OR "New Zealand cricket" OR "West Indies cricket" OR "T20 cricket" OR "Test cricket")',
+    '(cricket) (said OR says OR called OR claimed OR praised OR warned OR revealed OR admitted OR criticised OR criticized OR controversy OR dispute OR row OR clash)',
+    '(cricket) (selection OR selected OR dropped OR recalled OR return OR injury OR injured OR captain OR coach OR retirement OR retired OR contract OR appointment OR suspended OR banned)',
+    '(cricket) (record OR milestone OR first OR fastest OR historic OR upset OR comeback OR thriller OR scare OR shock OR stuns)',
+    '("women cricket" OR WPL OR "women\'s cricket") (said OR controversy OR selection OR debut OR record OR upset)',
+    '(cricket) (emerging player OR uncapped OR domestic OR U19 OR U23 OR academy OR county OR franchise) (debut OR selected OR record OR milestone OR comeback)',
+    '("India Pakistan" cricket OR "Australia England" cricket OR "Ashes" OR "South Africa cricket") (controversy OR clash OR upset OR called OR slammed OR warned OR rivalry)',
+)
+
+CRICKET_GENERAL_DISCOVERY_QUERY_LANES = (
+    '(cricket OR ICC OR BCCI OR IPL OR WPL)',
+    'cricket (said OR says OR called OR claimed OR praised OR warned OR revealed OR admitted OR controversy OR dispute OR row OR clash)',
+    'cricket (selection OR selected OR dropped OR recalled OR injury OR injured OR captain OR coach OR retirement OR retired OR contract)',
+    'cricket (record OR milestone OR first OR fastest OR historic OR upset OR comeback OR thriller OR scare OR shock)',
+    'cricket (women OR domestic OR U19 OR U23 OR emerging OR uncapped OR academy) (debut OR selected OR record OR milestone OR comeback)',
+)
+GOOGLE_NEWS_RADAR_QUERIES = (
+    "(India OR Indian OR world OR global) (news OR announced OR decision OR deal OR launch)",
+    "(technology OR AI OR science) (news OR launch OR research OR breakthrough)",
+    "(business OR economy OR markets OR company) (news OR deal OR earnings OR investment)",
+    "(sports OR cricket OR football OR tennis) (news OR match OR tournament OR record)",
+    "(entertainment OR movies OR music OR celebrity) (news OR release OR announcement)",
+    "(health OR medicine OR wellness) (news OR study OR approval)",
+)
+GOOGLE_TRENDS_GEOS = ("IN", "US", "GB")
+REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports", "movies")
+
+DISCOVERY_OVERALL_WAIT_SECONDS = 10.0
+DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
+DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
+DISCOVERY_MAX_CRICKET_GOOGLE_QUERIES_BROAD = 8
+DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
+DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD = 6
+
+
+def _trend_traffic_score(value, rank=0):
+    text = str(value or "").strip().upper().replace(",", "")
+    match = re.search(r"(\d+(?:\.\d+)?)\s*([KMB])?", text)
+    if match:
+        number = float(match.group(1))
+        multiplier = {"K": 1e3, "M": 1e6, "B": 1e9}.get(match.group(2) or "", 1.0)
+        traffic = number * multiplier
+        if traffic >= 500_000:
+            return 4.0
+        if traffic >= 200_000:
+            return 3.5
+        if traffic >= 100_000:
+            return 3.0
+        if traffic >= 50_000:
+            return 2.5
+        if traffic >= 20_000:
+            return 2.0
+        if traffic > 0:
+            return 1.5
+    return max(1.0, min(3.0, 3.0 - max(0, int(rank) - 1) * 0.2))
+
+
+def _google_trends_root(geo="IN"):
+    geo = str(geo or "").strip().upper()
+    if not geo:
+        return None
+    try:
+        response = requests.get(
+            "https://trends.google.com/trending/rss",
+            params={"geo": geo},
+            headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
+            timeout=8,
+        )
+        response.raise_for_status()
+        return ET.fromstring(response.content)
+    except Exception as exc:
+        print(f"   [Discovery] Google Trends RSS unavailable for {geo}: {type(exc).__name__}", flush=True)
+        return None
+
+
+def _google_trends_items(geo="IN", max_items=10):
+    geo = str(geo or "").strip().upper()
+    root = _google_trends_root(geo)
+    if root is None:
+        return []
+
+    output = []
+    for rank, item in enumerate(root.findall("./channel/item")[:max_items], 1):
+        trend_query = str(item.findtext("title") or "").strip()
+        if not trend_query:
+            continue
+        traffic = str(item.findtext("{*}approx_traffic") or "").strip()
+        trend_score = _trend_traffic_score(traffic, rank)
+        for news_item in item.findall("{*}news_item"):
+            title = str(news_item.findtext("{*}news_item_title") or "").strip()
+            url_value = str(news_item.findtext("{*}news_item_url") or "").strip()
+            publisher = str(news_item.findtext("{*}news_item_source") or "").strip()
+            snippet = str(news_item.findtext("{*}news_item_snippet") or "").strip()
+            if not title or not url_value:
+                continue
+            output.append({
+                "title": _clean_source_headline(title, publisher),
+                "source_headline": title,
+                "text": snippet or title,
+                "description": snippet,
+                "source": publisher or "Google Trends",
+                "source_name": publisher or "Google Trends",
+                "publisher": publisher or "Google Trends",
+                "url": url_value,
+                "publishedAt": str(item.findtext("pubDate") or "").strip(),
+                "genre": "",
+                "collection_source": "google_trends",
+                "trend_query": trend_query,
+                "trend_traffic": traffic,
+                "trend_geo": geo,
+                "trend_rank": rank,
+                "trend_bonus": trend_score,
+            })
+    return output
+
+
+def fetch_google_trending_topics(geos=("IN",), max_terms=15):
+    terms = []
+    seen = set()
+    for geo in geos or ("IN",):
+        root = _google_trends_root(geo)
+        if root is None:
+            continue
+        for item in root.findall("./channel/item")[:max(1, int(max_terms))]:
+            trend = str(item.findtext("title") or "").strip()
+            if trend and trend.casefold() not in seen:
+                seen.add(trend.casefold())
+                terms.append(trend)
+                if len(terms) >= max(1, int(max_terms)):
+                    return terms
+    return terms
+
+
+def _google_news_search_items(query, genre_key="", max_items=60):
+    query = str(query or "").strip()
+    if not query:
+        return []
+    url = (
+        "https://news.google.com/rss/search"
+        f"?q={quote_plus(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+    )
+    return _rss_items(url, genre_key, collection_source="google_news_rss", max_items=max_items)
+
+
+def _infer_discovery_category(story):
+    text = _clean(" ".join(
+        str(story.get(key, "") or "")
+        for key in ("title", "text", "description", "event_search_text", "trend_query")
+    ))
+    weighted = {
+        "sports": {"cricket": 5, "icc": 5, "ipl": 5, "football": 4, "soccer": 4, "tennis": 4, "match": 2, "tournament": 3, "athlete": 3, "olympic": 4},
+        "technology": {"artificial intelligence": 5, "ai": 4, "chip": 3, "software": 3, "robot": 3, "smartphone": 4, "gadget": 3, "startup": 3, "nvidia": 3},
+        "business_finance": {"stock": 4, "market": 3, "economy": 4, "earnings": 4, "funding": 3, "acquisition": 4, "ipo": 4, "bank": 2, "finance": 3},
+        "entertainment": {"movie": 4, "film": 4, "bollywood": 5, "tollywood": 5, "celebrity": 4, "trailer": 3, "actor": 3, "music": 3, "album": 3},
+        "health_lifestyle": {"health": 3, "medical": 4, "medicine": 4, "disease": 4, "study": 2, "nutrition": 3, "fitness": 3, "wellness": 3},
+        "regional_state_news": {"telangana": 5, "hyderabad": 5, "andhra pradesh": 5, "amaravati": 5},
+        "viral_phenomenon": {"viral": 4, "trending": 3, "internet": 3, "social media": 3, "tiktok": 3, "instagram": 3, "youtube": 2},
+    }
+    scores = {key: 0 for key in weighted}
+    for category, terms in weighted.items():
+        for term, points in terms.items():
+            matched = bool(re.search(r"\bai\b", text)) if term == "ai" else term in text
+            if matched:
+                scores[category] += points
+    winner = max(scores.items(), key=lambda item: item[1])
+    return winner[0] if winner[1] > 0 else "national_global_affairs"
+
+
+def _discovery_category_allowed(genre_key, story):
+    """Keep fallback/trend signals inside the explicitly selected genre lane."""
+    genre_key = _clean(genre_key)
+    if not genre_key:
+        return True
+    inferred = _infer_discovery_category(story)
+    if genre_key == "sports_stories_of_day":
+        return inferred == "sports"
+    if genre_key == "tech_reviews":
+        return inferred == "technology"
+    return inferred == genre_key
+
+
+def _social_signal(title, social_titles):
+    tokens = _tokens(title)
+    if not tokens or not social_titles:
+        return 0.0
+    best = 0.0
+    for other in social_titles:
+        other_tokens = _tokens(other)
+        if not other_tokens:
+            continue
+        overlap = len(tokens & other_tokens) / max(1, len(tokens | other_tokens))
+        best = max(best, overlap)
+    return min(4.0, best * 12.0)
+
+
+def _source_url_from_item(item):
+    return str(item.get("url") or item.get("link") or "").strip()
+
+
+def _clean_source_headline(title, publisher=""):
+    """Remove only an exact trailing publisher suffix; keep the raw source headline separately."""
+    clean_title = re.sub(r"\s+", " ", str(title or "")).strip()
+    clean_publisher = re.sub(r"\s+", " ", str(publisher or "")).strip()
+    if not clean_title or not clean_publisher:
+        return clean_title
+    suffix = re.compile(
+        r"\s*(?:[-–—|:]\s*)" + re.escape(clean_publisher) + r"\s*$",
+        re.IGNORECASE,
+    )
+    stripped = suffix.sub("", clean_title).strip(" -–—|:")
+    return stripped or clean_title
+
+
+def _rss_items(url, genre_key, collection_source="rss", max_items=60):
+    if not url:
+        return []
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 ViralShortsFactory/2026"},
+            timeout=8,
+        )
+        if response.status_code != 200:
+            return []
+        root = ET.fromstring(response.content)
+
+        # Support both RSS 2.0 (<item>) and Atom (<entry>) feeds. A provider
+        # switching feed format must not silently disappear from discovery.
+        rss_items = root.findall(".//item")
+        atom_items = root.findall(".//{*}entry")
+        feed_items = rss_items or atom_items
+
+        items = []
+        for item in feed_items[:max_items]:
+            is_atom = item.tag.endswith("entry")
+            if is_atom:
+                title = (item.findtext("{*}title") or "").strip()
+                link_node = item.find("{*}link")
+                link = (
+                    str(link_node.get("href") or "").strip()
+                    if link_node is not None
+                    else ""
+                )
+                description = (
+                    item.findtext("{*}summary")
+                    or item.findtext("{*}content")
+                    or ""
+                ).strip()
+                published = (
+                    item.findtext("{*}published")
+                    or item.findtext("{*}updated")
+                    or ""
+                ).strip()
+                publisher = (
+                    item.findtext("{*}author/{*}name")
+                    or _source_domain({"url": link})
+                    or "Atom"
+                ).strip()
+            else:
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                description = (item.findtext("description") or "").strip()
+                published = (item.findtext("pubDate") or "").strip()
+                source_node = item.find("source")
+                publisher = (
+                    (source_node.text or "").strip()
+                    if source_node is not None and source_node.text
+                    else _source_domain({"url": link}) or "RSS"
+                )
+
+            if title and link:
+                source_headline = title
+                title = _clean_source_headline(title, publisher)
+                items.append({
+                    "title": title,
+                    "source_headline": source_headline,
+                    "text": description,
+                    "description": description,
+                    "source": publisher,
+                    "source_name": publisher,
+                    "url": link,
+                    "publishedAt": published,
+                    "genre": genre_key,
+                    "collection_source": collection_source,
+                })
+        return items
+    except Exception:
+        return []
+
+
+def _official_feed_urls(genre_key, genre_cfg):
+    urls = []
+    configured = genre_cfg.get("official_rss_urls") or []
+    if isinstance(configured, str):
+        configured = re.split(r"[;,]", configured)
+    urls.extend(str(item).strip() for item in configured if str(item).strip())
+    urls.extend(
+        item.strip()
+        for item in os.getenv(f"OFFICIAL_FEEDS_{str(genre_key).upper()}", "").split(";")
+        if item.strip()
+    )
+    urls.extend(
+        item.strip()
+        for item in os.getenv("FACTORY_OFFICIAL_FEEDS", "").split(";")
+        if item.strip()
+    )
+    return list(dict.fromkeys(urls))
+
+
+def _official_feed_items(genre_key, genre_cfg):
+    """Fetch configured official feeds in parallel without serializing the lane."""
+    urls = _official_feed_urls(genre_key, genre_cfg)
+    if not urls:
+        return []
+
+    pool = ThreadPoolExecutor(
+        max_workers=min(4, len(urls)),
+        thread_name_prefix="discovery-official",
+    )
+    futures = {
+        pool.submit(_rss_items, url, genre_key, collection_source="official"): url
+        for url in urls
+    }
+    try:
+        done, pending = wait(futures, timeout=8.0)
+        items = []
+        for future in done:
+            try:
+                items.extend(future.result() or [])
+            except Exception:
+                continue
+        for future in pending:
+            future.cancel()
+        return items
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _reddit_items(genre_key="", subreddit="", limit=50):
+    subreddit = str(subreddit or "").strip() or {
+        "sports": "sports",
+        "sports_stories_of_day": "sports",
+        "technology": "technology",
+        "business_finance": "business",
+        "entertainment": "movies",
+        "viral_phenomenon": "popular",
+        "national_global_affairs": "worldnews",
+    }.get(genre_key, "popular")
+    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={max(10, min(50, int(limit)))}"
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
+            timeout=8,
+        )
+        if response.status_code != 200:
+            return []
+        children = response.json().get("data", {}).get("children", [])
+        output = []
+        for node in children:
+            data = node.get("data", {}) if isinstance(node, dict) else {}
+            title = str(data.get("title") or "").strip()
+            permalink = str(data.get("permalink") or "").strip()
+            if not title:
+                continue
+            created_utc = _safe_float(data.get("created_utc"))
+            published = ""
+            if created_utc:
+                try:
+                    published = datetime.fromtimestamp(created_utc, tz=timezone.utc).isoformat()
+                except (TypeError, ValueError, OSError):
+                    published = ""
+            output.append({
+                "title": title,
+                "text": title,
+                "description": title,
+                "source": f"Reddit r/{subreddit}",
+                "source_name": f"Reddit r/{subreddit}",
+                "url": f"https://www.reddit.com{permalink}" if permalink else "",
+                "publishedAt": published,
+                "genre": genre_key,
+                "collection_source": "reddit",
+                "reddit_score": _safe_float(data.get("score")) or 0.0,
+            })
+        return output
+    except Exception:
+        return []
+
+
+def _cheap_filter(stories, max_items=30, max_age_hours=72):
+    """Apply freshness/safety eligibility before truncating the intake."""
+    survivors = []
+    seen_urls = set()
+    for story in stories:
+        if not isinstance(story, dict):
+            continue
+        title = str(story.get("title") or "").strip()
+        if len(title) < 12:
+            continue
+        safe, hits = _safety_gate(story)
+        if not safe:
+            story["discovery_rejection"] = "Safety/content policy gate"
+            story["safety_hits"] = hits
+            continue
+        age = _age_hours(story)
+        if age == 9999.0 or age > max_age_hours:
+            story["discovery_rejection"] = "Missing or stale publication date"
+            continue
+        if age > 48.0 and _event_momentum_score(story) < 0.5:
+            story["discovery_rejection"] = "Stale event without recent development"
+            continue
+        if not _source_page_pass(story):
+            continue
+        url = _canonical_url(_source_url_from_item(story))
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        story["cheap_filter_pass"] = True
+        story["age_hours"] = round(age, 2)
+        survivors.append(story)
+
+    survivors.sort(
+        key=lambda item: (
+            _freshness_score(item),
+            _niche_opportunity_score(item),
+            _topic_actionability(item),
+            -max(0.0, _safe_float(item.get("age_hours")) or 9999.0),
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
+            _source_quality(item),
+        ),
+        reverse=True,
+    )
+    return survivors[:max_items]
+
+
+def _deduplicate_stage(stories, max_items=15, prefer_editorial=False):
+    """Remove residual duplicates while optionally preserving editorially strong hooks."""
+    selected = []
+    for story in sorted(
+        stories,
+        key=lambda item: (
+            _hook_potential_score(item) if prefer_editorial else (
+                _safe_float(item.get("event_corroboration_score")) or 0.0
+            ),
+            _niche_opportunity_score(item) if prefer_editorial else _freshness_score(item),
+            _freshness_score(item),
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
+            _source_quality(item),
+        ),
+        reverse=True,
+    ):
+        duplicate = False
+        for old in selected:
+            if (
+                story.get("event_id")
+                and old.get("event_id")
+                and str(story.get("event_id")) == str(old.get("event_id"))
+            ):
+                duplicate = True
+                break
+            similarity = _story_theme_similarity(story, old)
+            if similarity < 0.50 or not _topic_dedupe_compatible(story, old):
+                continue
+            story_entities = _topic_entities(story)
+            old_entities = _topic_entities(old)
+            shared_entities = story_entities & old_entities
+            conflicting_entities = (
+                bool(story_entities - old_entities)
+                and bool(old_entities - story_entities)
+            )
+            # A residual duplicate should share a distinctive subject anchor,
+            # while genuinely different targets (for example Australia vs
+            # England) must remain separate even when headline wording overlaps.
+            if shared_entities and not conflicting_entities:
+                duplicate = True
+                break
+        if duplicate:
+            story["discovery_rejection"] = "Duplicate event/topic"
+            continue
+        story["dedupe_pass"] = True
+        selected.append(story)
+        if len(selected) >= max_items:
+            break
+    return selected
+
+
+def _fact_source_stage(stories, max_items=8, allow_strong_hook_single_source=False):
+    for story in stories:
+        publishers = set()
+        if story.get("event_clustered"):
+            domains = set(story.get("event_source_domains") or [])
+            publishers = set(story.get("event_publishers") or [])
+            if story.get("event_article_count", 0) == 1 and not domains:
+                domain = _source_domain(story)
+                if domain:
+                    domains.add(domain)
+            corroboration = max(
+                len(domains),
+                len(publishers),
+                int(story.get("event_source_count") or 0),
+            )
+            article_count = int(story.get("event_article_count") or 1)
+        else:
+            title = story.get("title", "")
+            domains = {_source_domain(story)} if _source_domain(story) else set()
+            for other in stories:
+                if other is story:
+                    continue
+                if _topic_overlap(title, other.get("title", "")) >= 0.30:
+                    domain = _source_domain(other)
+                    if domain:
+                        domains.add(domain)
+            corroboration = len(domains)
+            article_count = 1
+
+        event_bonus = _safe_float(story.get("event_corroboration_score")) or 0.0
+        article_bonus = min(4.0, max(0.0, article_count - 1) * 0.5)
+        story["corroboration_bonus"] = min(10.0, max(float(corroboration) * 2.0, event_bonus))
+        story["article_support_bonus"] = article_bonus
+        story["source_domains"] = sorted(domains)
+        story["source_quality_score"] = _source_quality(story)
+        story["fact_source_score"] = min(
+            16.0,
+            float(corroboration) * 2.5 + _source_quality(story) + article_bonus,
+        )
+
+        body = " ".join(
+            str(story.get(key) or "")
+            for key in ("description", "summary", "snippet", "text", "content")
+        ).strip()
+        body_chars = len(re.sub(r"\s+", " ", body))
+        strong_hook = _hook_potential_score(story) >= 5.0
+        regular_pass = (
+            _source_quality(story) >= 1.0
+            or corroboration >= 2
+            or (
+                _niche_opportunity_score(story) >= 5.0
+                and _story_substance_pass(story, minimum_body_chars=150)
+            )
+        )
+        hook_pass = (
+            bool(allow_strong_hook_single_source)
+            and strong_hook
+            and _source_quality(story) >= 1.0
+            and body_chars >= 80
+        )
+        story["fact_source_pass"] = bool(domains or publishers) and (regular_pass or hook_pass)
+
+    passed = [story for story in stories if story.get("fact_source_pass")]
+    for story in stories:
+        if not story.get("fact_source_pass"):
+            story["discovery_rejection"] = "Insufficient source support"
+
+    passed.sort(
+        key=lambda item: (
+            _safe_float(item.get("fact_source_score")) or 0.0,
+            _niche_opportunity_score(item),
+            _freshness_score(item),
+        ),
+        reverse=True,
+    )
+    limit = max(0, int(max_items or 0))
+    if len(passed) <= limit:
+        return passed
+
+    niche_target = min(
+        len([item for item in passed if _niche_opportunity_score(item) >= 5.0]),
+        max(1, int(math.ceil(limit * 0.25))) if limit >= 5 else 0,
+    )
+    niche = [
+        item for item in passed
+        if _niche_opportunity_score(item) >= 5.0
+    ][:niche_target]
+    niche_keys = {id(item) for item in niche}
+    core = [item for item in passed if id(item) not in niche_keys]
+    balanced = niche + core[: max(0, limit - len(niche))]
+    balanced.sort(
+        key=lambda item: (
+            _safe_float(item.get("fact_source_score")) or 0.0,
+            _niche_opportunity_score(item),
+            _freshness_score(item),
+        ),
+        reverse=True,
+    )
+    return balanced[:limit]
+
+
+def _originality_stage(stories, used_topics, max_items=5):
+    """Score historical/current similarity while retaining genuine new developments."""
+    selected = []
+    for story in stories:
+        overlap = _same_topic(story, used_topics)
+        title_overlap = max(
+            (
+                _topic_overlap(story.get("title", ""), old.get("title", ""))
+                for old in selected
+            ),
+            default=0.0,
+        )
+        similar_old = [
+            old for old in selected
+            if _topic_overlap(story.get("title", ""), old.get("title", "")) >= 0.82
+        ]
+        distinct_event = any(
+            story.get("event_id")
+            and old.get("event_id")
+            and str(story.get("event_id")) != str(old.get("event_id"))
+            for old in similar_old
+        )
+        story_actions = set(story.get("event_actions") or _event_actions(story.get("title", "")))
+        same_action = any(
+            bool(story_actions & set(old.get("event_actions") or _event_actions(old.get("title", ""))))
+            for old in similar_old
+        )
+        if title_overlap >= 0.82 and not distinct_event and same_action:
+            story["discovery_rejection"] = "Residual near-duplicate topic"
+            continue
+        story["historical_topic_overlap"] = round(overlap, 3)
+        story["originality_score"] = round(
+            max(0.0, 10.0 - overlap * 7.0 - title_overlap * 5.0),
+            2,
+        )
+        story["originality_pass"] = True
+        selected.append(story)
+        if len(selected) >= max_items:
+            break
+    return selected
+
+
+    selected = []
+    for story in stories:
+        overlap = _same_topic(story, used_topics)
+
+        # Historical cooldown is deliberately conservative: high lexical
+        # overlap indicates the same covered topic, while moderate overlap can
+        # simply mean the same entity has a genuinely new development.
+        if overlap >= 0.72:
+            story["discovery_rejection"] = "Previously covered topic/angle"
+            continue
+
+        title_overlap = max(
+            (
+                _topic_overlap(story.get("title", ""), old.get("title", ""))
+                for old in selected
+            ),
+            default=0.0,
+        )
+        if title_overlap >= 0.58:
+            similar_old = [
+                old
+                for old in selected
+                if _topic_overlap(story.get("title", ""), old.get("title", "")) >= 0.58
+            ]
+            distinct_event = any(
+                story.get("event_id")
+                and old.get("event_id")
+                and str(story.get("event_id")) != str(old.get("event_id"))
+                for old in similar_old
+            )
+            if not distinct_event:
+                story["discovery_rejection"] = "Residual similar topic"
+                continue
+
+        story["originality_score"] = round(
+            max(0.0, 10.0 - overlap * 9.0 - title_overlap * 6.0),
+            2,
+        )
+        story["originality_pass"] = True
+        selected.append(story)
+        if len(selected) >= max_items:
+            break
+    return selected
+
+
+def _editorial_score(story, rows, target_category, target_format, target_language, social_titles, ai_cricket=False):
+    velocity = _safe_float(story.get("velocity_score")) or 0.0
+    trend = _safe_float(story.get("trend_bonus")) or 0.0
+    freshness = _freshness_score(story)
+    corroboration = _safe_float(story.get("corroboration_bonus")) or 0.0
+    article_support = _safe_float(story.get("article_support_bonus")) or 0.0
+    visual = _visual_potential(story)
+    risk = _risk_score(story)
+    india_relevance = _india_relevance_score(story)
+    topic_actionability = _topic_actionability(story)
+    source_quality = _safe_float(story.get("source_quality_score")) or 0.0
+    event_text = story.get("event_search_text") or story.get("title", "")
+    social = _social_signal(event_text, social_titles)
+    google_trend = trend
+    history, history_matches = _historical_context_score(
+        story,
+        rows,
+        target_category,
+        target_format,
+        target_language,
+    )
+    niche = _apply_sports_niche_bonus(story, target_category)
+    cricket_worthiness = (
+        _cricket_story_worthiness_score(story)
+        if _clean(target_category) == "sports_stories_of_day"
+        else 0.0
+    )
+    story["discovery_target_category"] = _clean(target_category)
+    niche_opportunity = _niche_opportunity_score(story)
+    major_event_score = _major_event_score(story)
+    originality = _safe_float(story.get("originality_score")) or 5.0
+    event_momentum = _event_momentum_score(story)
+    independent_corroboration = _independent_corroboration_score(story)
+    event_velocity = _safe_float(story.get("event_velocity_score")) or 0.0
+    discovery_gap = bool(story.get("event_discovery_gap"))
+    development_state = _clean(story.get("event_development_state"))
+
+    momentum = min(
+        10.0,
+        velocity
+        + trend
+        + min(2.0, event_velocity * 0.35)
+        + (0.75 if development_state == "developing" else 0.0)
+    )
+    importance = _clamp_score(
+        momentum * 0.28
+        + min(10.0, event_momentum) * 0.18
+        + min(10.0, freshness) * 0.16
+        + min(10.0, corroboration) * 0.16
+        + min(10.0, independent_corroboration) * 0.10
+        + min(10.0, article_support) * 0.04
+        + min(10.0, source_quality) * 0.08
+        - min(10.0, risk * 2.0) * 0.18
+    )
+
+    audience = _audience_potential(
+        story,
+        social,
+        google_trend,
+        event_momentum,
+        originality,
+    )
+    shorts_viability = _shorts_viability(story, visual)
+    hook_potential = _hook_potential_score(story)
+    shorts_scope = _shorts_scope_score(story)
+    channel_history = history
+    candidate_hook_style = classify_hook_style(story.get("title") or story.get("event_search_text") or "")
+    channel_fit, channel_fit_samples = _channel_performance_prior(
+        rows,
+        target_category,
+        target_format,
+        target_language,
+    )
+    hook_fit, hook_fit_samples = _channel_performance_prior(
+        rows,
+        target_category,
+        target_format,
+        target_language,
+        candidate_hook_style,
+    )
+    momentum_weight = 1.08 if ai_cricket else 1.0
+
+    # candidate_score remains a single ranking score, but its components are
+    # now explicitly separated so audience interest does not masquerade as
+    # factual importance and correlated coverage signals are capped.
+    is_cricket = _clean(target_category) == "sports_stories_of_day"
+    strategy_input = story
+    if is_cricket:
+        # event_search_text contains clustered headlines and must not manufacture
+        # a stronger opening hook than the actual candidate headline.
+        strategy_input = dict(story)
+        strategy_input["event_search_text"] = ""
+    channel_strategy = score_channel_strategy(strategy_input)
+    channel_signal = _safe_float(channel_strategy.get("score")) or 0.0
+    freshfeed_pattern_score = _safe_float(channel_strategy.get("freshfeed_pattern_score")) or 0.0
+    freshfeed_scope_score = _safe_float(channel_strategy.get("freshfeed_scope_score")) or 0.0
+    freshfeed_priority_pattern = bool(channel_strategy.get("freshfeed_priority_pattern"))
+    title_packaging = title_package_score(story.get("title") or "")
+    cricket_event_family = _cricket_event_family(story) if is_cricket else ""
+
+    # Channel history says the opening promise is the decisive packaging signal.
+    # Keep evidence, freshness and source quality intact, but let hookability and
+    # channel fit materially influence selection.
+    final_score = (
+        importance * (1.05 if is_cricket else 1.25)
+        + audience * (1.00 if is_cricket else 1.10) * momentum_weight
+        + shorts_viability * (1.25 if is_cricket else 1.15)
+        + shorts_scope * (1.10 if is_cricket else 0.95)
+        + hook_potential * (1.75 if is_cricket else 1.35)
+        + topic_actionability * 0.55
+        + originality * 0.40
+        + visual * 0.18
+        + india_relevance * INDIA_FOCUS_SCORE_WEIGHT
+        + channel_history * 0.60
+        + channel_fit * 0.40
+        + hook_fit * 0.25
+        # FreshFeed pattern fit is intentionally separate from generic channel
+        # strategy so the actual winning combinations (conflict, bold quotes,
+        # marquee people, rivalry and concise scope) materially affect ranking.
+        + freshfeed_pattern_score * (1.45 if is_cricket else 1.25)
+        + (1.60 if freshfeed_priority_pattern else 0.0)
+        + channel_signal * (1.05 if is_cricket else 0.90)
+        + title_packaging * (0.45 if is_cricket else 0.25)
+        + niche * 0.18
+        + niche_opportunity * 0.45
+        + cricket_worthiness * (0.90 if _clean(target_category) == "sports_stories_of_day" else 0.0)
+        + (0.50 if discovery_gap else 0.0)
+        - risk * 0.60
+    )
+    story["candidate_score"] = round(final_score, 3)
+    story["freshfeed_channel_fit_score"] = channel_signal
+    story["freshfeed_pattern_score"] = freshfeed_pattern_score
+    story["freshfeed_scope_score"] = freshfeed_scope_score
+    story["freshfeed_priority_pattern"] = freshfeed_priority_pattern
+    story["freshfeed_pattern_reasons"] = channel_strategy.get("freshfeed_pattern_reasons", [])
+    story["freshfeed_marquee_person_hits"] = int(channel_strategy.get("marquee_person_hits") or 0)
+    story["freshfeed_rivalry_signal"] = bool(channel_strategy.get("rivalry_signal"))
+    story["title_package_score"] = round(title_packaging, 3)
+    story["cricket_event_family"] = cricket_event_family
+    story["freshfeed_channel_fit_reasons"] = channel_strategy.get("reasons", [])
+    story["freshfeed_channel_strong_hook"] = bool(channel_strategy.get("strong_hook"))
+    story["freshfeed_channel_strategy_version"] = channel_strategy.get("version", "")
+    story["event_momentum_score"] = event_momentum
+    story["independent_corroboration_score"] = independent_corroboration
+    story["historical_topic_signal"] = round(history, 3)
+    story["historical_topic_matches"] = history_matches
+    story["channel_fit_score"] = channel_fit
+    story["channel_fit_samples"] = channel_fit_samples
+    story["hook_style"] = candidate_hook_style
+    story["hook_fit_score"] = hook_fit
+    story["hook_fit_samples"] = hook_fit_samples
+    story["freshness_score"] = round(freshness, 2)
+    story["visual_potential"] = round(visual, 2)
+    story["shorts_viability_score"] = round(shorts_viability, 2)
+    story["shorts_scope_score"] = round(shorts_scope, 2)
+    story["hook_potential_score"] = round(hook_potential, 2)
+    story["topic_actionability_score"] = round(topic_actionability, 2)
+    story["india_relevance_score"] = round(india_relevance, 2)
+    story["importance_score"] = round(importance, 2)
+    story["audience_potential_score"] = round(audience, 2)
+    story["risk_signal_count"] = risk
+    story["social_signal"] = round(social, 2)
+    story["google_trends_signal"] = round(google_trend, 2)
+    story["sports_niche_bonus"] = niche
+    story["niche_opportunity_score"] = niche_opportunity
+    story["major_event_score"] = major_event_score
+    story["discovery_dimensions"] = {
+        "importance": round(importance, 2),
+        "audience_potential": round(audience, 2),
+        "shorts_viability": round(shorts_viability, 2),
+        "shorts_scope": round(shorts_scope, 2),
+        "hook_potential": round(hook_potential, 2),
+        "channel_fit": round(channel_signal, 2),
+        "channel_fit_reasons": channel_strategy.get("reasons", []),
+        "freshfeed_pattern": round(freshfeed_pattern_score, 2),
+        "freshfeed_scope": round(freshfeed_scope_score, 2),
+        "freshfeed_priority_pattern": freshfeed_priority_pattern,
+        "freshfeed_pattern_reasons": channel_strategy.get("freshfeed_pattern_reasons", []),
+        "freshfeed_marquee_person_hits": int(channel_strategy.get("marquee_person_hits") or 0),
+        "freshfeed_rivalry_signal": bool(channel_strategy.get("rivalry_signal")),
+        "topic_actionability": round(topic_actionability, 2),
+        "india_relevance": round(india_relevance, 2),
+        "momentum": round(momentum, 2),
+        "event_momentum": round(event_momentum, 2),
+        "freshness": round(freshness, 2),
+        "corroboration": round(corroboration, 2),
+        "independent_corroboration": round(independent_corroboration, 2),
+        "article_support": round(article_support, 2),
+        "source_quality": round(source_quality, 2),
+        "social_signal": round(social, 2),
+        "google_trends": round(google_trend, 2),
+        "channel_history": round(history, 2),
+        "channel_fit": round(channel_fit, 2),
+        "channel_fit_samples": channel_fit_samples,
+        "hook_fit": round(hook_fit, 2),
+        "hook_fit_samples": hook_fit_samples,
+        "niche_opportunity": round(niche_opportunity, 2),
+        "cricket_story_worthiness": round(cricket_worthiness, 2),
+        "major_event": round(major_event_score, 2),
+        "originality": round(originality, 2),
+        "visual_potential": round(visual, 2),
+        "safety_risk": risk,
+        "event_velocity": round(event_velocity, 2),
+        "development_state": development_state,
+        "discovery_gap": discovery_gap,
+    }
+    return story
+
+
+def _discovery_source_pass(story):
+    """Require minimum provenance for dashboard discovery without requiring corroboration."""
+    url = _source_url_from_item(story)
+    evidence = [
+        item for item in (story.get("event_evidence") or [])
+        if isinstance(item, dict)
+    ]
+    has_evidence_url = any(str(item.get("url") or "").strip() for item in evidence)
+    publisher = _clean(
+        story.get("publisher")
+        or story.get("source")
+        or story.get("source_name")
+        or story.get("domain")
+    )
+    has_evidence_publisher = any(
+        _clean(item.get("publisher"))
+        for item in evidence
+        if isinstance(item, dict)
+    )
+    if not (url or has_evidence_url):
+        story["discovery_rejection"] = "No source URL/evidence"
+        return False
+    if not (publisher or has_evidence_publisher):
+        story["discovery_rejection"] = "No identifiable publisher"
+        return False
+    story["discovery_source_backed"] = True
+    return True
+
+
+def _candidate_quality_pass(story):
+    """Keep weak candidates out of the dashboard instead of padding the list."""
+    dimensions = story.get("discovery_dimensions") or {}
+    freshness = _safe_float(dimensions.get("freshness")) or 0.0
+    momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
+    importance = _safe_float(dimensions.get("importance")) or 0.0
+    shorts = _safe_float(dimensions.get("shorts_viability")) or 0.0
+    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
+    scope = _safe_float(dimensions.get("shorts_scope")) or 0.0
+    corroboration = _safe_float(dimensions.get("corroboration")) or 0.0
+    source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
+    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
+    importance = _safe_float(dimensions.get("importance")) or 0.0
+    channel_signal = _safe_float(dimensions.get("channel_fit")) or 0.0
+    freshfeed_pattern_score = (
+        _safe_float(story.get("freshfeed_pattern_score"))
+        or _safe_float(dimensions.get("freshfeed_pattern"))
+        or 0.0
+    )
+    freshfeed_priority_pattern = bool(
+        story.get("freshfeed_priority_pattern")
+        or dimensions.get("freshfeed_priority_pattern")
+    )
+    score = _safe_float(story.get("candidate_score")) or 0.0
+
+    channel_ok, channel_reason = candidate_gate(
+        {
+            "score": channel_signal,
+            "freshfeed_pattern_score": freshfeed_pattern_score,
+            "freshfeed_priority_pattern": freshfeed_priority_pattern,
+            "strong_hook": bool(story.get("freshfeed_channel_strong_hook")),
+            "routine_or_admin": bool(
+                story.get("freshfeed_channel_fit_reasons")
+                and any(
+                    reason in story.get("freshfeed_channel_fit_reasons", [])
+                    for reason in ("routine/service penalty", "administrative-news penalty")
+                )
+            ),
+        },
+        hook,
+        importance,
+    )
+    if not channel_ok:
+        story["discovery_rejection"] = channel_reason
+        return False
+
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.5):
+        return False
+    if not _headline_noise_pass(story):
+        return False
+    if freshness < 2.0 and momentum < 2.0:
+        story["discovery_rejection"] = "Insufficient current-event signal"
+        return False
+    if importance < 3.5:
+        story["discovery_rejection"] = "Insufficient editorial importance"
+        return False
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Insufficient story substance behind headline"
+        return False
+    if shorts < 3.0:
+        story["discovery_rejection"] = "Weak Shorts viability"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 3.25:
+        story["discovery_rejection"] = "Weak Shorts hook potential"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and scope < 5.5:
+        story["discovery_rejection"] = "Poor fit for a focused 20–35s Short"
+        return False
+    if source_quality < 1.0 and corroboration < 2.0:
+        story["discovery_rejection"] = "Insufficient source support"
+        return False
+    if score < 14.0:
+        story["discovery_rejection"] = "Below discovery quality floor"
+        return False
+    return True
+
+
+
+def _discovery_portfolio_pass(story):
+    """Keep source-valid current events visible; rank quality instead of deleting it."""
+    if not _source_page_pass(story):
+        return False
+    if not _headline_noise_pass(story):
+        return False
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Insufficient story substance behind headline"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day":
+        if not _cricket_service_title_pass(story):
+            story["discovery_rejection"] = "Low-value cricket service article"
+            return False
+    story["discovery_quality_floor_bypassed"] = True
+    return True
+
+
+    """Keep the dashboard broad without weakening the production selection gate.
+
+    The dashboard is a human exploration surface, so niche but current,
+    source-supported stories should remain visible even when they are not
+    strong enough for automatic production selection.
+    """
+    dimensions = story.get("discovery_dimensions") or {}
+    freshness = _safe_float(dimensions.get("freshness")) or 0.0
+    momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
+    score = _safe_float(story.get("candidate_score")) or 0.0
+    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
+    scope = _safe_float(dimensions.get("shorts_scope")) or 0.0
+    actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.0):
+        return False
+    if not _source_page_pass(story):
+        return False
+    if not _headline_noise_pass(story):
+        return False
+    if freshness < 1.0 and momentum < 1.0:
+        story["discovery_rejection"] = "Insufficient current-event signal"
+        return False
+    strong_hook = bool(story.get("freshfeed_channel_strong_hook")) or hook >= 5.0
+    if actionability < 3.0 and not strong_hook:
+        story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
+        story["discovery_rejection"] = "Weak Shorts hook potential"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and scope < 5.5:
+        story["discovery_rejection"] = "Poor fit for a focused 20–35s Short"
+        return False
+    if not _story_substance_pass(story):
+        story["discovery_rejection"] = "Headline lacks enough story substance behind the event"
+        return False
+    if score < 6.0:
+        story["discovery_rejection"] = "Below exploration quality floor"
+        return False
+
+    story["discovery_tier"] = (
+        "production-ready" if _candidate_quality_pass(story) else "exploratory"
+    )
     return True
 
 
