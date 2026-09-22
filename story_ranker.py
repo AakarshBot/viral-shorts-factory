@@ -1401,7 +1401,7 @@ def _deduplicate_stage(stories, max_items=15, prefer_editorial=False):
     return selected
 
 
-def _fact_source_stage(stories, max_items=8):
+def _fact_source_stage(stories, max_items=8, allow_strong_hook_single_source=False):
     for story in stories:
         publishers = set()
         if story.get("event_clustered"):
@@ -1440,7 +1440,14 @@ def _fact_source_stage(stories, max_items=8):
             16.0,
             float(corroboration) * 2.5 + _source_quality(story) + article_bonus,
         )
-        story["fact_source_pass"] = bool(domains or publishers) and (
+
+        body = " ".join(
+            str(story.get(key) or "")
+            for key in ("description", "summary", "snippet", "text", "content")
+        ).strip()
+        body_chars = len(re.sub(r"\s+", " ", body))
+        strong_hook = _hook_potential_score(story) >= 5.0
+        regular_pass = (
             _source_quality(story) >= 1.0
             or corroboration >= 2
             or (
@@ -1448,6 +1455,13 @@ def _fact_source_stage(stories, max_items=8):
                 and _story_substance_pass(story, minimum_body_chars=150)
             )
         )
+        hook_pass = (
+            bool(allow_strong_hook_single_source)
+            and strong_hook
+            and _source_quality(story) >= 1.0
+            and body_chars >= 80
+        )
+        story["fact_source_pass"] = bool(domains or publishers) and (regular_pass or hook_pass)
 
     passed = [story for story in stories if story.get("fact_source_pass")]
     for story in stories:
@@ -1508,7 +1522,14 @@ def _originality_stage(stories, used_topics, max_items=5):
             default=0.0,
         )
         if title_overlap >= 0.58:
-            continue
+            distinct_event = bool(
+                story.get("event_id")
+                and old.get("event_id")
+                and str(story.get("event_id")) != str(old.get("event_id"))
+            ) if selected else False
+            if not distinct_event:
+                story["discovery_rejection"] = "Residual similar topic"
+                continue
 
         story["originality_score"] = round(
             max(0.0, 10.0 - overlap * 9.0 - title_overlap * 6.0),
@@ -2806,12 +2827,17 @@ def rank_discovery_candidates(
     stage50 = _fact_source_stage(
         stage60,
         max_items=90 if is_cricket_dashboard else 60,
+        allow_strong_hook_single_source=is_cricket_dashboard,
     )
     stage40 = [
         item for item in stage50
         if _headline_noise_pass(item) and _story_substance_pass(item)
     ]
-    stage30 = _originality_stage(stage40, used_topics, max_items=60)
+    stage30 = _originality_stage(
+        stage40,
+        used_topics,
+        max_items=90 if is_cricket_dashboard else 60,
+    )
 
     ranked = [
         _editorial_score(
