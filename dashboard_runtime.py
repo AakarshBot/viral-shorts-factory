@@ -1233,6 +1233,11 @@ class DashboardWorkflowController(WorkflowController):
                 return False, f"Script edits need attention: {reason}"
 
             rank_title_candidates(cleaned, story_data)
+            cleaned_titles = cleaned.get("titles") or []
+            if not isinstance(cleaned_titles, list) or len(cleaned_titles) != 3:
+                return False, "Script review requires exactly three usable title candidates."
+            if selected_index < 1 or selected_index > len(cleaned_titles):
+                return False, "The selected title is no longer valid after title cleanup."
             cleaned["recommended_title_index"] = selected_index
 
             original_voice = [
@@ -1330,6 +1335,26 @@ class DashboardWorkflowController(WorkflowController):
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False
+
+        packages = snapshot.get("visual_packages") or []
+        unresolved = []
+        for index, package in enumerate(packages, 1):
+            layer = package[0] if isinstance(package, list) and package else package
+            if not isinstance(layer, dict):
+                unresolved.append(index)
+                continue
+            image_path = str(layer.get("image") or "").strip()
+            if (
+                not image_path
+                or not os.path.isfile(image_path)
+                or not bool(layer.get("visual_verified"))
+                or bool(layer.get("visual_qc_blocked"))
+            ):
+                unresolved.append(index)
+
+        if unresolved:
+            return False
+
         self._visual_approved = True
         gate = self._manual_gate_state
         if isinstance(gate, dict):
