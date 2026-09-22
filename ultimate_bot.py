@@ -23,7 +23,10 @@ import subprocess
 load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
-from script_runtime import append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density
+from script_runtime import (
+    append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
+    estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
+)
 
 
 def global_exception_hook(exctype, value, tb):
@@ -1032,6 +1035,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Use that lens only when the evidence supports it; never invent conflict, surprise, comparison, or consequences just to make the story more dramatic.\n\n"
         "RUNTIME SCOPE CONTROL:\n"
         f"- Story scope fit score: {story_data.get('shorts_scope_score', 0)}. Prefer a focused 20–30 second cut for a compact single-event story; allow up to roughly 35 seconds only when a second perspective or necessary context genuinely earns the extra time. Never pad or force compression.\n"
+        f"- Duration controller instruction: {str(story_data.get('duration_control_instruction') or '').strip()}\n"
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
@@ -2187,6 +2191,54 @@ def run_robot(web_config=None):
             print("   [!] Error: Script generation returned None.")
             return
 
+        # Pre-TTS duration control: estimate from the selected persona/rate.
+        # Only an over-35s estimate triggers one tightening rewrite; there is no
+        # audio-generation loop and no padding of short scripts.
+        persona_key = str(script_data.get("persona_used") or "LISTICLE HOST").upper()
+        persona_profile = PERSONA_PROFILES.get(persona_key, PERSONA_PROFILES["LISTICLE HOST"])
+        duration_estimate = estimate_narration_duration(script_data, persona_profile)
+        script_data["estimated_duration_seconds"] = duration_estimate["seconds"]
+        script_data["estimated_duration_word_count"] = duration_estimate["word_count"]
+        script_data["estimated_duration_effective_wpm"] = duration_estimate["effective_wpm"]
+        script_data["duration_band"] = classify_narration_duration(duration_estimate["seconds"])
+        print(
+            f"   [Script Duration] Estimated {duration_estimate['seconds']:.1f}s "
+            f"({duration_estimate['word_count']} words at {duration_estimate['effective_wpm']:.0f} WPM).",
+            flush=True,
+        )
+
+        if duration_estimate["seconds"] > 35.0:
+            duration_story = dict(story_payload)
+            duration_story["duration_control_instruction"] = (
+                f"Previous draft is estimated at {duration_estimate['seconds']:.1f} seconds. "
+                "Tighten it once before human review so the narration is no longer than 35 seconds, "
+                "preferably 20–30 seconds. Preserve every supported essential fact and the editorial angle. "
+                "Remove repetition, generic setup and nonessential context; do not add filler or invent facts. "
+                "Return a complete replacement script, not commentary about the rewrite."
+            )
+            print("   [Script Duration] Over 35s; performing exactly one pre-TTS tightening rewrite.", flush=True)
+            rewritten = write_script(
+                duration_story, language_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
+            )
+            if not rewritten:
+                raise RuntimeError("Pre-TTS duration rewrite failed; refusing to send an overlong script to human approval.")
+            rewritten_estimate = estimate_narration_duration(rewritten, persona_profile)
+            rewritten["estimated_duration_seconds"] = rewritten_estimate["seconds"]
+            rewritten["estimated_duration_word_count"] = rewritten_estimate["word_count"]
+            rewritten["estimated_duration_effective_wpm"] = rewritten_estimate["effective_wpm"]
+            rewritten["duration_band"] = classify_narration_duration(rewritten_estimate["seconds"])
+            rewritten["duration_rewrite_attempted"] = True
+            print(
+                f"   [Script Duration] Rewritten estimate: {rewritten_estimate['seconds']:.1f}s.",
+                flush=True,
+            )
+            if rewritten_estimate["seconds"] > 35.0:
+                raise RuntimeError(
+                    f"Pre-TTS duration control could not bring the script below 35s "
+                    f"(estimated {rewritten_estimate['seconds']:.1f}s); no second rewrite will be attempted."
+                )
+            script_data = rewritten
+
         if dashboard_manual_control:
             conn.execute(
                 "UPDATE vault SET status='WAITING_SCRIPT_REVIEW', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
@@ -2261,6 +2313,32 @@ def run_robot(web_config=None):
             if not audio_paths:
                 print("   [!] Error: Voiceover generation failed to produce audio files.")
                 return
+
+            # Definitive TTS QC: measure the one synthesized audio set and compare
+            # it with the pre-TTS estimate. Never silently rewrite after approval.
+            audio_duration = measure_audio_duration(audio_paths)
+            tts_qc = validate_tts_duration(
+                script_data.get("estimated_duration_seconds"),
+                audio_duration["total_seconds"],
+            )
+            script_data["actual_audio_duration_seconds"] = audio_duration["total_seconds"]
+            script_data["tts_duration_qc"] = tts_qc
+            print(
+                f"   [TTS Duration QC] Actual {audio_duration['total_seconds']:.1f}s vs "
+                f"estimated {float(script_data.get('estimated_duration_seconds') or 0):.1f}s "
+                f"(delta {tts_qc.get('delta_seconds', 0):+.1f}s).",
+                flush=True,
+            )
+            if not tts_qc.get("passed"):
+                raise RuntimeError(
+                    "TTS duration materially differs from the pre-TTS estimate; "
+                    "stopping without silently rewriting the approved script."
+                )
+            if audio_duration["total_seconds"] > 35.0:
+                raise RuntimeError(
+                    f"Final synthesized narration is over 35s ({audio_duration['total_seconds']:.1f}s); "
+                    "stopping without rewriting the approved script."
+                )
 
             visuals = asyncio.run(
                 process_visuals_async(script_data, lang_cfg, format_mode)
