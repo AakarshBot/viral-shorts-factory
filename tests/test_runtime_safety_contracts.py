@@ -35,7 +35,7 @@ def test_run_id_includes_microseconds_to_avoid_same_second_collisions():
 def test_core_vault_writes_are_pinned_to_the_created_row():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     start = source.index("def run_robot(")
-    end = source.index("\nif __name__ == "__main__":", start)
+    end = source.index("\nif __name__ == \"__main__\":", start)
     block = source[start:end]
     assert '"INSERT OR IGNORE INTO vault "' in block
     assert "insert_cursor = conn.execute(" in block
@@ -184,7 +184,7 @@ def test_visual_qa_budget_and_failure_state_are_execution_local():
 def test_production_uses_a_run_scoped_workspace_instead_of_wiping_shared_output():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     start = source.index("def run_robot(")
-    end = source.index("\nif __name__ == "__main__":", start)
+    end = source.index("\nif __name__ == \"__main__\":", start)
     block = source[start:end]
     assert 'global ASSETS_DIR' in block
     assert 'ASSETS_DIR = os.path.join(BASE_DIR, "output", workspace_id)' in block
@@ -211,7 +211,7 @@ def test_fresh_vault_contains_visual_rights_ledger_column():
 def test_script_is_persisted_before_expensive_media_pipeline():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     start = source.index("def run_robot(")
-    end = source.index("\nif __name__ == "__main__":", start)
+    end = source.index("\nif __name__ == \"__main__\":", start)
     block = source[start:end]
     persist_pos = block.index("UPDATE vault SET script_json")
     pipeline_pos = block.index("Starting Asset Generation & Rendering Pipeline")
@@ -246,7 +246,7 @@ def test_dashboard_initialization_restores_ready_upload_state():
 def test_locked_dashboard_story_skips_redundant_analytics_sweep():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     start = source.index("def run_robot(")
-    end = source.index("\nif __name__ == "__main__":", start)
+    end = source.index("\nif __name__ == \"__main__\":", start)
     block = source[start:end]
     marker = 'locked_story = bool('
     skip = 'should_sync = not locked_story'
@@ -258,7 +258,7 @@ def test_locked_dashboard_story_skips_redundant_analytics_sweep():
 def test_active_production_stages_are_distinct_from_stale_qc():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     start = source.index("def run_robot(")
-    end = source.index("\nif __name__ == "__main__":", start)
+    end = source.index("\nif __name__ == \"__main__\":", start)
     block = source[start:end]
     assert "status='RUNNING'" in block
     assert "status='WAITING_SCRIPT_REVIEW'" in block
