@@ -241,3 +241,15 @@ def test_dashboard_initialization_restores_ready_upload_state():
     assert "restore_ready_upload()" in block
     assert "st.session_state.production_started = True" in block
     assert "metadata_approved = False" in block
+
+
+def test_locked_dashboard_story_skips_redundant_analytics_sweep():
+    source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("def run_robot(")
+    end = source.index("\nif __name__ == "__main__":", start)
+    block = source[start:end]
+    marker = 'locked_story = bool('
+    skip = 'should_sync = not locked_story'
+    assert marker in block
+    assert skip in block
+    assert "Analytics sync skipped: dashboard story is already locked" in block
