@@ -2141,6 +2141,22 @@ def run_robot(web_config=None):
             except (ValueError, EOFError):
                 script_data["title"] = titles[rec_idx - 1]
 
+        # Persist the approved script before expensive narration/visual work.
+        # This is the recovery source if the process later reaches READY_FOR_UPLOAD
+        # and the Streamlit session itself is recreated.
+        conn.execute(
+            """UPDATE vault SET script_json=?, format_used=?, language_used=?,
+            trend_keyword=?, updated_at=CURRENT_TIMESTAMP WHERE rowid=?""",
+            (
+                json.dumps(script_data, ensure_ascii=False),
+                str(format_mode or ""),
+                str(lang_key if "lang_key" in locals() else ""),
+                str(trend_keyword or ""),
+                run_row_id,
+            ),
+        )
+        conn.commit()
+
         print("\n⚙️ Starting Asset Generation & Rendering Pipeline...")
         try:
             audio_paths, word_timings = asyncio.run(
