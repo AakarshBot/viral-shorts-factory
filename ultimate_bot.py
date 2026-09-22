@@ -1943,7 +1943,18 @@ def run_robot(web_config=None):
         conn.commit()
 
         sync_file = os.path.join(BASE_DIR, "last_sync.txt")
-        should_sync = True
+        locked_story = bool(
+            isinstance(web_config, dict)
+            and isinstance(web_config.get("selected_story"), dict)
+            and str(web_config["selected_story"].get("title") or "").strip()
+        )
+        should_sync = not locked_story
+        if locked_story:
+            print(
+                "   [Learning] Analytics sync skipped: dashboard story is already locked; "
+                "no discovery ranking depends on a fresh learning sweep.",
+                flush=True,
+            )
         if os.path.exists(sync_file):
             try:
                 with open(sync_file, "r", encoding="utf-8") as f:
