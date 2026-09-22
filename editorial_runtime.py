@@ -5,6 +5,24 @@ import re
 import sqlite3
 
 
+_EDITORIAL_SAFETY_TERMS = {
+    "sexual assault", "child sexual", "child abuse", "sexual abuse", "explicit porn",
+    "pornographic", "graphic sexual", "suicide method", "suicide instructions",
+    "terrorist recruitment", "terrorist propaganda", "hate speech", "racial slur",
+    "violent extremist propaganda", "gore", "graphic gore",
+}
+
+
+def _contains_editorial_safety_block(story):
+    if not isinstance(story, dict):
+        return False
+    text = " ".join(
+        str(story.get(key) or "")
+        for key in ("title", "source_headline", "canonical_title", "text")
+    ).lower()
+    return any(term in text for term in _EDITORIAL_SAFETY_TERMS)
+
+
 def _num(value, default=0.0):
     try:
         return float(value)
@@ -82,14 +100,29 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         if idx >= len(batch_stories) or not isinstance(scores, dict):
             break
         story = batch_stories[idx]
-        if not isinstance(story, dict) or _bool(scores.get("hard_reject"), False):
+        if not isinstance(story, dict):
             continue
 
+        model_hard_reject = _bool(scores.get("hard_reject"), False)
         hs = max(0.0, min(10.0, _num(scores.get("hook_strength"), 5.0)))
         nc = max(0.0, min(10.0, _num(scores.get("narrative_completeness"), 5.0)))
         af = max(0.0, min(10.0, _num(scores.get("audience_fit"), 5.0)))
         mr = max(0.0, min(10.0, _num(scores.get("monetization_risk"), 5.0)))
         sl = max(0.0, min(10.0, _num(scores.get("shelf_life"), 5.0)))
+
+        # Provider hard_reject is advisory. Deterministic safety remains a hard
+        # stop, while a high monetization-risk score must not itself kill a
+        # substantively strong story. This prevents false stops on normal sports
+        # stories involving younger athletes or other brand-safety-sensitive context.
+        safety_blocked = _contains_editorial_safety_block(story)
+        if safety_blocked:
+            continue
+        strong_enough_for_reject_override = (
+            mr >= 8.0 and hs >= 7.0 and nc >= 7.0 and af >= 6.0
+        )
+        if model_hard_reject and not strong_enough_for_reject_override:
+            continue
+
         channel_fit = max(
             0.0, min(10.0, _num(story.get("freshfeed_channel_fit_score"), 0.0))
         )
@@ -105,6 +138,10 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
             + sl * 0.10
             + channel_fit * 0.10
         )
+        if model_hard_reject:
+            # Preserve the model's concern as a soft penalty rather than letting
+            # it override otherwise strong, safe editorial evidence.
+            quality_score -= 1.50
 
         trend_bonus = _num(story.get("trend_bonus"), 0.0)
         velocity_boost = _num(story.get("velocity_score"), 0.0)

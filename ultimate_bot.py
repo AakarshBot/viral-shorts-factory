@@ -868,6 +868,8 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         "For hook_strength, judge the immediate scroll-stop potential of the story headline and opening fact: reward a specific conflict, surprising result, consequential change, record, or attributed quote that can be understood immediately; "
         "penalize generic setup, routine schedules/previews, and empty 'latest update' framing. Never reward unsupported sensationalism or clickbait. "
         "For narrative_completeness, judge whether the event has enough substance for a concise but complete Short. "
+        "Set hard_reject=true only for a clear safety/policy violation or a story that is objectively unusable as a factual Short; "
+        "never set hard_reject=true merely because monetization_risk is 8-10, because monetization risk is a soft penalty rather than an automatic rejection. "
         "Return ONLY this exact JSON object structure: {\"results\": [{\"hook_strength\": 8, \"narrative_completeness\": 8, \"audience_fit\": 8, \"monetization_risk\": 9, \"shelf_life\": 7, \"hard_reject\": false, \"one_line_reasoning\": \"...\"}]} "
         "matching the input order one-to-one."
     )

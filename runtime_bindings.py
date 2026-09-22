@@ -177,21 +177,18 @@ def _wrap_scored_candidates(bot):
             risk_values.append(risk)
             if risk >= 8:
                 risk_reject_count += 1
-        print("   [Editorial Diagnostics] Rejection inputs: " + f"hard_reject={hard_reject_count}, monetization_risk>=8={risk_reject_count}, malformed/missing={missing_count}, risks={risk_values}", flush=True)
+        print("   [Editorial Diagnostics] Model risk signals: " + f"hard_reject={hard_reject_count}, monetization_risk>=8={risk_reject_count} (risk is a soft penalty), malformed/missing={missing_count}, risks={risk_values}", flush=True)
 
         result = current(normalised, batch_stories, bonuses, last_genre, format_mode)
         if not result:
             print("   [Editorial Diagnostics] Corrected scorer returned 0 candidates.", flush=True)
             return []
 
-        rejected_ids = {
-            id(batch_stories[index])
-            for index, scores in enumerate(normalised)
-            if index < len(batch_stories) and _coerce_bool(scores.get("hard_reject"), False)
-        }
-        filtered = [item for item in result if id(item) not in rejected_ids]
-        print(f"   [Editorial Diagnostics] Corrected scorer candidates={len(result)}; after explicit hard-reject gate={len(filtered)}.", flush=True)
-        return filtered
+        # The authoritative scorer owns rejection semantics. Do not apply a
+        # second blanket hard_reject filter here; that would undo its safety-aware
+        # override for strong stories where monetization risk is only advisory.
+        print(f"   [Editorial Diagnostics] Authoritative scorer candidates={len(result)}.", flush=True)
+        return result
 
     safe_process._hard_reject_safe = True
     bot.process_scored_candidates = safe_process
