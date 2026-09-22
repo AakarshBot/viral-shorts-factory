@@ -69,10 +69,12 @@ def test_originality_stage_returns_only_actual_passes():
     )
 
     assert [item["title"] for item in result] == [
+        "Previously covered battery breakthrough",
         "Fresh robotics factory opens",
         "Fresh satellite mission launches",
     ]
     assert all(item["originality_pass"] is True for item in result)
+    assert result[0]["originality_score"] < 10.0
 
 
 def test_event_clustering_preserves_category_provenance():

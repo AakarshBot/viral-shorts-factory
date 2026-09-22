@@ -117,12 +117,6 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         safety_blocked = _contains_editorial_safety_block(story)
         if safety_blocked:
             continue
-        strong_enough_for_reject_override = (
-            mr >= 8.0 and hs >= 7.0 and nc >= 7.0 and af >= 6.0
-        )
-        if model_hard_reject and not strong_enough_for_reject_override:
-            continue
-
         channel_fit = max(
             0.0, min(10.0, _num(story.get("freshfeed_channel_fit_score"), 0.0))
         )
@@ -139,9 +133,9 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
             + channel_fit * 0.10
         )
         if model_hard_reject:
-            # Preserve the model's concern as a soft penalty rather than letting
-            # it override otherwise strong, safe editorial evidence.
-            quality_score -= 1.50
+            # Model hard-reject is advisory only. Deterministic safety remains
+            # authoritative; subjective provider judgements become a soft penalty.
+            quality_score -= 2.0
 
         trend_bonus = _num(story.get("trend_bonus"), 0.0)
         velocity_boost = _num(story.get("velocity_score"), 0.0)

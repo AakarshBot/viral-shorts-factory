@@ -1201,7 +1201,10 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
     script_data["hook_quality_score"] = hook_diagnostics["score"]
     script_data["hook_quality_reasons"] = hook_diagnostics["reasons"]
     if hook_target >= 6.0 and hook_diagnostics["score"] < 3.0:
-        return False, "Opening hook is too weak for a high-potential story."
+        script_data["hook_quality_warning"] = (
+            "Opening hook scored below the preferred threshold for a high-potential story; "
+            "retaining the draft for downstream QC rather than hard-rejecting it."
+        )
 
     return True, "Passed semantic narrative completeness, hook quality and anti-retention checks"
 

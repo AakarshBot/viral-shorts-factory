@@ -29,8 +29,8 @@ def test_high_monetization_risk_hard_reject_is_soft_for_strong_safe_story(strong
     assert result[0]["composite_score"] > 0
 
 
-def test_weak_hard_reject_is_still_rejected():
-    story = {"title": "Routine update", "text": "A routine update with little factual substance."}
+def test_model_hard_reject_is_advisory_for_editorial_scoring():
+    story = {"title": "Routine update", "text": "A routine update with factual substance for a short."}
     scored = [{
         "hook_strength": 3,
         "narrative_completeness": 3,
@@ -40,7 +40,10 @@ def test_weak_hard_reject_is_still_rejected():
         "hard_reject": True,
     }]
 
-    assert score_candidates(scored, [story], {}, "", "regular") == []
+    result = score_candidates(scored, [story], {}, "", "regular")
+
+    assert len(result) == 1
+    assert result[0]["composite_score"] < 3.0
 
 
 def test_deterministic_safety_block_remains_hard_reject():

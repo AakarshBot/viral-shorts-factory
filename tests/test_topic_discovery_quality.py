@@ -420,3 +420,43 @@ def test_cricket_marquee_quote_outscores_plain_result_for_youtube_fit():
         "event_actions": ["win"],
     }
     assert story_ranker._cricket_story_worthiness_score(quote) > story_ranker._cricket_story_worthiness_score(result)
+
+
+
+def test_recent_topic_cooldown_keeps_overlap_as_penalty():
+    import sqlite3
+    from datetime import datetime, timezone
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE vault (topic TEXT, date_used TEXT, created_at TEXT, video_id TEXT, status TEXT)")
+    conn.execute(
+        "INSERT INTO vault(topic, date_used, created_at, video_id, status) VALUES (?, ?, ?, ?, ?)",
+        ("Rishabh Pant selection debate", datetime.now(timezone.utc).isoformat(), "", "vid-1", "UPLOADED"),
+    )
+    story = {"title": "Rishabh Pant selection debate grows", "event_actions": ["discuss"]}
+    result = story_ranker._recent_topic_cooldown(conn, [story], hours=72)
+
+    assert len(result) == 1
+    assert result[0]["recent_topic_penalty"] > 0
+    assert result[0]["discovery_repetition_note"]
+
+
+def test_dashboard_portfolio_does_not_delete_low_scoring_but_valid_story():
+    story = {
+        "title": "Uncapped player makes domestic debut",
+        "description": "An uncapped player made a domestic debut after a long academy spell. The result gives the story a concrete current event and a clear subject.",
+        "url": "https://example.com/sports/uncapped-player-debut",
+        "source": "Specialist Sports",
+        "discovery_target_category": "sports_stories_of_day",
+        "discovery_dimensions": {
+            "freshness": 8.0,
+            "event_momentum": 1.0,
+            "importance": 2.0,
+            "shorts_viability": 2.0,
+            "hook_potential": 2.0,
+            "shorts_scope": 3.0,
+        },
+        "candidate_score": 4.0,
+        "topic_actionability_score": 1.0,
+    }
+    assert story_ranker._discovery_portfolio_pass(story) is True
