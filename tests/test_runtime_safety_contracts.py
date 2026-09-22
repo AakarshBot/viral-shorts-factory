@@ -91,3 +91,21 @@ def test_exact_identity_wrapper_preserves_canonical_runner():
     source = (REPO_ROOT / "final_qc_runtime.py").read_text(encoding="utf-8")
     assert '_vsf_canonical_run_robot' in source
     assert 'exact_identity_runner._canonical_run_robot' in source
+
+def test_public_publish_block_is_enforced_before_upload():
+    source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("    def upload_manual(")
+    end = source.index("\ndef _validate_selected_story", start)
+    block = source[start:end]
+    assert 'bool((script_data or {}).get("public_publish_blocked"))' in block
+    assert "publish_mode" in block
+    assert "marked it private-only" in block
+
+
+def test_legacy_creator_comment_uploader_is_only_a_compatibility_shim():
+    source = (REPO_ROOT / "youtube_comment_runtime.py").read_text(encoding="utf-8")
+    start = source.index("def patch_youtube_upload(")
+    block = source[start:]
+    assert "return getattr(bot, "upload_to_youtube", None)" in block
+    assert "videos().insert" not in block
+    assert "_creator_comment_wrapped" not in block
