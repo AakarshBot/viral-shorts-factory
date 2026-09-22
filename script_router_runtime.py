@@ -176,6 +176,7 @@ def install_script_pipeline(bot):
                 )
             cleaned["fallback_diagnostics"] = fallback_diag
             cleaned["public_publish_blocked"] = True
+            sr.rank_title_candidates(cleaned, data)
             bot._active_script_data = cleaned
             return cleaned
 
@@ -192,6 +193,7 @@ def install_script_pipeline(bot):
             if rewritten is None:
                 cleaned["public_publish_blocked"] = True
                 cleaned["originality_overlap"] = originality
+                sr.rank_title_candidates(cleaned, data)
                 bot._active_script_data = cleaned
                 return cleaned
 
@@ -215,6 +217,7 @@ def install_script_pipeline(bot):
             if not originality["passed"]:
                 cleaned["public_publish_blocked"] = True
                 cleaned["originality_overlap"] = originality
+                sr.rank_title_candidates(cleaned, data)
                 bot._active_script_data = cleaned
                 return cleaned
 
@@ -224,6 +227,7 @@ def install_script_pipeline(bot):
         if critique.get("unsupported_claims"):
             cleaned["public_publish_blocked"] = True
 
+        sr.rank_title_candidates(cleaned, data)
         bot._active_script_data = cleaned
         return cleaned
 
