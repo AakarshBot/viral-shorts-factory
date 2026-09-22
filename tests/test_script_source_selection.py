@@ -108,3 +108,78 @@ def test_writer_contract_explicitly_bans_retention_bait():
         "don't go anywhere",
     ):
         assert phrase in source
+
+
+
+def test_title_ranking_prefers_specific_factual_candidate():
+    from script_runtime import rank_title_candidates
+
+    script = {
+        "titles": [
+            "You Won't Believe What Happened Next!",
+            "India women reach the T20 World Cup final after semifinal win",
+            "A big update on India's latest cricket result",
+        ],
+        "script": [
+            {"primary_entity": "India women", "voiceover": "India women reached the T20 World Cup final after winning the semifinal."},
+        ],
+    }
+    result = rank_title_candidates(
+        script,
+        {
+            "title": "India women reach the T20 World Cup final after semifinal win",
+            "summary": "India women won the semifinal and advanced to the T20 World Cup final.",
+        },
+    )
+
+    assert result["recommended_title_index"] == 2
+    assert script["recommended_title_index"] == 2
+    assert result["scores"][0]["score"] < result["scores"][1]["score"]
+
+
+def test_title_ranking_uses_one_based_index_consistently():
+    from script_runtime import rank_title_candidates
+    from quality_runtime import _quality_validate
+
+    script = {
+        "titles": ["India policy update", "India announces policy change", "Policy change explained for India"],
+        "recommended_title_index": 1,
+        "editorial_angle": "This explains the policy change, its background and practical consequence.",
+        "seo_description": "A factual explanation of the policy change, its background and practical consequence.",
+        "script": [
+            {
+                "voiceover": "India announced the policy change today.",
+                "narrative_role": "hook",
+                "primary_entity": "India",
+                "specific_search_prompt": "India policy change",
+            },
+            {
+                "voiceover": "Officials are implementing the policy across affected departments.",
+                "narrative_role": "development",
+                "primary_entity": "India",
+                "specific_search_prompt": "India policy implementation",
+            },
+            {
+                "voiceover": "The background explains what the new policy changes from the previous process.",
+                "narrative_role": "context",
+                "primary_entity": "India",
+                "specific_search_prompt": "India policy background",
+            },
+            {
+                "voiceover": "The practical consequence is a new implementation process for the affected departments.",
+                "narrative_role": "consequence",
+                "primary_entity": "India",
+                "specific_search_prompt": "India policy consequence",
+            },
+        ],
+    }
+    rank_title_candidates(script, {"title": "India announces policy change"})
+    assert script["recommended_title_index"] in (1, 2, 3)
+
+    ok, reason = _quality_validate(
+        lambda *_args: (True, ""),
+        script,
+        "India announces policy change",
+        "regular",
+    )
+    assert ok, reason
