@@ -142,3 +142,15 @@ def test_fact_source_stage_keeps_a_niche_slice_when_major_coverage_fills_the_lan
 
     selected = _fact_source_stage(stories, max_items=10)
     assert any("Emerging academy debut" in item["title"] for item in selected)
+
+
+def test_mega_event_score_identifies_saturated_mass_news_without_becoming_a_hard_rejection():
+    from story_ranker import _major_event_score
+
+    score = _major_event_score({
+        "title": "Global government summit decision draws worldwide attention",
+        "description": "The major policy decision is being covered by national and international outlets.",
+        "event_source_count": 7,
+        "event_article_count": 12,
+    })
+    assert score >= 3.5
