@@ -969,7 +969,15 @@ class DashboardWorkflowController(WorkflowController):
                 video_title=video_title,
                 used_hashes=used_hashes,
                 used_source_image_urls=used_source_image_urls,
-                search_round=len(self._visual_search_groups) + 1,
+                search_round=(
+                    sum(
+                        1
+                        for group in self._visual_search_groups
+                        if str(group.get("query") or "").strip().casefold()
+                        == query.casefold()
+                    )
+                    + 1
+                ),
             )
             assets = list(result.get("assets") or [])
             materialized = materialize_manual_visual_pool(
