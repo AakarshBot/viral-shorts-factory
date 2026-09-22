@@ -1012,8 +1012,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "STORY SHAPE:\n"
         "- Preserve every distinct narrative beat as its own scene. Do not cram multiple important developments into one overloaded scene, and never add filler solely to make the video longer. Let the story's real complexity determine how many scenes it needs.\n"
         "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep those beats meaningfully distinct.\n"
-        "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through a specific fact, change, consequence, or tension that is already supported by the evidence. Never manufacture suspense by withholding the actual information.\n"
+        "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported tension, surprising result, consequential change, or attributed quote. Never manufacture suspense by withholding the actual information.\n"
+        "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Never open with a generic 'latest update', 'here is what happened', or setup sentence.\n"
         "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs.\n"
+        "- Prefer a roughly 25–35 second finished cut when the complete story can be explained accurately within that span. Do not pad a short story, and do not force a complex story into an arbitrary duration.\n"
         "- Start with a factual hook. Build through the important development and relevant context. End with the most useful consequence, implication, limitation, comparison, or final fact.\n\n"
         "RETENTION-BAIT BAN:\n"
         "- Never use phrases such as 'wait till the end', 'wait until the end', 'wait for it', 'stay tuned', 'keep watching', "
@@ -1102,9 +1104,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 {"role": "assistant", "content": raw_content},
                 {"role": "user", "content": (
                     "Rewrite the complete script. Preserve supported facts and the editorial angle. "
-                    "Remove retention-bait and generic filler. Ensure distinct hook, development, context "
-                    "and consequence scenes remain present. Do not compress the story merely to make the "
-                    "output shorter, and do not add filler merely to make it longer."
+                    "Lead the first scene with the strongest supported conflict, surprise, consequence, or "
+                    "attributed quote. Remove generic setup and retention-bait. Ensure distinct hook, "
+                    "development, context and consequence scenes remain present. Prefer a roughly 25–35 "
+                    "second cut when the story genuinely fits that range, without padding or forced compression."
                 )},
             ])
         except Exception as exc:
