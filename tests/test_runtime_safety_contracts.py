@@ -199,3 +199,35 @@ def test_new_production_is_blocked_while_previous_run_awaits_upload():
     assert 'self.state.stage == "qc"' in block
     assert "not self.state.uploaded_video_id" in block
     assert "ready for upload" in block.lower()
+
+
+def test_fresh_vault_contains_visual_rights_ledger_column():
+    source = (REPO_ROOT / "db_architecture.py").read_text(encoding="utf-8")
+    assert '"asset_credits_json", "TEXT"' in source
+    assert "asset_credits_json TEXT" in source
+    assert 'def _add_column(conn, "asset_credits_json", "TEXT")' in source
+
+
+def test_script_is_persisted_before_expensive_media_pipeline():
+    source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("def run_robot(")
+    end = source.index("\nif __name__ == "__main__":", start)
+    block = source[start:end]
+    persist_pos = block.index("UPDATE vault SET script_json")
+    pipeline_pos = block.index("Starting Asset Generation & Rendering Pipeline")
+    assert persist_pos < pipeline_pos
+
+
+def test_ready_upload_recovery_reconstructs_upload_state():
+    source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("    def restore_ready_upload(")
+    end = source.index("    def _worker_started", start)
+    block = source[start:end]
+    for needle in (
+        "status = 'READY_FOR_UPLOAD'",
+        "script_json IS NOT NULL",
+        "final_video_output.mp4",
+        "self.state.script_data = dict(script_data)",
+        "self.bot._last_run_row_id = int(row_id)",
+    ):
+        assert needle in block
