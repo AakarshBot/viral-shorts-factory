@@ -187,6 +187,53 @@ class WorkflowController:
         finally:
             conn.close()
 
+    def persist_approved_metadata(
+        self,
+        title: str,
+        description: str,
+        comment: str,
+    ) -> None:
+        """Persist the human-approved upload metadata against the exact run."""
+        import json
+        import ultimate_bot
+
+        row_id = getattr(self.bot, "_last_run_row_id", None)
+        run_id = str(getattr(self.bot, "_last_run_run_id", "") or "").strip()
+        if row_id is None or not run_id:
+            raise RuntimeError("Cannot persist approved metadata without exact run identity.")
+
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        try:
+            migrate_vault(conn)
+            row = conn.execute(
+                "SELECT run_id, script_json, status FROM vault WHERE id = ?",
+                (row_id,),
+            ).fetchone()
+            if row is None or str(row[0] or "") != run_id:
+                raise RuntimeError("Exact production row identity does not match the active run.")
+            if row[2] not in {"READY_FOR_UPLOAD", "RUNNING", "WAITING_VISUAL_REVIEW", "WAITING_SCRIPT_REVIEW"}:
+                raise RuntimeError(
+                    f"Cannot approve metadata for run in terminal/invalid state: {row[2]!r}"
+                )
+            try:
+                script_data = json.loads(row[1] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise RuntimeError("Stored production script payload is invalid.") from exc
+            if not isinstance(script_data, dict):
+                raise RuntimeError("Stored production script payload is invalid.")
+            script_data["approved_metadata"] = {
+                "title": str(title or "").strip(),
+                "description": str(description or "").strip(),
+                "comment": str(comment or "").strip(),
+            }
+            update_run_record(
+                conn,
+                row_id,
+                script_json=json.dumps(script_data, ensure_ascii=False),
+            )
+        finally:
+            conn.close()
+
     def restore_ready_upload(self) -> bool:
         """Restore the newest READY_FOR_UPLOAD run whose artifact is still present."""
         import json
@@ -241,16 +288,22 @@ class WorkflowController:
         if not isinstance(genre_cfg, dict):
             return False
 
-        title, description, _tags = _build_clean_metadata(
-            script_data,
-            genre_cfg,
-            str(trend_keyword or "").strip(),
-        )
-        comment = build_pinned_comment(
-            script_data,
-            title,
-            genre_cfg.get("label", ""),
-        )
+        stored_metadata = script_data.get("approved_metadata")
+        if isinstance(stored_metadata, dict):
+            title = str(stored_metadata.get("title") or "").strip()
+            description = str(stored_metadata.get("description") or "").strip()
+            comment = str(stored_metadata.get("comment") or "").strip()
+        else:
+            title, description, _tags = _build_clean_metadata(
+                script_data,
+                genre_cfg,
+                str(trend_keyword or "").strip(),
+            )
+            comment = build_pinned_comment(
+                script_data,
+                title,
+                genre_cfg.get("label", ""),
+            )
 
         audio_dir = os.path.dirname(video_path)
         recovered_audio = sorted(
