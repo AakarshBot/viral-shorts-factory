@@ -190,6 +190,160 @@ def _story_structure(story_data, format_mode):
         return _STRUCTURE_HINTS["ranking"]
     return _STRUCTURE_HINTS["explainer"]
 
+_EDITORIAL_ANGLE_STRATEGIES = {
+    "confrontation_led": (
+        "Lead with the documented disagreement, criticism, accusation, clash, or response. "
+        "Name the relevant people/teams and the concrete claim or action, then explain what triggered it "
+        "and what the evidence actually establishes."
+    ),
+    "result_or_record_led": (
+        "Lead with the verified result, record, milestone, qualification, elimination, win/loss, or other "
+        "concrete outcome. Put the defining number or achievement early, then explain the context and consequence."
+    ),
+    "comparison_led": (
+        "Use the documented comparison as the spine: establish the two sides or benchmarks, identify the "
+        "measured difference, and explain why that difference matters. Do not invent superiority beyond the evidence."
+    ),
+    "unexpected_person_led": (
+        "Center the unusual person-level development: an unexpected debut, comeback, first-time achievement, "
+        "youngest/oldest milestone, outsider, unlikely participant, or other clearly supported human surprise. "
+        "Explain what makes the person's role unusual rather than merely calling it shocking."
+    ),
+    "why_it_matters_led": (
+        "Lead with the consequential change or decision, then explain who or what is affected, the immediate "
+        "implication, and the strongest evidence-backed context. Do not predict unsupported future outcomes."
+    ),
+    "timeline_led": (
+        "Use the verified sequence of events as the narrative spine. Start with the pivotal change, then move "
+        "through only the earlier facts needed to understand how the story reached this point."
+    ),
+    "evidence_explainer": (
+        "Use the clearest factual development as the opening and organize the evidence into a simple hook, "
+        "development, context and consequence. Prefer concrete details over generic background."
+    ),
+}
+
+
+def choose_editorial_angle(story_data, format_mode="regular"):
+    """Choose one evidence-backed narrative lens without making another model/API call."""
+    story = story_data if isinstance(story_data, dict) else {}
+    text = " ".join(
+        str(story.get(key) or "")
+        for key in (
+            "title", "topic", "summary", "description", "snippet",
+            "event_search_text", "research_evidence_text", "text",
+        )
+    ).casefold()
+    title = str(story.get("title") or story.get("topic") or "").casefold()
+    actions = {
+        str(action).strip().casefold()
+        for action in (story.get("event_actions") or [])
+        if str(action).strip()
+    }
+    entities = [
+        str(entity).strip()
+        for entity in (story.get("event_entities") or [])
+        if str(entity).strip()
+    ]
+
+    def count(patterns):
+        return sum(1 for pattern in patterns if re.search(pattern, text))
+
+    scores = {
+        "confrontation_led": 0.0,
+        "result_or_record_led": 0.0,
+        "comparison_led": 0.0,
+        "unexpected_person_led": 0.0,
+        "why_it_matters_led": 0.0,
+        "timeline_led": 0.0,
+        "evidence_explainer": 0.5,
+    }
+
+    confrontation = count((
+        r"\baccused\b", r"\baccusation\b", r"\bcriticiz(?:ed|es|ing)\b",
+        r"\bcriticis(?:ed|es|ing)\b", r"\bslammed\b", r"\bblasted\b",
+        r"\bcalled\b.{0,45}\barrogant\b", r"\bcontrovers(?:y|ial)\b",
+        r"\bdispute\b", r"\bfeud\b", r"\bclash\b", r"\bresponded\b",
+        r"\bhit(?:s|ting)? back\b", r"\bmocked\b", r"\binsulted\b",
+        r"\bwarned\b",
+    ))
+    scores["confrontation_led"] += min(8.0, confrontation * 2.0)
+    if {"comment", "respond", "criticise", "criticize"} & actions:
+        scores["confrontation_led"] += 2.0
+
+    result = count((
+        r"\bwon\b", r"\bwins\b", r"\blost\b", r"\bloses\b",
+        r"\bdefeated\b", r"\bbeat\b", r"\bbeats\b", r"\bclinched\b",
+        r"\bqualified\b", r"\beliminated\b", r"\brecord\b", r"\bmilestone\b",
+        r"\bfirst\b", r"\bfastest\b", r"\bhighest\b", r"\blowest\b",
+        r"\b200th\b", r"\b100th\b", r"\b50th\b",
+    ))
+    scores["result_or_record_led"] += min(9.0, result * 1.65)
+    if actions & {"win", "defeat", "beat", "qualify", "eliminate"}:
+        scores["result_or_record_led"] += 2.0
+
+    comparison = count((
+        r"\bvs\.?\b", r"\bversus\b", r"\bcompared with\b",
+        r"\bcompared to\b", r"\bovertook\b", r"\bsurpassed\b",
+        r"\boutpaced\b", r"\bhigher than\b", r"\blower than\b",
+    ))
+    if comparison and len(entities) >= 2:
+        scores["comparison_led"] += min(9.0, comparison * 2.75) + 1.5
+
+    unexpected = count((
+        r"\bunexpected\b", r"\bunheralded\b", r"\boutsider\b",
+        r"\bunseeded\b", r"\bunlikely\b", r"\buncapped\b",
+        r"\bdebut\b", r"\bcomeback\b", r"\byoungest\b", r"\boldest\b",
+        r"\bfirst[- ]time\b", r"\breturn(?:s|ed)?\b",
+    ))
+    if unexpected and any(
+        term in text
+        for term in ("player", "star", "actor", "singer", "founder", "scientist",
+                     "coach", "captain", "batter", "bowler", "person")
+    ):
+        scores["unexpected_person_led"] += min(8.0, unexpected * 1.9) + 1.0
+
+    consequence = count((
+        r"\bbanned\b", r"\bsuspended\b", r"\binjured\b", r"\bruled out\b",
+        r"\bresigned\b", r"\bappointed\b", r"\bapproved\b", r"\bblocked\b",
+        r"\bcancel(?:led|ed|s)?\b", r"\bdelayed\b", r"\blaunch(?:ed|es)?\b",
+        r"\bacquired\b", r"\bsigned\b", r"\bdeal\b", r"\bdecision\b",
+        r"\bchange\b", r"\bimpact\b", r"\baffect(?:s|ed|ing)?\b",
+    ))
+    if consequence || (["ban","appoint","approve","resign","injure","cancel","delay","launch","acquire","sign"].some(a => actions.has(a))):
+        scores["why_it_matters_led"] += min(8.0, consequence * 1.6) + 1.5
+
+    const timeline = count((
+        r"\bhistory\b", r"\btimeline\b", r"\bsince\b", r"\bpreviously\b",
+        r"\bearlier\b", r"\bbefore\b", r"\bover the past\b",
+        r"\bin \d{4}\b", r"\byears? (?:later|ago)\b",
+    ))
+    if timeline >= 2 || /\b(?:history|timeline)\b/.test(title)) {
+        scores["timeline_led"] += Math.min(7.0, timeline * 1.9);
+    }
+
+    const priority = [
+        "confrontation_led",
+        "result_or_record_led",
+        "comparison_led",
+        "unexpected_person_led",
+        "why_it_matters_led",
+        "timeline_led",
+        "evidence_explainer",
+    ];
+    const chosen = priority.reduce((best, name) => scores[name] > scores[best] ? name : best, priority[0]);
+    return {
+        type: chosen,
+        instruction: _EDITORIAL_ANGLE_STRATEGIES[chosen],
+        signal_score: Number(scores[chosen].toFixed(2)),
+        signals: Object.fromEntries(
+            Object.entries(scores).filter(([, value]) => value > 0.5).map(([name, value]) => [name, Number(value.toFixed(2))])
+        ),
+        reason: "Selected from concrete event, conflict, outcome, comparison, person-level, consequence and timeline signals; the writer must still follow the evidence pack.",
+    };
+}
+
+
 
 def _strip_filler(text):
     value = str(text or "").strip()
