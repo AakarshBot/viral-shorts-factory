@@ -157,7 +157,12 @@ def _clean_script_result(script_data: dict, story_data: dict, format_mode: str =
         ]
 
     from script_runtime import validate_content_density
-    valid, reason = validate_content_density(result, story_data, format_mode)
+    valid, reason = validate_content_density(
+        result,
+        story_data,
+        format_mode,
+        require_visual_metadata=False,
+    )
     if not valid:
         raise ValueError(f"Canonical script validation failed: {reason}")
     return result

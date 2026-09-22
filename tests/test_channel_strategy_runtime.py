@@ -66,3 +66,88 @@ def test_final_editorial_gate_weights_hook_and_channel_fit_together():
     ]
     ranked = score_candidates(scores, stories, {}, "", "regular")
     assert ranked[0]["title"] == "Strong hook"
+
+
+def test_freshfeed_pattern_score_separates_winning_hook_combinations():
+    conflict = score_story({
+        "title": "India called arrogant by ex-Pakistani batter",
+        "event_entities": ["India", "Pakistan"],
+        "event_actions": ["called"],
+    })
+    question = score_story({
+        "title": "Did Beating India Actually Ruin Pakistan Cricket?",
+        "event_entities": ["India", "Pakistan"],
+        "event_actions": ["beat", "ruin"],
+    })
+    quote = score_story({
+        "title": "Rashid Khan Calls Indian Sensation God-Gifted",
+        "event_entities": ["Rashid Khan", "India"],
+        "event_actions": ["calls"],
+    })
+
+    assert conflict["freshfeed_pattern_score"] >= 3.0
+    assert question["freshfeed_pattern_score"] >= 3.0
+    assert quote["freshfeed_pattern_score"] >= 4.0
+    assert conflict["freshfeed_priority_pattern"] is True
+    assert question["freshfeed_priority_pattern"] is True
+    assert quote["freshfeed_priority_pattern"] is True
+    assert quote["marquee_person_hits"] >= 1
+    assert "marquee + tension synergy" in quote["freshfeed_pattern_reasons"]
+
+
+def test_routine_squad_listing_is_penalised_but_selection_drama_gets_hook():
+    routine = score_story({
+        "title": "India announce squad for upcoming series",
+        "event_actions": ["announce"],
+    })
+    drama = score_story({
+        "title": "India drop star batter from squad after controversy",
+        "event_entities": ["India"],
+        "event_actions": ["drop"],
+    })
+
+    assert routine["routine_or_admin"] is True
+    assert routine["freshfeed_pattern_score"] < drama["freshfeed_pattern_score"]
+    assert drama["strong_hook"] is True
+
+
+def test_compact_story_gets_better_scope_than_long_explanatory_story():
+    compact = score_story({
+        "title": "India's 7-run shock over England",
+        "event_actions": ["won"],
+    })
+    broad = score_story({
+        "title": "Everything you need to know about the complete background and history of India's latest tournament campaign",
+        "event_actions": ["explained"],
+    })
+
+    assert compact["freshfeed_scope_score"] >= 7.0
+    assert broad["freshfeed_scope_score"] < compact["freshfeed_scope_score"]
+    assert broad["freshfeed_pattern_score"] < compact["freshfeed_pattern_score"]
+
+
+def test_quoted_headline_is_an_immediate_hook():
+    signal = score_story({
+        "title": '"India are arrogant," says ex-Pakistan batter',
+    })
+    assert signal["strong_hook"] is True
+    assert signal["quoted_title"] is True
+    assert "bold quote/statement" in signal["freshfeed_pattern_reasons"]
+
+
+def test_freshfeed_pattern_can_keep_a_strong_story_gate_eligible():
+    signal = {
+        "score": 1.0,
+        "freshfeed_pattern_score": 4.0,
+        "strong_hook": True,
+        "routine_or_admin": False,
+    }
+    assert candidate_gate(signal, hook_potential=5.0, importance=4.0)[0] is True
+
+
+def test_clustered_event_text_cannot_create_a_headline_hook():
+    signal = score_story({
+        "title": "India announce training update",
+        "event_search_text": "Gautam Gambhir calls India arrogant after controversy",
+    })
+    assert signal["strong_hook"] is False

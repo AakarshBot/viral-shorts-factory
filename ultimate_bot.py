@@ -1018,8 +1018,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Add evidence-backed context, comparison, mechanism, timeline, limitation, implication, or consequence wherever supported. Never invent motives, predictions, quotes, statistics, opinions presented as facts, or unsupported causal claims.\n"
         "- The result should feel authored through selection, order and explanation of the evidence. Do not produce a source-article readout.\n\n"
         "STORY SHAPE:\n"
-        "- Preserve every distinct narrative beat as its own scene. Do not cram multiple important developments into one overloaded scene, and never add filler solely to make the video longer. Let the story's real complexity determine how many scenes it needs.\n"
-        "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep those beats meaningfully distinct.\n"
+        "- Preserve the distinct narrative beats without adding filler. For a compact 20–30 second story, one scene may combine a closely related development/context beat when that improves pacing; never split one idea into artificial filler scenes.\n"
+        "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep the hook and consequence distinct, and use the middle scenes for development/context as the story requires.\n"
         "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported conflict, bold quote, surprising result, consequential change, rivalry, or attributed statement. Never manufacture suspense by withholding the actual information.\n"
         "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Do not spend the first seconds on dates, venues, tournament names, match setup, or channel framing unless that detail is itself the story.\n"
         "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs, and must earn every extra second.\n"
@@ -1041,8 +1041,16 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
         "- Keep generated titles compact at 55 characters or fewer whenever possible. Prefer a strong factual statement, attributed quote, or curiosity question tied to the story's central tension; never stuff them with schedules, venues, match metadata or hashtags.\n"\
         "- No spoken like/share/subscribe/follow CTA.\n"        "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
+        "FRESHFEED CHANNEL SIGNALS:\n"
+        f"- pattern_score={story_data.get('freshfeed_pattern_score', 0)}, "
+        f"scope_score={story_data.get('freshfeed_scope_score', story_data.get('shorts_scope_score', 0))}, "
+        f"pattern_reasons={story_data.get('freshfeed_pattern_reasons', [])}, "
+        f"marquee_person_hits={story_data.get('freshfeed_marquee_person_hits', story_data.get('marquee_person_hits', 0))}, "
+        f"rivalry_signal={story_data.get('freshfeed_rivalry_signal', story_data.get('rivalry_signal', False))}.\n"
+        "- Use these channel-learning signals to strengthen the opening only when the underlying evidence supports them. "
+        "Never invent conflict, controversy, quotes or rivalry merely because a signal is present.\n\n"
         "VISUAL DATA:\n"
-        "- Every scene needs one primary_entity supported by the evidence and a grounded specific_search_prompt. Never invent identities.\n\n"
+        "- Prefer a supported primary_entity and specific_search_prompt for every scene, but visual metadata is downstream data and must never replace or weaken factual narration. Never invent identities.\n\n"
         f"LANGUAGE: {language_cfg['script_instruction']}\n"
         f"PAST FEEDBACK: {insights}\n\n"
         "Return ONLY valid JSON. Use as many scenes as the story genuinely needs; keep the output focused on the story itself.\n"
@@ -1067,9 +1075,47 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "}"
     )
 
+    previous_script = story_data.get("previous_script")
+    previous_draft_text = ""
+    if isinstance(previous_script, list):
+        previous_scenes = [
+            {
+                "index": index,
+                "voiceover": str(scene.get("voiceover") or "").strip(),
+                "narrative_role": str(scene.get("narrative_role") or "").strip(),
+            }
+            for index, scene in enumerate(previous_script, 1)
+            if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
+        ]
+        if previous_scenes:
+            previous_draft_text = json.dumps(previous_scenes, ensure_ascii=False)
+
+    freshfeed_block = (
+        "\n\nFRESHFEED SELECTION CONTEXT:\n"
+        f"pattern_score={story_data.get('freshfeed_pattern_score', 0)}\n"
+        f"scope_score={story_data.get('freshfeed_scope_score', story_data.get('shorts_scope_score', 0))}\n"
+        f"pattern_reasons={story_data.get('freshfeed_pattern_reasons', [])}\n"
+        f"marquee_person_hits={story_data.get('freshfeed_marquee_person_hits', story_data.get('marquee_person_hits', 0))}\n"
+        f"rivalry_signal={story_data.get('freshfeed_rivalry_signal', story_data.get('rivalry_signal', False))}\n"
+        "Use only supported signals; they guide framing but never justify invented claims."
+    )
+
+    rewrite_block = ""
+    if previous_draft_text:
+        rewrite_block = (
+            "\n\nPREVIOUS DRAFT TO TIGHTEN:\n"
+            + previous_draft_text
+            + "\nThis is a real compression rewrite, not a fresh story. Preserve the previous draft's "
+            "supported facts, central hook, editorial angle and useful order. Remove repetition, generic setup "
+            "and nonessential context. Return a complete replacement script and do not add new facts."
+        )
+
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"STORY DATA:\n{source_text}"},
+        {
+            "role": "user",
+            "content": f"STORY DATA:\n{source_text}" + freshfeed_block + rewrite_block,
+        },
     ]
 
     for attempt in range(1, 3):
@@ -1120,9 +1166,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 {"role": "user", "content": (
                     "Rewrite the complete script. Preserve supported facts and the editorial angle. "
                     "Lead the first scene with the strongest supported conflict, surprise, consequence, or "
-                    "attributed quote. Remove generic setup and retention-bait. Ensure distinct hook, "
-                    "development, context and consequence scenes remain present. Prefer a focused 20–30 "
-                    "second cut for a compact story and allow up to roughly 35 seconds only when the story genuinely earns it, without padding or forced compression."
+                    "attributed quote. Remove generic setup and retention-bait. Preserve the hook, development, "
+                    "context and consequence beats; a compact 20–30 second story may combine one middle beat "
+                    "into a single scene when needed for pacing. Prefer a focused 20–30 second cut and allow up to "
+                    "roughly 35 seconds only when the story genuinely earns it, without padding or forced compression."
                 )},
             ])
         except Exception as exc:
@@ -2210,10 +2257,36 @@ def run_robot(web_config=None):
 
         if duration_estimate["seconds"] > 30.0:
             duration_story = dict(story_payload)
+            duration_story["previous_script"] = [
+                {
+                    "voiceover": str(scene.get("voiceover") or "").strip(),
+                    "narrative_role": str(scene.get("narrative_role") or "").strip(),
+                }
+                for scene in (script_data.get("script") or [])
+                if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
+            ]
+            duration_story["previous_editorial_angle"] = str(
+                script_data.get("editorial_angle") or ""
+            ).strip()
+            # Reuse the first evidence pack during the tightening rewrite. A
+            # transient research fetch failure must not kill an otherwise valid script.
+            for key in (
+                "research_sources",
+                "research_source_count",
+                "research_distinct_domains",
+                "research_evidence_pack",
+                "research_evidence_text",
+                "research_evidence_status",
+                "research_synthesis_required",
+                "research_fallback_source_used",
+            ):
+                if key in script_data:
+                    duration_story[key] = script_data[key]
             duration_story["duration_control_instruction"] = (
-                f"Previous draft is estimated at {duration_estimate['seconds']:.1f} seconds. "
-                "Tighten it once before human review toward the channel's 20–30 second sweet spot. "
-                "The final narration must not exceed 35 seconds. Preserve every supported essential fact "
+                "The previous draft supplied in previous_script is the authoritative draft to compress. "
+                f"It is estimated at {duration_estimate['seconds']:.1f} seconds. "
+                "Tighten that exact draft once before human review toward the channel's 20–30 second sweet spot. "
+                "The final narration should not exceed 35 seconds. Preserve every supported essential fact "
                 "and the editorial angle. Remove repetition, generic setup and nonessential context; "
                 "do not add filler or invent facts. Return a complete replacement script, not commentary about the rewrite."
             )
@@ -2222,7 +2295,17 @@ def run_robot(web_config=None):
                 duration_story, language_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
             )
             if not rewritten:
-                raise RuntimeError("Pre-TTS duration rewrite failed; refusing to send an overlong script to human approval.")
+                if duration_estimate["seconds"] <= 35.0:
+                    print(
+                        "   [Script Duration] Tightening rewrite failed; retaining the original "
+                        "within-35s draft rather than stopping production.",
+                        flush=True,
+                    )
+                    rewritten = script_data
+                else:
+                    raise RuntimeError(
+                        "Pre-TTS duration rewrite failed while the original draft was already over 35s."
+                    )
             rewritten_estimate = estimate_narration_duration(rewritten, persona_profile)
             rewritten["estimated_duration_seconds"] = rewritten_estimate["seconds"]
             rewritten["estimated_duration_word_count"] = rewritten_estimate["word_count"]
@@ -2234,10 +2317,19 @@ def run_robot(web_config=None):
                 flush=True,
             )
             if rewritten_estimate["seconds"] > 35.0:
-                raise RuntimeError(
-                    f"Pre-TTS duration control could not bring the script below 35s "
-                    f"(estimated {rewritten_estimate['seconds']:.1f}s); no second rewrite will be attempted."
-                )
+                if duration_estimate["seconds"] <= 35.0:
+                    print(
+                        f"   [Script Duration] Rewrite remained over 35s ({rewritten_estimate['seconds']:.1f}s); "
+                        "retaining the original within-limit draft.",
+                        flush=True,
+                    )
+                    rewritten = script_data
+                    rewritten_estimate = duration_estimate
+                else:
+                    raise RuntimeError(
+                        f"Pre-TTS duration control could not bring the already-overlong script below 35s "
+                        f"(rewrite estimated {rewritten_estimate['seconds']:.1f}s)."
+                    )
             script_data = rewritten
 
         if dashboard_manual_control:
