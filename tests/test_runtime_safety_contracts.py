@@ -109,3 +109,48 @@ def test_legacy_creator_comment_uploader_is_only_a_compatibility_shim():
     assert "return getattr(bot, "upload_to_youtube", None)" in block
     assert "videos().insert" not in block
     assert "_creator_comment_wrapped" not in block
+
+def test_core_init_db_delegates_to_canonical_schema():
+    source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("def init_db(")
+    end = source.index("\ndef safe_text(", start)
+    block = source[start:end]
+    assert "from db_architecture import migrate_vault" in block
+    assert "topic TEXT PRIMARY KEY" not in block
+
+
+def test_manual_pool_defaults_to_ten_total_images():
+    source = (REPO_ROOT / "visual_retrieval_runtime.py").read_text(encoding="utf-8")
+    assert 'VISUAL_MANUAL_POOL_TARGET", "10"' in source
+    start = source.index("def collect_manual_visual_pool(")
+    end = source.index("\ndef collect_manual_visual_search(", start)
+    block = source[start:end]
+    assert "requested_max = min(MANUAL_POOL_TARGET, default_max or MANUAL_POOL_TARGET)" in block
+
+
+def test_manual_pool_provider_fetches_are_parallelized():
+    source = (REPO_ROOT / "visual_retrieval_runtime.py").read_text(encoding="utf-8")
+    start = source.index("def collect_manual_visual_pool(")
+    end = source.index("\ndef collect_manual_visual_search(", start)
+    block = source[start:end]
+    assert "ThreadPoolExecutor(" in block
+    assert "thread_name_prefix=\"manual-visual-pool\"" in block
+
+
+def test_first_manual_query_is_preferred_for_first_slide():
+    source = (REPO_ROOT / "visual_retrieval_runtime.py").read_text(encoding="utf-8")
+    start = source.index("def select_manual_visual_candidate(")
+    end = source.index("\ndef materialize_manual_visual_pool(", start)
+    block = source[start:end]
+    assert '"slide_index") or 0' in block
+    assert 'asset.get("manual_query_index")' in block
+
+
+def test_repeated_manual_searches_advance_provider_pages():
+    source = (REPO_ROOT / "visual_retrieval_runtime.py").read_text(encoding="utf-8")
+    start = source.index("def collect_manual_visual_search(")
+    end = source.index("\ndef collect_manual_visual_options(", start)
+    block = source[start:end]
+    assert "search_round: int = 1" in block
+    assert "effective_page = (max(1, int(search_round)) - 1) * MANUAL_SEARCH_MAX_PAGES + page" in block
+    assert "effective_page," in block
