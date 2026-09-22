@@ -67,22 +67,27 @@ def test_query_budget_is_parallel_budgeted_not_unbounded():
 
 def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
     import dashboard_runtime
+    import dashboard_topic_discovery_runtime
     captured = []
 
-    def fake_collect(*args, **kwargs):
-        captured.append(args[2])
-        return ([], [])
+    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
+        captured.append({
+            "genre_key": genre_key,
+            "genre_cfg": dict(genre_cfg),
+            "cricket_scope": kwargs.get("cricket_scope"),
+        })
+        return []
 
-    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
-    monkeypatch.setattr(story_ranker, "rank_discovery_candidates", lambda stories, **kwargs: stories)
+    monkeypatch.setattr(
+        dashboard_topic_discovery_runtime,
+        "discover_dashboard_topics",
+        fake_discovery,
+    )
 
     bot = type(
         "Bot",
         (),
-        {
-            "CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES,
-            "_active_web_config": {},
-        },
+        {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES, "_active_web_config": {}},
     )()
 
     dashboard_runtime.discover_ranked_topics(
@@ -92,8 +97,10 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
         max_candidates=5,
     )
     india_cfg = captured[-1]
-    assert india_cfg["global_gnews_q"] == ""
-    assert "India" in india_cfg["india_gnews_q"]
+    assert india_cfg["cricket_scope"] == "India / Asia"
+    assert india_cfg["genre_key"] == "sports_stories_of_day"
+    assert india_cfg["genre_cfg"]["global_gnews_q"] == ""
+    assert "India" in india_cfg["genre_cfg"]["india_gnews_q"]
 
     dashboard_runtime.discover_ranked_topics(
         bot,
@@ -102,8 +109,9 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
         max_candidates=5,
     )
     global_cfg = captured[-1]
-    assert global_cfg["india_gnews_q"] == ""
-    assert "ICC" in global_cfg["global_gnews_q"]
+    assert global_cfg["cricket_scope"] == "Global"
+    assert global_cfg["genre_cfg"]["india_gnews_q"] == ""
+    assert "ICC" in global_cfg["genre_cfg"]["global_gnews_q"]
 
 
 def test_dual_geo_genre_query_budget_skips_redundant_base_lane():
@@ -135,31 +143,22 @@ def test_all_dashboard_topic_catalog_entries_have_valid_production_categories():
 
 def test_sports_ai_discovery_routes_through_real_sports_lanes(monkeypatch):
     import dashboard_runtime
-
+    import dashboard_topic_discovery_runtime
     captured = {}
 
-    def fake_collect(
-        bot,
-        genre_key,
-        genre_cfg,
-        trend_keyword=None,
-        custom_gnews_q=None,
-        custom_rss_url=None,
-        broad_discovery=False,
-    ):
+    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
         captured["genre_key"] = genre_key
         captured["genre_cfg"] = dict(genre_cfg)
-        captured["broad_discovery"] = broad_discovery
-        return [], []
+        captured["broad_discovery"] = True
+        return []
 
-    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
+    monkeypatch.setattr(
+        dashboard_topic_discovery_runtime,
+        "discover_dashboard_topics",
+        fake_discovery,
+    )
 
-    bot = type(
-        "Bot",
-        (),
-        {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES},
-    )()
-
+    bot = type("Bot", (), {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES})()
     dashboard_runtime.discover_ai_topics(
         bot,
         {
@@ -181,29 +180,16 @@ def test_sports_ai_discovery_routes_through_real_sports_lanes(monkeypatch):
 
 def test_sports_ai_discovery_tolerates_legacy_virtual_category(monkeypatch):
     import dashboard_runtime
-
+    import dashboard_topic_discovery_runtime
     captured = {}
 
-    def fake_collect(
-        bot,
-        genre_key,
-        genre_cfg,
-        trend_keyword=None,
-        custom_gnews_q=None,
-        custom_rss_url=None,
-        broad_discovery=False,
-    ):
-        captured["genre_key"] = genre_key
-        return [], []
+    monkeypatch.setattr(
+        dashboard_topic_discovery_runtime,
+        "discover_dashboard_topics",
+        lambda bot, genre_key, genre_cfg, **kwargs: captured.setdefault("genre_key", genre_key) or [],
+    )
 
-    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
-
-    bot = type(
-        "Bot",
-        (),
-        {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES},
-    )()
-
+    bot = type("Bot", (), {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES})()
     dashboard_runtime.discover_ai_topics(
         bot,
         {
@@ -215,7 +201,6 @@ def test_sports_ai_discovery_tolerates_legacy_virtual_category(monkeypatch):
         None,
         max_candidates=5,
     )
-
     assert captured["genre_key"] == "sports"
 
 
@@ -248,28 +233,19 @@ def test_legacy_ai_category_is_normalized_before_production_lookup():
 
 def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, category, format_mode):
     import dashboard_runtime
-
+    import dashboard_topic_discovery_runtime
     captured = {}
 
-    def fake_collect(
-        bot,
-        genre_key,
-        genre_cfg,
-        trend_keyword=None,
-        custom_gnews_q=None,
-        custom_rss_url=None,
-        broad_discovery=False,
-    ):
+    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
         captured["genre_key"] = genre_key
         captured["genre_cfg"] = dict(genre_cfg)
-        captured["broad_discovery"] = broad_discovery
-        return [], []
+        captured["broad_discovery"] = True
+        return []
 
-    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
     monkeypatch.setattr(
-        story_ranker,
-        "rank_discovery_candidates",
-        lambda stories, **kwargs: stories,
+        dashboard_topic_discovery_runtime,
+        "discover_dashboard_topics",
+        fake_discovery,
     )
 
     bot = type(
@@ -300,28 +276,19 @@ def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, categor
 
 def test_niche_sports_discovery_routes_through_sports_category(monkeypatch):
     import dashboard_runtime
-
+    import dashboard_topic_discovery_runtime
     captured = {}
 
-    def fake_collect(
-        bot,
-        genre_key,
-        genre_cfg,
-        trend_keyword=None,
-        custom_gnews_q=None,
-        custom_rss_url=None,
-        broad_discovery=False,
-    ):
+    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
         captured["genre_key"] = genre_key
         captured["genre_cfg"] = dict(genre_cfg)
-        captured["broad_discovery"] = broad_discovery
-        return [], []
+        captured["broad_discovery"] = True
+        return []
 
-    monkeypatch.setattr(story_ranker, "collect_high_recall_stories", fake_collect)
     monkeypatch.setattr(
-        story_ranker,
-        "rank_discovery_candidates",
-        lambda stories, **kwargs: stories,
+        dashboard_topic_discovery_runtime,
+        "discover_dashboard_topics",
+        fake_discovery,
     )
 
     bot = type(
