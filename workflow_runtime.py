@@ -220,14 +220,18 @@ class WorkflowController:
                 self.state.completed = False
                 self.state.error = ""
 
-        if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
-            config["format_mode"] = "cricket"
-        is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
-        config["publish_mode"] = "private"
-        config["manual_qc_required"] = True
-        self.bot._active_web_config = dict(config)
-        with self._lock:
-            self.state.format_mode = str(config.get("format_mode") or "").strip().lower()
+            if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
+                config["format_mode"] = "cricket"
+            is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
+            config["publish_mode"] = "private"
+            config["manual_qc_required"] = True
+            self.bot._active_web_config = dict(config)
+            with self._lock:
+                self.state.format_mode = str(config.get("format_mode") or "").strip().lower()
+
+        except Exception:
+            _PROCESS_PRODUCTION_LOCK.release()
+            raise
 
         def worker():
             try:
