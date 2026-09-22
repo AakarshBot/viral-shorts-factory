@@ -59,6 +59,9 @@ def sync_factory_analytics(bot, conn):
                 stats = items[0].get("statistics", {})
                 views_raw = stats.get("viewCount")
                 likes_raw = stats.get("likeCount")
+                comments_raw = stats.get("commentCount")
+                likes = int(likes_raw) if likes_raw is not None else None
+                comments = int(comments_raw) if comments_raw is not None else None
                 views = int(views_raw) if views_raw is not None else None
 
                 try:
@@ -156,6 +159,12 @@ def sync_factory_analytics(bot, conn):
                 if ctr is not None:
                     sets.append("title_ctr=?")
                     params.append(ctr)
+                if likes is not None:
+                    sets.append("likes=?")
+                    params.append(likes)
+                if comments is not None:
+                    sets.append("comments=?")
+                    params.append(comments)
 
                 params.append(row_id)
                 conn.execute(
@@ -173,7 +182,9 @@ def sync_factory_analytics(bot, conn):
                     f"   [Learning] {video_id}: views={views if views is not None else 'n/a'} "
                     f"stayed_to_watch={stayed_to_watch if stayed_to_watch is not None else 'pending'} "
                     f"retention={avg_pct if avg_pct is not None else 'pending'} "
-                    f"duration={avg_duration if avg_duration is not None else 'pending'}"
+                    f"duration={avg_duration if avg_duration is not None else 'pending'} "
+                    f"likes={likes if likes is not None else 'pending'} "
+                    f"comments={comments if comments is not None else 'pending'}"
                 )
 
             except Exception as exc:

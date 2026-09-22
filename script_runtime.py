@@ -563,6 +563,7 @@ def rank_title_candidates(script_data, story_data=None):
     headline_terms = set(re.findall(r"[\w]+(?:['’.-][\w]+)*", headline, flags=re.UNICODE))
     headline_terms = {term.casefold() for term in headline_terms if len(term) > 1}
     has_number = bool(re.search(r"\d|%", headline))
+    hook_family = classify_hook_style(script_data)
 
     scores = []
     for index, raw_title in enumerate(titles, 1):
@@ -573,6 +574,54 @@ def rank_title_candidates(script_data, story_data=None):
         score = 0.0
         reasons = []
 
+        char_count = len(title)
+        if 20 <= char_count <= 55:
+            score += 1.25
+            reasons.append("compact package")
+        elif char_count <= 70:
+            score += 0.25
+        else:
+            score -= 1.75
+            reasons.append("title too long")
+
+        if "#" in title or "|" in title:
+            score -= 0.75
+            reasons.append("metadata/hashtag clutter")
+
+        metadata_hits = sum(
+            1
+            for term in (
+                "schedule", "timings", "fixture", "match", "league", "venue",
+                "1st", "2nd", "3rd", "probable xi",
+            )
+            if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", title.casefold())
+        )
+        if metadata_hits >= 3:
+            score -= 1.25
+            reasons.append("match-metadata clutter")
+
+        hook_title_bonus = {
+            "Curiosity Question": "?" in title,
+            "Conflict / Accusation": any(
+                term in title.casefold()
+                for term in ("accused", "critic", "slammed", "blasted", "arrogant", "controversy", "clash")
+            ),
+            "Bold Quote / Statement": bool(re.search(r'["“”]', title)) or any(
+                term in title.casefold()
+                for term in ("said", "says", "called", "claimed", "revealed", "warned")
+            ),
+            "Result / Record": bool(re.search(r"\d", title)) or any(
+                term in title.casefold()
+                for term in ("won", "wins", "defeated", "record", "first", "fastest", "milestone")
+            ),
+            "Surprise / Human Angle": any(
+                term in title.casefold()
+                for term in ("unexpected", "debut", "comeback", "youngest", "oldest", "rare")
+            ),
+        }
+        if hook_title_bonus.get(hook_family):
+            score += 0.75
+            reasons.append("hook-aligned packaging")
         if 5 <= len(lowered) <= 14:
             score += 2.0
             reasons.append("concise")

@@ -335,3 +335,40 @@ def test_editorial_ranking_exposes_and_rewards_hook_potential():
         ranked_conflict["discovery_dimensions"]["hook_potential"]
         == ranked_conflict["hook_potential_score"]
     )
+
+
+def test_short_scope_score_prefers_one_focused_event():
+    compact = {
+        "title": "Former batter calls India arrogant after rivalry clash",
+        "description": "The former batter criticised India's approach after the clash.",
+        "event_actions": ["comment"],
+        "event_entities": ["Former batter", "India"],
+    }
+    broad = {
+        "title": "Full history, timeline and everything you need to know about India and Australia",
+        "description": "A complete guide covering the history, background, timeline and many related developments.",
+        "event_actions": ["announce", "schedule", "comment", "injury"],
+        "event_entities": ["India", "Australia", "BCCI", "ICC", "Player", "Coach"],
+    }
+    assert story_ranker._shorts_scope_score(compact) > story_ranker._shorts_scope_score(broad)
+
+
+def test_sports_discovery_portfolio_has_a_defined_hook_signal():
+    story = {
+        "candidate_score": 12.0,
+        "topic_actionability_score": 4.0,
+        "event_source_count": 2,
+        "event_article_count": 2,
+        "description": "A current cricket development with concrete detail and a named subject.",
+        "event_actions": ["comment"],
+        "discovery_target_category": "sports_stories_of_day",
+        "discovery_dimensions": {
+            "freshness": 6.0,
+            "event_momentum": 2.0,
+            "importance": 4.0,
+            "shorts_viability": 4.0,
+            "hook_potential": 5.0,
+            "shorts_scope": 7.0,
+        },
+    }
+    assert story_ranker._discovery_portfolio_pass(story) is True

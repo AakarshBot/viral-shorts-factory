@@ -224,3 +224,27 @@ def test_high_potential_story_rejects_weak_opening_hook():
 
     assert valid is False
     assert "hook" in reason.lower()
+
+
+def test_title_packaging_rewards_compact_hook_aligned_title():
+    from script_runtime import rank_title_candidates
+    script = {
+        "titles": [
+            "Former batter calls India arrogant",
+            "India vs Pakistan clash, 1st match, schedule, venue, timings, league 2026",
+        ],
+        "script": [{
+            "voiceover": "Former batter calls India arrogant after the rivalry clash.",
+            "primary_entity": "Former batter",
+            "narrative_role": "hook",
+        }],
+    }
+    result = rank_title_candidates(
+        script,
+        {
+            "title": "Former batter calls India arrogant after rivalry clash",
+            "description": "The former batter criticised India's approach after the clash.",
+        },
+    )
+    assert result["recommended_title_index"] == 1
+    assert result["scores"][0]["score"] > result["scores"][1]["score"]

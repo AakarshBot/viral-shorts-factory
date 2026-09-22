@@ -1030,11 +1030,13 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "EDITORIAL ANGLE CONTROL:\n"
         f"- Recommended narrative lens: {angle_strategy['type']}. {angle_strategy['instruction']}\n"
         "- Use that lens only when the evidence supports it; never invent conflict, surprise, comparison, or consequences just to make the story more dramatic.\n\n"
+        "RUNTIME SCOPE CONTROL:\n"
+        f"- Story scope fit score: {story_data.get('shorts_scope_score', 0)}. Prefer a focused 20–30 second cut for a compact single-event story; allow up to roughly 35 seconds only when a second perspective or necessary context genuinely earns the extra time. Never pad or force compression.\n"
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
-        "- No spoken like/share/subscribe/follow CTA.\n"
-        "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
+        "- Keep generated titles compact, ideally under 55 characters, and never stuff them with schedules, venues, match metadata or hashtags.\n"\
+        "- No spoken like/share/subscribe/follow CTA.\n"        "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
         "VISUAL DATA:\n"
         "- Every scene needs one primary_entity supported by the evidence and a grounded specific_search_prompt. Never invent identities.\n\n"
         f"LANGUAGE: {language_cfg['script_instruction']}\n"
@@ -1115,8 +1117,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                     "Rewrite the complete script. Preserve supported facts and the editorial angle. "
                     "Lead the first scene with the strongest supported conflict, surprise, consequence, or "
                     "attributed quote. Remove generic setup and retention-bait. Ensure distinct hook, "
-                    "development, context and consequence scenes remain present. Prefer a roughly 25–35 "
-                    "second cut when the story genuinely fits that range, without padding or forced compression."
+                    "development, context and consequence scenes remain present. Prefer a focused 20–30 "
+                    "second cut for a compact story and allow up to roughly 35 seconds only when the story genuinely earns it, without padding or forced compression."
                 )},
             ])
         except Exception as exc:
@@ -1151,8 +1153,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                     format_mode,
                 )
                 if valid:
-                    data["hook_type"] = "Direct Factual Headline"
-                    data["hook_style_used"] = "Direct Factual Headline"
+                    data["hook_type"] = classify_hook_style(data)
+                    data["hook_style_used"] = data["hook_type"]
+                    data["editorial_angle_strategy"] = angle_strategy
                     data["structure_used"] = "Top 5" if format_mode == "top5" else "Editorial Explainer"
                     data["persona_used"] = persona_name.title()
                     return data

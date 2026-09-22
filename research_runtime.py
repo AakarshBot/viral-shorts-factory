@@ -84,6 +84,8 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "EDITORIAL ANGLE CONTROL: "
         f"Use this evidence-selected narrative lens when supported: {angle_strategy['type']}. {angle_strategy['instruction']} "
         "Do not force the lens when the evidence does not support it. "
+        "RUNTIME SCOPE CONTROL: Use a focused 20–30 second narrative for a compact single-event story; allow up to roughly 35 seconds only when added context genuinely earns it, never through padding. "
+        "TITLE PACKAGING CONTROL: Keep titles compact, ideally under 55 characters, with no schedule/venue/match-metadata clutter or hashtags. "
         "Make scene 1 a precise factual headline that names the concrete event or subject immediately, with no generic setup. "
         "Use curiosity through a specific supported fact, change, consequence, or tension rather than withholding information. "
         "Keep scene 1 tighter than the explanatory scenes that follow. "

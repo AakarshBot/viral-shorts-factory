@@ -328,6 +328,59 @@ def _shorts_viability(story, visual=None):
     )
 
 
+def _shorts_scope_score(story):
+    """Estimate whether a story can be delivered as one focused 20–35s Short."""
+    story = story if isinstance(story, dict) else {}
+    title = str(story.get("title") or story.get("event_search_text") or "").strip()
+    title_tokens = _tokens(title)
+    text = " ".join(str(story.get(key) or "") for key in ("description", "summary", "snippet")).strip()
+    actions = set(story.get("event_actions") or _event_actions(title))
+    entities = {str(entity).strip().casefold() for entity in (story.get("event_entities") or []) if str(entity).strip()}
+    scope_text = f"{title} {text}".casefold()
+
+    score = 6.0
+    if len(actions) == 1:
+        score += 1.6
+    elif len(actions) == 2:
+        score += 0.7
+    elif len(actions) == 0:
+        score -= 0.8
+    else:
+        score -= min(2.0, (len(actions) - 2) * 0.6)
+
+    if 5 <= len(title_tokens) <= 16:
+        score += 1.0
+    elif len(title_tokens) <= 22:
+        score += 0.4
+    elif len(title_tokens) > 28:
+        score -= 1.4
+    elif len(title_tokens) > 22:
+        score -= 0.7
+
+    if 1 <= len(entities) <= 3:
+        score += 0.7
+    elif len(entities) > 5:
+        score -= min(1.5, (len(entities) - 5) * 0.4)
+
+    scope_terms = (
+        "history", "timeline", "background", "context", "origins",
+        "all you need to know", "everything you need to know",
+        "explained in detail", "complete guide", "full breakdown",
+    )
+    scope_hits = sum(1 for term in scope_terms if term in scope_text)
+    if scope_hits >= 2:
+        score -= min(1.8, scope_hits * 0.7)
+    elif scope_hits == 1:
+        score -= 0.4
+
+    if len(_tokens(text)) > 180:
+        score -= 0.8
+    if len(actions) <= 2 and len(title_tokens) <= 18 and len(entities) <= 4:
+        score += 0.6
+
+    return _clamp_score(score)
+
+
 def _hook_potential_score(story):
     """Score scroll-stop potential from concrete headline/story signals."""
     story = story if isinstance(story, dict) else {}
@@ -566,8 +619,9 @@ def _load_history(conn):
         return []
     try:
         cursor = conn.execute(
-            """SELECT status, video_id, avg_view_percentage, genre,
-                      format_used, language_used, combo_key, topic
+            """SELECT status, video_id, avg_view_percentage, stayed_to_watch, genre,
+                      format_used, language_used, combo_key, topic,
+                      hook_type, hook_style_used
                FROM vault
                WHERE (avg_view_percentage IS NOT NULL OR stayed_to_watch IS NOT NULL)
                  AND video_id IS NOT NULL
@@ -687,7 +741,14 @@ def _historical_score(story, rows, target_category, target_format, target_langua
         if overlap < 0.22:
             continue
 
-        value = _safe_float(row.get("avg_view_percentage")) or 0.0
+        retention = _safe_float(row.get("avg_view_percentage"))
+        stayed = _safe_float(row.get("stayed_to_watch"))
+        if retention is not None and stayed is not None:
+            value = retention * 0.60 + stayed * 0.40
+        elif retention is not None:
+            value = retention
+        else:
+            value = stayed or 0.0
         combo = str(row.get("combo_key") or "").split("|")
         fmt = _clean(row.get("format_used") or (combo[0] if len(combo) > 0 else ""))
         category = _clean(row.get("genre") or (combo[1] if len(combo) > 1 else ""))
@@ -1479,6 +1540,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     )
     shorts_viability = _shorts_viability(story, visual)
     hook_potential = _hook_potential_score(story)
+    shorts_scope = _shorts_scope_score(story)
     channel_history = history
     candidate_hook_style = classify_hook_style(story.get("title") or story.get("event_search_text") or "")
     channel_fit, channel_fit_samples = _channel_performance_prior(
@@ -1503,6 +1565,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         importance * 1.55
         + audience * 1.35 * momentum_weight
         + shorts_viability * 1.20
+        + shorts_scope * 0.85
         + topic_actionability * 0.65
         + originality * 0.45
         + visual * 0.20
@@ -1529,6 +1592,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
     story["shorts_viability_score"] = round(shorts_viability, 2)
+    story["shorts_scope_score"] = round(shorts_scope, 2)
     story["hook_potential_score"] = round(hook_potential, 2)
     story["topic_actionability_score"] = round(topic_actionability, 2)
     story["india_relevance_score"] = round(india_relevance, 2)
@@ -1544,6 +1608,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "importance": round(importance, 2),
         "audience_potential": round(audience, 2),
         "shorts_viability": round(shorts_viability, 2),
+        "shorts_scope": round(shorts_scope, 2),
         "hook_potential": round(hook_potential, 2),
         "topic_actionability": round(topic_actionability, 2),
         "india_relevance": round(india_relevance, 2),
@@ -1611,6 +1676,7 @@ def _candidate_quality_pass(story):
     importance = _safe_float(dimensions.get("importance")) or 0.0
     shorts = _safe_float(dimensions.get("shorts_viability")) or 0.0
     hook = _safe_float(dimensions.get("hook_potential")) or 0.0
+    scope = _safe_float(dimensions.get("shorts_scope")) or 0.0
     corroboration = _safe_float(dimensions.get("corroboration")) or 0.0
     source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
@@ -1630,6 +1696,9 @@ def _candidate_quality_pass(story):
         return False
     if shorts < 3.0:
         story["discovery_rejection"] = "Weak Shorts viability"
+        return False
+    if scope < 3.0 and hook < 5.5:
+        story["discovery_rejection"] = "Story scope is too broad for a focused Short"
         return False
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
         story["discovery_rejection"] = "Weak Shorts hook potential"
@@ -1655,6 +1724,8 @@ def _discovery_portfolio_pass(story):
     freshness = _safe_float(dimensions.get("freshness")) or 0.0
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
+    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
+    scope = _safe_float(dimensions.get("shorts_scope")) or 0.0
     actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.0):
         return False
@@ -1664,6 +1735,9 @@ def _discovery_portfolio_pass(story):
         return False
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
+        return False
+    if scope < 2.5 and hook < 4.5:
+        story["discovery_rejection"] = "Story scope is too broad for a focused Short"
         return False
     if actionability < 3.0:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
