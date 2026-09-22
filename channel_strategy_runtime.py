@@ -122,7 +122,7 @@ def score_story(story: dict) -> dict:
 
     strong_hook = bool(
         conflict or quote or surprise
-        or ("?" in title and len(title.split()) >= 5)
+        or ("?" in headline and len(headline.split()) >= 5)
         or result
     )
     if routine and not strong_hook:
@@ -134,7 +134,7 @@ def score_story(story: dict) -> dict:
     if generic and not strong_hook:
         score -= min(1.75, generic * 0.75)
         reasons.append("generic-headline penalty")
-    if len(re.findall(r"\w+", title)) > 24:
+    if len(re.findall(r"\w+", headline)) > 24:
         score -= 0.75
         reasons.append("headline too broad")
 
