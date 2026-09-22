@@ -298,8 +298,10 @@ def choose_editorial_angle(story_data, format_mode="regular"):
     ))
     if unexpected and any(
         term in text
-        for term in ("player", "star", "actor", "singer", "founder", "scientist",
-                     "coach", "captain", "batter", "bowler", "person")
+        for term in (
+            "player", "star", "actor", "singer", "founder", "scientist",
+            "coach", "captain", "batter", "bowler", "person",
+        )
     ):
         scores["unexpected_person_led"] += min(8.0, unexpected * 1.9) + 1.0
 
@@ -310,19 +312,21 @@ def choose_editorial_angle(story_data, format_mode="regular"):
         r"\bacquired\b", r"\bsigned\b", r"\bdeal\b", r"\bdecision\b",
         r"\bchange\b", r"\bimpact\b", r"\baffect(?:s|ed|ing)?\b",
     ))
-    if consequence || (["ban","appoint","approve","resign","injure","cancel","delay","launch","acquire","sign"].some(a => actions.has(a))):
+    if consequence or actions & {
+        "ban", "appoint", "approve", "resign", "injure", "cancel",
+        "delay", "launch", "acquire", "sign",
+    }:
         scores["why_it_matters_led"] += min(8.0, consequence * 1.6) + 1.5
 
-    const timeline = count((
+    timeline = count((
         r"\bhistory\b", r"\btimeline\b", r"\bsince\b", r"\bpreviously\b",
         r"\bearlier\b", r"\bbefore\b", r"\bover the past\b",
         r"\bin \d{4}\b", r"\byears? (?:later|ago)\b",
     ))
-    if timeline >= 2 || /\b(?:history|timeline)\b/.test(title)) {
-        scores["timeline_led"] += Math.min(7.0, timeline * 1.9);
-    }
+    if timeline >= 2 or re.search(r"\b(?:history|timeline)\b", title):
+        scores["timeline_led"] += min(7.0, timeline * 1.9)
 
-    const priority = [
+    priority = [
         "confrontation_led",
         "result_or_record_led",
         "comparison_led",
@@ -330,19 +334,22 @@ def choose_editorial_angle(story_data, format_mode="regular"):
         "why_it_matters_led",
         "timeline_led",
         "evidence_explainer",
-    ];
-    const chosen = priority.reduce((best, name) => scores[name] > scores[best] ? name : best, priority[0]);
+    ]
+    chosen = max(priority, key=lambda name: (scores[name], -priority.index(name)))
     return {
-        type: chosen,
-        instruction: _EDITORIAL_ANGLE_STRATEGIES[chosen],
-        signal_score: Number(scores[chosen].toFixed(2)),
-        signals: Object.fromEntries(
-            Object.entries(scores).filter(([, value]) => value > 0.5).map(([name, value]) => [name, Number(value.toFixed(2))])
+        "type": chosen,
+        "instruction": _EDITORIAL_ANGLE_STRATEGIES[chosen],
+        "signal_score": round(scores[chosen], 2),
+        "signals": {
+            name: round(value, 2)
+            for name, value in scores.items()
+            if value > 0.5
+        },
+        "reason": (
+            "Selected from concrete event, conflict, outcome, comparison, person-level, "
+            "consequence and timeline signals; the writer must still follow the evidence pack."
         ),
-        reason: "Selected from concrete event, conflict, outcome, comparison, person-level, consequence and timeline signals; the writer must still follow the evidence pack.",
-    };
-}
-
+    }
 
 
 def _strip_filler(text):
