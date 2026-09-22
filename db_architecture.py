@@ -9,7 +9,7 @@ VAULT_COLUMNS = [
     ("persona_used", "TEXT"), ("hook_strength", "REAL"), ("narrative_completeness", "REAL"),
     ("audience_fit", "REAL"), ("monetization_risk", "REAL"), ("shelf_life", "REAL"),
     ("composite_score", "REAL"), ("rejected_reason", "TEXT"), ("script_json", "TEXT"),
-    ("ai_image_ratio", "REAL"), ("voice_gender", "TEXT"), ("format_used", "TEXT"),
+    ("asset_credits_json", "TEXT"), ("ai_image_ratio", "REAL"), ("voice_gender", "TEXT"), ("format_used", "TEXT"),
     ("language_used", "TEXT"), ("avg_view_duration", "REAL"), ("avg_view_percentage", "REAL"),
     ("combo_key", "TEXT"), ("title_ctr", "REAL"), ("hook_style_used", "TEXT"),
     ("trend_keyword", "TEXT"),
@@ -39,6 +39,7 @@ def _create(conn):
         composite_score REAL,
         rejected_reason TEXT,
         script_json TEXT,
+        asset_credits_json TEXT,
         ai_image_ratio REAL,
         voice_gender TEXT,
         format_used TEXT,
@@ -100,6 +101,7 @@ def migrate_vault(conn):
 
     _add_column(conn, "run_id", "TEXT")
     _add_column(conn, "status", "TEXT DEFAULT 'COMPLETED'")
+    _add_column(conn, "asset_credits_json", "TEXT")
     _add_column(conn, "created_at", "TIMESTAMP")
     _add_column(conn, "updated_at", "TIMESTAMP")
     conn.execute("UPDATE vault SET status = CASE WHEN video_id = 'PENDING_QC' THEN 'PENDING_QC' WHEN video_id = 'REJECTED' THEN 'REJECTED' WHEN video_id IS NULL OR video_id = '' THEN 'FAILED' ELSE COALESCE(status, 'COMPLETED') END")
@@ -141,7 +143,7 @@ def update_run_record(conn, row_id, **fields):
         "topic", "date_used", "genre", "video_id", "status", "reported", "views",
         "title_used", "hook_type", "structure_used", "persona_used", "hook_strength",
         "narrative_completeness", "audience_fit", "monetization_risk", "shelf_life",
-        "composite_score", "rejected_reason", "script_json", "ai_image_ratio", "voice_gender",
+        "composite_score", "rejected_reason", "script_json", "asset_credits_json", "ai_image_ratio", "voice_gender",
         "format_used", "language_used", "avg_view_duration", "avg_view_percentage", "combo_key",
         "title_ctr", "hook_style_used", "trend_keyword",
     }
