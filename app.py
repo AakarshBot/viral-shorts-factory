@@ -2342,6 +2342,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     approved_metadata = st.session_state.get("approved_metadata") or {}
     if metadata_approved and not isinstance(approved_metadata, dict):
         approved_metadata = {}
+    public_publish_blocked = bool(
+        (script_data or {}).get("public_publish_blocked")
+    )
     with st.container(border=True):
         if metadata_approved and not st.session_state.get("metadata_editing"):
             st.markdown(
@@ -2473,12 +2476,17 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         )
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
+        if public_publish_blocked:
+            st.warning(
+                "Public upload is disabled for this run because the script pipeline "
+                "marked the script as requiring private-only publication."
+            )
         if st.button(
             "Upload Publicly",
             type="primary",
             width="stretch",
             key="upload_public",
-            disabled=not upload_unlocked,
+            disabled=not upload_unlocked or public_publish_blocked,
         ):
             st.session_state["confirm_public_upload"] = True
             st.rerun()
