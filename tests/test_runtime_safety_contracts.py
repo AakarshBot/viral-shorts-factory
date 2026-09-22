@@ -231,3 +231,14 @@ def test_ready_upload_recovery_reconstructs_upload_state():
         "self.bot._last_run_row_id = int(row_id)",
     ):
         assert needle in block
+
+
+def test_dashboard_initialization_restores_ready_upload_state():
+    source = (REPO_ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("def _init_state()")
+    end = source.index("
+def _topic_identity", start)
+    block = source[start:end]
+    assert "restore_ready_upload()" in block
+    assert "st.session_state.production_started = True" in block
+    assert "metadata_approved = False" in block
