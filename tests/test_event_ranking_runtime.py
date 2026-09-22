@@ -290,3 +290,48 @@ def test_deduplicate_stage_keeps_distinct_action_targets_separate():
 
     selected = story_ranker._deduplicate_stage(stories, max_items=10)
     assert len(selected) == 2
+
+
+def test_editorial_ranking_exposes_and_rewards_hook_potential():
+    common = {
+        "event_clustered": True,
+        "event_source_count": 3,
+        "event_source_domains": ["icc-cricket.com", "reuters.com", "bbc.com"],
+        "event_evidence_publishers": ["ICC", "Reuters", "BBC"],
+        "event_corroboration_score": 6.0,
+        "event_article_count": 4,
+        "event_evidence": [
+            {"publishedAt": _iso(0.5), "publisher": "ICC"},
+            {"publishedAt": _iso(1.0), "publisher": "Reuters"},
+            {"publishedAt": _iso(2.0), "publisher": "BBC"},
+        ],
+        "velocity_score": 5.0,
+        "trend_bonus": 2.0,
+        "originality_score": 8.0,
+        "description": "The story has enough independently reported detail to explain the current development and its immediate consequence.",
+        "event_actions": ["comment"],
+        "event_entities": ["India", "Pakistan"],
+    }
+    conflict = {
+        **common,
+        "title": "Former Pakistan batter calls India arrogant after rivalry clash",
+    }
+    routine = {
+        **common,
+        "title": "India squad announced with schedule and match timings",
+        "event_actions": ["announce"],
+    }
+
+    ranked_conflict = story_ranker._editorial_score(
+        conflict, [], "sports_stories_of_day", "regular", "english", []
+    )
+    ranked_routine = story_ranker._editorial_score(
+        routine, [], "sports_stories_of_day", "regular", "english", []
+    )
+
+    assert ranked_conflict["hook_potential_score"] > ranked_routine["hook_potential_score"]
+    assert ranked_conflict["candidate_score"] > ranked_routine["candidate_score"]
+    assert (
+        ranked_conflict["discovery_dimensions"]["hook_potential"]
+        == ranked_conflict["hook_potential_score"]
+    )
