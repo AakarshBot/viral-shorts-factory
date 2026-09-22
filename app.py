@@ -527,6 +527,8 @@ def _init_state() -> None:
         "production_started": False,
         "upload_result": "",
         "upload_mode": "",
+        "upload_notice": "",
+        "upload_notice_kind": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
         "selected_channel": _channel_options()[0],
@@ -596,6 +598,8 @@ def reset_run() -> None:
         "production_started": False,
         "upload_result": "",
         "upload_mode": "",
+        "upload_notice": "",
+        "upload_notice_kind": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
         # final_title/final_description/final_comment belong to Streamlit widgets.
@@ -828,6 +832,12 @@ def _clear_live_run_selection() -> None:
     st.session_state.pending_candidate = None
     st.session_state.production_started = False
     st.session_state.upload_result = ""
+    st.session_state.upload_mode = ""
+    st.session_state.upload_notice = ""
+    st.session_state.upload_notice_kind = ""
+    st.session_state.metadata_approved = False
+    st.session_state.metadata_editing = False
+    st.session_state.metadata_loaded_run_id = ""
     st.session_state.confirm_public_upload = False
     st.session_state.candidate_page = 0
     st.session_state.visual_query_story_key = ""
@@ -1071,25 +1081,15 @@ def render_live_navigation() -> Dict[str, Any]:
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     stages = [
-        ("Headlines", "discovery"),
-        ("Research", "research"),
-        ("Script", "script_review"),
-        ("Voiceover", "audio"),
-        ("Visuals", "visual_approval"),
-        ("Render", "render"),
-        ("Final QC", "qc"),
+        (item["label"], item["key"])
+        for item in LIVE_STAGE_SPEC
     ]
     current = str(snapshot.get("stage") or "idle").strip()
     percent = max(0, min(100, int(snapshot.get("percent", 0) or 0)))
     current_key = {"script": "script_review", "visuals": "visual_approval"}.get(current, current)
     bounds = {
-        "discovery": (0, 14),
-        "research": (15, 23),
-        "script_review": (24, 40),
-        "audio": (41, 54),
-        "visual_approval": (55, 76),
-        "render": (77, 95),
-        "qc": (96, 100),
+        item["key"]: (item["min_percent"], item["max_percent"])
+        for item in LIVE_STAGE_SPEC
     }
     if current == "error":
         current_key = next(
@@ -2016,16 +2016,22 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         or ""
     ).strip()
     upload_mode = str(st.session_state.get("upload_mode") or "").strip().lower()
+    upload_notice = str(st.session_state.get("upload_notice") or "").strip()
+    upload_notice_kind = str(st.session_state.get("upload_notice_kind") or "").strip().lower()
 
     if uploaded_video_id:
-        heading = "Published to YouTube" if upload_mode == "public" else "Upload complete"
-        copy = (
-            "The Short is public and the creator comment was submitted."
-            if upload_mode == "public"
-            else "The Short is stored on YouTube as a private upload."
-            if upload_mode == "private"
-            else "YouTube has accepted the video for this production run."
-        )
+        if upload_notice_kind == "visibility_blocked":
+            heading = "YouTube kept the video private"
+            copy = upload_notice or "YouTube accepted the upload but did not allow public visibility."
+        else:
+            heading = "Published to YouTube" if upload_mode == "public" else "Upload complete"
+            copy = (
+                "The Short is public and the creator comment was submitted."
+                if upload_mode == "public"
+                else "The Short is stored on YouTube as a private upload."
+                if upload_mode == "private"
+                else "YouTube has accepted the video for this production run."
+            )
         with st.container(border=True):
             st.markdown(
                 f"<div class='release-success'>"
@@ -2292,12 +2298,17 @@ def _perform_upload(
         )
         st.session_state.upload_result = str(result)
         st.session_state.upload_mode = str(publish_mode).strip().lower()
+        st.session_state.upload_notice = ""
+        st.session_state.upload_notice_kind = ""
         st.rerun()
     except Exception as exc:
         message = str(exc)
         match = re.search(r"accepted video\s+([A-Za-z0-9_-]+)", message)
         video_id = str(getattr(exc, "video_id", "") or (match.group(1) if match else "")).strip()
         if video_id and "kept it private instead of public" in message:
+            st.session_state["upload_notice"] = message
+            st.session_state["upload_notice_kind"] = "visibility_blocked"
+            st.session_state["upload_mode"] = "youtube_private"
             st.error(message)
             st.info(
                 "YouTube blocked public visibility for this upload. The video already exists and is private, "
