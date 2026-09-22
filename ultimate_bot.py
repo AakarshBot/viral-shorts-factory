@@ -1078,21 +1078,6 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "}"
     )
 
-    previous_script = story_data.get("previous_script")
-    previous_draft_text = ""
-    if isinstance(previous_script, list):
-        previous_scenes = [
-            {
-                "index": index,
-                "voiceover": str(scene.get("voiceover") or "").strip(),
-                "narrative_role": str(scene.get("narrative_role") or "").strip(),
-            }
-            for index, scene in enumerate(previous_script, 1)
-            if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
-        ]
-        if previous_scenes:
-            previous_draft_text = json.dumps(previous_scenes, ensure_ascii=False)
-
     freshfeed_block = (
         "\n\nFRESHFEED SELECTION CONTEXT:\n"
         f"pattern_score={story_data.get('freshfeed_pattern_score', 0)}\n"
@@ -1103,21 +1088,11 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Use only supported signals; they guide framing but never justify invented claims."
     )
 
-    rewrite_block = ""
-    if previous_draft_text:
-        rewrite_block = (
-            "\n\nPREVIOUS DRAFT TO TIGHTEN:\n"
-            + previous_draft_text
-            + "\nThis is a real compression rewrite, not a fresh story. Preserve the previous draft's "
-            "supported facts, central hook, editorial angle and useful order. Remove repetition, generic setup "
-            "and nonessential context. Return a complete replacement script and do not add new facts."
-        )
-
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": f"STORY DATA:\n{source_text}" + freshfeed_block + rewrite_block,
+            "content": f"STORY DATA:\n{source_text}" + freshfeed_block,
         },
     ]
 
