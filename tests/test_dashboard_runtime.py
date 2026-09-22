@@ -1683,3 +1683,134 @@ def test_dashboard_shows_video_id_after_upload():
     assert "VIDEO ID" in panel
     assert "https://www.youtube.com/watch?v={uploaded_video_id}" in panel
     assert "release-success" in panel
+
+
+def test_script_review_accepts_unchanged_or_human_edited_script(monkeypatch):
+    import script_runtime
+
+    controller = DashboardWorkflowController(_Bot())
+    controller.state.stage = "script_review"
+    controller.state.run_id = "run-script-review"
+    controller.state.format_mode = "regular"
+    controller.state.selected_story = {
+        "title": "India announces new policy",
+        "text": "India announced a new policy with implementation details and a clear practical consequence.",
+    }
+    controller.state.script_data = {
+        "titles": ["India policy update", "India announces policy change", "What India's policy change means"],
+        "recommended_title_index": 2,
+        "editorial_angle": "The script explains the change and its practical consequence.",
+        "seo_description": "A factual explanation of the policy change, its background and practical consequence.",
+        "script": [
+            {"voiceover": "India announced the policy change today.", "narrative_role": "hook", "primary_entity": "India", "specific_search_prompt": "India policy change"},
+            {"voiceover": "Officials are implementing the change across affected departments.", "narrative_role": "development", "primary_entity": "India", "specific_search_prompt": "India policy implementation"},
+            {"voiceover": "The background explains what changes from the previous process.", "narrative_role": "context", "primary_entity": "India", "specific_search_prompt": "India policy background"},
+            {"voiceover": "The practical consequence is a new process for affected departments.", "narrative_role": "consequence", "primary_entity": "India", "specific_search_prompt": "India policy consequence"},
+        ],
+    }
+    controller._ensure_manual_gate_state()
+
+    monkeypatch.setattr(
+        script_runtime,
+        "clean_script_data",
+        lambda data, *_args, **_kwargs: (dict(data, script=[dict(s) for s in data["script"]]), {"changed_scenes": 0, "removed_scenes": 0}),
+    )
+    monkeypatch.setattr(script_runtime, "validate_content_density", lambda *_args: (True, "ok"))
+    monkeypatch.setattr(script_runtime, "assess_release_structure", lambda *_args: (True, "ok", "Editorial Explainer"))
+    monkeypatch.setattr(
+        script_runtime,
+        "rank_title_candidates",
+        lambda data, *_args: {"recommended_title_index": data.get("recommended_title_index", 1), "scores": []},
+    )
+    monkeypatch.setattr(script_runtime, "check_script_originality", lambda *_args: {"passed": True, "failures": []})
+    monkeypatch.setattr(script_runtime, "_run_real_critique", lambda *_args: {
+        "score": 9,
+        "unsupported_claims": [],
+        "exaggerations": [],
+        "fixes": [],
+        "provider": "test",
+    })
+
+    reviewed = controller.snapshot()["script_data"]
+    reviewed = dict(reviewed)
+    reviewed["script"] = [dict(scene) for scene in reviewed["script"]]
+    reviewed["script"][1]["voiceover"] = "Officials are rolling out the change across the affected departments."
+    reviewed["recommended_title_index"] = 2
+
+    ok, message = controller.submit_script_review(reviewed)
+
+    assert ok, message
+    assert controller.state.script_data["human_script_reviewed"] is True
+    assert controller.state.script_data["human_script_edit_applied"] is True
+    assert controller.state.script_data["script"][1]["voiceover"].startswith("Officials are rolling out")
+    assert controller._manual_gate_state["script_submitted"] is True
+    assert controller._manual_gate_state["script_event"].is_set()
+
+
+def test_script_review_rejects_scene_count_change():
+    controller = DashboardWorkflowController(_Bot())
+    controller.state.stage = "script_review"
+    controller.state.script_data = {
+        "titles": ["One", "Two", "Three"],
+        "recommended_title_index": 1,
+        "script": [
+            {"voiceover": "Hook.", "narrative_role": "hook"},
+            {"voiceover": "Development.", "narrative_role": "development"},
+            {"voiceover": "Context.", "narrative_role": "context"},
+            {"voiceover": "Consequence.", "narrative_role": "consequence"},
+        ],
+    }
+    controller._ensure_manual_gate_state()
+
+    ok, message = controller.submit_script_review({
+        "titles": ["One", "Two", "Three"],
+        "recommended_title_index": 1,
+        "script": [{"voiceover": "Only one scene."}],
+    })
+
+    assert ok is False
+    assert "number of scenes" in message.lower()
+    assert controller._manual_gate_state["script_event"].is_set() is False
+
+
+def test_visual_approval_is_fail_closed_in_controller(tmp_path):
+    controller = DashboardWorkflowController(_Bot())
+    controller.state.stage = "visual_approval"
+    controller._visual_packages = [[{
+        "image": str(tmp_path / "missing.jpg"),
+        "visual_verified": False,
+    }]]
+    controller._ensure_manual_gate_state()
+
+    assert controller.approve_visuals() is False
+    assert controller._manual_gate_state["visual_event"].is_set() is False
+
+    image = tmp_path / "verified.jpg"
+    image.write_bytes(b"image")
+    controller._visual_packages = [[{
+        "image": str(image),
+        "visual_verified": True,
+        "visual_qc_blocked": False,
+    }]]
+
+    assert controller.approve_visuals() is True
+    assert controller._manual_gate_state["visual_event"].is_set() is True
+
+
+def test_dashboard_review_surface_exposes_editable_script_and_visual_replacement_controls():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = source.index("def render_script_visual_query_review")
+    end = source.index("
+def _visual_items", start)
+    review = source[start:end]
+    assert "Edit script before approval" in review
+    assert "Save edits & approve script" in review
+    assert "Working title" in review
+
+    visual_start = source.index("def render_visual_review")
+    visual_end = source.index("
+def render_live_factory", visual_start)
+    visual = source[visual_start:visual_end]
+    assert "Replace image" in visual
+    assert "Find up to 10 alternatives" in visual
+    assert "Use" in visual
