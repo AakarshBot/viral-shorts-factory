@@ -11,6 +11,7 @@ VAULT_COLUMNS = [
     ("composite_score", "REAL"), ("rejected_reason", "TEXT"), ("script_json", "TEXT"),
     ("asset_credits_json", "TEXT"), ("ai_image_ratio", "REAL"), ("voice_gender", "TEXT"), ("format_used", "TEXT"),
     ("language_used", "TEXT"), ("avg_view_duration", "REAL"), ("avg_view_percentage", "REAL"),
+    ("engaged_views", "INTEGER"), ("stayed_to_watch", "REAL"),
     ("combo_key", "TEXT"), ("title_ctr", "REAL"), ("hook_style_used", "TEXT"),
     ("trend_keyword", "TEXT"),
 ]
@@ -46,6 +47,8 @@ def _create(conn):
         language_used TEXT,
         avg_view_duration REAL,
         avg_view_percentage REAL,
+        engaged_views INTEGER,
+        stayed_to_watch REAL,
         combo_key TEXT,
         title_ctr REAL,
         hook_style_used TEXT,
@@ -102,6 +105,8 @@ def migrate_vault(conn):
     _add_column(conn, "run_id", "TEXT")
     _add_column(conn, "status", "TEXT DEFAULT 'COMPLETED'")
     _add_column(conn, "asset_credits_json", "TEXT")
+    _add_column(conn, "engaged_views", "INTEGER")
+    _add_column(conn, "stayed_to_watch", "REAL")
     _add_column(conn, "created_at", "TIMESTAMP")
     _add_column(conn, "updated_at", "TIMESTAMP")
     conn.execute(
@@ -157,8 +162,9 @@ def update_run_record(conn, row_id, **fields):
         "title_used", "hook_type", "structure_used", "persona_used", "hook_strength",
         "narrative_completeness", "audience_fit", "monetization_risk", "shelf_life",
         "composite_score", "rejected_reason", "script_json", "asset_credits_json", "ai_image_ratio", "voice_gender",
-        "format_used", "language_used", "avg_view_duration", "avg_view_percentage", "combo_key",
-        "title_ctr", "hook_style_used", "trend_keyword",
+        "format_used", "language_used", "avg_view_duration", "avg_view_percentage",
+        "engaged_views", "stayed_to_watch", "combo_key", "title_ctr", "hook_style_used",
+        "trend_keyword",
     }
     unknown = set(fields) - allowed
     if unknown:
