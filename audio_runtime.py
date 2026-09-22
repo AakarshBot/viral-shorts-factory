@@ -147,6 +147,33 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
     return timings
 
 
+def _is_retryable_audio_error(exc: BaseException) -> bool:
+    """Retry only failures that may succeed on a fresh TTS request."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return True
+    message = str(exc or "").casefold()
+    if isinstance(exc, (ConnectionError, OSError)):
+        return True
+    transient_markers = (
+        "429", "too many requests", "rate limit", "503", "service unavailable",
+        "temporarily unavailable", "connection reset", "timed out",
+    )
+    if any(marker in message for marker in transient_markers):
+        return True
+
+    # These failures are deterministic for the current generated artifact.
+    # Retrying them only adds latency and cannot repair the same input locally.
+    deterministic_markers = (
+        "word-boundary timing coverage is too low",
+        "word timings are not monotonic",
+        "word timings fit encoded audio duration",
+        "word timing contains a negative duration",
+        "encoded audio duration is not positive",
+        "unable to determine encoded audio duration",
+    )
+    return not any(marker in message for marker in deterministic_markers)
+
+
 async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
     print("\n🎙️ Generating Audio & Mapping Word Timings [STRICT AUDIO PIPELINE]...", flush=True)
 
@@ -199,12 +226,22 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                     flush=True,
                 )
                 break
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as exc:
                 print(f"   [Audio] Scene {idx + 1} timed out after 45s on attempt {attempt}.", flush=True)
+                retryable = _is_retryable_audio_error(exc)
             except Exception as exc:
+                retryable = _is_retryable_audio_error(exc)
                 print(f"   [Audio] Scene {idx + 1} failed on attempt {attempt}: {type(exc).__name__}: {exc}", flush=True)
-            await asyncio.sleep(min(3 * attempt, 9))
-            gc.collect()
+
+            if not retryable:
+                print(
+                    f"   [Audio] Scene {idx + 1} failure is deterministic; "
+                    "skipping redundant retry.",
+                    flush=True,
+                )
+                break
+            if attempt < 3:
+                await asyncio.sleep(min(3 * attempt, 9))
 
         if not success:
             print(f"   [Audio] FATAL: Could not generate real narration for scene {idx + 1}.", flush=True)
