@@ -563,7 +563,7 @@ def patch_content_first_visuals(bot):
             if manual_available_pool:
                 manual_selected = select_manual_visual_candidate(
                     manual_available_pool,
-                    seg,
+                    {**seg, "slide_index": idx + 1},
                     used_hashes,
                 )
 
