@@ -104,7 +104,20 @@ def migrate_vault(conn):
     _add_column(conn, "asset_credits_json", "TEXT")
     _add_column(conn, "created_at", "TIMESTAMP")
     _add_column(conn, "updated_at", "TIMESTAMP")
-    conn.execute("UPDATE vault SET status = CASE WHEN video_id = 'PENDING_QC' THEN 'PENDING_QC' WHEN video_id = 'REJECTED' THEN 'REJECTED' WHEN video_id IS NULL OR video_id = '' THEN 'FAILED' ELSE COALESCE(status, 'COMPLETED') END")
+    conn.execute(
+        """UPDATE vault
+           SET status = CASE
+               WHEN status IN (
+                   'RUNNING', 'WAITING_SCRIPT_REVIEW', 'WAITING_VISUAL_REVIEW',
+                   'READY_FOR_UPLOAD', 'UPLOADED', 'UPLOADED_PRIVATE',
+                   'FAILED', 'REJECTED'
+               ) THEN status
+               WHEN video_id = 'PENDING_QC' THEN 'PENDING_QC'
+               WHEN video_id = 'REJECTED' THEN 'REJECTED'
+               WHEN video_id IS NULL OR video_id = '' THEN 'FAILED'
+               ELSE COALESCE(status, 'COMPLETED')
+           END"""
+    )
     conn.execute("UPDATE vault SET created_at = COALESCE(created_at, date_used, CURRENT_TIMESTAMP)")
     conn.execute("UPDATE vault SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vault_topic ON vault(topic)")
