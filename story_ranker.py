@@ -1802,7 +1802,7 @@ def _niche_opportunity_score(story):
         1 for term in NICHE_OPPORTUNITY_TERMS
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
     )
-    entities = len(_topic_entities(story)) if "event_entities" in story else 0
+    entities = len(_topic_entities(story))
     actions = len(story.get("event_actions") or _event_actions(title))
     audience = _safe_float(story.get("audience_potential_score")) or 0.0
     shorts = _safe_float(story.get("shorts_viability_score")) or 0.0
