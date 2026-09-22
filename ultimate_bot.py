@@ -1785,9 +1785,10 @@ def upload_to_youtube(
         raw_title = safe_text(
             title_override or script_data.get("title"), genre_cfg.get("label", "Shorts")
         )
-        if trend_keyword and trend_keyword.lower() not in raw_title.lower():
-            raw_title = f"{trend_keyword}: {raw_title}"
 
+        # Keep the approved editorial title intact. Trend keywords may enrich
+        # the description, but they must never be prepended to the title after
+        # the channel-specific title scorer has already selected it.
         title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip()[:100]
         if not title:
             title = "Shorts"
