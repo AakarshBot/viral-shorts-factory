@@ -161,17 +161,23 @@ def assess_narrative_completeness(script_data):
             "roles": roles,
         }
 
-    if "hook" not in roles:
+    first_role = next(iter(roles), "")
+    first_scene_role = str(scenes[0].get("narrative_role") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    first_scene_role = _NARRATIVE_ROLE_ALIASES.get(first_scene_role, first_scene_role)
+    last_scene_role = str(scenes[-1].get("narrative_role") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    last_scene_role = _NARRATIVE_ROLE_ALIASES.get(last_scene_role, last_scene_role)
+
+    if first_scene_role != "hook":
         return {
             "passed": False,
-            "reason": "Narrative has no clear opening hook.",
+            "reason": "Scene 1 must be the factual retention hook.",
             "roles": roles,
         }
 
-    if "consequence" not in roles:
+    if last_scene_role != "consequence":
         return {
             "passed": False,
-            "reason": "Narrative has no closing consequence or payoff.",
+            "reason": "The final scene must deliver the consequence, payoff or closing implication.",
             "roles": roles,
         }
 
