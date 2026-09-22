@@ -1805,7 +1805,7 @@ NICHE_DISCOVERY_QUERIES = {
     "national_global_affairs": "(district OR state-level OR municipal OR local regulator OR court order OR infrastructure project OR university OR regional industry)",
     "viral_phenomenon": "(creator OR microtrend OR emerging meme OR online community OR platform feature OR local internet trend OR niche community)",
     "sports": "(women OR domestic OR academy OR junior OR U19 OR U23 OR uncapped OR debut OR club OR state league OR emerging)",
-    "sports_stories_of_day": "(women's cricket OR domestic cricket OR uncapped OR debut OR academy OR U19 OR U23 OR Ranji OR emerging player OR selection)",
+    "sports_stories_of_day": "(women's cricket OR domestic cricket OR India A OR U19 OR U23 OR Ranji OR Duleep OR DPL OR academy OR uncapped OR emerging player) (debut OR record OR milestone OR first OR fastest OR selection OR selected OR recalled OR injury OR comeback OR title OR final OR upset OR century OR fifty OR runs OR wickets)",
     "technology": "(open source OR developer tool OR benchmark OR research paper OR prototype OR security patch OR startup OR niche gadget)",
     "tech_reviews": "(indie gadget OR niche device OR long-tail smartphone OR accessory launch OR developer hardware OR specialized tech)",
     "business_finance": "(startup funding OR SME OR regional company OR niche sector OR small business OR local IPO OR early-stage company)",
