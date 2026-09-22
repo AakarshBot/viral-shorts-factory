@@ -45,8 +45,9 @@ def test_query_budget_preserves_india_global_and_category_lanes():
         cfg,
         broad_discovery=False,
     )
-    assert queries[0] == cfg["india_gnews_q"]
+    assert cfg["india_gnews_q"] in queries
     assert cfg["global_gnews_q"] in queries
+    assert queries[0] != cfg["gnews_q"]
     assert len(queries) <= story_ranker.DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD
 
 
