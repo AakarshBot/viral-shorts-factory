@@ -360,6 +360,7 @@ def install_visual_qa_bridge(visual_runtime_module):
     visual_runtime_module.reset_visual_qa_video_budget = reset_visual_qa_video_budget
     visual_runtime_module.start_visual_qa_scene = start_visual_qa_scene
     visual_runtime_module.get_visual_qa_calls_used = get_visual_qa_calls_used
+    visual_runtime_module.get_last_visual_qa_failure = get_last_visual_qa_failure
     visual_runtime_module._visual_qa_bridge_version = VISUAL_QA_RUNTIME_VERSION
     print(f"[Visual QA] Entity-only gate installed | runtime={VISUAL_QA_RUNTIME_VERSION}", flush=True)
     return True
