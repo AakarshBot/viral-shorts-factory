@@ -14,9 +14,10 @@ CHANNEL_TITLE_MAX_CHARS = 55
 
 _CONFLICT_TERMS = {
     "accused","accuses","accusation","arrogant","blasted","blast","called","calls",
-    "clash","clashes","controversy","controversial","criticized","criticised",
+    "clash","clashes","showdown","controversy","controversial","criticized","criticised",
     "criticism","debate","dispute","feud","fight","hits back","insulted","mocked",
-    "rivalry","row","ruin","slammed","slams","targeted","warned","warning","war of words",
+    "dropped","excluded","left out","benched","standoff","rivalry","row","ruin",
+    "slammed","slams","targeted","warned","warning","war of words",
 }
 _QUOTE_TERMS = {
     "said","says","called","described","declared","claimed","claims","criticized",
@@ -25,7 +26,7 @@ _QUOTE_TERMS = {
 }
 _SURPRISE_TERMS = {
     "record","first","fastest","highest","lowest","historic","unprecedented",
-    "unexpected","surprise","stuns","stunned","upset","comeback","debut",
+    "unexpected","surprise","shock","shocking","stuns","stunned","upset","comeback","debut",
     "youngest","oldest","rare","never",
 }
 _RESULT_TERMS = {
@@ -37,8 +38,9 @@ _ROUTINE_TERMS = {
     "schedule","schedules","fixtures","fixture","timings","timing","where to watch",
     "live stream","live streaming","telecast","tv channel","playing xi","probable xi",
     "predicted xi","match preview","match prediction","prediction","fantasy","dream11",
-    "tickets","scorecard","latest update","big update","squad list","full squad",
-    "training update",
+    "tickets","scorecard","latest update","big update","squad","squad announcement",
+    "squad announced","squad list","full squad","team announcement","team announced",
+    "lineup","line-up","training update",
 }
 _ADMIN_TERMS = {
     "reconstitution","board appointments","board appointment","administrative",
@@ -204,6 +206,7 @@ def score_story(story: dict) -> dict:
     # traffic comes from the Shorts Feed, where the opening promise matters most.
     conflict = _hits(_CONFLICT_TERMS, headline)
     quote = _hits(_QUOTE_TERMS, headline)
+    quoted_title = bool(re.search(r'["“”]', title))
     surprise = _hits(_SURPRISE_TERMS, headline)
     result = _hits(_RESULT_TERMS, headline)
     routine = _hits(_ROUTINE_TERMS, headline)
@@ -226,8 +229,8 @@ def score_story(story: dict) -> dict:
     if conflict:
         score += min(3.0, conflict * 1.45)
         reasons.append("conflict/controversy")
-    if quote:
-        score += min(2.25, quote * 0.80)
+    if quote or quoted_title:
+        score += min(2.25, max(quote, 1) * 0.80)
         reasons.append("bold quote/statement")
     if surprise:
         score += min(1.75, surprise * 0.65)
@@ -264,7 +267,7 @@ def score_story(story: dict) -> dict:
     freshfeed_pattern_score, pattern_reasons = _freshfeed_pattern_score(
         story=story,
         conflict=conflict,
-        quote=quote,
+        quote=max(quote, 1 if quoted_title else 0),
         surprise=surprise,
         result=result,
         routine=routine,
@@ -282,6 +285,7 @@ def score_story(story: dict) -> dict:
         "freshfeed_scope_score": scope_score,
         "freshfeed_pattern_reasons": pattern_reasons,
         "marquee_person_hits": marquee,
+        "quoted_title": quoted_title,
         "rivalry_signal": rivalry,
         "strong_hook": strong_hook,
         "routine_or_admin": bool(routine or admin),
