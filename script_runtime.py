@@ -258,6 +258,18 @@ def _hook_quality_score(script_data, story_data=None):
         "criticised",
     }
 
+    action_terms = {
+        "won", "wins", "lost", "loses", "beat", "beats", "defeated", "named",
+        "selected", "ruled out", "injured", "returns", "returned", "retired",
+        "banned", "suspended", "appointed", "signed", "launched", "revealed",
+        "announced", "reached", "missed", "failed", "secured", "clinched",
+    }
+    if any(
+        re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", lower)
+        for term in action_terms
+    ):
+        score += 1.25
+        reasons.append("concrete action stated immediately")
     if any(term in lower for term in conflict_terms):
         score += 2.0
         reasons.append("tension stated immediately")
