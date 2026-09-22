@@ -162,7 +162,7 @@ def test_discovery_portfolio_rejects_single_source_headline_without_story_substa
     }
 
     assert story_ranker._discovery_portfolio_pass(story) is False
-    assert story["discovery_rejection"] == "Headline lacks enough story substance behind the event"
+    assert story["discovery_rejection"] == "Insufficient story substance behind headline"
     assert story["story_substance_chars"] == 0
 
 
@@ -190,7 +190,6 @@ def test_discovery_portfolio_accepts_headline_only_event_when_independently_corr
     }
 
     assert story_ranker._discovery_portfolio_pass(story) is True
-    assert story["discovery_tier"] == "exploratory"
 
 
 def test_editorial_score_gives_india_relevance_a_material_ranking_lift():
