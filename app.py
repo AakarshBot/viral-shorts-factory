@@ -1801,6 +1801,60 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         st.caption(caption)
                     if not item.get("qc_passed"):
                         st.caption(item.get("qc_reason") or "This slide still needs a usable image.")
+
+                    with st.popover("Replace image", width="stretch"):
+                        with st.form(key=f"replace_visual_form_{run_id}_{item['index']}"):
+                            replacement_query = st.text_input(
+                                "Search",
+                                value=str(item.get("manual_query") or item.get("query_used") or "").strip(),
+                                placeholder="e.g. Smriti Mandhana batting",
+                                label_visibility="collapsed",
+                            )
+                            replacement_submitted = st.form_submit_button(
+                                "Find up to 10 alternatives",
+                                width="stretch",
+                            )
+                        if replacement_submitted:
+                            ok, message = controller.search_visual_options(
+                                item["index"],
+                                replacement_query,
+                            )
+                            if ok:
+                                st.rerun()
+                            st.error(message)
+
+                    replacement_options = [
+                        option
+                        for option in (item.get("search_options") or [])
+                        if isinstance(option, dict)
+                        and str(option.get("path") or "").strip()
+                        and os.path.isfile(str(option.get("path") or "").strip())
+                    ]
+                    if replacement_options:
+                        with st.expander(
+                            f"Replacement options · {len(replacement_options)}",
+                            expanded=True,
+                        ):
+                            option_cols = st.columns(min(3, len(replacement_options)), gap="small")
+                            for option_index, option in enumerate(replacement_options, 1):
+                                with option_cols[(option_index - 1) % len(option_cols)]:
+                                    st.image(option["path"], width=140)
+                                    st.caption(
+                                        str(option.get("source") or "visual source").strip()
+                                    )
+                                    if st.button(
+                                        "Use",
+                                        width="stretch",
+                                        key=f"use_search_option_{run_id}_{item['index']}_{option_index}_{str(option.get('hash') or '')[:10]}",
+                                    ):
+                                        ok, message = controller.replace_visual_from_search_option(
+                                            item["index"],
+                                            option_index,
+                                        )
+                                        if ok:
+                                            st.rerun()
+                                        st.error(message)
+
                     original_path = str(item.get("original_path") or "").strip()
                     if original_path and os.path.isfile(original_path):
                         if st.button(
@@ -1979,8 +2033,10 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             key="approve_visuals",
             disabled=bool(sum(1 for item in items if not item.get("qc_passed"))),
         ):
-            controller.approve_visuals()
-            st.rerun()
+            ok = controller.approve_visuals()
+            if ok:
+                st.rerun()
+            st.error("Visual approval is not complete. Every slide must have a verified, available image.")
         unresolved = sum(1 for item in items if not item.get("qc_passed"))
         if unresolved:
             st.caption(f"{unresolved} slide(s) still need a usable image.")
