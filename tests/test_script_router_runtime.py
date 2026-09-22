@@ -92,3 +92,10 @@ def test_duration_rewrite_uses_run_robot_language_config():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "duration_story, lang_cfg, genre_key=cat_choice" in source
     assert "duration_story, language_cfg, genre_key=cat_choice" not in source
+
+def test_duration_compression_is_a_single_lightweight_pass():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "tighten_script_for_duration_once(" in source
+    assert "write_script(\n                story_payload" not in source
+    assert 'duration_story["research_evidence_pack"]' not in source
+
