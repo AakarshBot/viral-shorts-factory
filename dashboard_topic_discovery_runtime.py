@@ -344,6 +344,8 @@ def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> b
 
     if not sr._source_page_pass(story):
         return False
+    if genre_key == "sports_stories_of_day" and not sr._cricket_service_title_pass(story):
+        return False
     if not sr._headline_noise_pass(story):
         return False
     if not sr._discovery_source_pass(story):
