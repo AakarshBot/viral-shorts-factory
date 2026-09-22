@@ -269,6 +269,38 @@ SHORTS_STAKES_TERMS = {
     "controversy", "viral", "million", "billion", "%",
 }
 
+HOOK_CONFLICT_TERMS = {
+    "arrogant", "accused", "accuses", "accusation", "blasted", "blast", "called",
+    "calls", "criticised", "criticized", "criticism", "clash", "clashes", "controversy",
+    "controversial", "debate", "dispute", "feud", "fight", "hits back", "insulted",
+    "mocked", "rivalry", "row", "ruin", "slammed", "slams", "targeted", "warned",
+    "warning", "war of words", "struggle", "scare", "upset", "shock", "shocks",
+}
+
+HOOK_QUOTE_TERMS = {
+    "said", "says", "called", "described", "declared", "claimed", "claims",
+    "criticized", "criticised", "praised", "hailed", "warned", "revealed",
+    "admitted", "responded", "responds", "hit back", "hits back",
+}
+
+HOOK_SURPRISE_TERMS = {
+    "record", "first", "fastest", "highest", "lowest", "historic", "unprecedented",
+    "unexpected", "surprise", "stuns", "stunned", "upset", "comeback", "debut",
+    "youngest", "oldest", "rare", "never", "200th", "100th",
+}
+
+HOOK_ROUTINE_TERMS = {
+    "schedule", "fixtures", "timings", "timing", "where to watch", "live stream",
+    "live streaming", "telecast", "playing xi", "probable xi", "predicted xi",
+    "match preview", "fantasy", "tickets", "squad announcement", "squad announced",
+    "training session", "training update", "latest update", "big update",
+}
+
+HOOK_GENERIC_TERMS = {
+    "latest news", "big news", "major update", "big update", "all you need to know",
+    "here is what happened", "what happened today", "things to know",
+}
+
 
 def _clamp_score(value, maximum=10.0):
     return round(max(0.0, min(float(maximum), float(value))), 2)
@@ -293,6 +325,82 @@ def _shorts_viability(story, visual=None):
     return _clamp_score(
         clarity + stakes + compression + update_density + visual_component
     )
+
+
+def _hook_potential_score(story):
+    """Score scroll-stop potential from concrete headline/story signals."""
+    story = story if isinstance(story, dict) else {}
+    raw_title = str(story.get("title") or story.get("event_search_text") or "").strip()
+    title = _clean(raw_title)
+    text = _text_blob(story)
+    combined = f"{title} {text}"
+    tokens = _tokens(raw_title)
+    score = 0.0
+    signals = []
+
+    actions = set(story.get("event_actions") or _event_actions(title))
+    if actions:
+        score += 1.25
+        signals.append("clear action")
+
+    def _hits(terms, value):
+        return sum(
+            1 for term in terms
+            if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", value)
+        )
+
+    conflict_hits = _hits(HOOK_CONFLICT_TERMS, combined)
+    if conflict_hits:
+        score += min(2.75, conflict_hits * 1.0)
+        signals.append("conflict/tension")
+
+    quote_hits = _hits(HOOK_QUOTE_TERMS, combined)
+    quoted = bool(re.search(r"[\"“”]", raw_title))
+    if quote_hits or quoted:
+        score += min(1.75, quote_hits * 0.75 + (0.75 if quoted else 0.0))
+        signals.append("quotable claim")
+
+    surprise_hits = _hits(HOOK_SURPRISE_TERMS, combined)
+    if surprise_hits:
+        score += min(2.0, surprise_hits * 0.65)
+        signals.append("surprise/novelty")
+
+    specificity = 0.0
+    if re.search(r"\b\d{2,}\b|%", raw_title):
+        specificity += 0.9
+        signals.append("specific number")
+    entities = {
+        str(entity).strip().casefold()
+        for entity in (story.get("event_entities") or [])
+        if str(entity).strip()
+    }
+    if len(entities) >= 2:
+        specificity += 0.65
+        signals.append("clear subjects")
+    score += min(1.5, specificity)
+
+    if "?" in raw_title and len(tokens) >= 5:
+        score += 0.65
+        signals.append("curiosity question")
+
+    routine_hits = _hits(HOOK_ROUTINE_TERMS, combined)
+    generic_hits = _hits(HOOK_GENERIC_TERMS, title)
+    stronger_signals = conflict_hits + quote_hits + surprise_hits + int(bool(actions))
+    if routine_hits and stronger_signals <= 1:
+        score -= min(2.5, 0.85 + routine_hits * 0.35)
+        signals.append("routine-news penalty")
+    if generic_hits:
+        score -= min(1.75, generic_hits * 0.75)
+        signals.append("generic-headline penalty")
+
+    word_count = len(tokens)
+    if 5 <= word_count <= 16:
+        score += 0.6
+    elif word_count > 24:
+        score -= 0.75
+
+    story["hook_potential_signals"] = list(dict.fromkeys(signals))
+    return _clamp_score(score)
 
 
 def _audience_potential(story, social, google_trend, event_momentum, originality):
@@ -624,6 +732,22 @@ def _cricket_story_worthiness_score(story):
     )
     if niche_hits and development_hits:
         score += 0.75
+
+    hook = _hook_potential_score(story)
+    score += min(1.75, hook * 0.35)
+    routine_hits = sum(
+        1 for term in HOOK_ROUTINE_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    stronger_signals = (
+        len(story.get("event_actions") or [])
+        + int(any(
+            re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+            for term in HOOK_CONFLICT_TERMS | HOOK_SURPRISE_TERMS | HOOK_QUOTE_TERMS
+        ))
+    )
+    if routine_hits and stronger_signals <= 1:
+        score -= 1.25
 
     return _clamp_score(score)
 
@@ -1324,6 +1448,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         originality,
     )
     shorts_viability = _shorts_viability(story, visual)
+    hook_potential = _hook_potential_score(story)
     channel_history = history
     channel_fit, channel_fit_samples = _channel_performance_prior(
         rows,
@@ -1362,6 +1487,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
     story["shorts_viability_score"] = round(shorts_viability, 2)
+    story["hook_potential_score"] = round(hook_potential, 2)
     story["topic_actionability_score"] = round(topic_actionability, 2)
     story["india_relevance_score"] = round(india_relevance, 2)
     story["importance_score"] = round(importance, 2)
@@ -1376,6 +1502,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "importance": round(importance, 2),
         "audience_potential": round(audience, 2),
         "shorts_viability": round(shorts_viability, 2),
+        "hook_potential": round(hook_potential, 2),
         "topic_actionability": round(topic_actionability, 2),
         "india_relevance": round(india_relevance, 2),
         "momentum": round(momentum, 2),
@@ -1439,6 +1566,7 @@ def _candidate_quality_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     importance = _safe_float(dimensions.get("importance")) or 0.0
     shorts = _safe_float(dimensions.get("shorts_viability")) or 0.0
+    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
     corroboration = _safe_float(dimensions.get("corroboration")) or 0.0
     source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
@@ -1458,6 +1586,9 @@ def _candidate_quality_pass(story):
         return False
     if shorts < 3.0:
         story["discovery_rejection"] = "Weak Shorts viability"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
+        story["discovery_rejection"] = "Weak Shorts hook potential"
         return False
     if source_quality < 1.0 and corroboration < 2.0:
         story["discovery_rejection"] = "Insufficient source support"
@@ -1492,6 +1623,9 @@ def _discovery_portfolio_pass(story):
         return False
     if actionability < 3.0:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.25:
+        story["discovery_rejection"] = "Weak Shorts hook potential"
         return False
     if not _story_substance_pass(story):
         story["discovery_rejection"] = "Headline lacks enough story substance behind the event"
@@ -1540,6 +1674,8 @@ def _candidate_reason(story):
         parts.append("strong cricket story development")
     if _safe_float(dimensions.get("shorts_viability")) >= 7:
         parts.append("strong Shorts potential")
+    if _safe_float(dimensions.get("hook_potential")) >= 7:
+        parts.append("strong scroll-stop hook potential")
     if _safe_float(dimensions.get("momentum")) >= 5:
         parts.append("strong current momentum")
     if _safe_float(dimensions.get("event_momentum")) >= 4:
