@@ -77,7 +77,7 @@ def _scene_features(script_json: str) -> Tuple[int | None, float | None, str, st
 
 def _rows(conn) -> List[Dict[str, Any]]:
     columns = [
-        "topic", "genre", "views", "avg_view_percentage", "avg_view_duration", "title_ctr",
+        "topic", "genre", "views", "avg_view_percentage", "stayed_to_watch", "avg_view_duration", "title_ctr",
         "title_used", "hook_type", "hook_style_used", "structure_used", "persona_used",
         "ai_image_ratio", "voice_gender", "format_used", "language_used", "trend_keyword", "script_json",
         "status", "video_id", "date_used",
@@ -110,6 +110,7 @@ def _group_summary(rows: List[Dict[str, Any]], key: str, minimum: int = 2) -> Li
             continue
         views = [x for x in (_num(r.get("views")) for r in bucket) if x is not None]
         retention = [x for x in (_num(r.get("avg_view_percentage")) for r in bucket) if x is not None]
+        stayed = [x for x in (_num(r.get("stayed_to_watch")) for r in bucket) if x is not None]
         duration = [x for x in (_num(r.get("avg_view_duration")) for r in bucket) if x is not None]
         ctr = [x for x in (_num(r.get("title_ctr")) for r in bucket) if x is not None]
         result.append({
@@ -117,6 +118,7 @@ def _group_summary(rows: List[Dict[str, Any]], key: str, minimum: int = 2) -> Li
             "Videos": len(bucket),
             "Avg views": round(mean(views)) if views else None,
             "Avg retention %": round(mean(retention), 1) if retention else None,
+            "Avg stayed to watch %": round(mean(stayed), 1) if stayed else None,
             "Avg view duration": round(mean(duration), 1) if duration else None,
             "Avg CTR %": round(mean(ctr), 2) if ctr else None,
         })
@@ -219,7 +221,7 @@ def _render_intelligence(st) -> None:
             continue
         st.markdown(f"**{label}**")
         st.dataframe(table[:8], width="stretch", hide_index=True)
-        st.caption("Patterns require at least two factory videos. Retention/category/format/language fit and prior-topic similarity can influence selection; hook, structure, pace and other deeper patterns are currently analytics-only.")
+        st.caption("Patterns require at least two factory videos. Retention, stayed-to-watch, category/format/language fit and prior-topic similarity can influence selection; hook, structure, pace and other deeper patterns are currently analytics-only.")
 
 
 __all__ = ["build_intelligence", "install_channel_intelligence_dialog"]
