@@ -2259,40 +2259,6 @@ def run_robot(web_config=None):
         )
 
         if duration_estimate["seconds"] > 30.0:
-            duration_story = dict(story_payload)
-            duration_story["previous_script"] = [
-                {
-                    "voiceover": str(scene.get("voiceover") or "").strip(),
-                    "narrative_role": str(scene.get("narrative_role") or "").strip(),
-                }
-                for scene in (script_data.get("script") or [])
-                if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
-            ]
-            duration_story["previous_editorial_angle"] = str(
-                script_data.get("editorial_angle") or ""
-            ).strip()
-            # Reuse the first evidence pack during the tightening rewrite. A
-            # transient research fetch failure must not kill an otherwise valid script.
-            for key in (
-                "research_sources",
-                "research_source_count",
-                "research_distinct_domains",
-                "research_evidence_pack",
-                "research_evidence_text",
-                "research_evidence_status",
-                "research_synthesis_required",
-                "research_fallback_source_used",
-            ):
-                if key in script_data:
-                    duration_story[key] = script_data[key]
-            duration_story["duration_control_instruction"] = (
-                "The previous draft supplied in previous_script is the authoritative draft to compress. "
-                f"It is estimated at {duration_estimate['seconds']:.1f} seconds. "
-                "Tighten that exact draft once before human review toward the channel's 20–30 second sweet spot. "
-                "The final narration should not exceed 35 seconds. Preserve every supported essential fact "
-                "and the editorial angle. Remove repetition, generic setup and nonessential context; "
-                "do not add filler or invent facts. Return a complete replacement script, not commentary about the rewrite."
-            )
             print(
                 "   [Script Duration] Over 30s; performing exactly one lightweight compression pass "
                 "on the validated draft (no research/provider-chain rerun).",
@@ -2300,7 +2266,7 @@ def run_robot(web_config=None):
             )
             rewritten = tighten_script_for_duration_once(
                 script_data,
-                duration_story,
+                story_payload,
                 lang_cfg,
                 format_mode,
                 target_seconds=30.0,
