@@ -153,3 +153,11 @@ def test_repeated_manual_searches_advance_provider_pages():
     assert "search_round: int = 1" in block
     assert "effective_page = (max(1, int(search_round)) - 1) * MANUAL_SEARCH_MAX_PAGES + page" in block
     assert "effective_page," in block
+
+def test_global_manual_search_pagination_is_scoped_per_query():
+    source = (REPO_ROOT / "dashboard_runtime.py").read_text(encoding="utf-8")
+    start = source.index("    def search_visual_pool(")
+    end = source.index("\n    def assign_visual_pool_asset(", start)
+    block = source[start:end]
+    assert 'if str(group.get("query") or "").strip().casefold()' in block
+    assert "search_round=(" in block
