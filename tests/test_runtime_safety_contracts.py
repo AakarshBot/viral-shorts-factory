@@ -40,7 +40,7 @@ def test_core_vault_writes_are_pinned_to_the_created_row():
     block = source[start:end]
     assert '"INSERT OR IGNORE INTO vault "' in block
     assert "insert_cursor = conn.execute(" in block
-    assert "run_row_id = getattr(insert_cursor, "lastrowid", None)" in block
+    assert 'run_row_id = getattr(insert_cursor, "lastrowid", None)' in block
     assert 'WHERE rowid=?' in block
     assert 'WHERE topic=?' not in block
 
@@ -106,7 +106,7 @@ def test_legacy_creator_comment_uploader_is_only_a_compatibility_shim():
     source = (REPO_ROOT / "youtube_comment_runtime.py").read_text(encoding="utf-8")
     start = source.index("def patch_youtube_upload(")
     block = source[start:]
-    assert "return getattr(bot, "upload_to_youtube", None)" in block
+    assert 'return getattr(bot, "upload_to_youtube", None)' in block
     assert "videos().insert" not in block
     assert "_creator_comment_wrapped" not in block
 
