@@ -45,13 +45,34 @@ def _contract_scene(text, role):
     }
 
 
-def test_validate_script_rejects_collapsed_narrative_without_scene_or_word_quota():
+def test_validate_script_rejects_one_or_two_scene_stubs():
+    for scenes in (
+        [_contract_scene("India announced the policy today.", "hook")],
+        [
+            _contract_scene("India announced the policy today.", "hook"),
+            _contract_scene("Officials are implementing the policy.", "development"),
+        ],
+    ):
+        script = {
+            "editorial_angle": "This explains the development, its context, and the practical consequence.",
+            "script": scenes,
+        }
+        valid, reason = validate_script(
+            script,
+            "India announced a new policy and officials are implementing it.",
+            "regular",
+        )
+        assert valid is False
+        assert "incomplete" in reason.lower() or "missing" in reason.lower()
+
+
+def test_validate_script_accepts_compact_three_scene_story():
     script = {
         "editorial_angle": "This explains the development, its context, and the practical consequence.",
         "script": [
             _contract_scene("India announced the policy today.", "hook"),
-            _contract_scene("Officials are implementing the policy.", "development"),
-            _contract_scene("The background explains why the policy was introduced.", "context"),
+            _contract_scene("Officials are implementing the policy and preparing the affected departments.", "development"),
+            _contract_scene("The practical consequence is that departments must now prepare for the new process.", "consequence"),
         ],
     }
     valid, reason = validate_script(
@@ -59,8 +80,7 @@ def test_validate_script_rejects_collapsed_narrative_without_scene_or_word_quota
         "India announced a new policy and officials are implementing it.",
         "regular",
     )
-    assert valid is False
-    assert "incomplete" in reason.lower() or "missing" in reason.lower()
+    assert valid is True, reason
 
 
 def test_validate_script_accepts_complete_story_without_numeric_limits():
