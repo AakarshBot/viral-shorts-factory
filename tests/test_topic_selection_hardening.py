@@ -184,6 +184,8 @@ def test_originality_allows_new_development_for_same_entity():
     )
 
     assert [item["title"] for item in result] == [
+        "OpenAI launches new model for developers",
         "OpenAI launches new model for enterprise users",
     ]
+    assert result[0]["originality_score"] < result[1]["originality_score"]
 
