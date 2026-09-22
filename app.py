@@ -2446,6 +2446,11 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                             clean_title, clean_description, clean_comment = validate_final_upload_metadata(
                                 title, description, comment
                             )
+                            controller.persist_approved_metadata(
+                                clean_title,
+                                clean_description,
+                                clean_comment,
+                            )
                             st.session_state["metadata_pending_values"] = {
                                 "run_id": run_id,
                                 "title": clean_title,
