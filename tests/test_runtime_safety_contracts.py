@@ -28,7 +28,6 @@ def test_run_id_includes_microseconds_to_avoid_same_second_collisions():
     source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
     start = source.index("def start_production(")
     end = source.index("\ndef _validate_selected_story", start)
-def _validate_selected_story", start)
     block = source[start:end]
     assert 'strftime(\n                    "run-%Y%m%d-%H%M%S-%f"' in block
 
