@@ -1722,21 +1722,35 @@ class DashboardWorkflowController(WorkflowController):
 
             self._return_slide_visual_to_pool(old_layer, replacement_scene)
 
+            replacement_provenance = dict(
+                replacement_scene.get("asset_provenance") or {}
+            )
             new_layer = {
                 "image": replacement_path,
+                "visual_original_path": str(
+                    replacement_scene.get("visual_original_path") or ""
+                ).strip(),
                 "text": "" if format_mode == "top5" else replacement_scene.get("voiceover", ""),
                 "ai_generated": used_ai,
                 "source_type": source_type,
                 "visual_type": visual_type,
                 "visual_genre": replacement_scene.get("visual_genre", "GENERAL_CONTEXT"),
                 "visual_verified": bool(replacement_scene.get("visual_verified", False)),
+                "visual_qc_blocked": bool(replacement_scene.get("visual_qc_blocked", False)),
+                "visual_qc_block_reason": replacement_scene.get("visual_qc_block_reason", ""),
                 "visual_rescue_reason": replacement_scene.get("visual_rescue_reason", ""),
                 "visual_fallback_reason": "",
                 "visual_query_used": replacement_scene.get("visual_query_used", ""),
                 "manual_visual_query": query,
                 "manual_visual_query_score": replacement_scene.get("manual_visual_query_score", 0),
                 "source_credit": source_credit,
-                "source_image_url": "",
+                "source_image_url": str(
+                    replacement_scene.get("source_image_url")
+                    or replacement_provenance.get("url")
+                    or replacement_provenance.get("source_page_url")
+                    or ""
+                ).strip(),
+                "asset_provenance": replacement_provenance,
             }
 
             with self._lock:
