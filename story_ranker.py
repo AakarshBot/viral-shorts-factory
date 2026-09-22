@@ -51,6 +51,46 @@ SPORTS_NICHE_TERMS = {
 
 CRICKET_TERMS = {"cricket", "icc", "bcci", "pcb", "test cricket", "t20", "odi", "ipl", "psl"}
 
+CRICKET_SERVICE_TITLE_PATTERNS = (
+    r"\blive scores?\b",
+    r"\blive updates?\b",
+    r"\bwhere to watch\b",
+    r"\blive streaming\b",
+    r"\bstreaming details?\b",
+    r"\btelecast\b",
+    r"\btv channel\b",
+    r"\bplaying xi\b",
+    r"\bprobable xi\b",
+    r"\bpredicted xi\b",
+    r"\bmatch preview\b",
+    r"\bmatch prediction\b",
+    r"\bprediction\b",
+    r"\bfantasy\b",
+    r"\bdream11\b",
+    r"\btickets?\b",
+    r"\bfixtures?\b",
+    r"\bschedule\b",
+    r"\bmatch timings?\b",
+    r"\bscorecard\b",
+)
+
+CRICKET_DEVELOPMENT_TERMS = (
+    "won", "wins", "win", "lost", "loss", "beat", "defeated", "upset", "scare",
+    "thriller", "survived", "escaped", "comeback", "clinched", "sealed",
+    "record", "milestone", "first", "fastest", "highest", "lowest", "historic",
+    "debut", "breakthrough", "selected", "named", "recalled", "returns", "returned",
+    "ruled out", "injury", "injured", "appointed", "retired", "suspended", "banned",
+    "fined", "investigation", "corruption", "anti-corruption", "approach", "contract",
+    "extension", "frontrunner", "replace", "selection", "gold", "medal", "title",
+    "final", "qualify", "qualified", "eliminated", "century", "ton", "fifty",
+    "runs", "wickets", "five-wicket", "smashes", "smashed", "scored",
+)
+
+CRICKET_NICHE_CONTEXT_TERMS = (
+    "women", "women's", "domestic", "india a", "u19", "u-19", "u23", "u-23",
+    "ranji", "duleep", "dpl", "academy", "uncapped", "emerging player",
+)
+
 
 
 def _clean(value):
@@ -530,6 +570,76 @@ def _historical_score(story, rows, target_category, target_format, target_langua
         matches += 1
 
     return best, matches
+
+
+def _cricket_service_title_pass(story):
+    """Reject cricket utility/service pages before they consume discovery capacity."""
+    title = _clean(story.get("title") or "")
+    return not any(re.search(pattern, title) for pattern in CRICKET_SERVICE_TITLE_PATTERNS)
+
+
+def _cricket_story_worthiness_score(story):
+    """Score whether a cricket story contains a real development worth covering."""
+    if not _cricket_service_title_pass(story):
+        return 0.0
+
+    title = _clean(story.get("title") or "")
+    text = _text_blob(story)
+    combined = f"{title} {text}"
+    score = 0.0
+
+    development_hits = sum(
+        1 for term in CRICKET_DEVELOPMENT_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    score += min(4.0, development_hits * 1.1)
+
+    novelty_hits = sum(
+        1 for term in ("record", "milestone", "first", "fastest", "highest", "lowest", "historic", "upset", "debut", "gold", "medal", "title", "breakthrough")
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    score += min(2.5, novelty_hits * 0.9)
+
+    entities = _topic_entities(story)
+    score += 1.25 if len(entities) >= 2 else (0.75 if entities else 0.0)
+    if re.search(r"\b\d{2,}\b|%", title):
+        score += 0.75
+
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).strip()
+    body_chars = len(re.sub(r"\s+", " ", body))
+    if body_chars >= 240:
+        score += 1.0
+    elif body_chars >= 120:
+        score += 0.6
+
+    if _source_quality(story) >= 2.0:
+        score += 0.5
+
+    niche_hits = sum(
+        1 for term in CRICKET_NICHE_CONTEXT_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    if niche_hits and development_hits:
+        score += 0.75
+
+    return _clamp_score(score)
+
+
+def _cricket_story_worthiness_pass(story, minimum_score=5.0):
+    score = _cricket_story_worthiness_score(story)
+    story["cricket_story_worthiness_score"] = score
+    if not _cricket_service_title_pass(story):
+        story["cricket_service_article_pass"] = False
+        story["discovery_rejection"] = "Low-value cricket service article"
+        return False
+    story["cricket_service_article_pass"] = True
+    if score < float(minimum_score):
+        story["discovery_rejection"] = "Weak cricket editorial development"
+        return False
+    return True
 
 
 def _apply_sports_niche_bonus(story, target_category):
@@ -1173,6 +1283,12 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         target_language,
     )
     niche = _apply_sports_niche_bonus(story, target_category)
+    cricket_worthiness = (
+        _cricket_story_worthiness_score(story)
+        if _clean(target_category) == "sports_stories_of_day"
+        else 0.0
+    )
+    story["discovery_target_category"] = _clean(target_category)
     niche_opportunity = _niche_opportunity_score(story)
     major_event_score = _major_event_score(story)
     originality = _safe_float(story.get("originality_score")) or 5.0
@@ -1232,6 +1348,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + channel_fit * 0.45
         + niche * 0.20
         + niche_opportunity * 0.55
+        + cricket_worthiness * (0.90 if _clean(target_category) == "sports_stories_of_day" else 0.0)
         + (0.60 if discovery_gap else 0.0)
         - risk * 0.55
     )
@@ -1274,6 +1391,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "channel_fit": round(channel_fit, 2),
         "channel_fit_samples": channel_fit_samples,
         "niche_opportunity": round(niche_opportunity, 2),
+        "cricket_story_worthiness": round(cricket_worthiness, 2),
         "major_event": round(major_event_score, 2),
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
@@ -1325,6 +1443,8 @@ def _candidate_quality_pass(story):
     source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
 
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.5):
+        return False
     if not _headline_noise_pass(story):
         return False
     if freshness < 2.0 and momentum < 2.0:
@@ -1361,6 +1481,8 @@ def _discovery_portfolio_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
     actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.0):
+        return False
     if not _source_page_pass(story):
         return False
     if not _headline_noise_pass(story):
@@ -1414,6 +1536,8 @@ def _candidate_reason(story):
         parts.append("strong audience-interest signal")
     if _safe_float(dimensions.get("niche_opportunity")) >= 6:
         parts.append("specific niche opportunity")
+    if _safe_float(dimensions.get("cricket_story_worthiness")) >= 7:
+        parts.append("strong cricket story development")
     if _safe_float(dimensions.get("shorts_viability")) >= 7:
         parts.append("strong Shorts potential")
     if _safe_float(dimensions.get("momentum")) >= 5:
@@ -1511,6 +1635,10 @@ def diversity_rerank(stories, max_items=28):
     niche_candidates = [
         item for item in candidates
         if (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+        and (
+            _clean(item.get("discovery_target_category")) != "sports_stories_of_day"
+            or (_safe_float(item.get("cricket_story_worthiness_score")) or 0.0) >= 5.5
+        )
     ]
     niche_target = min(
         len(niche_candidates),
@@ -1525,7 +1653,13 @@ def diversity_rerank(stories, max_items=28):
         niche_remaining = sum(
             1
             for item in remaining
-            if (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+            if (
+                (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+                and (
+                    _clean(item.get("discovery_target_category")) != "sports_stories_of_day"
+                    or (_safe_float(item.get("cricket_story_worthiness_score")) or 0.0) >= 5.5
+                )
+            )
         )
         force_niche = bool(
             niche_needed
@@ -1537,7 +1671,13 @@ def diversity_rerank(stories, max_items=28):
             (index, item)
             for index, item in enumerate(remaining)
             if not force_niche
-            or (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+            or (
+                (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+                and (
+                    _clean(item.get("discovery_target_category")) != "sports_stories_of_day"
+                    or (_safe_float(item.get("cricket_story_worthiness_score")) or 0.0) >= 5.5
+                )
+            )
         ]
 
         for index, candidate in eligible_remaining:
@@ -1665,7 +1805,7 @@ NICHE_DISCOVERY_QUERIES = {
     "national_global_affairs": "(district OR state-level OR municipal OR local regulator OR court order OR infrastructure project OR university OR regional industry)",
     "viral_phenomenon": "(creator OR microtrend OR emerging meme OR online community OR platform feature OR local internet trend OR niche community)",
     "sports": "(women OR domestic OR academy OR junior OR U19 OR U23 OR uncapped OR debut OR club OR state league OR emerging)",
-    "sports_stories_of_day": "(women's cricket OR domestic cricket OR uncapped OR debut OR academy OR U19 OR U23 OR Ranji OR emerging player OR selection)",
+    "sports_stories_of_day": "(women's cricket OR domestic cricket OR India A OR U19 OR U23 OR Ranji OR Duleep OR DPL OR academy OR uncapped OR emerging player) (debut OR record OR milestone OR first OR fastest OR selection OR selected OR recalled OR injury OR comeback OR title OR final OR upset OR century OR fifty OR runs OR wickets)",
     "technology": "(open source OR developer tool OR benchmark OR research paper OR prototype OR security patch OR startup OR niche gadget)",
     "tech_reviews": "(indie gadget OR niche device OR long-tail smartphone OR accessory launch OR developer hardware OR specialized tech)",
     "business_finance": "(startup funding OR SME OR regional company OR niche sector OR small business OR local IPO OR early-stage company)",
@@ -2274,6 +2414,11 @@ def rank_discovery_candidates(
     stage120 = _cheap_filter(stories, max_items=120, max_age_hours=48)
     stage100 = _recent_topic_cooldown(conn, stage120, hours=36)
     stage80 = _deduplicate_stage(stage100, max_items=80)
+    if str(target_category or "").strip().lower() == "sports_stories_of_day":
+        # Remove cricket utility/service headlines before the fact-source cap.
+        # This prevents previews, streams, scorecards and schedules from
+        # consuming the 60-story evidence budget and crowding out real events.
+        stage80 = [item for item in stage80 if _cricket_service_title_pass(item)]
     stage60 = [
         item for item in stage80
         if _discovery_source_pass(item)

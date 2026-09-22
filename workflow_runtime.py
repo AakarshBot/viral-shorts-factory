@@ -36,17 +36,17 @@ FORMAT_OPTIONS = {
 CRICKET_CATEGORIES = {
     "India / Asia": {
         "key": "cricket_india_asia",
-        "query": "(India OR Indian OR BCCI OR IPL OR WPL OR Pakistan OR Sri Lanka OR Bangladesh) (cricket OR Test OR ODI OR T20) (match OR result OR squad OR selection OR injury OR record OR series OR final OR win OR loss)",
+        "query": "(India OR Indian OR BCCI OR IPL OR WPL OR \"India Women\" OR \"India A\" OR Ranji OR Duleep OR DPL OR Pakistan OR Sri Lanka OR Bangladesh) cricket (won OR win OR lost OR beat OR defeated OR upset OR scare OR thriller OR survived OR comeback OR record OR milestone OR first OR fastest OR historic OR debut OR breakthrough OR selected OR named OR recalled OR \"ruled out\" OR injury OR appointed OR retired OR suspended OR banned OR fined OR investigation OR corruption OR \"anti-corruption\" OR approach OR contract OR extension OR frontrunner OR selection OR gold OR medal OR title OR final OR qualify OR qualified OR eliminated OR century OR fifty OR runs OR wickets) -\"live score\" -\"live updates\" -\"where to watch\" -\"live streaming\" -telecast -\"TV channel\" -\"playing XI\" -\"probable XI\" -\"predicted XI\" -\"match preview\" -\"match prediction\" -prediction -fantasy -Dream11 -tickets -fixtures -schedule -\"match timings\" -scorecard",
         "rss": "https://news.google.com/rss/search?q=India+Cricket+OR+Pakistan+Cricket+OR+BCCI+OR+PCB&hl=en-IN&gl=IN&ceid=IN:en",
     },
     "Global": {
         "key": "cricket_global",
-        "query": "(ICC OR Australia Cricket OR England Cricket OR New Zealand Cricket OR South Africa Cricket OR West Indies Cricket OR Test Cricket OR T20 Cricket) (match OR result OR squad OR series OR final OR record OR win OR loss OR tournament)",
+        "query": "(ICC OR Australia Cricket OR England Cricket OR New Zealand Cricket OR South Africa Cricket OR West Indies Cricket OR Test Cricket OR T20 Cricket) cricket (won OR win OR lost OR beat OR defeated OR upset OR record OR milestone OR first OR fastest OR historic OR debut OR selected OR recalled OR injury OR appointed OR retired OR suspended OR banned OR investigation OR title OR final OR qualify OR eliminated OR century OR fifty OR runs OR wickets) -\"live score\" -\"live updates\" -\"where to watch\" -\"live streaming\" -telecast -\"playing XI\" -\"probable XI\" -\"predicted XI\" -\"match preview\" -prediction -fantasy -Dream11 -tickets -fixtures -schedule -scorecard",
         "rss": "https://news.google.com/rss/search?q=ICC+Cricket+OR+Australia+Cricket+OR+England+Cricket+OR+Test+Cricket&hl=en-IN&gl=IN&ceid=IN:en",
     },
     "AI-assisted top story in cricket": {
         "key": "cricket_ai_today",
-        "query": "(Cricket OR ICC OR BCCI OR IPL OR WPL OR PSL OR Big Bash) (match OR result OR squad OR selection OR record OR series OR final OR win OR loss OR tournament)",
+        "query": "(Cricket OR ICC OR BCCI OR IPL OR WPL OR PSL OR Big Bash) (won OR win OR lost OR beat OR defeated OR upset OR record OR milestone OR first OR fastest OR historic OR debut OR selected OR recalled OR injury OR appointed OR retired OR suspended OR banned OR investigation OR title OR final OR qualify OR eliminated OR century OR fifty OR runs OR wickets) -\"live score\" -\"live updates\" -\"where to watch\" -\"live streaming\" -telecast -\"playing XI\" -\"probable XI\" -\"predicted XI\" -\"match preview\" -prediction -fantasy -Dream11 -tickets -fixtures -schedule -scorecard",
         "rss": "https://news.google.com/rss/search?q=Cricket+OR+ICC+OR+BCCI+OR+Test+Cricket+OR+T20+Cricket&hl=en-IN&gl=IN&ceid=IN:en",
     },
 }

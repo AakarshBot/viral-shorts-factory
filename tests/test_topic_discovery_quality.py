@@ -1,6 +1,9 @@
 """Focused tests for topic discovery quality and portfolio behavior."""
 
 from story_ranker import (
+    _cricket_service_title_pass,
+    _cricket_story_worthiness_score,
+    _cricket_story_worthiness_pass,
     _headline_noise_pass,
     _niche_opportunity_score,
     _source_page_pass,
@@ -72,6 +75,58 @@ def test_diversity_rerank_reserves_slots_for_qualified_niche_stories():
         if float(item.get("niche_opportunity_score") or 0) >= 6.0
     )
     assert niche_count >= 6
+
+
+def test_cricket_service_articles_are_rejected_before_ranking():
+    service_titles = [
+        "India vs Japan T20I live streaming: where to watch",
+        "India vs Japan playing XI prediction and probable XI",
+        "India vs Japan match preview: pitch, weather and timings",
+        "India vs Japan tickets, schedule and live score",
+    ]
+    for title in service_titles:
+        story = {"title": title}
+        assert _cricket_service_title_pass(story) is False
+        assert _cricket_story_worthiness_score(story) == 0.0
+
+
+def test_cricket_worthiness_accepts_real_current_developments():
+    stories = [
+        {
+            "title": "India survive Japan scare to clinch 200th T20I win",
+            "description": "India won by two runs in a rain-shortened match, becoming the first side to reach 200 T20I victories.",
+            "event_entities": ["India", "Japan"],
+            "event_actions": ["win"],
+            "event_source_count": 2,
+        },
+        {
+            "title": "India Women win cricket gold, country's first at Asian Games 2026",
+            "description": "India defeated Sri Lanka by 147 runs to secure the country's first gold medal at the Asian Games.",
+            "event_entities": ["India Women", "Sri Lanka", "Asian Games"],
+            "event_actions": ["win"],
+            "event_source_count": 3,
+        },
+        {
+            "title": "DDCA writes to BCCI about corrupt approach",
+            "description": "DDCA informed the BCCI about an alleged corrupt approach involving a player, with the matter reported to the anti-corruption unit for investigation.",
+            "event_entities": ["DDCA", "BCCI", "DPL"],
+            "event_actions": ["investigation"],
+            "event_source_count": 1,
+        },
+    ]
+    for story in stories:
+        assert _cricket_story_worthiness_score(story) >= 5.0
+        assert _cricket_story_worthiness_pass(story, minimum_score=5.0) is True
+
+
+def test_niche_but_service_like_cricket_story_does_not_qualify_for_editorial_floor():
+    story = {
+        "title": "India Women probable XI for next match",
+        "description": "Possible playing XI combinations and team selection options ahead of the next match.",
+        "event_entities": ["India Women"],
+    }
+    assert _cricket_story_worthiness_pass(story, minimum_score=5.0) is False
+    assert story["discovery_rejection"] == "Low-value cricket service article"
 
 
 def test_niche_discovery_query_lanes_are_defined():
