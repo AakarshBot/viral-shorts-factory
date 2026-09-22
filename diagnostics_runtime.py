@@ -317,7 +317,7 @@ def _test_dashboard_architecture():
         and "candidate_page" in source
     )
     event_topic_ui = (
-        "Event radar" in source
+        ("Event radar" in source or "Story radar" in source)
         and "TOPIC #" in source
         and "Use topic →" in source
         and "candidate_page" in source
