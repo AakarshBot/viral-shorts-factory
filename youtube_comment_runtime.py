@@ -164,7 +164,8 @@ def patch_youtube_upload(bot):
                 raise RuntimeError("YouTube upload completed without a video ID.")
 
             if body["status"]["privacyStatus"] == "public":
-                from ultimate_bot import _report_youtube_upload_visibility
+                from ultimate_bot import _ensure_youtube_public_visibility, _report_youtube_upload_visibility
+                response = _ensure_youtube_public_visibility(youtube, response, video_id)
                 _report_youtube_upload_visibility(response, video_id, "public")
 
             print(f"   [+] Successfully uploaded to YouTube! Video ID: {video_id}", flush=True)

@@ -386,6 +386,7 @@ class WorkflowController:
                         )
                     raise RuntimeError(
                         f"YouTube accepted video {video_id}, but kept it private instead of public. "
+                        f"Visibility detail: {message}. "
                         "The video already exists; do not retry this production run. "
                         "The current Google API project must be eligible/audited for public YouTube API uploads."
                     ) from exc
