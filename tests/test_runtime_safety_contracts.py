@@ -189,3 +189,13 @@ def test_production_uses_a_run_scoped_workspace_instead_of_wiping_shared_output(
     assert 'global ASSETS_DIR' in block
     assert 'ASSETS_DIR = os.path.join(BASE_DIR, "output", workspace_id)' in block
     assert 'safe_cleanup(ASSETS_DIR)' not in block
+
+
+def test_new_production_is_blocked_while_previous_run_awaits_upload():
+    source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("    def start_production(")
+    end = source.index("\n    def upload_manual(", start)
+    block = source[start:end]
+    assert 'self.state.stage == "qc"' in block
+    assert "not self.state.uploaded_video_id" in block
+    assert "ready for upload" in block.lower()
