@@ -850,6 +850,19 @@ def _cricket_story_worthiness_score(story):
         score -= min(2.5, routine_hits * 0.9)
 
     return _clamp_score(score)
+def _cricket_story_worthiness_pass(story, minimum_score=5.0):
+    score = _cricket_story_worthiness_score(story)
+    story["cricket_story_worthiness_score"] = score
+    if not _cricket_service_title_pass(story):
+        story["cricket_service_article_pass"] = False
+        story["discovery_rejection"] = "Low-value cricket service article"
+        return False
+    story["cricket_service_article_pass"] = True
+    if score < float(minimum_score):
+        story["discovery_rejection"] = "Weak cricket editorial development"
+        return False
+    return True
+
 def _apply_sports_niche_bonus(story, target_category):
     if _clean(target_category) != "sports":
         return 0.0
