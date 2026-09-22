@@ -1474,11 +1474,40 @@ def diversity_rerank(stories, max_items=28):
 
     selected = []
     remaining = list(candidates)
-    while remaining and len(selected) < max(0, int(max_items or 0)):
+    limit = max(0, int(max_items or 0))
+    niche_candidates = [
+        item for item in candidates
+        if (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+    ]
+    niche_target = min(
+        len(niche_candidates),
+        max(0, min(8, int(math.ceil(limit * 0.30)))) if limit >= 5 else 0,
+    )
+    niche_selected = 0
+
+    while remaining and len(selected) < limit:
         best_index = 0
         best_adjusted = -999999.0
+        niche_needed = max(0, niche_target - niche_selected)
+        niche_remaining = sum(
+            1
+            for item in remaining
+            if (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+        )
+        force_niche = bool(
+            niche_needed
+            and niche_remaining >= niche_needed
+            and len(selected) >= limit - niche_needed
+        )
 
-        for index, candidate in enumerate(remaining):
+        eligible_remaining = [
+            (index, item)
+            for index, item in enumerate(remaining)
+            if not force_niche
+            or (_safe_float(item.get("niche_opportunity_score")) or 0.0) >= 6.0
+        ]
+
+        for index, candidate in eligible_remaining:
             base_score = _safe_float(candidate.get("candidate_score")) or -9999.0
             max_similarity = max(
                 (_story_theme_similarity(candidate, old) for old in selected),
@@ -1506,9 +1535,13 @@ def diversity_rerank(stories, max_items=28):
             )
             portfolio_penalty = min(3.0, max(0, same_genre_repeats - 2) * 0.75)
 
+            niche_score = _safe_float(candidate.get("niche_opportunity_score")) or 0.0
+            niche_bonus = min(2.5, max(0.0, niche_score - 5.0) * 0.5)
+
             adjusted = (
                 base_score
                 + novelty_bonus
+                + niche_bonus
                 - repetition_penalty
                 - repeated_entity_penalty
                 - portfolio_penalty
@@ -1519,6 +1552,8 @@ def diversity_rerank(stories, max_items=28):
                 best_index = index
 
         winner = remaining.pop(best_index)
+        if (_safe_float(winner.get("niche_opportunity_score")) or 0.0) >= 6.0:
+            niche_selected += 1
         winner["diversity_max_similarity"] = round(
             max(
                 (_story_theme_similarity(winner, old) for old in selected),
