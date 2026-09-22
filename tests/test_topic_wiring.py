@@ -183,10 +183,14 @@ def test_sports_ai_discovery_tolerates_legacy_virtual_category(monkeypatch):
     import dashboard_topic_discovery_runtime
     captured = {}
 
+    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
+        captured["genre_key"] = genre_key
+        return []
+
     monkeypatch.setattr(
         dashboard_topic_discovery_runtime,
         "discover_dashboard_topics",
-        lambda bot, genre_key, genre_cfg, **kwargs: captured.setdefault("genre_key", genre_key) or [],
+        fake_discovery,
     )
 
     bot = type("Bot", (), {"CONTENT_CATEGORIES": ultimate_bot.CONTENT_CATEGORIES})()
