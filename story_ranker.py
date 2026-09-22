@@ -1900,6 +1900,15 @@ def _candidate_quality_pass(story):
     hook = _safe_float(dimensions.get("hook_potential")) or 0.0
     importance = _safe_float(dimensions.get("importance")) or 0.0
     channel_signal = _safe_float(dimensions.get("channel_fit")) or 0.0
+    freshfeed_pattern_score = (
+        _safe_float(story.get("freshfeed_pattern_score"))
+        or _safe_float(dimensions.get("freshfeed_pattern"))
+        or 0.0
+    )
+    freshfeed_priority_pattern = bool(
+        story.get("freshfeed_priority_pattern")
+        or dimensions.get("freshfeed_priority_pattern")
+    )
     score = _safe_float(story.get("candidate_score")) or 0.0
 
     channel_ok, channel_reason = candidate_gate(
