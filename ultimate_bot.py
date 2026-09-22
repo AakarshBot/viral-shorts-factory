@@ -2294,7 +2294,7 @@ def run_robot(web_config=None):
             )
             print("   [Script Duration] Over 30s; performing exactly one pre-TTS tightening rewrite toward the 20–30s sweet spot.", flush=True)
             rewritten = write_script(
-                duration_story, language_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
+                duration_story, lang_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
             )
             if not rewritten:
                 if duration_estimate["seconds"] <= 35.0:

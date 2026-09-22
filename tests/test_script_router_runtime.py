@@ -83,3 +83,12 @@ def test_primary_writer_contains_freshfeed_selection_context():
     assert "FRESHFEED SELECTION CONTEXT" in source
     assert "pattern_reasons" in source
     assert "rivalry_signal" in source
+
+
+
+def test_duration_rewrite_uses_run_robot_language_config():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "duration_story, lang_cfg, genre_key=cat_choice" in source
+    assert "duration_story, language_cfg, genre_key=cat_choice" not in source
