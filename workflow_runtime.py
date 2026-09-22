@@ -252,6 +252,18 @@ class WorkflowController:
             genre_cfg.get("label", ""),
         )
 
+        audio_dir = os.path.dirname(video_path)
+        recovered_audio = sorted(
+            (
+                os.path.join(audio_dir, name)
+                for name in os.listdir(audio_dir)
+                if name.startswith("voiceover_") and name.endswith(".mp3")
+            ),
+            key=lambda path: int(re.search(r"voiceover_(\d+)\.mp3$", os.path.basename(path)).group(1))
+            if re.search(r"voiceover_(\d+)\.mp3$", os.path.basename(path))
+            else 0,
+        )
+
         with self._lock:
             self.state.run_id = run_id
             self.state.selected_story = {
@@ -259,6 +271,7 @@ class WorkflowController:
                 "story_key": run_id,
             }
             self.state.script_data = dict(script_data)
+            self.state.audio_paths = recovered_audio
             self.state.video_path = os.path.abspath(video_path)
             self.state.final_metadata = {
                 "title": title or str(script_data.get("title") or topic or "").strip(),
