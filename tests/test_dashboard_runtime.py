@@ -1476,22 +1476,28 @@ def test_regular_script_release_structure_accepts_four_complete_beats():
     assert passed is True, reason
 
 
-def test_regular_script_release_structure_rejects_compressed_three_beat_stub():
+def test_regular_script_release_structure_accepts_compact_semantic_story():
     from script_runtime import assess_release_structure
 
     script = {
         "script": [
-            {"voiceover": "The concrete event happened today.", "narrative_role": "hook"},
-            {"voiceover": "The key development changed the situation.", "narrative_role": "development"},
-            {"voiceover": "The consequence is now clear.", "narrative_role": "consequence"},
+            {"voiceover": "Did this defeat actually change Pakistan cricket?", "narrative_role": "hook"},
+            {"voiceover": "Former players argued the result exposed problems that had been building around the team.", "narrative_role": "development"},
+            {"voiceover": "The immediate consequence is a deeper debate over what Pakistan must change next.", "narrative_role": "consequence"},
         ]
     }
 
     passed, reason, _ = assess_release_structure(script, "regular")
-    assert passed is False
-    assert "context" in reason.lower()
+    assert passed is True, reason
 
-
+    two_scene = {
+        "script": [
+            {"voiceover": "India were called arrogant after the latest cricket clash.", "narrative_role": "hook"},
+            {"voiceover": "The comment triggered a direct response, giving the story both context and a clear payoff.", "narrative_role": "consequence"},
+        ]
+    }
+    passed, reason, _ = assess_release_structure(two_scene, "regular")
+    assert passed is True, reason
 
 
 def test_renderer_has_no_artificial_scene_audio_padding():
@@ -1503,7 +1509,7 @@ def test_renderer_has_no_artificial_scene_audio_padding():
 def test_script_writer_prompt_requires_precise_first_scene_without_length_quota():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "Scene 1 is the retention entry point" in source
-    assert "Let the story's real complexity determine how many scenes it needs." in source
+    assert "Return ONLY valid JSON. Use as many scenes as the story genuinely needs" in source
 
 
 def test_dashboard_upload_unlock_is_metadata_only():
