@@ -798,9 +798,16 @@ def test_recent_topic_cooldown_removes_only_recent_repeats(tmp_path):
     )
 
     kept_titles = [item["title"] for item in kept]
-    assert "Battery breakthrough announced with new results" not in kept_titles
+    assert "Battery breakthrough announced with new results" in kept_titles
     assert "Completely new robotics factory opens" in kept_titles
     assert "Satellite launch gets a fresh update" in kept_titles
+
+    repeated = next(
+        item for item in kept
+        if item["title"] == "Battery breakthrough announced with new results"
+    )
+    assert repeated["recent_topic_penalty"] > 0
+    assert repeated["discovery_repetition_note"]
 
     conn.close()
 
