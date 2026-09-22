@@ -31,11 +31,13 @@ def test_dashboard_genres_have_global_lane_except_regional():
     assert ultimate_bot.CONTENT_CATEGORIES["regional_state_news"].get("global_gnews_q") == ""
 
 
-def test_cricket_scopes_have_story_event_queries():
+def test_cricket_scopes_have_event_driven_queries():
     for name in ("India / Asia", "Global", "AI-assisted top story in cricket"):
         query = str(CRICKET_CATEGORIES[name]["query"]).lower()
-        assert "match" in query
-        assert any(term in query for term in ("result", "squad", "record", "series", "final", "win", "loss"))
+        assert any(term in query for term in ("record", "milestone", "debut", "selected", "injury", "final", "win"))
+        assert "-\"live score\"" in query
+        assert "-\"playing xi\"" in query
+        assert "-schedule" in query
 
 
 def test_query_budget_preserves_india_global_and_category_lanes():
