@@ -224,6 +224,120 @@ def _clean_titles(script_data):
     script_data["titles"] = cleaned
 
 
+def rank_title_candidates(script_data, story_data=None):
+    """Choose the strongest existing title candidate without changing the title set."""
+    if not isinstance(script_data, dict):
+        return {"recommended_title_index": 1, "scores": []}
+    titles = script_data.get("titles")
+    if not isinstance(titles, list) or not titles:
+        return {"recommended_title_index": 1, "scores": []}
+
+    story = story_data if isinstance(story_data, dict) else {}
+    headline = " ".join(
+        str(story.get(key) or "").strip()
+        for key in ("title", "topic", "canonical_title")
+        if str(story.get(key) or "").strip()
+    )
+    evidence = str(
+        story.get("research_evidence_text")
+        or story.get("summary")
+        or story.get("description")
+        or ""
+    ).strip()[:4000]
+    entity_text = " ".join(
+        str(scene.get("primary_entity") or "")
+        for scene in (script_data.get("script") or [])
+        if isinstance(scene, dict)
+    ).strip()
+    source_terms = set(re.findall(r"[\\w]+(?:['’.-][\\w]+)*", f"{headline} {entity_text} {evidence}", flags=re.UNICODE))
+    source_terms = {term.casefold() for term in source_terms if len(term) > 1}
+    headline_terms = set(re.findall(r"[\\w]+(?:['’.-][\\w]+)*", headline, flags=re.UNICODE))
+    headline_terms = {term.casefold() for term in headline_terms if len(term) > 1}
+    has_number = bool(re.search(r"\\d|%", headline))
+
+    scores = []
+    for index, raw_title in enumerate(titles, 1):
+        title = re.sub(r"\\s+", " ", str(raw_title or "")).strip()
+        terms = re.findall(r"[\\w]+(?:['’.-][\\w]+)*", title, flags=re.UNICODE)
+        lowered = [term.casefold() for term in terms if len(term) > 1]
+        title_set = set(lowered)
+        score = 0.0
+        reasons = []
+
+        if 5 <= len(lowered) <= 14:
+            score += 2.0
+            reasons.append("concise")
+        elif len(lowered) <= 18:
+            score += 1.0
+        elif len(lowered) > 22:
+            score -= 1.5
+
+        if lowered:
+            relevance = len(title_set & source_terms) / max(1, len(title_set))
+            score += min(3.0, relevance * 3.0)
+            if relevance >= 0.60:
+                reasons.append("story-relevant")
+
+        entity_terms = set(
+            term.casefold()
+            for term in re.findall(r"[\\w]+(?:['’.-][\\w]+)*", entity_text, flags=re.UNICODE)
+            if len(term) > 1
+        )
+        if entity_terms and title_set & entity_terms:
+            score += 2.0
+            reasons.append("names the subject")
+
+        first_half = set(lowered[:max(1, len(lowered) // 2 + 1)])
+        if first_half & headline_terms:
+            score += 1.0
+            reasons.append("key term early")
+
+        if has_number and re.search(r"\\d|%", title):
+            score += 0.75
+            reasons.append("specific detail")
+        elif not has_number and re.search(r"\\d|%", title):
+            score += 0.25
+
+        if any(re.search(pattern, title, flags=re.IGNORECASE) for pattern in (
+            r"\\byou (?:won['’]?t|will not) believe\\b",
+            r"\\bwatch (?:this|what happens next)\\b",
+            r"\\bshocking\\b",
+            r"\\bunbelievable\\b",
+            r"\\bcraziest\\b",
+            r"\\binsane\\b",
+            r"\\bmust[- ]see\\b",
+        )):
+            score -= 4.0
+            reasons.append("clickbait risk")
+
+        alpha = [char for char in title if char.isalpha()]
+        if alpha:
+            upper_ratio = sum(1 for char in alpha if char.isupper()) / len(alpha)
+            if upper_ratio > 0.70:
+                score -= 1.0
+                reasons.append("excessive capitals")
+
+        emoji_count = sum(1 for char in title if ord(char) > 0x1F300)
+        if emoji_count >= 3:
+            score -= 0.75
+            reasons.append("excessive emoji")
+
+        scores.append({
+            "index": index,
+            "title": title,
+            "score": round(score, 3),
+            "reasons": reasons,
+        })
+
+    best = max(scores, key=lambda item: (item["score"], -item["index"]))
+    script_data["recommended_title_index"] = int(best["index"])
+    script_data["title_selection_diagnostics"] = scores
+    return {
+        "recommended_title_index": int(best["index"]),
+        "scores": scores,
+    }
+
+
 def _ground_visual_scene_entities(script_data, story_data):
     """Deterministically lock automatic visual identities to the supplied story."""
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
