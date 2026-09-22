@@ -22,8 +22,8 @@ def test_live_navigation_is_incremental_pill_hierarchy():
 def test_live_navigation_labels_sports_as_a_separate_lane():
     source = _live_navigation_source()
 
-    assert '"02 · Sports lane"' in source
-    assert '"02 · Topic"' in source
+    assert "02 · Sports lane" in source
+    assert "02 · Topic" in source
     assert '"Cricket", "Niche Sports", "AI"' in source
 
 
@@ -64,7 +64,7 @@ def test_live_navigation_shows_selected_path_only_when_ready():
     settings = source.index('with st.popover("⚙ Settings", width="stretch")')
 
     assert path_parts < ready < settings
-    assert '"Path ready"' in source
+    assert "Path ready" in source
     assert '"Change path"' in source
 
 def test_dashboard_theme_uses_the_refreshed_cool_light_palette():
