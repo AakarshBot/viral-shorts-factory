@@ -1102,7 +1102,7 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
             connector = f"<div class='workflow-connector {connector_state}'></div>"
 
         nodes.append(
-            f"<div class='workflow-node {node_state}'>"
+            f"<div class='workflow-node {node_state}' title='{_ui_html(label)}'>"
             f"<div class='workflow-dot'>{icon}</div>"
             f"<div class='workflow-node-copy'>"
             f"<div class='workflow-node-name'>{_ui_html(label)}</div>"
@@ -1797,7 +1797,6 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if st.button("Stop production", width="stretch", key="reject_visuals"):
             controller.reject_visuals()
             st.rerun()
-
     replacement_count = sum(
         len(history.get(str(item["index"])) or history.get(item["index"]) or [])
         for item in items
