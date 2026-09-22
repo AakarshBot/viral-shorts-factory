@@ -65,6 +65,10 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
         return False, "One or more generated titles are empty."
 
     recommended = script_data.get("recommended_title_index")
+    if recommended == 0:
+        # Legacy model responses used zero-based indexing; normalize them once.
+        recommended = 1
+        script_data["recommended_title_index"] = recommended
     if recommended not in (1, 2, 3):
         return False, "Recommended title index is invalid."
 
