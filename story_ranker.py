@@ -2037,13 +2037,13 @@ def _candidate_reason(story):
         parts.append(f"{article_count} articles clustered")
     elif source_count >= 2:
         parts.append(f"{source_count} publishers covering the event")
-    if _safe_float(dimensions.get("social_signal")) >= 2:
+    if (_safe_float(dimensions.get("social_signal")) or 0.0) >= 2:
         parts.append("social-interest signal")
-    if _safe_float(dimensions.get("google_trends")) >= 1:
+    if (_safe_float(dimensions.get("google_trends")) or 0.0) >= 1:
         parts.append("Google Trends signal")
-    if _safe_float(dimensions.get("channel_history")) >= 2:
+    if (_safe_float(dimensions.get("channel_history")) or 0.0) >= 2:
         parts.append("relevant channel history")
-    if _safe_float(dimensions.get("originality")) >= 7:
+    if (_safe_float(dimensions.get("originality")) or 0.0) >= 7:
         parts.append("strong originality")
     if not parts:
         parts.append("strong editorial score after staged discovery checks")
