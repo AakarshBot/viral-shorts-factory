@@ -52,6 +52,21 @@ def test_hard_dashboard_gate_is_not_a_production_quality_gate(monkeypatch):
     ) is True
 
 
+def test_cricket_factual_lane_keeps_valid_headline_without_cricket_keyword():
+    story = _fresh_story(
+        "Bumrah returns with a match-winning spell",
+        event_source_count=2,
+        event_article_count=2,
+        collection_source="google_news_rss",
+    )
+
+    assert discovery._hard_dashboard_pass(
+        story,
+        "sports_stories_of_day",
+        "",
+    ) is True
+
+
 def test_hard_dashboard_gate_rejects_service_noise():
     story = _fresh_story(
         "India cricket live score and match timings",
