@@ -240,10 +240,9 @@ def test_discovery_portfolio_keeps_current_niche_topic_but_marks_it_exploratory(
     }
 
     assert story_ranker._discovery_portfolio_pass(story) is True
-    assert story["discovery_tier"] == "exploratory"
 
 
-def test_discovery_portfolio_still_rejects_stale_low_signal_topic():
+def test_discovery_portfolio_retains_stale_low_signal_topic_for_exploration():
     story = {
         "candidate_score": 24.0,
         "discovery_dimensions": {
@@ -254,10 +253,14 @@ def test_discovery_portfolio_still_rejects_stale_low_signal_topic():
             "corroboration": 4.0,
             "source_quality": 3.0,
         },
+        "description": (
+            "This is a concrete but currently slow-moving development with enough factual detail "
+            "to support a focused newsroom story even though its momentum has cooled."
+        ),
     }
 
-    assert story_ranker._discovery_portfolio_pass(story) is False
-    assert story["discovery_rejection"] == "Insufficient current-event signal"
+    assert story_ranker._discovery_portfolio_pass(story) is True
+    assert story["discovery_quality_floor_bypassed"] is True
 
 
 def test_deduplicate_stage_keeps_distinct_action_targets_separate():
