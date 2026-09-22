@@ -284,7 +284,7 @@ HOOK_CONFLICT_TERMS = {
 }
 
 HOOK_QUOTE_TERMS = {
-    "said", "says", "called", "described", "declared", "claimed", "claims",
+    "said", "says", "called", "calls", "described", "declared", "claimed", "claims",
     "criticized", "criticised", "praised", "hailed", "warned", "revealed",
     "admitted", "responded", "responds", "hit back", "hits back",
 }
@@ -913,10 +913,6 @@ def _cricket_story_worthiness_score(story):
 
     if question:
         score += 1.10
-
-    headline_hook_count = conflict_hits + quote_hits + surprise_hits + question
-    if development_hits and not headline_hook_count:
-        score -= 1.50
 
     entities = _topic_entities(story)
     score += 1.35 if len(entities) >= 2 else (0.75 if entities else 0.0)
