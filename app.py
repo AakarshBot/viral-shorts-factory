@@ -1267,7 +1267,10 @@ def render_script_visual_query_review(
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not isinstance(scenes, list) or not scenes:
         st.warning("The script is not available for review yet.")
-        st.info("The run is paused at script review. Once the script payload is available, the review appears here; PowerShell remains active while it waits.")
+        st.info(
+            "The run is paused at script review. Once the script payload is available, "
+            "the review appears here; PowerShell remains active while it waits."
+        )
         return
 
     run_id = str(snapshot.get("run_id") or "current-run").strip() or "current-run"
@@ -1276,55 +1279,209 @@ def render_script_visual_query_review(
         _render_section_header(
             "Step 04 · Script review",
             "Review the narration",
-            "Option 2 will turn this verified script into an original editorial visual storyboard. Manual image-search fields are disabled for this pipeline.",
+            "Check the story and title before the original storyboard is built. You can edit the narration here when needed.",
         )
-        with st.container(border=True):
-            st.markdown(
-                "<div class='output-card'><div class='small-muted'>OPTION 2 · ORIGINAL STORYBOARD</div>"
-                "<div style='margin-top:7px;line-height:1.55'>The visual engine will choose lead cards, fact graphics, stat panels, timelines, comparisons, scorecards, process layouts and tactical diagrams from the verified script. It does not scrape news photographs.</div></div>",
-                unsafe_allow_html=True,
-            )
-        if st.button(
-            "Continue with Option 2 storyboard",
-            type="primary",
-            width="stretch",
-            key=f"continue_option2_script_{run_id}",
-        ):
-            controller.submit_script_visual_queries([""] * len(scenes))
-            st.rerun()
-        return
+    else:
+        _render_section_header(
+            "Step 04 · Script review",
+            "Review the narration",
+            "Check the story, evidence status and title choice before narration starts. Editing is optional; unchanged scripts continue without another AI review pass.",
+        )
 
-    _render_section_header(
-        "Step 04 · Script review",
-        "Review the narration",
-        "Visual search terms were finalized before production. This checkpoint no longer searches or assigns images by slide.",
+    evidence_pack = script_data.get("research_evidence_pack") or {}
+    evidence_counts = evidence_pack.get("counts") if isinstance(evidence_pack, dict) else {}
+    evidence_counts = evidence_counts if isinstance(evidence_counts, dict) else {}
+    sources = int(
+        script_data.get("research_source_count")
+        or evidence_counts.get("usable_sources")
+        or 0
+    )
+    domains = int(
+        script_data.get("research_distinct_domains")
+        or evidence_counts.get("independent_domains")
+        or 0
+    )
+    corroborated = int(evidence_counts.get("corroborated_claims") or 0)
+    conflicts = int(evidence_counts.get("conflicted_claims") or 0)
+
+    metric_cols = st.columns(4, gap="small")
+    metric_cols[0].metric("Sources", sources)
+    metric_cols[1].metric("Independent", domains)
+    metric_cols[2].metric("Corroborated", corroborated)
+    metric_cols[3].metric("Conflicts", conflicts)
+
+    originality = script_data.get("originality_overlap")
+    critique = script_data.get("originality_critique")
+    unsupported = (
+        critique.get("unsupported_claims")
+        if isinstance(critique, dict)
+        else []
+    ) or []
+    originality_passed = (
+        originality.get("passed")
+        if isinstance(originality, dict)
+        else None
+    )
+    status_parts = []
+    if isinstance(originality_passed, bool):
+        status_parts.append(
+            "Originality passed" if originality_passed else "Originality needs attention"
+        )
+    if unsupported:
+        status_parts.append(f"{len(unsupported)} unsupported claim(s) flagged")
+    if status_parts:
+        st.caption(" · ".join(status_parts))
+    if conflicts:
+        st.warning(
+            "Some research claims conflict. The script should attribute or qualify those points rather than presenting them as settled facts."
+        )
+    if unsupported:
+        with st.expander("Factual review notes", expanded=False):
+            for item in unsupported[:6]:
+                st.markdown(f"- {_ui_text(item)}")
+
+    titles = [
+        str(title or "").strip()
+        for title in (script_data.get("titles") or [])
+        if str(title or "").strip()
+    ]
+    if not titles:
+        titles = [str(script_data.get("title") or "Selected story").strip() or "Selected story"]
+    try:
+        recommended_index = int(script_data.get("recommended_title_index", 1))
+    except (TypeError, ValueError):
+        recommended_index = 1
+    recommended_index = max(1, min(recommended_index, len(titles)))
+
+    edit_mode = st.toggle(
+        "Edit script before approval",
+        value=False,
+        key=f"script_review_edit_{run_id}",
+        help="Edit narration or title candidates only when you see something worth changing.",
     )
 
     with st.form(key=f"script_review_{run_id}"):
-        for index, scene in enumerate(scenes, 1):
-            if not isinstance(scene, dict):
-                continue
-            voiceover = str(scene.get("voiceover") or "").strip()
-            with st.container(border=True):
-                st.markdown(f"<div class='story-rank'>SLIDE {index:02d}</div>", unsafe_allow_html=True)
-                if voiceover:
+        working_titles = list(titles[:3])
+        if edit_mode:
+            st.markdown("#### Title candidates")
+            working_titles = [
+                st.text_input(
+                    f"Title {index}",
+                    value=title,
+                    key=f"script_review_title_{run_id}_{index}",
+                )
+                for index, title in enumerate(working_titles, 1)
+            ]
+        else:
+            st.markdown("#### Title candidates")
+            for index, title in enumerate(working_titles, 1):
+                marker = " · recommended" if index == recommended_index else ""
+                st.caption(f"{index}. {title}{marker}")
+
+        clean_working_titles = [
+            str(title or "").strip()
+            for title in working_titles
+            if str(title or "").strip()
+        ]
+        if not clean_working_titles:
+            clean_working_titles = ["Selected story"]
+
+        selected_title = st.selectbox(
+            "Working title",
+            options=clean_working_titles,
+            index=max(
+                0,
+                min(
+                    recommended_index - 1,
+                    len(clean_working_titles) - 1,
+                ),
+            ),
+            key=f"script_review_title_choice_{run_id}",
+        )
+        selected_index = clean_working_titles.index(selected_title) + 1
+
+        angle = str(script_data.get("editorial_angle") or "").strip()
+        if edit_mode:
+            angle = st.text_area(
+                "Editorial angle",
+                value=angle,
+                height=84,
+                key=f"script_review_angle_{run_id}",
+                help="Keep this aligned with what the evidence actually supports.",
+            )
+        elif angle:
+            st.caption(f"Editorial angle · {angle}")
+
+        voiceovers = []
+        st.markdown("#### Narration")
+        if edit_mode:
+            for index, scene in enumerate(scenes, 1):
+                if not isinstance(scene, dict):
+                    continue
+                voiceovers.append(
+                    st.text_area(
+                        f"Slide {index:02d}",
+                        value=str(scene.get("voiceover") or "").strip(),
+                        height=120,
+                        key=f"script_review_voice_{run_id}_{index}",
+                    )
+                )
+        else:
+            for index, scene in enumerate(scenes, 1):
+                if not isinstance(scene, dict):
+                    continue
+                voiceover = str(scene.get("voiceover") or "").strip()
+                if not voiceover:
+                    continue
+                with st.container(border=True):
+                    st.markdown(
+                        f"<div class='story-rank'>SLIDE {index:02d}</div>",
+                        unsafe_allow_html=True,
+                    )
                     st.markdown(
                         f"<div style='font-size:.92rem;line-height:1.6;margin:7px 0 4px;overflow-wrap:anywhere'>{_ui_html(voiceover)}</div>",
                         unsafe_allow_html=True,
                     )
+                    role = _ui_text(scene.get("narrative_role"), "")
+                    if role:
+                        st.caption(f"Beat · {role}")
+
         submitted = st.form_submit_button(
-            "Approve script & continue",
+            "Save edits & approve script" if edit_mode else "Approve script & continue",
             type="primary",
             width="stretch",
         )
 
-    if submitted:
-        if controller.submit_script_visual_queries([]):
-            st.rerun()
-        else:
-            st.error("The script review is no longer active. Refreshing the dashboard.")
-            st.rerun()
+    if not submitted:
+        return
 
+    reviewed = dict(script_data)
+    reviewed["titles"] = clean_working_titles[:3]
+    reviewed["recommended_title_index"] = selected_index
+    reviewed["editorial_angle"] = angle
+
+    if edit_mode:
+        review_scenes = []
+        voice_index = 0
+        for scene in scenes:
+            if not isinstance(scene, dict):
+                continue
+            updated = dict(scene)
+            updated["voiceover"] = (
+                voiceovers[voice_index]
+                if voice_index < len(voiceovers)
+                else str(scene.get("voiceover") or "")
+            )
+            voice_index += 1
+            review_scenes.append(updated)
+        reviewed["script"] = review_scenes
+
+    ok, message = controller.submit_script_review(reviewed)
+    if ok:
+        st.success(message)
+        st.rerun()
+    else:
+        st.error(message)
 
 def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
     items = []
