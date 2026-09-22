@@ -20,7 +20,7 @@ _PROCESS_PRODUCTION_LOCK = threading.Lock()
 
 def _run_production_runner(bot, web_config: Dict[str, Any]):
     """Execute the production runner exactly once with the identity bridge."""
-    production_runner = getattr(bot, "run_robot", None)
+    production_runner = getattr(bot, "_vsf_canonical_run_robot", None) or getattr(bot, "run_robot", None)
     if not callable(production_runner):
         raise RuntimeError("Legacy run_robot() is not available.")
     if getattr(production_runner, "_exact_identity_runner", False):
@@ -236,7 +236,7 @@ class WorkflowController:
         def worker():
             try:
                 self._worker_started()
-                run_robot = self.bot.run_robot
+                run_robot = getattr(self.bot, "_vsf_canonical_run_robot", None) or self.bot.run_robot
                 globals_dict = getattr(run_robot, "__globals__", {})
                 original_gather = globals_dict.get("gather_and_filter_stories")
                 selected = dict(selected_story)
