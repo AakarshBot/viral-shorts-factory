@@ -1328,6 +1328,12 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             "scene_id": index,
         })
 
+    if str(format_mode or "").lower() != "top5" and len(scenes) < 3:
+        raise ValueError(
+            "Source-grounded fallback refused to invent narration: not enough distinct narrative beats "
+            "for a hook, middle beat and payoff."
+        )
+
     result = {
         "step_1_headline": title,
         "step_2_data_points": raw_source,
