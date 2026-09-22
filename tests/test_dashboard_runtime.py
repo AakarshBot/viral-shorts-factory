@@ -497,7 +497,8 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_choices(mon
             "target": 10,
             "hard_max": 10,
             "minimum_options": 0,
-            "available_options": 3,            "enough_options": True,
+            "available_options": 3,
+            "enough_options": True,
         }
 
     monkeypatch.setattr(
@@ -996,7 +997,8 @@ def test_dashboard_replacement_returns_used_pool_asset_without_duplicate(tmp_pat
 
     controller = DashboardWorkflowController(_Bot())
     controller._visual_pool = [{
-        "path": str(selected),        "original_path": str(selected),
+        "path": str(selected),
+        "original_path": str(selected),
         "hash": "selected-hash",
         "source": "Commons",
         "used": True,
@@ -1495,7 +1497,8 @@ def test_regular_script_release_structure_rejects_compressed_three_beat_stub():
 
 
 def test_renderer_has_no_artificial_scene_audio_padding():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")    assert "audio.duration + 0.25" not in source
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "audio.duration + 0.25" not in source
     assert "Audio is already encoded at its natural duration" in source
 
 
@@ -1639,7 +1642,8 @@ def test_legacy_learning_metrics_ignore_non_publishable_rows(tmp_path):
 
     assert scores["technology"]["count"] == 1
     conn.close()
-
+    
+    
 def test_dashboard_workflow_is_compact_and_uses_progressive_disclosure():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert "workflow-shell" in source
@@ -1657,4 +1661,3 @@ def test_dashboard_shows_video_id_after_upload():
     assert "VIDEO ID" in panel
     assert "https://www.youtube.com/watch?v={uploaded_video_id}" in panel
     assert "release-success" in panel
-
