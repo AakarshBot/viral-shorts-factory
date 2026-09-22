@@ -348,7 +348,9 @@ def discover_ranked_topics(
             genre_cfg["gnews_q"] = cricket_cfg["query"]
 
         custom_rss = cricket_cfg["rss"]
-        target_category = category or genre_key
+        # Cricket dashboard discovery must use the cricket-specific editorial
+        # scorer even when the UI also carries a generic sports category value.
+        target_category = genre_key
         ai_cricket = cricket_name == "AI-assisted top story in cricket"
     else:
         genre_key = category or "national_global_affairs"
