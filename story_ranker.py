@@ -777,7 +777,7 @@ def _cricket_service_title_pass(story):
 
 
 def _cricket_story_worthiness_score(story):
-    """Score whether a cricket story contains a real development worth covering."""
+    """Score whether a cricket story contains a real, potentially compelling development."""
     if not _cricket_service_title_pass(story):
         return 0.0
 
@@ -786,20 +786,36 @@ def _cricket_story_worthiness_score(story):
     combined = f"{title} {text}"
     score = 0.0
 
+    # The channel report shows that conflict, direct quotes and provocative
+    # premises can outperform routine result recaps. Do not require a title to
+    # contain a narrow set of "win/record/medal" words before it can qualify.
+    conflict_hits = sum(
+        1 for term in HOOK_CONFLICT_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    quote_hits = sum(
+        1 for term in HOOK_QUOTE_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    surprise_hits = sum(
+        1 for term in HOOK_SURPRISE_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
     development_hits = sum(
         1 for term in CRICKET_DEVELOPMENT_TERMS
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
     )
-    score += min(4.0, development_hits * 1.1)
 
-    novelty_hits = sum(
-        1 for term in ("record", "milestone", "first", "fastest", "highest", "lowest", "historic", "upset", "debut", "gold", "medal", "title", "breakthrough")
-        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
-    )
-    score += min(2.5, novelty_hits * 0.9)
+    score += min(3.25, conflict_hits * 1.25)
+    score += min(2.75, quote_hits * 1.05)
+    score += min(2.00, surprise_hits * 0.80)
+    score += min(3.25, development_hits * 0.90)
+
+    if "?" in title:
+        score += 1.10
 
     entities = _topic_entities(story)
-    score += 1.25 if len(entities) >= 2 else (0.75 if entities else 0.0)
+    score += 1.35 if len(entities) >= 2 else (0.75 if entities else 0.0)
     if re.search(r"\b\d{2,}\b|%", title):
         score += 0.75
 
@@ -820,30 +836,20 @@ def _cricket_story_worthiness_score(story):
         1 for term in CRICKET_NICHE_CONTEXT_TERMS
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
     )
-    if niche_hits and development_hits:
+    if niche_hits and (development_hits or conflict_hits or quote_hits or surprise_hits):
         score += 0.75
 
-    hook = _hook_potential_score(story)
-    score += min(2.75, hook * 0.45)
-    if hook >= 6.0:
-        score += 1.5
+    # Routine utility/service pieces can only qualify when a stronger hook is
+    # present; the service-title gate remains the first line of defence.
     routine_hits = sum(
         1 for term in HOOK_ROUTINE_TERMS
-        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", title)
     )
-    stronger_signals = (
-        len(story.get("event_actions") or [])
-        + int(any(
-            re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
-            for term in HOOK_CONFLICT_TERMS | HOOK_SURPRISE_TERMS | HOOK_QUOTE_TERMS
-        ))
-    )
-    if routine_hits and stronger_signals <= 1:
-        score -= 1.25
+    strong_hook = bool(conflict_hits or quote_hits or surprise_hits or "?" in title)
+    if routine_hits and not strong_hook:
+        score -= min(2.5, routine_hits * 0.9)
 
     return _clamp_score(score)
-
-
 def _cricket_story_worthiness_pass(story, minimum_score=5.0):
     score = _cricket_story_worthiness_score(story)
     story["cricket_story_worthiness_score"] = score
@@ -856,7 +862,6 @@ def _cricket_story_worthiness_pass(story, minimum_score=5.0):
         story["discovery_rejection"] = "Weak cricket editorial development"
         return False
     return True
-
 
 def _apply_sports_niche_bonus(story, target_category):
     if _clean(target_category) != "sports":
@@ -891,6 +896,40 @@ def _cricket_relevance_pass(story, genre_key):
     return False
 
 
+CRICKET_SERVICE_QUERY_EXCLUSIONS = (
+    ' -"live score" -"live scores" -"live updates" -"where to watch"'
+    ' -"live streaming" -telecast -"tv channel" -"playing XI"'
+    ' -"probable XI" -"predicted XI" -"match preview" -"match prediction"'
+    ' -prediction -fantasy -Dream11 -tickets -fixtures -schedule -scorecard'
+)
+
+CRICKET_INDIA_DISCOVERY_QUERY_LANES = (
+    '(India OR Indian OR BCCI OR IPL OR WPL OR "Team India" OR Pakistan OR Sri Lanka OR Bangladesh) cricket',
+    '("India cricket" OR "Team India" OR BCCI OR IPL OR WPL) (said OR says OR called OR claimed OR praised OR warned OR revealed OR admitted OR criticised OR criticized OR slammed OR blasted OR controversy OR dispute OR row)',
+    '("India cricket" OR "Team India" OR BCCI) (selection OR selected OR dropped OR recalled OR return OR injury OR injured OR captain OR coach OR retirement OR retired OR contract OR appointment OR suspended OR banned)',
+    '("India cricket" OR "Team India") (record OR milestone OR first OR fastest OR historic OR upset OR comeback OR thriller OR scare OR shock OR stuns OR survived)',
+    '("India Women" OR women cricket OR WPL) India (said OR says OR called OR controversy OR selection OR debut OR record OR milestone OR upset OR comeback)',
+    '(Ranji OR Duleep OR DPL OR "India A" OR U19 OR U23 OR domestic cricket OR state league) India (debut OR selected OR recalled OR injury OR record OR milestone OR controversy OR upset OR comeback)',
+    '("India Pakistan cricket" OR "India vs Pakistan" OR "India Pakistan") (controversy OR dispute OR row OR clash OR rivalry OR accused OR called OR slammed OR trophy OR sponsor)',
+)
+
+CRICKET_GLOBAL_DISCOVERY_QUERY_LANES = (
+    '(ICC OR "Australia cricket" OR "England cricket" OR "South Africa cricket" OR "New Zealand cricket" OR "West Indies cricket" OR "T20 cricket" OR "Test cricket")',
+    '(cricket) (said OR says OR called OR claimed OR praised OR warned OR revealed OR admitted OR criticised OR criticized OR controversy OR dispute OR row OR clash)',
+    '(cricket) (selection OR selected OR dropped OR recalled OR return OR injury OR injured OR captain OR coach OR retirement OR retired OR contract OR appointment OR suspended OR banned)',
+    '(cricket) (record OR milestone OR first OR fastest OR historic OR upset OR comeback OR thriller OR scare OR shock OR stuns)',
+    '("women cricket" OR WPL OR "women\'s cricket") (said OR controversy OR selection OR debut OR record OR upset)',
+    '(cricket) (emerging player OR uncapped OR domestic OR U19 OR U23 OR academy OR county OR franchise) (debut OR selected OR record OR milestone OR comeback)',
+    '("India Pakistan" cricket OR "Australia England" cricket OR "Ashes" OR "South Africa cricket") (controversy OR clash OR upset OR called OR slammed OR warned OR rivalry)',
+)
+
+CRICKET_GENERAL_DISCOVERY_QUERY_LANES = (
+    '(cricket OR ICC OR BCCI OR IPL OR WPL)',
+    'cricket (said OR says OR called OR claimed OR praised OR warned OR revealed OR admitted OR controversy OR dispute OR row OR clash)',
+    'cricket (selection OR selected OR dropped OR recalled OR injury OR injured OR captain OR coach OR retirement OR retired OR contract)',
+    'cricket (record OR milestone OR first OR fastest OR historic OR upset OR comeback OR thriller OR scare OR shock)',
+    'cricket (women OR domestic OR U19 OR U23 OR emerging OR uncapped OR academy) (debut OR selected OR record OR milestone OR comeback)',
+)
 GOOGLE_NEWS_RADAR_QUERIES = (
     "(India OR Indian OR world OR global) (news OR announced OR decision OR deal OR launch)",
     "(technology OR AI OR science) (news OR launch OR research OR breakthrough)",
@@ -905,6 +944,7 @@ REDDIT_RADAR_SUBREDDITS = ("news", "worldnews", "india", "technology", "sports",
 DISCOVERY_OVERALL_WAIT_SECONDS = 10.0
 DISCOVERY_MIN_CORE_ARTICLES_FOR_GDELT = 60
 DISCOVERY_MAX_GOOGLE_QUERIES_BROAD = 7
+DISCOVERY_MAX_CRICKET_GOOGLE_QUERIES_BROAD = 8
 DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD = 4
 DISCOVERY_MAX_REDDIT_SUBREDDITS_BROAD = 6
 
@@ -1310,14 +1350,18 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
     return survivors[:max_items]
 
 
-def _deduplicate_stage(stories, max_items=15):
-    """Remove residual duplicate articles without collapsing clustered events."""
+def _deduplicate_stage(stories, max_items=15, prefer_editorial=False):
+    """Remove residual duplicates while optionally preserving editorially strong hooks."""
     selected = []
     for story in sorted(
         stories,
         key=lambda item: (
-            _safe_float(item.get("event_corroboration_score")) or 0.0,
+            _hook_potential_score(item) if prefer_editorial else (
+                _safe_float(item.get("event_corroboration_score")) or 0.0
+            ),
+            _niche_opportunity_score(item) if prefer_editorial else _freshness_score(item),
             _freshness_score(item),
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
             _source_quality(item),
         ),
         reverse=True,
@@ -1357,7 +1401,7 @@ def _deduplicate_stage(stories, max_items=15):
     return selected
 
 
-def _fact_source_stage(stories, max_items=8):
+def _fact_source_stage(stories, max_items=8, allow_strong_hook_single_source=False):
     for story in stories:
         publishers = set()
         if story.get("event_clustered"):
@@ -1396,7 +1440,14 @@ def _fact_source_stage(stories, max_items=8):
             16.0,
             float(corroboration) * 2.5 + _source_quality(story) + article_bonus,
         )
-        story["fact_source_pass"] = bool(domains or publishers) and (
+
+        body = " ".join(
+            str(story.get(key) or "")
+            for key in ("description", "summary", "snippet", "text", "content")
+        ).strip()
+        body_chars = len(re.sub(r"\s+", " ", body))
+        strong_hook = _hook_potential_score(story) >= 5.0
+        regular_pass = (
             _source_quality(story) >= 1.0
             or corroboration >= 2
             or (
@@ -1404,6 +1455,13 @@ def _fact_source_stage(stories, max_items=8):
                 and _story_substance_pass(story, minimum_body_chars=150)
             )
         )
+        hook_pass = (
+            bool(allow_strong_hook_single_source)
+            and strong_hook
+            and _source_quality(story) >= 1.0
+            and body_chars >= 80
+        )
+        story["fact_source_pass"] = bool(domains or publishers) and (regular_pass or hook_pass)
 
     passed = [story for story in stories if story.get("fact_source_pass")]
     for story in stories:
@@ -1464,7 +1522,20 @@ def _originality_stage(stories, used_topics, max_items=5):
             default=0.0,
         )
         if title_overlap >= 0.58:
-            continue
+            similar_old = [
+                old
+                for old in selected
+                if _topic_overlap(story.get("title", ""), old.get("title", "")) >= 0.58
+            ]
+            distinct_event = any(
+                story.get("event_id")
+                and old.get("event_id")
+                and str(story.get("event_id")) != str(old.get("event_id"))
+                for old in similar_old
+            )
+            if not distinct_event:
+                story["discovery_rejection"] = "Residual similar topic"
+                continue
 
         story["originality_score"] = round(
             max(0.0, 10.0 - overlap * 9.0 - title_overlap * 6.0),
@@ -1770,7 +1841,8 @@ def _discovery_portfolio_pass(story):
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
-    if actionability < 3.0:
+    strong_hook = bool(story.get("freshfeed_channel_strong_hook")) or hook >= 5.0
+    if actionability < 3.0 and not strong_hook:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
         return False
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.25:
@@ -1984,7 +2056,23 @@ def diversity_rerank(stories, max_items=28):
                     for old in selected
                     if candidate_entities & _topic_entities(old)
                 )
-                repeated_entity_penalty = min(4.0, entity_repeats * 1.25)
+                event_anchor_repeats = sum(
+                    1
+                    for old in selected
+                    if (
+                        candidate_entities
+                        & {
+                            entity
+                            for entity in _topic_entities(old)
+                            if re.search(
+                                r"\b(?:games?|cup|league|tournament|championship|series|world|open|premier)\b",
+                                entity,
+                            )
+                        }
+                    )
+                )
+                repeated_entity_penalty = min(5.0, entity_repeats * 1.25)
+                repeated_entity_penalty += min(3.0, event_anchor_repeats * 1.0)
 
             candidate_genre = _clean(candidate.get("primary_genre") or candidate.get("genre"))
             same_genre_repeats = sum(
@@ -2344,25 +2432,50 @@ def _build_discovery_google_queries(
     selected_rss="",
     broad_discovery=False,
 ):
-    """Build a bounded Google News query budget around requested/category context."""
+    """Build high-recall Google News lanes around the selected editorial scope."""
     genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
-    candidates = []
-    rss_query = _google_news_query_from_url(selected_rss)
     niche_query = str(
         NICHE_DISCOVERY_QUERIES.get(str(genre_key or "").strip(), "")
     ).strip()
     india_query = str(genre_cfg.get("india_gnews_q") or "").strip()
     global_query = str(genre_cfg.get("global_gnews_q") or "").strip()
+    rss_query = _google_news_query_from_url(selected_rss)
+    base_query = str(genre_cfg.get("gnews_q") or "").strip()
 
-    # When explicit India + global lanes exist, the broad category query is
-    # usually redundant. Keep it only when a lane is missing, or when the caller
-    # supplied a targeted trend/custom query that benefits from the extra context.
-    # Put the niche lane before broad trend signals so the bounded query
-    # budget cannot crowd it out with generic/high-volume news.
+    # Cricket discovery is intentionally recall-first. The old India/Asia lane
+    # required "cricket" plus one of many result/selection words, which excluded
+    # high-value quote/conflict stories and allowed one dominant news cycle to
+    # consume most of the dashboard. Use several independent search lenses.
+    if genre_key == "sports_stories_of_day" and broad_discovery:
+        if india_query:
+            lane_queries = list(CRICKET_INDIA_DISCOVERY_QUERY_LANES)
+            budget = DISCOVERY_MAX_CRICKET_GOOGLE_QUERIES_BROAD
+        elif global_query:
+            lane_queries = list(CRICKET_GLOBAL_DISCOVERY_QUERY_LANES)
+            budget = DISCOVERY_MAX_CRICKET_GOOGLE_QUERIES_BROAD
+        else:
+            lane_queries = list(CRICKET_GENERAL_DISCOVERY_QUERY_LANES)
+            budget = DISCOVERY_MAX_CRICKET_GOOGLE_QUERIES_BROAD
+
+        values = []
+        if str(custom_gnews_q or "").strip():
+            values.append(str(custom_gnews_q).strip())
+        values.extend(
+            f"{query}{CRICKET_SERVICE_QUERY_EXCLUSIONS}"
+            for query in lane_queries
+        )
+        if str(trend_keyword or "").strip():
+            values.append(str(trend_keyword).strip())
+        # Retain the configured query as a late fallback for any publisher
+        # wording not captured by the more targeted lanes above.
+        values.extend([base_query, rss_query, niche_query])
+
+        return _dedupe_discovery_queries(values, budget)
+
+    candidates = []
     values = [custom_gnews_q, niche_query, india_query, trend_keyword, global_query]
     has_dual_geo_lanes = bool(india_query and global_query)
-    base_query = str(genre_cfg.get("gnews_q") or "").strip()
-    if not has_dual_geo_lanes or str(trend_keyword or "").strip() or str(custom_gnews_q or "").strip():
+    if not has_dual_geo_lanes:
         values.append(base_query)
     values.append(rss_query)
 
@@ -2379,9 +2492,6 @@ def _build_discovery_google_queries(
     has_category_query = bool(str(genre_cfg.get("gnews_q") or "").strip())
 
     if genre_key and (india_query or global_query or has_category_query):
-        # An explicitly selected genre must stay inside its own discovery lanes
-        # in both dashboard and production discovery. The generic radar is only
-        # for the intentionally broad AI/general-news mode.
         budget = (
             DISCOVERY_MAX_GOOGLE_QUERIES_BROAD
             if broad_discovery
@@ -2396,8 +2506,6 @@ def _build_discovery_google_queries(
 
     candidates.append(GOOGLE_NEWS_RADAR_QUERIES[0])
     return _dedupe_discovery_queries(candidates, DISCOVERY_MAX_GOOGLE_QUERIES_STANDARD)
-
-
 def _resolve_discovery_futures(future_sources, timeout):
     """Resolve completed discovery workers without allowing one source to block its lane."""
     if not future_sources:
@@ -2537,11 +2645,17 @@ def collect_high_recall_stories(
         # intake is small enough that it is likely to need help. It shares the
         # same overall deadline, so a slow GDELT response can never add another
         # wait after the factual sources finish.
-        if len(google_queries) <= 2:
+        if len(google_queries) <= 2 or (
+            broad_discovery and genre_key == "sports_stories_of_day"
+        ):
             gdelt_query = (
-                str(trend_keyword or "").strip()
-                or str(custom_gnews_q or "").strip()
-                or str(genre_cfg.get("gnews_q") or "").strip()
+                str(custom_gnews_q or "").strip()
+                or str(trend_keyword or "").strip()
+                or (
+                    "India cricket Pakistan cricket BCCI controversy quotes selection injury records"
+                    if genre_key == "sports_stories_of_day"
+                    else str(genre_cfg.get("gnews_q") or "").strip()
+                )
                 or GOOGLE_NEWS_RADAR_QUERIES[0]
             )
             gdelt_future = core_pool.submit(
@@ -2700,22 +2814,36 @@ def rank_discovery_candidates(
 
     stage120 = _cheap_filter(stories, max_items=120, max_age_hours=48)
     stage100 = _recent_topic_cooldown(conn, stage120, hours=36)
-    stage80 = _deduplicate_stage(stage100, max_items=80)
-    if str(target_category or "").strip().lower() == "sports_stories_of_day":
-        # Remove cricket utility/service headlines before the fact-source cap.
-        # This prevents previews, streams, scorecards and schedules from
-        # consuming the 60-story evidence budget and crowding out real events.
+    is_cricket_dashboard = str(target_category or "").strip().lower() == "sports_stories_of_day"
+    stage80 = _deduplicate_stage(
+        stage100,
+        max_items=140 if is_cricket_dashboard else 80,
+        prefer_editorial=is_cricket_dashboard,
+    )
+    if is_cricket_dashboard:
+        # Remove cricket utility/service headlines before the evidence cap.
+        # Keep a large editorially-aware pool so the final scorer can choose
+        # quote, conflict, surprise, marquee-player and niche stories instead
+        # of allowing a single dominant tournament cycle to consume the intake.
         stage80 = [item for item in stage80 if _cricket_service_title_pass(item)]
     stage60 = [
         item for item in stage80
         if _discovery_source_pass(item)
     ]
-    stage50 = _fact_source_stage(stage60, max_items=60)
+    stage50 = _fact_source_stage(
+        stage60,
+        max_items=90 if is_cricket_dashboard else 60,
+        allow_strong_hook_single_source=is_cricket_dashboard,
+    )
     stage40 = [
         item for item in stage50
         if _headline_noise_pass(item) and _story_substance_pass(item)
     ]
-    stage30 = _originality_stage(stage40, used_topics, max_items=60)
+    stage30 = _originality_stage(
+        stage40,
+        used_topics,
+        max_items=90 if is_cricket_dashboard else 60,
+    )
 
     ranked = [
         _editorial_score(

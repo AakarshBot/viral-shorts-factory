@@ -1,3 +1,4 @@
+import story_ranker
 """Focused tests for topic discovery quality and portfolio behavior."""
 
 from story_ranker import (
@@ -127,6 +128,77 @@ def test_niche_but_service_like_cricket_story_does_not_qualify_for_editorial_flo
     }
     assert _cricket_story_worthiness_pass(story, minimum_score=5.0) is False
     assert story["discovery_rejection"] == "Low-value cricket service article"
+
+
+def test_india_cricket_discovery_uses_multiple_editorial_lanes():
+    cfg = {
+        "india_gnews_q": "old narrow India cricket query",
+        "gnews_q": "old narrow India cricket query",
+    }
+    queries = story_ranker._build_discovery_google_queries(
+        "sports_stories_of_day",
+        cfg,
+        broad_discovery=True,
+    )
+
+    assert len(queries) >= 7
+    joined = "\n".join(queries).lower()
+    assert "cricket" in joined
+    assert "said" in joined or "controversy" in joined
+    assert "selection" in joined or "injury" in joined
+    assert "record" in joined or "upset" in joined
+    assert "ranji" in joined or "u19" in joined or "domestic" in joined
+    assert "india pakistan" in joined or "rivalry" in joined
+    assert "old narrow india cricket query" not in queries
+
+def test_cricket_worthiness_accepts_quote_and_conflict_story_without_result_keyword():
+    story = {
+        "title": "Gautam Gambhir called out over India team selection",
+        "description": "A senior cricket figure criticised the selection approach and called for a rethink, triggering a fresh debate among supporters.",
+        "event_entities": ["Gautam Gambhir", "India"],
+        "event_actions": ["comment"],
+        "event_source_count": 2,
+    }
+    score = story_ranker._cricket_story_worthiness_score(story)
+    assert score >= 5.0
+    assert story_ranker._cricket_story_worthiness_pass(story, minimum_score=5.0) is True
+
+def test_dashboard_fact_source_stage_keeps_strong_hook_single_source():
+    story = {
+        "title": "Former Pakistan batter calls India arrogant",
+        "description": "The former batter criticised India's approach and called the rivalry unusually heated.",
+        "url": "https://example.com/cricket/story",
+        "source": "ESPNcricinfo",
+        "event_clustered": True,
+        "event_article_count": 1,
+        "event_source_count": 1,
+        "event_source_domains": ["espncricinfo.com"],
+        "event_publishers": ["ESPNcricinfo"],
+        "event_entities": ["Pakistan batter", "India"],
+        "event_actions": [],
+    }
+    result = story_ranker._fact_source_stage(
+        [story],
+        max_items=1,
+        allow_strong_hook_single_source=True,
+    )
+    assert result == [story]
+    assert story["fact_source_pass"] is True
+
+
+def test_originality_keeps_distinct_event_ids_with_similar_headlines():
+    stories = [
+        {
+            "title": "India batter responds to strong criticism",
+            "event_id": "event-1",
+        },
+        {
+            "title": "India batter responds to strong criticism after new row",
+            "event_id": "event-2",
+        },
+    ]
+    selected = story_ranker._originality_stage(stories, used_topics=[], max_items=2)
+    assert len(selected) == 2
 
 
 def test_niche_discovery_query_lanes_are_defined():
