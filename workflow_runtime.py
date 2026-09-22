@@ -324,9 +324,9 @@ class WorkflowController:
                     self._worker_finished()
                 except Exception:
                     pass
+                _PROCESS_PRODUCTION_LOCK.release()
                 with self._lock:
                     self.state.thread_alive = False
-                _PROCESS_PRODUCTION_LOCK.release()
 
         try:
             threading.Thread(
