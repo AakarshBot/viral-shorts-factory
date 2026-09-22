@@ -2070,6 +2070,16 @@ def run_robot(web_config=None):
             "(topic, date_used, genre, video_id) VALUES (?, ?, ?, ?)",
             (main_topic, datetime.now(), cat_choice, "PENDING_QC"),
         )
+        if conn.total_changes < 1:
+            raise RuntimeError(
+                "Production run record was not created as a new vault row; "
+                "refusing to continue with ambiguous run identity."
+            )
+        run_row_id = c.lastrowid
+        if not run_row_id:
+            raise RuntimeError(
+                "Production run row identity is unavailable; refusing to continue."
+            )
         conn.commit()
 
         dashboard_manual_control = bool(
@@ -2197,10 +2207,10 @@ def run_robot(web_config=None):
         # Persist the visual rights ledger before the human upload gate so the
         # selected/rejected render remains auditable.
         conn.execute(
-            "UPDATE vault SET asset_credits_json=? WHERE topic=?",
+            "UPDATE vault SET asset_credits_json=? WHERE rowid=?",
             (
                 json.dumps(script_data.get("visual_provenance") or [], ensure_ascii=False),
-                main_topic,
+                run_row_id,
             ),
         )
         conn.commit()
@@ -2244,7 +2254,7 @@ def run_robot(web_config=None):
             narrative_completeness=?, audience_fit=?, monetization_risk=?,
             shelf_life=?, composite_score=?, asset_credits_json=?, ai_image_ratio=?, voice_gender=?,
             format_used=?, language_used=?, combo_key=?, hook_style_used=?,
-            trend_keyword=? WHERE topic=?""",
+            trend_keyword=? WHERE rowid=?""",
             (
                 vid_id,
                 script_data["title"],
@@ -2265,7 +2275,7 @@ def run_robot(web_config=None):
                 combo_key,
                 script_data.get("hook_style_used", ""),
                 trend_keyword,
-                main_topic,
+                run_row_id,
             ),
         )
         conn.commit()
