@@ -1800,16 +1800,14 @@ def test_visual_approval_is_fail_closed_in_controller(tmp_path):
 def test_dashboard_review_surface_exposes_editable_script_and_visual_replacement_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = source.index("def render_script_visual_query_review")
-    end = source.index("
-def _visual_items", start)
+    end = source.index("\ndef _visual_items", start)
     review = source[start:end]
     assert "Edit script before approval" in review
     assert "Save edits & approve script" in review
     assert "Working title" in review
 
     visual_start = source.index("def render_visual_review")
-    visual_end = source.index("
-def render_live_factory", visual_start)
+    visual_end = source.index("\ndef render_live_factory", visual_start)
     visual = source[visual_start:visual_end]
     assert "Replace image" in visual
     assert "Find up to 10 alternatives" in visual
