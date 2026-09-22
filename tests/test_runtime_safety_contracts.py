@@ -265,3 +265,18 @@ def test_active_production_stages_are_distinct_from_stale_qc():
     assert "status='WAITING_VISUAL_REVIEW'" in block
     assert "WHERE status = 'RUNNING' AND date_used < ?" in block
     assert "WHERE video_id = 'PENDING_QC' AND date_used < ?" not in block
+
+
+def test_vault_migration_preserves_explicit_active_production_states():
+    source = (REPO_ROOT / "db_architecture.py").read_text(encoding="utf-8")
+    start = source.index("def migrate_vault(")
+    end = source.index("\ndef make_run_id", start)
+    block = source[start:end]
+    for status in (
+        "'RUNNING'",
+        "'WAITING_SCRIPT_REVIEW'",
+        "'WAITING_VISUAL_REVIEW'",
+        "'READY_FOR_UPLOAD'",
+    ):
+        assert status in block
+    assert "WHEN status IN (" in block
