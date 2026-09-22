@@ -259,7 +259,7 @@ def score_story(story: dict) -> dict:
         reasons.append("marquee personality")
 
     strong_hook = bool(
-        conflict or quote or surprise
+        conflict or quote or quoted_title or surprise
         or (question and len(headline.split()) >= 5)
         or result
     )
