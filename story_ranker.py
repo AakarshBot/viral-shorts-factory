@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 import requests
 
 from event_discovery_runtime import fetch_gdelt_articles, cluster_news_events, _event_actions
+from script_runtime import classify_hook_style
 
 
 SAFETY_BLOCKLIST = {
@@ -420,7 +421,7 @@ def _audience_potential(story, social, google_trend, event_momentum, originality
     )
 
 
-def _channel_performance_prior(rows, target_category="", target_format="", target_language=""):
+def _channel_performance_prior(rows, target_category="", target_format="", target_language="", target_hook_style=""):
     """Learn a small channel-fit prior from the factory's own completed uploads.
 
     The prior is intentionally conservative: it shrinks sparse category/format/language
@@ -455,6 +456,7 @@ def _channel_performance_prior(rows, target_category="", target_format="", targe
     category = _context_value(target_category)
     fmt = _clean(target_format)
     language = _clean(target_language)
+    hook_style = _clean(target_hook_style)
 
     def matches(row, require_all=True):
         row_category = _context_value(row.get("genre"))
@@ -476,6 +478,23 @@ def _channel_performance_prior(rows, target_category="", target_format="", targe
         context_rows = [row for row in eligible if _clean(row.get("format_used")) == fmt]
     if not context_rows and language:
         context_rows = [row for row in eligible if _clean(row.get("language_used")) == language]
+
+    if hook_style:
+        hook_rows = [
+            row for row in context_rows
+            if _clean(row.get("hook_style_used") or row.get("hook_type")) == hook_style
+        ]
+        # Use hook history only when there are at least two comparable uploads.
+        # Sparse history stays neutral rather than overfitting a single Short.
+        if len(hook_rows) >= 2:
+            context_rows = hook_rows
+        else:
+            all_hook_rows = [
+                row for row in eligible
+                if _clean(row.get("hook_style_used") or row.get("hook_type")) == hook_style
+            ]
+            if len(all_hook_rows) >= 2:
+                context_rows = all_hook_rows
 
     context_values = [value for value in (_value(row) for row in context_rows) if value is not None]
     if not context_values:
@@ -550,7 +569,7 @@ def _load_history(conn):
             """SELECT status, video_id, avg_view_percentage, genre,
                       format_used, language_used, combo_key, topic
                FROM vault
-               WHERE avg_view_percentage IS NOT NULL
+               WHERE (avg_view_percentage IS NOT NULL OR stayed_to_watch IS NOT NULL)
                  AND video_id IS NOT NULL
                  AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')
                  AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"""
@@ -640,7 +659,10 @@ def _eligible(row):
     return (
         status not in {"pending_qc", "rejected", "failed"}
         and video_id not in {"", "pending_qc", "rejected", "failed"}
-        and _safe_float(row.get("avg_view_percentage")) is not None
+        and (
+            _safe_float(row.get("avg_view_percentage")) is not None
+            or _safe_float(row.get("stayed_to_watch")) is not None
+        )
     )
 
 
@@ -1458,11 +1480,19 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     shorts_viability = _shorts_viability(story, visual)
     hook_potential = _hook_potential_score(story)
     channel_history = history
+    candidate_hook_style = classify_hook_style(story.get("title") or story.get("event_search_text") or "")
     channel_fit, channel_fit_samples = _channel_performance_prior(
         rows,
         target_category,
         target_format,
         target_language,
+    )
+    hook_fit, hook_fit_samples = _channel_performance_prior(
+        rows,
+        target_category,
+        target_format,
+        target_language,
+        candidate_hook_style,
     )
     momentum_weight = 1.08 if ai_cricket else 1.0
 
@@ -1479,6 +1509,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + india_relevance * INDIA_FOCUS_SCORE_WEIGHT
         + channel_history * 0.70
         + channel_fit * 0.45
+        + hook_fit * 0.30
         + niche * 0.20
         + niche_opportunity * 0.55
         + cricket_worthiness * (0.90 if _clean(target_category) == "sports_stories_of_day" else 0.0)
@@ -1492,6 +1523,9 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["historical_topic_matches"] = history_matches
     story["channel_fit_score"] = channel_fit
     story["channel_fit_samples"] = channel_fit_samples
+    story["hook_style"] = candidate_hook_style
+    story["hook_fit_score"] = hook_fit
+    story["hook_fit_samples"] = hook_fit_samples
     story["freshness_score"] = round(freshness, 2)
     story["visual_potential"] = round(visual, 2)
     story["shorts_viability_score"] = round(shorts_viability, 2)
@@ -1525,6 +1559,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "channel_history": round(history, 2),
         "channel_fit": round(channel_fit, 2),
         "channel_fit_samples": channel_fit_samples,
+        "hook_fit": round(hook_fit, 2),
+        "hook_fit_samples": hook_fit_samples,
         "niche_opportunity": round(niche_opportunity, 2),
         "cricket_story_worthiness": round(cricket_worthiness, 2),
         "major_event": round(major_event_score, 2),
