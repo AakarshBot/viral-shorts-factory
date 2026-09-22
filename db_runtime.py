@@ -225,14 +225,14 @@ def run_robot_with_exact_identity(bot, web_config=None):
                 "SELECT status, video_id FROM vault WHERE id = ?",
                 (state.row_id,),
             ).fetchone()
-            if row and row[0] == "PENDING_QC":
+            if row and row[0] in {"PENDING_QC", "RUNNING"}:
                 if web_config is None:
                     update_run_record(
                         raw,
                         state.row_id,
                         status="REJECTED",
                         reported=1,
-                        rejected_reason="Run ended at manual QC gate",
+                        rejected_reason="Run ended before upload approval",
                     )
                 else:
                     update_run_record(

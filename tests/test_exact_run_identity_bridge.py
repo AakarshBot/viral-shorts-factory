@@ -64,3 +64,9 @@ def test_exact_identity_does_not_patch_process_wide_sqlite(monkeypatch):
     ) == "ran"
     assert seen == [True]
     assert sqlite3.connect is module_connect
+
+
+def test_normal_run_return_finalizes_running_row_without_waiting_for_stale_sweep():
+    source = (__import__("pathlib").Path(__file__).resolve().parents[1] / "db_runtime.py").read_text(encoding="utf-8")
+    assert 'if row and row[0] in {"PENDING_QC", "RUNNING"}:' in source
+    assert 'rejected_reason="Run ended before upload approval"' in source
