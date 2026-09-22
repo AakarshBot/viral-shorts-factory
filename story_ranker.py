@@ -1350,14 +1350,18 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
     return survivors[:max_items]
 
 
-def _deduplicate_stage(stories, max_items=15):
-    """Remove residual duplicate articles without collapsing clustered events."""
+def _deduplicate_stage(stories, max_items=15, prefer_editorial=False):
+    """Remove residual duplicates while optionally preserving editorially strong hooks."""
     selected = []
     for story in sorted(
         stories,
         key=lambda item: (
-            _safe_float(item.get("event_corroboration_score")) or 0.0,
+            _hook_potential_score(item) if prefer_editorial else (
+                _safe_float(item.get("event_corroboration_score")) or 0.0
+            ),
+            _niche_opportunity_score(item) if prefer_editorial else _freshness_score(item),
             _freshness_score(item),
+            _safe_float(item.get("event_corroboration_score")) or 0.0,
             _source_quality(item),
         ),
         reverse=True,
@@ -1810,7 +1814,8 @@ def _discovery_portfolio_pass(story):
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
         return False
-    if actionability < 3.0:
+    strong_hook = bool(story.get("freshfeed_channel_strong_hook")) or hook >= 5.0
+    if actionability < 3.0 and not strong_hook:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
         return False
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.25:
@@ -2024,7 +2029,23 @@ def diversity_rerank(stories, max_items=28):
                     for old in selected
                     if candidate_entities & _topic_entities(old)
                 )
-                repeated_entity_penalty = min(4.0, entity_repeats * 1.25)
+                event_anchor_repeats = sum(
+                    1
+                    for old in selected
+                    if (
+                        candidate_entities
+                        & {
+                            entity
+                            for entity in _topic_entities(old)
+                            if re.search(
+                                r"\\b(?:games?|cup|league|tournament|championship|series|world|open|premier)\\b",
+                                entity,
+                            )
+                        }
+                    )
+                )
+                repeated_entity_penalty = min(5.0, entity_repeats * 1.25)
+                repeated_entity_penalty += min(3.0, event_anchor_repeats * 1.0)
 
             candidate_genre = _clean(candidate.get("primary_genre") or candidate.get("genre"))
             same_genre_repeats = sum(
@@ -2766,17 +2787,26 @@ def rank_discovery_candidates(
 
     stage120 = _cheap_filter(stories, max_items=120, max_age_hours=48)
     stage100 = _recent_topic_cooldown(conn, stage120, hours=36)
-    stage80 = _deduplicate_stage(stage100, max_items=80)
-    if str(target_category or "").strip().lower() == "sports_stories_of_day":
-        # Remove cricket utility/service headlines before the fact-source cap.
-        # This prevents previews, streams, scorecards and schedules from
-        # consuming the 60-story evidence budget and crowding out real events.
+    is_cricket_dashboard = str(target_category or "").strip().lower() == "sports_stories_of_day"
+    stage80 = _deduplicate_stage(
+        stage100,
+        max_items=140 if is_cricket_dashboard else 80,
+        prefer_editorial=is_cricket_dashboard,
+    )
+    if is_cricket_dashboard:
+        # Remove cricket utility/service headlines before the evidence cap.
+        # Keep a large editorially-aware pool so the final scorer can choose
+        # quote, conflict, surprise, marquee-player and niche stories instead
+        # of allowing a single dominant tournament cycle to consume the intake.
         stage80 = [item for item in stage80 if _cricket_service_title_pass(item)]
     stage60 = [
         item for item in stage80
         if _discovery_source_pass(item)
     ]
-    stage50 = _fact_source_stage(stage60, max_items=60)
+    stage50 = _fact_source_stage(
+        stage60,
+        max_items=90 if is_cricket_dashboard else 60,
+    )
     stage40 = [
         item for item in stage50
         if _headline_noise_pass(item) and _story_substance_pass(item)
