@@ -1241,6 +1241,7 @@ def collect_manual_visual_search(
     video_title: str = "",
     used_hashes: set[str] | None = None,
     used_source_image_urls: set[str] | None = None,
+    search_round: int = 1,
 ) -> dict:
     """Fetch up to ten new images from every available manual source with identity AI checks.
 
@@ -1315,8 +1316,10 @@ def collect_manual_visual_search(
         cache_updates: dict[tuple, list] = {}
         provider_items: list = []
 
-        for page in (1, 2):
-            cache_key = ("dashboard-query", source_key, exact_query.casefold(), page)
+        for page in range(1, MANUAL_SEARCH_MAX_PAGES + 1):
+            effective_page = (max(1, int(search_round)) - 1) * MANUAL_SEARCH_MAX_PAGES + page
+            effective_page = max(1, min(25, effective_page))
+            cache_key = ("dashboard-query", source_key, exact_query.casefold(), effective_page)
             raw_data = search_cache.get(cache_key)
             if raw_data is None:
                 try:
@@ -1502,6 +1505,7 @@ def collect_manual_visual_options(
     used_source_pages: set[str] | None = None,
     min_options: int = 0,
     max_options: int = 10,
+    search_round: int = 1,
 ) -> dict:
     """Compatibility wrapper for dashboard callers; searches return up to ten AI-checked choices with no minimum."""
     result = collect_manual_visual_search(
@@ -1510,6 +1514,7 @@ def collect_manual_visual_options(
         str(query or "").strip(),
         video_title=video_title,
         used_hashes=used_hashes,
+        search_round=search_round,
     )
     maximum = max(1, int(max_options or 5))
     result["assets"] = list(result.get("assets") or [])[:maximum]
