@@ -519,6 +519,18 @@ def _channel_options() -> list[str]:
 def _init_state() -> None:
     if "workflow_controller" not in st.session_state:
         st.session_state.workflow_controller = DashboardWorkflowController(ultimate_bot)
+        try:
+            if st.session_state.workflow_controller.restore_ready_upload():
+                # The worker may have disappeared with the previous Python
+                # process, but the database/artifact pair proves the run reached
+                # the manual upload gate. Restore the dashboard to that state.
+                st.session_state.production_started = True
+                st.session_state.metadata_loaded_run_id = ""
+                st.session_state.metadata_approved = False
+                st.session_state.approved_metadata = {}
+                st.session_state.metadata_editing = False
+        except Exception as exc:
+            print(f"[Dashboard] Ready-for-upload recovery unavailable: {type(exc).__name__}: {exc}", flush=True)
 
     defaults = {
         "candidates": [],

@@ -187,6 +187,117 @@ class WorkflowController:
         finally:
             conn.close()
 
+    def restore_ready_upload(self) -> bool:
+        """Restore the newest READY_FOR_UPLOAD run whose artifact is still present."""
+        import json
+        import ultimate_bot
+
+        conn = sqlite3.connect(ultimate_bot.DB_PATH)
+        try:
+            migrate_vault(conn)
+            row = conn.execute(
+                """
+                SELECT id, run_id, topic, genre, script_json, format_used,
+                       language_used, trend_keyword
+                FROM vault
+                WHERE status = 'READY_FOR_UPLOAD'
+                  AND video_id = 'READY_FOR_UPLOAD'
+                  AND run_id IS NOT NULL
+                  AND script_json IS NOT NULL
+                  AND script_json != ''
+                ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return False
+
+        row_id, run_id, topic, genre, script_json, format_mode, language_key, trend_keyword = row
+        run_id = str(run_id or "").strip()
+        if not run_id or not re.fullmatch(r"[A-Za-z0-9._-]+", run_id):
+            return False
+
+        video_path = os.path.join(
+            os.path.dirname(os.path.abspath(ultimate_bot.DB_PATH)),
+            "output",
+            run_id,
+            "final_video_output.mp4",
+        )
+        if not os.path.isfile(video_path):
+            return False
+
+        try:
+            script_data = json.loads(script_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(script_data, dict) or not script_data.get("script"):
+            return False
+
+        category_key = str(genre or "").strip()
+        genre_cfg = self.bot.CONTENT_CATEGORIES.get(category_key)
+        if not isinstance(genre_cfg, dict):
+            return False
+
+        title, description, _tags = _build_clean_metadata(
+            script_data,
+            genre_cfg,
+            str(trend_keyword or "").strip(),
+        )
+        comment = build_pinned_comment(
+            script_data,
+            title,
+            genre_cfg.get("label", ""),
+        )
+
+        audio_dir = os.path.dirname(video_path)
+        recovered_audio = sorted(
+            (
+                os.path.join(audio_dir, name)
+                for name in os.listdir(audio_dir)
+                if name.startswith("voiceover_") and name.endswith(".mp3")
+            ),
+            key=lambda path: int(re.search(r"voiceover_(\d+)\.mp3$", os.path.basename(path)).group(1))
+            if re.search(r"voiceover_(\d+)\.mp3$", os.path.basename(path))
+            else 0,
+        )
+
+        with self._lock:
+            self.state.run_id = run_id
+            self.state.selected_story = {
+                "title": str(topic or script_data.get("title") or "").strip(),
+                "story_key": run_id,
+            }
+            self.state.script_data = dict(script_data)
+            self.state.audio_paths = recovered_audio
+            self.state.video_path = os.path.abspath(video_path)
+            self.state.final_metadata = {
+                "title": title or str(script_data.get("title") or topic or "").strip(),
+                "description": description,
+                "pinned_comment": comment,
+            }
+            self.state.format_mode = str(format_mode or "").strip().lower()
+            self.state.stage = "qc"
+            self.state.percent = 100
+            self.state.message = "Recovered a completed production waiting for your upload decision."
+            self.state.error = ""
+            self.state.thread_alive = False
+            self.state.completed = True
+
+        self.bot._last_run_row_id = int(row_id)
+        self.bot._last_run_run_id = run_id
+        self.bot._active_web_config = {
+            "category": category_key,
+            "format_mode": str(format_mode or "").strip().lower(),
+            "language": str(language_key or "english").strip(),
+            "trend_keyword": str(trend_keyword or "").strip(),
+            "publish_mode": "private",
+            "manual_qc_required": True,
+        }
+        return True
+
     def _worker_started(self) -> None:
         """Hook for host controllers that need worker-thread setup."""
 
