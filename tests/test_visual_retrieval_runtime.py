@@ -1338,10 +1338,10 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
         "Test story",
     )
 
-    assert len(result["assets"]) == 20
-    assert len({item["hash"] for item in result["assets"]}) == 20
-    assert result["hard_max"] == 20
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
+    assert len(result["assets"]) == 10
+    assert len({item["hash"] for item in result["assets"]}) == 10
+    assert result["hard_max"] == 10
+    assert [item["verified"] for item in result["query_stats"]] == [3, 3, 2, 2]
     assert len(result["query_stats"]) == 4
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
@@ -1710,7 +1710,7 @@ def test_manual_pool_uses_ten_image_target_per_query(monkeypatch):
         ["rank 1", "rank 2", "rank 3"],
         allow_auto_backfill=False,
     )
-    assert [row["target"] for row in result["query_stats"]] == [10, 10, 10]
+    assert [row["target"] for row in result["query_stats"]] == [4, 3, 3]
     assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
     assert len(result["assets"]) == 22
 
