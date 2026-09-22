@@ -736,7 +736,7 @@ def _cricket_story_worthiness_score(story):
     hook = _hook_potential_score(story)
     score += min(2.75, hook * 0.45)
     if hook >= 6.0:
-        score += 1.0
+        score += 1.5
     routine_hits = sum(
         1 for term in HOOK_ROUTINE_TERMS
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
