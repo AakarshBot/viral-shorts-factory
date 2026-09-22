@@ -344,13 +344,8 @@ def discover_ranked_topics(
     max_candidates: int = 28,
     retained_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Dashboard discovery pool: return up to 28 diverse, evidence-backed topics."""
-    from story_ranker import (
-        _cricket_relevance_pass,
-        _requested_topic_pass,
-        collect_high_recall_stories,
-        rank_discovery_candidates,
-    )
+    """Dashboard discovery entry point using the dedicated broad-recall topic desk."""
+    from dashboard_topic_discovery_runtime import discover_dashboard_topics
     from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
     from workflow_runtime import CRICKET_CATEGORIES
 
@@ -361,6 +356,9 @@ def discover_ranked_topics(
     bot._active_web_config = dict(web_config)
 
     is_cricket = fmt == "cricket" or bool(web_config.get("cricket_pipeline"))
+    cricket_name = ""
+    requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+
     if is_cricket:
         cricket_name = str(
             web_config.get("cricket_category", "AI-assisted top story in cricket")
@@ -371,63 +369,39 @@ def discover_ranked_topics(
         )
         genre_key = "sports_stories_of_day"
         genre_cfg = dict(bot.CONTENT_CATEGORIES.get(genre_key, {}))
+
         if cricket_name == "India / Asia":
-            # Scope-specific cricket discovery: do not mix the global lane into
-            # the India/Asia result set.
             genre_cfg["india_gnews_q"] = cricket_cfg["query"]
             genre_cfg["global_gnews_q"] = ""
             genre_cfg["gnews_q"] = cricket_cfg["query"]
         elif cricket_name == "Global":
-            # Scope-specific cricket discovery: keep the selected result set
-            # on the global lane rather than re-adding India-first headlines.
             genre_cfg["india_gnews_q"] = ""
             genre_cfg["global_gnews_q"] = cricket_cfg["query"]
             genre_cfg["gnews_q"] = cricket_cfg["query"]
-        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-        custom_q = requested_topic or None if cricket_name != "AI-assisted top story in cricket" else (
-            requested_topic or cricket_cfg["query"]
-        )
+
         custom_rss = cricket_cfg["rss"]
+        target_category = category or genre_key
+        ai_cricket = cricket_name == "AI-assisted top story in cricket"
     else:
         genre_key = category or "national_global_affairs"
         genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key)
         if not genre_cfg:
             raise ValueError(f"Unknown category: {genre_key}")
-        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-        custom_q = requested_topic or None
-        custom_rss = None
+        custom_rss = ""
+        target_category = category or genre_key
+        ai_cricket = False
 
-    raw, social_titles = collect_high_recall_stories(
+    ranked = discover_dashboard_topics(
         bot,
         genre_key,
         genre_cfg,
-        web_config.get("trend_keyword"),
-        custom_q,
-        custom_rss,
-        broad_discovery=True,
-    )
-
-    relevance_filtered = []
-    for candidate in raw:
-        if not _cricket_relevance_pass(candidate, genre_key):
-            continue
-        if not _requested_topic_pass(candidate, requested_topic):
-            continue
-        relevance_filtered.append(candidate)
-
-    ai_cricket = (
-        genre_key == "sports_stories_of_day"
-        and str(web_config.get("cricket_category", ""))
-        == "AI-assisted top story in cricket"
-    )
-
-    ranked = rank_discovery_candidates(
-        relevance_filtered,
         conn=conn,
-        target_category=category or genre_key,
+        requested_topic=requested_topic,
+        custom_rss_url=custom_rss,
+        cricket_scope=cricket_name,
+        target_category=target_category,
         target_format=web_config.get("format_mode", "regular"),
         target_language=language,
-        social_titles=social_titles,
         ai_cricket=ai_cricket,
         max_candidates=max_candidates,
     )
@@ -441,16 +415,17 @@ def discover_ranked_topics(
         max_candidates=max_candidates,
     )
     pool = ranked[:max_candidates]
+
     for rank, story in enumerate(pool, 1):
         story["discovery_rank"] = rank
-        story["discovery_reason"] = _candidate_reason(story)
-        story["source_label"] = _source_label(story)
-        story["story_url"] = _story_url(story)
-        story["story_key"] = _story_key(story)
+        story["discovery_reason"] = story.get("discovery_reason") or _candidate_reason(story)
+        story["source_label"] = story.get("source_label") or _source_label(story)
+        story["story_url"] = story.get("story_url") or _story_url(story)
+        story["story_key"] = story.get("story_key") or _story_key(story)
 
     print(
-        f"   [Dashboard Discovery] {len(raw)} event candidates -> "
-        f"{len(relevance_filtered)} relevant -> {len(pool)} diverse ranked headline(s).",
+        f"   [Dashboard Discovery] {len(pool)} diverse headline(s) returned by "
+        f"{'cricket ' + cricket_name if is_cricket else genre_key} discovery v2.",
         flush=True,
     )
     return pool
