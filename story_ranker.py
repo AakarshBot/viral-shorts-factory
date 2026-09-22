@@ -14,7 +14,11 @@ import requests
 
 from event_discovery_runtime import fetch_gdelt_articles, cluster_news_events, _event_actions
 from script_runtime import classify_hook_style
-from channel_strategy_runtime import candidate_gate, score_story as score_channel_strategy
+from channel_strategy_runtime import (
+    candidate_gate,
+    score_story as score_channel_strategy,
+    title_package_score,
+)
 
 
 SAFETY_BLOCKLIST = {
@@ -304,6 +308,97 @@ HOOK_GENERIC_TERMS = {
 }
 
 
+# Small deterministic anchors for cricket portfolio saturation. They prevent one
+# tournament/news cycle from occupying the whole first dashboard page.
+CRICKET_MARQUEE_NAMES = (
+    "Virat Kohli", "Rohit Sharma", "MS Dhoni", "Jasprit Bumrah",
+    "Shubman Gill", "Rishabh Pant", "Hardik Pandya", "Ravindra Jadeja",
+    "Gautam Gambhir", "Suryakumar Yadav", "Yashasvi Jaiswal", "KL Rahul",
+    "Sanju Samson", "Mohammed Siraj", "Rashid Khan", "Pat Cummins",
+    "Babar Azam", "Shaheen Afridi", "Ben Stokes", "Joe Root",
+    "Jos Buttler", "Steve Smith", "Travis Head", "Kane Williamson",
+)
+
+CRICKET_EVENT_FAMILY_PATTERNS = (
+    ("india_pakistan_rivalry", (
+        r"\bindia[\s-]*(?:vs|v|versus)[\s-]*pakistan\b",
+        r"\bpakistan[\s-]*(?:vs|v|versus)[\s-]*india\b",
+        r"\bindia[\s-]*pakistan\b",
+        r"\bpakistan[\s-]*india\b",
+    )),
+    ("t20_world_cup", (r"\bt20(?: men'?s| women'?s)? world cup\b",)),
+    ("cricket_world_cup", (r"\b(?:icc )?cricket world cup\b", r"\bodi world cup\b")),
+    ("champions_trophy", (r"\bchampions trophy\b",)),
+    ("asia_cup", (r"\basia cup\b",)),
+    ("asian_games", (r"\basian games\b",)),
+    ("olympics", (r"\bolympics?\b",)),
+    ("world_test_championship", (r"\bworld test championship\b", r"\bwtc\b")),
+    ("ipl", (r"\bindian premier league\b", r"\bipl\b")),
+    ("wpl", (r"\bwomen'?s premier league\b", r"\bwpl\b")),
+    ("psl", (r"\bpakistan super league\b", r"\bpsl\b")),
+    ("big_bash", (r"\bbig bash\b", r"\bbbl\b")),
+    ("the_hundred", (r"\bthe hundred\b",)),
+    ("sa20", (r"\bsa20\b",)),
+    ("ranji_trophy", (r"\branji trophy\b", r"\branji\b")),
+    ("duleep_trophy", (r"\bduleep trophy\b", r"\bduleep\b")),
+    ("domestic_india", (r"\b(?:domestic|india a|u19|u-19|u23|u-23) cricket\b",)),
+)
+
+CRICKET_PORTFOLIO_TOP_WINDOW = 6
+CRICKET_MAX_SAME_FAMILY_IN_TOP_WINDOW = 2
+CRICKET_MAX_SAME_FAMILY_IN_PORTFOLIO = 4
+
+
+def _cricket_event_family(story):
+    """Return a broad umbrella for portfolio saturation control."""
+    story = story if isinstance(story, dict) else {}
+    title = str(story.get("title") or "").strip()
+    event_text = str(story.get("event_search_text") or "").strip()
+    entity_text = " ".join(
+        str(entity).strip()
+        for entity in (story.get("event_entities") or [])
+        if str(entity).strip()
+    )
+    combined = f"{title} {event_text} {entity_text}".casefold()
+
+    for family, patterns in CRICKET_EVENT_FAMILY_PATTERNS:
+        if any(re.search(pattern, combined) for pattern in patterns):
+            return family
+
+    for name in CRICKET_MARQUEE_NAMES:
+        if re.search(r"(?<![a-z])" + re.escape(name.casefold()) + r"(?![a-z])", combined):
+            return "person:" + re.sub(r"\s+", "_", name.casefold())
+
+    return ""
+
+
+def _cricket_headline_hook_signals(story):
+    """Count only headline-level hooks; clustered article text cannot manufacture a hook."""
+    story = story if isinstance(story, dict) else {}
+    title = str(story.get("title") or "").strip()
+    headline = _clean(title)
+    return {
+        "conflict": sum(
+            1 for term in HOOK_CONFLICT_TERMS
+            if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", headline)
+        ),
+        "quote": sum(
+            1 for term in HOOK_QUOTE_TERMS
+            if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", headline)
+        ),
+        "surprise": sum(
+            1 for term in HOOK_SURPRISE_TERMS
+            if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", headline)
+        ),
+        "question": int("?" in title),
+        "marquee": sum(
+            1
+            for name in CRICKET_MARQUEE_NAMES
+            if re.search(r"(?<![a-z])" + re.escape(name.casefold()) + r"(?![a-z])", headline)
+        ),
+    }
+
+
 def _clamp_score(value, maximum=10.0):
     return round(max(0.0, min(float(maximum), float(value))), 2)
 
@@ -383,13 +478,16 @@ def _shorts_scope_score(story):
 
 
 def _hook_potential_score(story):
-    """Score scroll-stop potential from concrete headline/story signals."""
+    """Score scroll-stop potential from headline signals, not clustered coverage volume."""
     story = story if isinstance(story, dict) else {}
     raw_title = str(story.get("title") or story.get("event_search_text") or "").strip()
     title = _clean(raw_title)
-    text = _text_blob(story)
-    combined = f"{title} {text}"
     tokens = _tokens(raw_title)
+    headline = title
+    context = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).casefold()
     score = 0.0
     signals = []
 
@@ -404,18 +502,18 @@ def _hook_potential_score(story):
             if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", value)
         )
 
-    conflict_hits = _hits(HOOK_CONFLICT_TERMS, combined)
+    conflict_hits = _hits(HOOK_CONFLICT_TERMS, headline)
     if conflict_hits:
         score += min(2.75, conflict_hits * 1.0)
         signals.append("conflict/tension")
 
-    quote_hits = _hits(HOOK_QUOTE_TERMS, combined)
+    quote_hits = _hits(HOOK_QUOTE_TERMS, headline)
     quoted = bool(re.search(r"[\"“”]", raw_title))
     if quote_hits or quoted:
         score += min(1.75, quote_hits * 0.75 + (0.75 if quoted else 0.0))
         signals.append("quotable claim")
 
-    surprise_hits = _hits(HOOK_SURPRISE_TERMS, combined)
+    surprise_hits = _hits(HOOK_SURPRISE_TERMS, headline)
     if surprise_hits:
         score += min(2.0, surprise_hits * 0.65)
         signals.append("surprise/novelty")
@@ -438,15 +536,19 @@ def _hook_potential_score(story):
         score += 0.65
         signals.append("curiosity question")
 
-    routine_hits = _hits(HOOK_ROUTINE_TERMS, combined)
+    routine_hits = _hits(HOOK_ROUTINE_TERMS, headline)
     generic_hits = _hits(HOOK_GENERIC_TERMS, title)
-    stronger_signals = conflict_hits + quote_hits + surprise_hits + int(bool(actions))
+    stronger_signals = conflict_hits + quote_hits + surprise_hits + int("?" in raw_title)
     if routine_hits and stronger_signals <= 1:
         score -= min(2.5, 0.85 + routine_hits * 0.35)
         signals.append("routine-news penalty")
     if generic_hits:
         score -= min(1.75, generic_hits * 0.75)
         signals.append("generic-headline penalty")
+
+    if len(_tokens(context)) >= 12 and stronger_signals:
+        score += 0.20
+        signals.append("supporting context")
 
     word_count = len(tokens)
     if 5 <= word_count <= 16:
@@ -782,25 +884,22 @@ def _cricket_story_worthiness_score(story):
         return 0.0
 
     title = _clean(story.get("title") or "")
-    text = _text_blob(story)
-    combined = f"{title} {text}"
+    context = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).casefold()
+    combined = f"{title} {context}"
     score = 0.0
 
-    # The channel report shows that conflict, direct quotes and provocative
-    # premises can outperform routine result recaps. Do not require a title to
-    # contain a narrow set of "win/record/medal" words before it can qualify.
-    conflict_hits = sum(
-        1 for term in HOOK_CONFLICT_TERMS
-        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
-    )
-    quote_hits = sum(
-        1 for term in HOOK_QUOTE_TERMS
-        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
-    )
-    surprise_hits = sum(
-        1 for term in HOOK_SURPRISE_TERMS
-        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
-    )
+    # Hook signals are headline-first. Clustered article text is factual context,
+    # not evidence that this headline itself can stop the scroll.
+    headline_hooks = _cricket_headline_hook_signals(story)
+    conflict_hits = headline_hooks["conflict"]
+    quote_hits = headline_hooks["quote"]
+    surprise_hits = headline_hooks["surprise"]
+    marquee_hits = headline_hooks["marquee"]
+    question = headline_hooks["question"]
+
     development_hits = sum(
         1 for term in CRICKET_DEVELOPMENT_TERMS
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
@@ -810,9 +909,14 @@ def _cricket_story_worthiness_score(story):
     score += min(2.75, quote_hits * 1.05)
     score += min(2.00, surprise_hits * 0.80)
     score += min(3.25, development_hits * 0.90)
+    score += min(1.50, marquee_hits * 0.75)
 
-    if "?" in title:
+    if question:
         score += 1.10
+
+    headline_hook_count = conflict_hits + quote_hits + surprise_hits + question
+    if development_hits and not headline_hook_count:
+        score -= 1.50
 
     entities = _topic_entities(story)
     score += 1.35 if len(entities) >= 2 else (0.75 if entities else 0.0)
@@ -845,7 +949,7 @@ def _cricket_story_worthiness_score(story):
         1 for term in HOOK_ROUTINE_TERMS
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", title)
     )
-    strong_hook = bool(conflict_hits or quote_hits or surprise_hits or "?" in title)
+    strong_hook = bool(conflict_hits or quote_hits or surprise_hits or question or marquee_hits)
     if routine_hits and not strong_hook:
         score -= min(2.5, routine_hits * 0.9)
 
@@ -1633,18 +1737,27 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     # candidate_score remains a single ranking score, but its components are
     # now explicitly separated so audience interest does not masquerade as
     # factual importance and correlated coverage signals are capped.
-    channel_strategy = score_channel_strategy(story)
+    is_cricket = _clean(target_category) == "sports_stories_of_day"
+    strategy_input = story
+    if is_cricket:
+        # event_search_text contains clustered headlines and must not manufacture
+        # a stronger opening hook than the actual candidate headline.
+        strategy_input = dict(story)
+        strategy_input["event_search_text"] = ""
+    channel_strategy = score_channel_strategy(strategy_input)
     channel_signal = _safe_float(channel_strategy.get("score")) or 0.0
+    title_packaging = title_package_score(story.get("title") or "")
+    cricket_event_family = _cricket_event_family(story) if is_cricket else ""
 
     # Channel history says the opening promise is the decisive packaging signal.
     # Keep evidence, freshness and source quality intact, but let hookability and
     # channel fit materially influence selection.
     final_score = (
-        importance * 1.25
-        + audience * 1.10 * momentum_weight
-        + shorts_viability * 1.15
-        + shorts_scope * 0.95
-        + hook_potential * 1.35
+        importance * (1.05 if is_cricket else 1.25)
+        + audience * (1.00 if is_cricket else 1.10) * momentum_weight
+        + shorts_viability * (1.25 if is_cricket else 1.15)
+        + shorts_scope * (1.10 if is_cricket else 0.95)
+        + hook_potential * (1.75 if is_cricket else 1.35)
         + topic_actionability * 0.55
         + originality * 0.40
         + visual * 0.18
@@ -1652,7 +1765,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + channel_history * 0.60
         + channel_fit * 0.40
         + hook_fit * 0.25
-        + channel_signal * 1.10
+        + channel_signal * (1.30 if is_cricket else 1.10)
+        + title_packaging * (0.45 if is_cricket else 0.25)
         + niche * 0.18
         + niche_opportunity * 0.45
         + cricket_worthiness * (0.90 if _clean(target_category) == "sports_stories_of_day" else 0.0)
@@ -1661,6 +1775,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     )
     story["candidate_score"] = round(final_score, 3)
     story["freshfeed_channel_fit_score"] = channel_signal
+    story["title_package_score"] = round(title_packaging, 3)
+    story["cricket_event_family"] = cricket_event_family
     story["freshfeed_channel_fit_reasons"] = channel_strategy.get("reasons", [])
     story["freshfeed_channel_strong_hook"] = bool(channel_strategy.get("strong_hook"))
     story["freshfeed_channel_strategy_version"] = channel_strategy.get("version", "")
@@ -1805,8 +1921,11 @@ def _candidate_quality_pass(story):
     if shorts < 3.0:
         story["discovery_rejection"] = "Weak Shorts viability"
         return False
-    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 3.25:
         story["discovery_rejection"] = "Weak Shorts hook potential"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and scope < 5.5:
+        story["discovery_rejection"] = "Poor fit for a focused 20–35s Short"
         return False
     if source_quality < 1.0 and corroboration < 2.0:
         story["discovery_rejection"] = "Insufficient source support"
@@ -1845,8 +1964,11 @@ def _discovery_portfolio_pass(story):
     if actionability < 3.0 and not strong_hook:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
         return False
-    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.25:
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
         story["discovery_rejection"] = "Weak Shorts hook potential"
+        return False
+    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and scope < 5.5:
+        story["discovery_rejection"] = "Poor fit for a focused 20–35s Short"
         return False
     if not _story_substance_pass(story):
         story["discovery_rejection"] = "Headline lacks enough story substance behind the event"
@@ -1980,6 +2102,15 @@ def _story_theme_similarity(left, right):
 def diversity_rerank(stories, max_items=28):
     """Select a high-quality but materially diverse dashboard portfolio."""
     candidates = [item for item in (stories or []) if isinstance(item, dict)]
+    is_cricket_portfolio = any(
+        _clean(item.get("discovery_target_category")) == "sports_stories_of_day"
+        for item in candidates
+    )
+    if is_cricket_portfolio:
+        for item in candidates:
+            item["cricket_event_family"] = (
+                item.get("cricket_event_family") or _cricket_event_family(item)
+            )
     candidates.sort(
         key=lambda item: (
             _safe_float(item.get("candidate_score")) or -9999.0,
@@ -2039,6 +2170,33 @@ def diversity_rerank(stories, max_items=28):
             )
         ]
 
+        if is_cricket_portfolio:
+            diversified = []
+            for index, item in eligible_remaining:
+                family = _clean(item.get("cricket_event_family") or _cricket_event_family(item))
+                repeats = (
+                    sum(
+                        1
+                        for old in selected
+                        if family and family == _clean(
+                            old.get("cricket_event_family") or _cricket_event_family(old)
+                        )
+                    )
+                    if family
+                    else 0
+                )
+                family_cap = (
+                    CRICKET_MAX_SAME_FAMILY_IN_TOP_WINDOW
+                    if len(selected) < CRICKET_PORTFOLIO_TOP_WINDOW
+                    else CRICKET_MAX_SAME_FAMILY_IN_PORTFOLIO
+                )
+                if family and repeats >= family_cap:
+                    continue
+                diversified.append((index, item))
+
+            if diversified:
+                eligible_remaining = diversified
+
         for index, candidate in eligible_remaining:
             base_score = _safe_float(candidate.get("candidate_score")) or -9999.0
             max_similarity = max(
@@ -2085,6 +2243,23 @@ def diversity_rerank(stories, max_items=28):
 
             niche_score = _safe_float(candidate.get("niche_opportunity_score")) or 0.0
             major_score = _safe_float(candidate.get("major_event_score")) or 0.0
+            family = _clean(candidate.get("cricket_event_family") or _cricket_event_family(candidate))
+            family_repeats = (
+                sum(
+                    1
+                    for old in selected
+                    if family and family == _clean(
+                        old.get("cricket_event_family") or _cricket_event_family(old)
+                    )
+                )
+                if family
+                else 0
+            )
+            family_repetition_penalty = (
+                min(5.0, family_repeats * 2.0)
+                if is_cricket_portfolio and family
+                else 0.0
+            )
             niche_bonus = min(2.5, max(0.0, niche_score - 5.0) * 0.5)
             mega_event_penalty = (
                 min(2.5, max(0.0, major_score - 2.0) * 0.55)
@@ -2100,6 +2275,7 @@ def diversity_rerank(stories, max_items=28):
                 - repetition_penalty
                 - repeated_entity_penalty
                 - portfolio_penalty
+                - family_repetition_penalty
             )
 
             if adjusted > best_adjusted:
