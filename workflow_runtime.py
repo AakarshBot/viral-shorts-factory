@@ -205,14 +205,19 @@ class WorkflowController:
 
         try:
             self.reset()
+            run_id = datetime.now(timezone.utc).strftime(
+                "run-%Y%m%d-%H%M%S-%f"
+            )
             config = dict(web_config)
             config = self._prepare_production_config(config)
+            # The dashboard run id is the authoritative id for the entire
+            # production execution. The exact-identity DB bridge consumes the
+            # same value so UI state and vault history can never diverge.
+            config["run_id"] = run_id
             self._install_production_wrappers()
             with self._lock:
                 self.state.selected_story = dict(selected_story)
-                self.state.run_id = datetime.now(timezone.utc).strftime(
-                    "run-%Y%m%d-%H%M%S-%f"
-                )
+                self.state.run_id = run_id
                 self.state.stage = "research"
                 self.state.percent = 16
                 self.state.message = "Researching multiple sources for the selected story…"
