@@ -253,3 +253,15 @@ def test_locked_dashboard_story_skips_redundant_analytics_sweep():
     assert marker in block
     assert skip in block
     assert "Analytics sync skipped: dashboard story is already locked" in block
+
+
+def test_active_production_stages_are_distinct_from_stale_qc():
+    source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("def run_robot(")
+    end = source.index("\nif __name__ == "__main__":", start)
+    block = source[start:end]
+    assert "status='RUNNING'" in block
+    assert "status='WAITING_SCRIPT_REVIEW'" in block
+    assert "status='WAITING_VISUAL_REVIEW'" in block
+    assert "WHERE status = 'RUNNING' AND date_used < ?" in block
+    assert "WHERE video_id = 'PENDING_QC' AND date_used < ?" not in block
