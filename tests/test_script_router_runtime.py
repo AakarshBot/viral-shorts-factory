@@ -38,11 +38,12 @@ def test_story_source_sufficiency_is_not_a_raw_character_cutoff():
     assert "enough_words" in result["checks"]
 
 
-def test_duration_rewrite_contract_passes_the_actual_previous_draft():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert 'duration_story["previous_script"]' in source
-    assert "PREVIOUS DRAFT TO TIGHTEN:" in source
+def test_duration_compression_contract_uses_the_actual_validated_draft():
+    source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
+    assert "def tighten_script_for_duration_once(" in source
+    assert "PREVIOUS VALIDATED SCRIPT:" in source
     assert "Preserve every supported essential fact" in source
+    assert "the central hook, editorial angle and factual order" in source
 
 
 def test_duration_fallbacks_receive_the_previous_draft_too():
@@ -85,17 +86,16 @@ def test_primary_writer_contains_freshfeed_selection_context():
     assert "rivalry_signal" in source
 
 
-
 def test_duration_rewrite_uses_run_robot_language_config():
-    from pathlib import Path
+    source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
+    assert "def tighten_script_for_duration_once(" in source
+    assert "language_cfg," in source
+    assert 'language_cfg.get("script_instruction")' in source
+    assert "Language: {language_instruction}" in source
 
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "duration_story, lang_cfg, genre_key=cat_choice" in source
-    assert "duration_story, language_cfg, genre_key=cat_choice" not in source
 
 def test_duration_compression_is_a_single_lightweight_pass():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "tighten_script_for_duration_once(" in source
     assert "write_script(\n                story_payload" not in source
     assert 'duration_story["research_evidence_pack"]' not in source
-
