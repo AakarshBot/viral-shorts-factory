@@ -253,4 +253,5 @@ def test_cricket_worthiness_is_not_satisfied_by_routine_headline_alone():
     }
 
     assert _cricket_story_worthiness_score(strong) > _cricket_story_worthiness_score(routine)
+    assert _cricket_story_worthiness_pass(strong, minimum_score=5.0) is True
     assert _cricket_story_worthiness_pass(routine, minimum_score=5.0) is False
