@@ -1663,7 +1663,7 @@ def test_canonical_manual_entity_anchor_normalizes_named_team(monkeypatch):
 
 
 
-def test_manual_pool_uses_ten_image_target_per_query(monkeypatch):
+def test_manual_pool_uses_ten_image_target_overall(monkeypatch):
     image_sets = {}
     for query_index, target in enumerate((10, 7, 5), 1):
         values = []
@@ -1711,8 +1711,8 @@ def test_manual_pool_uses_ten_image_target_per_query(monkeypatch):
         allow_auto_backfill=False,
     )
     assert [row["target"] for row in result["query_stats"]] == [4, 3, 3]
-    assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
-    assert len(result["assets"]) == 22
+    assert [row["verified"] for row in result["query_stats"]] == [4, 3, 3]
+    assert len(result["assets"]) == 10
 
 
 def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
