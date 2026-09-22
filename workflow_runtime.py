@@ -15,6 +15,7 @@ from db_architecture import migrate_vault, update_run_record
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
 MAX_DISCOVERY_CANDIDATES = 28
+_PROCESS_PRODUCTION_LOCK = threading.Lock()
 
 
 def _run_production_runner(bot, web_config: Dict[str, Any]):
@@ -196,19 +197,28 @@ class WorkflowController:
         selected_story = _validate_selected_story(selected_story)
         if self.state.thread_alive:
             return
-        self.reset()
-        config = dict(web_config)
-        config = self._prepare_production_config(config)
-        self._install_production_wrappers()
-        with self._lock:
-            self.state.selected_story = dict(selected_story)
-            self.state.run_id = datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")
-            self.state.stage = "research"
-            self.state.percent = 16
-            self.state.message = "Researching multiple sources for the selected story…"
-            self.state.thread_alive = True
-            self.state.completed = False
-            self.state.error = ""
+        if not _PROCESS_PRODUCTION_LOCK.acquire(blocking=False):
+            raise RuntimeError(
+                "Another production run is already active in this host process. "
+                "Wait for it to finish before starting another run."
+            )
+
+        try:
+            self.reset()
+            config = dict(web_config)
+            config = self._prepare_production_config(config)
+            self._install_production_wrappers()
+            with self._lock:
+                self.state.selected_story = dict(selected_story)
+                self.state.run_id = datetime.now(timezone.utc).strftime(
+                    "run-%Y%m%d-%H%M%S-%f"
+                )
+                self.state.stage = "research"
+                self.state.percent = 16
+                self.state.message = "Researching multiple sources for the selected story…"
+                self.state.thread_alive = True
+                self.state.completed = False
+                self.state.error = ""
 
         if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
             config["format_mode"] = "cricket"
@@ -312,8 +322,17 @@ class WorkflowController:
                     pass
                 with self._lock:
                     self.state.thread_alive = False
+                _PROCESS_PRODUCTION_LOCK.release()
 
-        threading.Thread(target=worker, name="viral-shorts-production", daemon=True).start()
+        try:
+            threading.Thread(
+                target=worker,
+                name="viral-shorts-production",
+                daemon=True,
+            ).start()
+        except Exception:
+            _PROCESS_PRODUCTION_LOCK.release()
+            raise
 
     def upload_manual(
         self,
