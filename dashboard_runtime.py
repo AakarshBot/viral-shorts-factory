@@ -787,7 +787,10 @@ class DashboardWorkflowController(WorkflowController):
 
         self._ensure_manual_gate_state()
 
-        run_robot = getattr(self.bot, "run_robot", None)
+        run_robot = (
+            getattr(self.bot, "_vsf_canonical_run_robot", None)
+            or getattr(self.bot, "run_robot", None)
+        )
         namespace = getattr(run_robot, "__globals__", None)
         if not isinstance(namespace, dict):
             return
