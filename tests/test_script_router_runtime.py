@@ -54,3 +54,30 @@ def test_script_router_reuses_existing_evidence_pack():
     source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
     assert "Reusing existing evidence pack." in source
     assert "No second research pass" in source
+
+
+def test_script_validation_does_not_require_visual_search_metadata():
+    from script_runtime import validate_content_density
+
+    script = {
+        "editorial_angle": "The result explains the immediate change and why it matters.",
+        "script": [
+            {"voiceover": "India were called arrogant after the latest cricket clash.", "narrative_role": "hook"},
+            {"voiceover": "The comment triggered a direct response and put the dispute back in focus.", "narrative_role": "consequence"},
+        ],
+    }
+
+    valid, reason = validate_content_density(
+        script,
+        {},
+        "regular",
+        require_visual_metadata=False,
+    )
+    assert valid, reason
+
+
+def test_primary_writer_contains_freshfeed_selection_context():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "FRESHFEED SELECTION CONTEXT" in source
+    assert "pattern_reasons" in source
+    assert "rivalry_signal" in source
