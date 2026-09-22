@@ -1790,6 +1790,13 @@ def upload_to_youtube(
         tags = tags[:30]
 
         privacy = "private" if publish_mode == "private" else "public"
+        if privacy == "public" and bool(
+            (script_data or {}).get("public_publish_blocked")
+        ):
+            raise RuntimeError(
+                "Public upload is blocked because the script pipeline marked this "
+                "production run as private-only."
+            )
         body = {
             "snippet": {
                 "title": title[:100],
