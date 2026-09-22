@@ -1647,10 +1647,29 @@ def test_legacy_learning_metrics_ignore_non_publishable_rows(tmp_path):
 def test_dashboard_workflow_is_compact_and_uses_progressive_disclosure():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert "workflow-shell" in source
-    assert "workflow-node done" in source
-    assert "workflow-node next" in source
-    assert 'st.popover("⚙ Production settings", width="stretch")' in source
+    assert 'node_state = "done"' in source
+    assert 'node_state = "next"' in source
+    assert 'st.popover("⚙ Settings", width="stretch")' in source
     assert "apply_dashboard_theme()" in source
+
+
+def test_dashboard_workflow_stage_definition_is_centralized():
+    dashboard_source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert "LIVE_STAGE_SPEC = (" in dashboard_source
+    assert '("Headlines", "discovery")' not in app_source
+    assert '"discovery": (0, 14)' not in app_source
+    assert "for item in LIVE_STAGE_SPEC" in app_source
+
+
+def test_dashboard_upload_success_state_persists_youtube_outcome():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    panel_start = source.index("def render_upload_panel")
+    panel = source[panel_start:source.index("\ndef _perform_upload", panel_start)]
+    assert "upload_notice_kind" in panel
+    assert "visibility_blocked" in panel
+    assert "YouTube kept the video private" in panel
+    assert "The video already exists; do not retry this production run." not in panel
 
 
 def test_dashboard_shows_video_id_after_upload():
