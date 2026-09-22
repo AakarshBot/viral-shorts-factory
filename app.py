@@ -497,7 +497,6 @@ def initialise_runtime() -> None:
             pass
     bind_dashboard_patches(ultimate_bot)
 
-
 def _channel_options() -> list[str]:
     configured = os.getenv("CHANNEL_OPTIONS", "").strip()
     if configured:        values = [item.strip() for item in configured.split(",") if item.strip()]
@@ -997,8 +996,7 @@ def render_live_navigation() -> Dict[str, Any]:
                 key="language_label",
             )
 
-        channels = _channel_options()
-        current_channel = st.session_state.get("selected_channel") or channels[0]
+        channels = _channel_options()        current_channel = st.session_state.get("selected_channel") or channels[0]
         if current_channel not in channels:
             current_channel = channels[0]
         with columns[1]:
@@ -1498,7 +1496,6 @@ def _render_crop_dialog(
             )
         except (TypeError, ValueError):
             crop_preview = None
-
     if crop_preview is not None:
         st.image(crop_preview, width=280)
 
@@ -1997,8 +1994,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                 f"<div class='release-success-copy'>"
                 f"<div class='release-success-kicker'>RELEASE COMPLETE</div>"
                 f"<div class='release-success-title'>{_ui_html(heading)}</div>"
-                f"<div class='release-success-detail'>{_ui_html(copy)}</div>"
-                f"</div></div>",
+                f"<div class='release-success-detail'>{_ui_html(copy)}</div>"                f"</div></div>",
                 unsafe_allow_html=True,
             )
             st.markdown("<div class='release-id-label'>VIDEO ID</div>", unsafe_allow_html=True)
@@ -2497,8 +2493,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         f"<div class='live-bar'><div class='live-bar-copy'><b>Event radar</b> · "
         f"Showing {start_index + 1}–{start_index + len(visible)} of {total} · "
         f"{event_backed} event-backed · {india_led} India-led</div></div>",
-        unsafe_allow_html=True,
-    )
+        unsafe_allow_html=True,    )
 
     for row_start in range(0, len(visible), 3):
         row = visible[row_start:row_start + 3]
@@ -2910,7 +2905,7 @@ def main() -> None:
 
     if workspace == "Live":
         snapshot = controller.snapshot()
-        render_header("Live")
+        render_header("Live Factory")
         if (
             not st.session_state.get("production_started")
             and not st.session_state.get("candidates")
