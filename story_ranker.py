@@ -749,12 +749,12 @@ def _source_url_from_item(item):
 
 def _clean_source_headline(title, publisher=""):
     """Remove only an exact trailing publisher suffix; keep the raw source headline separately."""
-    clean_title = re.sub(r"\\s+", " ", str(title or "")).strip()
-    clean_publisher = re.sub(r"\\s+", " ", str(publisher or "")).strip()
+    clean_title = re.sub(r"\s+", " ", str(title or "")).strip()
+    clean_publisher = re.sub(r"\s+", " ", str(publisher or "")).strip()
     if not clean_title or not clean_publisher:
         return clean_title
     suffix = re.compile(
-        r"\\s*(?:[-–—|:]\\s*)" + re.escape(clean_publisher) + r"\\s*$",
+        r"\s*(?:[-–—|:]\s*)" + re.escape(clean_publisher) + r"\s*$",
         re.IGNORECASE,
     )
     stripped = suffix.sub("", clean_title).strip(" -–—|:")
