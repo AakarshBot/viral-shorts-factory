@@ -959,6 +959,8 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
         if age > 48.0 and _event_momentum_score(story) < 0.5:
             story["discovery_rejection"] = "Stale event without recent development"
             continue
+        if not _source_page_pass(story):
+            continue
         url = _canonical_url(_source_url_from_item(story))
         if url and url in seen_urls:
             continue
@@ -971,6 +973,8 @@ def _cheap_filter(stories, max_items=30, max_age_hours=72):
     survivors.sort(
         key=lambda item: (
             _freshness_score(item),
+            _niche_opportunity_score(item),
+            _topic_actionability(item),
             -max(0.0, _safe_float(item.get("age_hours")) or 9999.0),
             _safe_float(item.get("event_corroboration_score")) or 0.0,
             _source_quality(item),
@@ -1139,6 +1143,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         target_language,
     )
     niche = _apply_sports_niche_bonus(story, target_category)
+    niche_opportunity = _niche_opportunity_score(story)
     originality = _safe_float(story.get("originality_score")) or 5.0
     event_momentum = _event_momentum_score(story)
     independent_corroboration = _independent_corroboration_score(story)
@@ -1195,6 +1200,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + channel_history * 0.70
         + channel_fit * 0.45
         + niche * 0.20
+        + niche_opportunity * 0.55
         + (0.60 if discovery_gap else 0.0)
         - risk * 0.55
     )
@@ -1216,6 +1222,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     story["social_signal"] = round(social, 2)
     story["google_trends_signal"] = round(google_trend, 2)
     story["sports_niche_bonus"] = niche
+    story["niche_opportunity_score"] = niche_opportunity
     story["discovery_dimensions"] = {
         "importance": round(importance, 2),
         "audience_potential": round(audience, 2),
@@ -1234,6 +1241,7 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "channel_history": round(history, 2),
         "channel_fit": round(channel_fit, 2),
         "channel_fit_samples": channel_fit_samples,
+        "niche_opportunity": round(niche_opportunity, 2),
         "originality": round(originality, 2),
         "visual_potential": round(visual, 2),
         "safety_risk": risk,
@@ -1320,6 +1328,8 @@ def _discovery_portfolio_pass(story):
     momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
     actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
+    if not _source_page_pass(story):
+        return False
     if not _headline_noise_pass(story):
         return False
     if freshness < 1.0 and momentum < 1.0:
@@ -1369,6 +1379,8 @@ def _candidate_reason(story):
         parts.append("strong editorial importance")
     if _safe_float(dimensions.get("audience_potential")) >= 7:
         parts.append("strong audience-interest signal")
+    if _safe_float(dimensions.get("niche_opportunity")) >= 6:
+        parts.append("specific niche opportunity")
     if _safe_float(dimensions.get("shorts_viability")) >= 7:
         parts.append("strong Shorts potential")
     if _safe_float(dimensions.get("momentum")) >= 5:
@@ -1573,6 +1585,20 @@ def _dedupe_discovery_queries(queries, max_items):
     return output
 
 
+NICHE_DISCOVERY_QUERIES = {
+    "entertainment": "(regional cinema OR indie film OR casting OR first look OR soundtrack OR streaming rights OR debut director)",
+    "national_global_affairs": "(district OR state-level OR municipal OR local regulator OR court order OR infrastructure project OR university OR regional industry)",
+    "viral_phenomenon": "(creator OR microtrend OR emerging meme OR online community OR platform feature OR local internet trend OR niche community)",
+    "sports": "(women OR domestic OR academy OR junior OR U19 OR U23 OR uncapped OR debut OR club OR state league OR emerging)",
+    "sports_stories_of_day": "(women's cricket OR domestic cricket OR uncapped OR debut OR academy OR U19 OR U23 OR Ranji OR emerging player OR selection)",
+    "technology": "(open source OR developer tool OR benchmark OR research paper OR prototype OR security patch OR startup OR niche gadget)",
+    "tech_reviews": "(indie gadget OR niche device OR long-tail smartphone OR accessory launch OR developer hardware OR specialized tech)",
+    "business_finance": "(startup funding OR SME OR regional company OR niche sector OR small business OR local IPO OR early-stage company)",
+    "health_lifestyle": "(new study OR rare disease OR public health program OR nutrition study OR fitness research OR specialist medicine)",
+    "regional_state_news": "(Hyderabad OR Telangana OR Andhra Pradesh) (university OR local startup OR civic project OR district OR infrastructure OR culture OR state-level)"
+}
+
+
 INDIA_SIGNAL_TERMS = {
     "india", "indian", "delhi", "mumbai", "hyderabad", "bengaluru", "bangalore",
     "chennai", "kolkata", "pune", "ahmedabad", "telangana", "andhra", "amaravati",
@@ -1614,7 +1640,112 @@ NON_EVENT_HEADLINE_PATTERNS = (
     r"\bthings to know\b",
     r"\btop \d+\b",
     r"\bopinion\b",
+    r"\btop headlines?\b",
+    r"\b(?:today'?s|latest) headlines?\b",
+    r"\b(?:today'?s|latest) news\b",
+    r"\bnews roundup\b",
+    r"\bnews digest\b",
+    r"\bdaily roundup\b",
+    r"\bweekly roundup\b",
+    r"\bnews briefing\b",
+    r"\bmorning briefing\b",
+    r"\bheadlines?\s*[:|-]\s*(?:top|latest|today)\b",
 )
+
+
+NON_ARTICLE_PATH_PATTERNS = (
+    r"^/$",
+    r"/(?:headlines?|home|homepage)(?:/|$)",
+    r"/(?:section|sections|topic|topics|category|categories)(?:/|$)",
+    r"/(?:tag|tags|search|results?|archive)(?:/|$)",
+    r"/(?:page|p)/\d+(?:/|$)",
+    r"/(?:latest|live|live-updates?|liveblog)(?:/|$)",
+    r"/(?:gallery|galleries|photos?|photo|videos?)(?:/|$)",
+)
+
+
+NICHE_OPPORTUNITY_TERMS = {
+    "uncapped", "debut", "academy", "domestic", "club", "regional", "local",
+    "independent", "indie", "emerging", "junior", "u19", "u20", "u21", "u23",
+    "women", "women's", "women’s", "youth", "reserve", "challenger", "minor",
+    "state league", "state-level", "district", "municipal", "university",
+    "college", "campus", "startup", "smaller", "open source", "developer",
+    "benchmark", "prototype", "pilot", "researchers", "study", "rare",
+    "specialist", "creator", "microtrend", "community", "niche",
+    "small business", "sme", "regional cinema", "streaming rights",
+}
+
+MAJOR_EVENT_TERMS = {
+    "war", "conflict", "election", "president", "presidential", "prime minister",
+    "government", "parliament", "summit", "ceasefire", "earthquake", "hurricane",
+    "cyclone", "tsunami", "terror attack", "bombing", "mass shooting", "nationwide",
+    "global crisis", "market crash", "central bank", "interest rate", "billion",
+}
+
+
+def _source_page_pass(story):
+    """Reject index/roundup/search pages before they enter the topic portfolio."""
+    url = str(story.get("url") or story.get("link") or "").strip()
+    if not url:
+        return True
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return True
+
+    host = parsed.netloc.lower().removeprefix("www.")
+    path = (parsed.path or "/").rstrip("/") or "/"
+    if host in {"news.google.com", "google.com"} and path.startswith("/rss"):
+        # Google News feed transport URLs are acceptable discovery provenance;
+        # the headline itself is still evaluated for event quality below.
+        return True
+
+    normalized_path = path.casefold()
+    if any(re.search(pattern, normalized_path) for pattern in NON_ARTICLE_PATH_PATTERNS):
+        story["discovery_rejection"] = "Non-article/index source page"
+        story["source_page_pass"] = False
+        return False
+
+    # A bare domain or very shallow homepage URL is a source, not a story.
+    segments = [segment for segment in path.split("/") if segment]
+    if len(segments) <= 1 and not story.get("event_id") and not story.get("event_evidence"):
+        story["discovery_rejection"] = "Publisher homepage instead of an article"
+        story["source_page_pass"] = False
+        return False
+
+    story["source_page_pass"] = True
+    return True
+
+
+def _niche_opportunity_score(story):
+    """Reward specific, underserved story angles without rewarding low-quality trivia."""
+    title = _clean(story.get("title") or "")
+    text = _text_blob(story)
+    combined = f"{title} {text}"
+    niche_hits = sum(
+        1 for term in NICHE_OPPORTUNITY_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+    entities = len(_topic_entities(story)) if "event_entities" in story else 0
+    actions = len(story.get("event_actions") or _event_actions(title))
+    audience = _safe_float(story.get("audience_potential_score")) or 0.0
+    shorts = _safe_float(story.get("shorts_viability_score")) or 0.0
+    source_count = int(story.get("event_source_count") or 0)
+    major_hits = sum(
+        1 for term in MAJOR_EVENT_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", combined)
+    )
+
+    score = min(4.0, niche_hits * 0.8)
+    score += 2.0 if entities >= 2 else (1.0 if entities == 1 else 0.0)
+    score += 1.0 if actions else 0.0
+    score += min(1.5, shorts * 0.15)
+    score += min(1.5, audience * 0.15)
+    if source_count and source_count <= 4:
+        score += 1.0
+    if major_hits >= 2 and source_count >= 4:
+        score -= 3.0
+    return _clamp_score(score)
 
 
 def _headline_noise_pass(story):
@@ -1697,13 +1828,18 @@ def _build_discovery_google_queries(
     genre_cfg = genre_cfg if isinstance(genre_cfg, dict) else {}
     candidates = []
     rss_query = _google_news_query_from_url(selected_rss)
+    niche_query = str(
+        NICHE_DISCOVERY_QUERIES.get(str(genre_key or "").strip(), "")
+    ).strip()
     india_query = str(genre_cfg.get("india_gnews_q") or "").strip()
     global_query = str(genre_cfg.get("global_gnews_q") or "").strip()
 
     # When explicit India + global lanes exist, the broad category query is
     # usually redundant. Keep it only when a lane is missing, or when the caller
     # supplied a targeted trend/custom query that benefits from the extra context.
-    values = [india_query, trend_keyword, custom_gnews_q, global_query]
+    # Put the niche lane before broad trend signals so the bounded query
+    # budget cannot crowd it out with generic/high-volume news.
+    values = [custom_gnews_q, niche_query, india_query, trend_keyword, global_query]
     has_dual_geo_lanes = bool(india_query and global_query)
     base_query = str(genre_cfg.get("gnews_q") or "").strip()
     if not has_dual_geo_lanes or str(trend_keyword or "").strip() or str(custom_gnews_q or "").strip():
