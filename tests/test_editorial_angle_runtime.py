@@ -42,3 +42,13 @@ def test_editorial_angle_falls_back_to_consequence_lens_for_concrete_changes():
     }
     result = choose_editorial_angle(story, "regular")
     assert result["type"] == "why_it_matters_led"
+
+
+
+def test_classify_hook_style_prefers_the_actual_opening_family():
+    from script_runtime import classify_hook_style
+
+    assert classify_hook_style("Did beating India actually ruin Pakistan cricket?") == "Curiosity Question"
+    assert classify_hook_style("Former batter calls India arrogant after the clash") == "Conflict / Accusation"
+    assert classify_hook_style("Rashid Khan says the young star is god-gifted") == "Bold Quote / Statement"
+    assert classify_hook_style("India clinches its 200th T20I win") == "Result / Record"
