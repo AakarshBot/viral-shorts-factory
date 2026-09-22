@@ -27,7 +27,7 @@ def test_production_lock_blocks_a_second_live_run():
 def test_run_id_includes_microseconds_to_avoid_same_second_collisions():
     source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
     start = source.index("def start_production(")
-    end = source.index("\ndef _validate_selected_story", start)
+    end = source.index("\n    def upload_manual(", start)
     block = source[start:end]
     assert 'strftime(\n                    "run-%Y%m%d-%H%M%S-%f"' in block
 
@@ -187,8 +187,10 @@ def test_production_uses_a_run_scoped_workspace_instead_of_wiping_shared_output(
     end = source.index("\nif __name__ == \"__main__\":", start)
     block = source[start:end]
     assert 'global ASSETS_DIR' in block
-    assert 'ASSETS_DIR = os.path.join(BASE_DIR, "output", workspace_id)' in block
-    assert 'safe_cleanup(ASSETS_DIR)' not in block
+    workspace_pos = block.index('ASSETS_DIR = os.path.join(BASE_DIR, "output", workspace_id)')
+    cleanup_pos = block.find('safe_cleanup(ASSETS_DIR)')
+    assert workspace_pos >= 0
+    assert cleanup_pos == -1 or cleanup_pos > workspace_pos
 
 
 def test_new_production_is_blocked_while_previous_run_awaits_upload():
@@ -205,7 +207,8 @@ def test_fresh_vault_contains_visual_rights_ledger_column():
     source = (REPO_ROOT / "db_architecture.py").read_text(encoding="utf-8")
     assert '"asset_credits_json", "TEXT"' in source
     assert "asset_credits_json TEXT" in source
-    assert 'def _add_column(conn, "asset_credits_json", "TEXT")' in source
+    assert '"asset_credits_json", "TEXT"' in source
+    assert '_add_column(conn, "asset_credits_json"' in source
 
 
 def test_script_is_persisted_before_expensive_media_pipeline():

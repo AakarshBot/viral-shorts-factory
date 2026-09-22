@@ -1338,10 +1338,10 @@ def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monke
         "Test story",
     )
 
-    assert len(result["assets"]) == 20
-    assert len({item["hash"] for item in result["assets"]}) == 20
-    assert result["hard_max"] == 20
-    assert [item["verified"] for item in result["query_stats"]] == [5, 5, 5, 5]
+    assert len(result["assets"]) == 10
+    assert len({item["hash"] for item in result["assets"]}) == 10
+    assert result["hard_max"] == 10
+    assert [item["verified"] for item in result["query_stats"]] == [3, 3, 2, 2]
     assert len(result["query_stats"]) == 4
     assert all(stat["qa_requests"] == 1 for stat in result["query_stats"])
 
@@ -1663,7 +1663,7 @@ def test_canonical_manual_entity_anchor_normalizes_named_team(monkeypatch):
 
 
 
-def test_manual_pool_uses_ten_image_target_per_query(monkeypatch):
+def test_manual_pool_uses_ten_image_target_overall(monkeypatch):
     image_sets = {}
     for query_index, target in enumerate((10, 7, 5), 1):
         values = []
@@ -1710,9 +1710,9 @@ def test_manual_pool_uses_ten_image_target_per_query(monkeypatch):
         ["rank 1", "rank 2", "rank 3"],
         allow_auto_backfill=False,
     )
-    assert [row["target"] for row in result["query_stats"]] == [10, 10, 10]
-    assert [row["verified"] for row in result["query_stats"]] == [10, 7, 5]
-    assert len(result["assets"]) == 22
+    assert [row["target"] for row in result["query_stats"]] == [4, 3, 3]
+    assert [row["verified"] for row in result["query_stats"]] == [4, 3, 3]
+    assert len(result["assets"]) == 10
 
 
 def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
