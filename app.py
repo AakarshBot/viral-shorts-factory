@@ -980,7 +980,6 @@ def render_live_navigation() -> Dict[str, Any]:
         return build_config()
 
     with st.popover("⚙ Production settings", width="stretch"):
-
         st.caption("Optional release settings.")
         columns = st.columns(3, gap="medium")
 
