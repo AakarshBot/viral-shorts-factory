@@ -912,24 +912,13 @@ def render_live_navigation() -> Dict[str, Any]:
 
     if live_format in {"Deep Dive", "Top 5"}:
         path_parts.append(topic_label)
-        st.markdown(
-            f"<div class='path-summary'>"
-            f"<div><span class='path-check'>✓</span><span class='path-label'>{_ui_html(live_format)}</span></div>"
-            f"<div class='path-summary-action' id='live-path-change'></div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        path_controls = st.columns([6.5, 1], gap="small")
-        with path_controls[0]:
-            st.caption("Format selected · choose the next lane below.")
-        with path_controls[1]:
-            if st.button("Change", key="change_live_format", width="stretch"):
-                _reset_live_navigation()
-                st.rerun()
-
         format_mode = "top5" if live_format == "Top 5" else "regular"
         options = category_options(format_mode, live_format)
         if not topic_label:
+            st.markdown(
+                "<div class='path-summary'><span class='path-check'>✓</span><span class='path-label'>" + _ui_html(live_format) + "</span><span class='path-summary-copy'>Format selected</span></div>",
+                unsafe_allow_html=True,
+            )
             st.markdown(
                 "<div class='choice-kicker'>02 · Topic</div>",
                 unsafe_allow_html=True,
@@ -987,21 +976,6 @@ def render_live_navigation() -> Dict[str, Any]:
                 st.rerun()
         else:
             path_parts.append(sports_mode)
-            st.markdown(
-                f"<div class='path-summary'>"
-                f"<div><span class='path-check'>✓</span><span class='path-label'>Sports</span>"
-                f"<span class='path-separator'>·</span><span class='path-check'>✓</span><span class='path-label'>{_ui_html(sports_mode)}</span></div>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-            path_controls = st.columns([6.5, 1], gap="small")
-            with path_controls[0]:
-                st.caption("Sports lane selected · choose the scope when required.")
-            with path_controls[1]:
-                if st.button("Change", key="change_live_sports", width="stretch"):
-                    _reset_live_navigation()
-                    st.rerun()
-
             if sports_mode == "Cricket":
                 if not cricket_scope:
                     st.markdown(
@@ -1023,14 +997,6 @@ def render_live_navigation() -> Dict[str, Any]:
                         st.rerun()
                 else:
                     path_parts.append(cricket_scope)
-                    st.markdown(
-                        f"<div class='path-summary'>"
-                        f"<div><span class='path-check'>✓</span><span class='path-label'>Sports</span>"
-                        f"<span class='path-separator'>·</span><span class='path-check'>✓</span><span class='path-label'>Cricket</span>"
-                        f"<span class='path-separator'>·</span><span class='path-check'>✓</span><span class='path-label'>{_ui_html(cricket_scope)}</span></div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
 
     final_path_ready = (
         bool(topic_label) if live_format in {"Deep Dive", "Top 5"} else
@@ -1039,8 +1005,9 @@ def render_live_navigation() -> Dict[str, Any]:
     if final_path_ready:
         st.session_state["live_path_ready"] = True
         st.markdown(
-            f"<div class='path-ready'><span class='path-ready-dot'>✓</span>"
-            f"<span><b>Ready</b> · {' · '.join(_ui_html(part) for part in path_parts if part)}</span>"
+            f"<div class='path-ready'>"
+            f"<span class='path-ready-dot'>✓</span>"
+            f"<span class='path-ready-copy'><b>Path ready</b><span class='path-ready-value'>{' · '.join(_ui_html(part) for part in path_parts if part)}</span></span>"
             f"</div>",
             unsafe_allow_html=True,
         )
