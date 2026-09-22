@@ -1071,21 +1071,51 @@ def _fact_source_stage(stories, max_items=8):
             float(corroboration) * 2.5 + _source_quality(story) + article_bonus,
         )
         story["fact_source_pass"] = bool(domains or publishers) and (
-            _source_quality(story) >= 1.0 or corroboration >= 2
+            _source_quality(story) >= 1.0
+            or corroboration >= 2
+            or (
+                _niche_opportunity_score(story) >= 5.0
+                and _story_substance_pass(story)
+            )
         )
 
     passed = [story for story in stories if story.get("fact_source_pass")]
     for story in stories:
         if not story.get("fact_source_pass"):
             story["discovery_rejection"] = "Insufficient source support"
+
     passed.sort(
         key=lambda item: (
             _safe_float(item.get("fact_source_score")) or 0.0,
+            _niche_opportunity_score(item),
             _freshness_score(item),
         ),
         reverse=True,
     )
-    return passed[:max_items]
+    limit = max(0, int(max_items or 0))
+    if len(passed) <= limit:
+        return passed
+
+    niche_target = min(
+        len([item for item in passed if _niche_opportunity_score(item) >= 5.0]),
+        max(1, int(math.ceil(limit * 0.25))) if limit >= 5 else 0,
+    )
+    niche = [
+        item for item in passed
+        if _niche_opportunity_score(item) >= 5.0
+    ][:niche_target]
+    niche_keys = {id(item) for item in niche}
+    core = [item for item in passed if id(item) not in niche_keys]
+    balanced = niche + core[: max(0, limit - len(niche))]
+    balanced.sort(
+        key=lambda item: (
+            _safe_float(item.get("fact_source_score")) or 0.0,
+            _niche_opportunity_score(item),
+            _freshness_score(item),
+        ),
+        reverse=True,
+    )
+    return balanced[:limit]
 
 
 def _originality_stage(stories, used_topics, max_items=5):
