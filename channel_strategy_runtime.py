@@ -278,11 +278,17 @@ def score_story(story: dict) -> dict:
         question=question,
         scope_score=scope_score,
     )
+    freshfeed_priority_pattern = bool(
+        (marquee or rivalry or conflict)
+        and (conflict or quote or quoted_title or surprise or question or result)
+        and scope_score >= 5.5
+    )
 
     return {
         "score": round(max(0.0, min(10.0, score)), 2),
         "freshfeed_pattern_score": freshfeed_pattern_score,
         "freshfeed_scope_score": scope_score,
+        "freshfeed_priority_pattern": freshfeed_priority_pattern,
         "freshfeed_pattern_reasons": pattern_reasons,
         "marquee_person_hits": marquee,
         "quoted_title": quoted_title,
@@ -300,10 +306,13 @@ def candidate_gate(story_signal: dict, hook_potential: float, importance: float)
         return True, ""
     signal = float(story_signal.get("score") or 0.0)
     pattern = float(story_signal.get("freshfeed_pattern_score") or 0.0)
+    priority_pattern = bool(story_signal.get("freshfeed_priority_pattern"))
     strong_hook = bool(story_signal.get("strong_hook"))
     routine_or_admin = bool(story_signal.get("routine_or_admin"))
     if routine_or_admin and not strong_hook and pattern < 4.5 and float(hook_potential or 0.0) < 5.5:
         return False, "Low-value routine/admin story for channel strategy"
+    if priority_pattern:
+        return True, ""
     if pattern < 2.75 and signal < 2.25 and float(hook_potential or 0.0) < 4.5 and float(importance or 0.0) < 7.0:
         return False, "Weak channel-specific hook signal"
     return True, ""
