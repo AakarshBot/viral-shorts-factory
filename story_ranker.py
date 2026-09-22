@@ -14,6 +14,7 @@ import requests
 
 from event_discovery_runtime import fetch_gdelt_articles, cluster_news_events, _event_actions
 from script_runtime import classify_hook_style
+from channel_strategy_runtime import candidate_gate, score_story as score_channel_strategy
 
 
 SAFETY_BLOCKLIST = {
@@ -1561,25 +1562,37 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     # candidate_score remains a single ranking score, but its components are
     # now explicitly separated so audience interest does not masquerade as
     # factual importance and correlated coverage signals are capped.
+    channel_strategy = score_channel_strategy(story)
+    channel_signal = _safe_float(channel_strategy.get("score")) or 0.0
+
+    # Channel history says the opening promise is the decisive packaging signal.
+    # Keep evidence, freshness and source quality intact, but let hookability and
+    # channel fit materially influence selection.
     final_score = (
-        importance * 1.55
-        + audience * 1.35 * momentum_weight
-        + shorts_viability * 1.20
-        + shorts_scope * 0.85
-        + topic_actionability * 0.65
-        + originality * 0.45
-        + visual * 0.20
+        importance * 1.25
+        + audience * 1.10 * momentum_weight
+        + shorts_viability * 1.15
+        + shorts_scope * 0.95
+        + hook_potential * 1.35
+        + topic_actionability * 0.55
+        + originality * 0.40
+        + visual * 0.18
         + india_relevance * INDIA_FOCUS_SCORE_WEIGHT
-        + channel_history * 0.70
-        + channel_fit * 0.45
-        + hook_fit * 0.30
-        + niche * 0.20
-        + niche_opportunity * 0.55
+        + channel_history * 0.60
+        + channel_fit * 0.40
+        + hook_fit * 0.25
+        + channel_signal * 1.10
+        + niche * 0.18
+        + niche_opportunity * 0.45
         + cricket_worthiness * (0.90 if _clean(target_category) == "sports_stories_of_day" else 0.0)
-        + (0.60 if discovery_gap else 0.0)
-        - risk * 0.55
+        + (0.50 if discovery_gap else 0.0)
+        - risk * 0.60
     )
     story["candidate_score"] = round(final_score, 3)
+    story["freshfeed_channel_fit_score"] = channel_signal
+    story["freshfeed_channel_fit_reasons"] = channel_strategy.get("reasons", [])
+    story["freshfeed_channel_strong_hook"] = bool(channel_strategy.get("strong_hook"))
+    story["freshfeed_channel_strategy_version"] = channel_strategy.get("version", "")
     story["event_momentum_score"] = event_momentum
     story["independent_corroboration_score"] = independent_corroboration
     story["historical_topic_signal"] = round(history, 3)
@@ -1610,6 +1623,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "shorts_viability": round(shorts_viability, 2),
         "shorts_scope": round(shorts_scope, 2),
         "hook_potential": round(hook_potential, 2),
+        "channel_fit": round(channel_signal, 2),
+        "channel_fit_reasons": channel_strategy.get("reasons", []),
         "topic_actionability": round(topic_actionability, 2),
         "india_relevance": round(india_relevance, 2),
         "momentum": round(momentum, 2),
@@ -1679,7 +1694,29 @@ def _candidate_quality_pass(story):
     scope = _safe_float(dimensions.get("shorts_scope")) or 0.0
     corroboration = _safe_float(dimensions.get("corroboration")) or 0.0
     source_quality = _safe_float(dimensions.get("source_quality")) or 0.0
+    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
+    importance = _safe_float(dimensions.get("importance")) or 0.0
+    channel_signal = _safe_float(dimensions.get("channel_fit")) or 0.0
     score = _safe_float(story.get("candidate_score")) or 0.0
+
+    channel_ok, channel_reason = candidate_gate(
+        {
+            "score": channel_signal,
+            "strong_hook": bool(story.get("freshfeed_channel_strong_hook")),
+            "routine_or_admin": bool(
+                story.get("freshfeed_channel_fit_reasons")
+                and any(
+                    reason in story.get("freshfeed_channel_fit_reasons", [])
+                    for reason in ("routine/service penalty", "administrative-news penalty")
+                )
+            ),
+        },
+        hook,
+        importance,
+    )
+    if not channel_ok:
+        story["discovery_rejection"] = channel_reason
+        return False
 
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.5):
         return False
@@ -1788,6 +1825,8 @@ def _candidate_reason(story):
         parts.append("strong Shorts potential")
     if _safe_float(dimensions.get("hook_potential")) >= 7:
         parts.append("strong scroll-stop hook potential")
+    if _safe_float(dimensions.get("channel_fit")) >= 6:
+        parts.append("strong FreshFeed channel fit")
     if _safe_float(dimensions.get("momentum")) >= 5:
         parts.append("strong current momentum")
     if _safe_float(dimensions.get("event_momentum")) >= 4:
