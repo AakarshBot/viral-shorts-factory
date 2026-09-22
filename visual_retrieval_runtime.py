@@ -48,7 +48,7 @@ MAX_CANDIDATES_PER_SOURCE = max(1, min(12, int(os.getenv("VISUAL_CANDIDATES_PER_
 MAX_ENTITY_BANK_PER_QUERY = max(10, min(20, int(os.getenv("VISUAL_ENTITY_BANK_PER_QUERY", "20"))))
 INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
 MANUAL_POOL_MAX = max(10, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))))
-MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "20"))))
+MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "10"))))
 AUTO_POOL_QUERY_LIMIT = max(1, min(4, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "4"))))
 MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
 MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
@@ -841,9 +841,12 @@ def collect_manual_visual_pool(
 
     parsed_queries = [str(item or "").strip() for item in (manual_queries or []) if str(item or "").strip()]
     default_max = sum(_manual_query_target(index) for index in range(1, len(parsed_queries) + 1))
-    requested_max = max(1, int(pool_max)) if pool_max is not None else max(1, default_max or MANUAL_POOL_MAX)
     if pool_target is not None:
-        requested_max = max(requested_max, int(pool_target))
+        requested_max = max(1, int(pool_target))
+    elif pool_max is not None:
+        requested_max = max(1, min(int(pool_max), MANUAL_POOL_MAX))
+    else:
+        requested_max = min(MANUAL_POOL_TARGET, default_max or MANUAL_POOL_TARGET)
 
     used_hashes = set(used_hashes or set())
     _ = used_source_pages  # Retained only for compatibility with older callers.
@@ -956,19 +959,35 @@ def collect_manual_visual_pool(
             except TypeError:
                 source_plan = _source_plan(bot, visual_type)
 
-        target = _manual_query_target(query_index)
+        remaining_queries = max(1, len(parsed_queries) - query_index + 1)
+        remaining_slots = max(0, requested_max - len(assets))
+        target = max(
+            1,
+            min(
+                _manual_query_target(query_index),
+                (remaining_slots + remaining_queries - 1) // remaining_queries,
+            ),
+        )
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
         qa_requests = 0
         verified_for_query = 0
 
-        for source_name, fetcher in source_plan:
+        provider_jobs = []
+        for source_index, (source_name, fetcher) in enumerate(source_plan):
             if not callable(fetcher):
                 continue
             source_key = str(source_name or "").strip().casefold()
             if not source_key:
                 continue
+            provider_jobs.append((source_index, str(source_name), fetcher, source_key))
+
+        provider_results = {}
+
+        def _fetch_manual_pool_provider(job):
+            source_index, source_name, fetcher, source_key = job
+            local_used_urls = set(fetch_used_urls)
             cache_key = ("query", source_key, exact_query.casefold())
             raw_data = search_cache.get(cache_key)
             if raw_data is None:
@@ -977,14 +996,14 @@ def collect_manual_visual_pool(
                         fetcher,
                         (
                             exact_query,
-                            fetch_used_urls,
+                            local_used_urls,
                             exact_query,
                             video_title,
                             visual_type,
                             visual_genre,
                             True,
                         ),
-                        str(source_name),
+                        source_name,
                         exact_query,
                     )
                 except Exception as exc:
@@ -994,10 +1013,48 @@ def collect_manual_visual_pool(
                         flush=True,
                     )
                     raw_data = []
-                search_cache[cache_key] = list(_raw_items(raw_data))
-            for data in search_cache.get(cache_key) or []:
+                return source_index, source_name, cache_key, list(_raw_items(raw_data)), local_used_urls
+            return source_index, source_name, cache_key, list(_raw_items(raw_data)), local_used_urls
+
+        if provider_jobs:
+            with ThreadPoolExecutor(
+                max_workers=len(provider_jobs),
+                thread_name_prefix="manual-visual-pool",
+            ) as executor:
+                futures = [
+                    executor.submit(_fetch_manual_pool_provider, job)
+                    for job in provider_jobs
+                ]
+                for future in futures:
+                    (
+                        source_index,
+                        source_name,
+                        cache_key,
+                        raw_items,
+                        local_used_urls,
+                    ) = future.result()
+                    provider_results[source_index] = (
+                        source_name,
+                        cache_key,
+                        raw_items,
+                        local_used_urls,
+                    )
+
+        for source_index, source_name, fetcher, source_key in provider_jobs:
+            (
+                _source_name,
+                cache_key,
+                raw_items,
+                local_used_urls,
+            ) = provider_results.get(
+                source_index,
+                (source_name, ("query", source_key, exact_query.casefold()), [], set()),
+            )
+            search_cache[cache_key] = list(raw_items)
+            fetch_used_urls.update(local_used_urls)
+            for data in raw_items:
                 candidate = _manual_candidate_from_data(
-                    str(source_name),
+                    source_name,
                     data,
                     exact_query,
                     visual_type,
@@ -1007,9 +1064,8 @@ def collect_manual_visual_pool(
                     query_seen_urls,
                     rejected_counts,
                 )
-                if candidate is None:
-                    continue
-                query_candidates.append(candidate)
+                if candidate is not None:
+                    query_candidates.append(candidate)
 
         # Search every available provider before QA so the strongest result can
         # win globally instead of being pre-empted by the first provider.
