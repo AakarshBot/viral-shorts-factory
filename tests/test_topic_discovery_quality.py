@@ -420,4 +420,3 @@ def test_cricket_marquee_quote_outscores_plain_result_for_youtube_fit():
         "event_actions": ["win"],
     }
     assert story_ranker._cricket_story_worthiness_score(quote) > story_ranker._cricket_story_worthiness_score(result)
-}
