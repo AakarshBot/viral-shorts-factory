@@ -1041,8 +1041,16 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
         "- Keep generated titles compact at 55 characters or fewer whenever possible. Prefer a strong factual statement, attributed quote, or curiosity question tied to the story's central tension; never stuff them with schedules, venues, match metadata or hashtags.\n"\
         "- No spoken like/share/subscribe/follow CTA.\n"        "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
+        "FRESHFEED CHANNEL SIGNALS:\n"
+        f"- pattern_score={story_data.get('freshfeed_pattern_score', 0)}, "
+        f"scope_score={story_data.get('freshfeed_scope_score', story_data.get('shorts_scope_score', 0))}, "
+        f"pattern_reasons={story_data.get('freshfeed_pattern_reasons', [])}, "
+        f"marquee_person_hits={story_data.get('freshfeed_marquee_person_hits', story_data.get('marquee_person_hits', 0))}, "
+        f"rivalry_signal={story_data.get('freshfeed_rivalry_signal', story_data.get('rivalry_signal', False))}.\n"
+        "- Use these channel-learning signals to strengthen the opening only when the underlying evidence supports them. "
+        "Never invent conflict, controversy, quotes or rivalry merely because a signal is present.\n\n"
         "VISUAL DATA:\n"
-        "- Every scene needs one primary_entity supported by the evidence and a grounded specific_search_prompt. Never invent identities.\n\n"
+        "- Prefer a supported primary_entity and specific_search_prompt for every scene, but visual metadata is downstream data and must never replace or weaken factual narration. Never invent identities.\n\n"
         f"LANGUAGE: {language_cfg['script_instruction']}\n"
         f"PAST FEEDBACK: {insights}\n\n"
         "Return ONLY valid JSON. Use as many scenes as the story genuinely needs; keep the output focused on the story itself.\n"
@@ -1067,9 +1075,47 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "}"
     )
 
+    previous_script = story_data.get("previous_script")
+    previous_draft_text = ""
+    if isinstance(previous_script, list):
+        previous_scenes = [
+            {
+                "index": index,
+                "voiceover": str(scene.get("voiceover") or "").strip(),
+                "narrative_role": str(scene.get("narrative_role") or "").strip(),
+            }
+            for index, scene in enumerate(previous_script, 1)
+            if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
+        ]
+        if previous_scenes:
+            previous_draft_text = json.dumps(previous_scenes, ensure_ascii=False)
+
+    freshfeed_block = (
+        "\n\nFRESHFEED SELECTION CONTEXT:\n"
+        f"pattern_score={story_data.get('freshfeed_pattern_score', 0)}\n"
+        f"scope_score={story_data.get('freshfeed_scope_score', story_data.get('shorts_scope_score', 0))}\n"
+        f"pattern_reasons={story_data.get('freshfeed_pattern_reasons', [])}\n"
+        f"marquee_person_hits={story_data.get('freshfeed_marquee_person_hits', story_data.get('marquee_person_hits', 0))}\n"
+        f"rivalry_signal={story_data.get('freshfeed_rivalry_signal', story_data.get('rivalry_signal', False))}\n"
+        "Use only supported signals; they guide framing but never justify invented claims."
+    )
+
+    rewrite_block = ""
+    if previous_draft_text:
+        rewrite_block = (
+            "\n\nPREVIOUS DRAFT TO TIGHTEN:\n"
+            + previous_draft_text
+            + "\nThis is a real compression rewrite, not a fresh story. Preserve the previous draft's "
+            "supported facts, central hook, editorial angle and useful order. Remove repetition, generic setup "
+            "and nonessential context. Return a complete replacement script and do not add new facts."
+        )
+
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"STORY DATA:\n{source_text}"},
+        {
+            "role": "user",
+            "content": f"STORY DATA:\n{source_text}" + freshfeed_block + rewrite_block,
+        },
     ]
 
     for attempt in range(1, 3):
@@ -2211,6 +2257,17 @@ def run_robot(web_config=None):
 
         if duration_estimate["seconds"] > 30.0:
             duration_story = dict(story_payload)
+            duration_story["previous_script"] = [
+                {
+                    "voiceover": str(scene.get("voiceover") or "").strip(),
+                    "narrative_role": str(scene.get("narrative_role") or "").strip(),
+                }
+                for scene in (script_data.get("script") or [])
+                if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
+            ]
+            duration_story["previous_editorial_angle"] = str(
+                script_data.get("editorial_angle") or ""
+            ).strip()
             # Reuse the first evidence pack during the tightening rewrite. A
             # transient research fetch failure must not kill an otherwise valid script.
             for key in (
@@ -2226,8 +2283,9 @@ def run_robot(web_config=None):
                 if key in script_data:
                     duration_story[key] = script_data[key]
             duration_story["duration_control_instruction"] = (
-                f"Previous draft is estimated at {duration_estimate['seconds']:.1f} seconds. "
-                "Tighten it once before human review toward the channel's 20–30 second sweet spot. "
+                "The previous draft supplied in previous_script is the authoritative draft to compress. "
+                f"It is estimated at {duration_estimate['seconds']:.1f} seconds. "
+                "Tighten that exact draft once before human review toward the channel's 20–30 second sweet spot. "
                 "The final narration should not exceed 35 seconds. Preserve every supported essential fact "
                 "and the editorial angle. Remove repetition, generic setup and nonessential context; "
                 "do not add filler or invent facts. Return a complete replacement script, not commentary about the rewrite."
