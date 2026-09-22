@@ -301,3 +301,32 @@ def test_learning_readers_filter_invalid_vault_rows_at_sql_boundary():
         assert "video_id IS NOT NULL" in source
         assert "READY_FOR_UPLOAD" in source
         assert "status NOT IN" in source
+
+
+
+def test_rss_headline_strips_only_exact_publisher_suffix():
+    row = story_ranker._rss_items
+    source = (
+        b"""<?xml version="1.0" encoding="utf-8"?>
+        <rss><channel><item>
+        <title>India announces new policy - Example News</title>
+        <link>https://example.com/story</link>
+        <description>Detailed report.</description>
+        <pubDate>Mon, 22 Sep 2026 10:00:00 GMT</pubDate>
+        <source>Example News</source>
+        </item></channel></rss>"""
+    )
+
+    class Response:
+        status_code = 200
+        content = source
+
+    original_get = story_ranker.requests.get
+    story_ranker.requests.get = lambda *args, **kwargs: Response()
+    try:
+        rows = row("https://example.com/feed", "technology", collection_source="official", max_items=5)
+    finally:
+        story_ranker.requests.get = original_get
+
+    assert rows[0]["title"] == "India announces new policy"
+    assert rows[0]["source_headline"] == "India announces new policy - Example News"
