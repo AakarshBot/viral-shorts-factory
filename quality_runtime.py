@@ -65,7 +65,7 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
         return False, "One or more generated titles are empty."
 
     recommended = script_data.get("recommended_title_index")
-    if recommended not in (0, 1, 2):
+    if recommended not in (1, 2, 3):
         return False, "Recommended title index is invalid."
 
     description = str(script_data.get("seo_description", "")).strip()
