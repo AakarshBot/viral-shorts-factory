@@ -24,32 +24,44 @@ GEMINI_VISUAL_QA_MAX_SIDE = max(512, min(1024, int(os.getenv("GEMINI_VISUAL_QA_M
 GEMINI_VISUAL_QA_JPEG_QUALITY = max(60, min(85, int(os.getenv("GEMINI_VISUAL_QA_JPEG_QUALITY", "78"))))
 VISUAL_QA_RUNTIME_VERSION = "2026-09-20-v16-entity-batch-payload-hardened"
 
-_VIDEO_CALLS = 0
-_SCENE_CALLS = 0
-_CIRCUIT_OPEN = False
-LAST_VISUAL_QA_FAILURE = ""
+_QA_STATE = threading.local()
 _LOCK = threading.Lock()
 _CACHE = {}
 
 
+def _qa_state():
+    state = _QA_STATE
+    if not hasattr(state, "video_calls"):
+        state.video_calls = 0
+        state.scene_calls = 0
+        state.circuit_open = False
+        state.last_failure = ""
+    return state
+
+
 def reset_visual_qa_video_budget():
-    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN, LAST_VISUAL_QA_FAILURE
+    state = _qa_state()
     with _LOCK:
-        _VIDEO_CALLS = 0
-        _SCENE_CALLS = 0
-        _CIRCUIT_OPEN = False
-        LAST_VISUAL_QA_FAILURE = ""
+        state.video_calls = 0
+        state.scene_calls = 0
+        state.circuit_open = False
+        state.last_failure = ""
 
 
 def start_visual_qa_scene():
-    global _SCENE_CALLS
+    state = _qa_state()
     with _LOCK:
-        _SCENE_CALLS = 0
+        state.scene_calls = 0
 
 
 def get_visual_qa_calls_used():
+    state = _qa_state()
     with _LOCK:
-        return _VIDEO_CALLS
+        return state.video_calls
+
+
+def get_last_visual_qa_failure():
+    return str(_qa_state().last_failure or "")
 
 
 def _cache_key(img_bytes, entity, tier, visual_type="", visual_genre=""):
@@ -89,10 +101,10 @@ Return exactly YES, NO, or UNCERTAIN followed by one short reason."""
 
 
 def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, api_key, tier="IDENTITY", visual_type="", visual_genre=""):
-    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN, LAST_VISUAL_QA_FAILURE
-    LAST_VISUAL_QA_FAILURE = ""
+    state = _qa_state()
+    state.last_failure = ""
     if not api_key:
-        LAST_VISUAL_QA_FAILURE = "no_api_key"
+        state.last_failure = "no_api_key"
         print("   [Visual QA] IDENTITY | Gemini unavailable (no API key); candidate remains uncertain.", flush=True)
         return None
 
@@ -103,21 +115,21 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         return cached
 
     with _LOCK:
-        if _CIRCUIT_OPEN:
-            LAST_VISUAL_QA_FAILURE = "circuit_breaker"
+        if state.circuit_open:
+            state.last_failure = "circuit_breaker"
             print("   [Visual QA] Circuit breaker open; candidate remains uncertain.", flush=True)
             return None
-        if _VIDEO_CALLS >= GEMINI_VISUAL_MAX_REQUESTS:
-            LAST_VISUAL_QA_FAILURE = "video_budget_exhausted"
+        if state.video_calls >= GEMINI_VISUAL_MAX_REQUESTS:
+            state.last_failure = "video_budget_exhausted"
             print(f"   [Visual QA] Per-video visual request budget exhausted ({GEMINI_VISUAL_MAX_REQUESTS}); candidate remains uncertain.", flush=True)
             return None
-        if _SCENE_CALLS >= GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE:
-            LAST_VISUAL_QA_FAILURE = "scene_budget_exhausted"
+        if state.scene_calls >= GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE:
+            state.last_failure = "scene_budget_exhausted"
             print(f"   [Visual QA] Per-scene visual QA budget exhausted ({GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}); candidate remains uncertain.", flush=True)
             return None
-        _VIDEO_CALLS += 1
-        _SCENE_CALLS += 1
-        call_no = _VIDEO_CALLS
+        state.video_calls += 1
+        state.scene_calls += 1
+        call_no = state.video_calls
 
     print(f"   [Visual QA] IDENTITY | Gemini request {call_no}/{GEMINI_VISUAL_MAX_REQUESTS}.", flush=True)
     try:
@@ -141,7 +153,7 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
         elif text.startswith("NO"):
             result = False
         else:
-            LAST_VISUAL_QA_FAILURE = "ambiguous_response"
+            state.last_failure = "ambiguous_response"
             print("   [Visual QA] Ambiguous Gemini answer; candidate remains uncertain.", flush=True)
             return None
         _CACHE[key] = result
@@ -149,12 +161,12 @@ def strict_gemini_check(img_bytes, entity, intent, prompt, voice, video_title, a
     except Exception as exc:
         msg = str(exc).lower()
         if any(x in msg for x in ("429", "quota", "resource exhausted", "rate limit")):
-            LAST_VISUAL_QA_FAILURE = "quota_or_rate_limit"
+            state.last_failure = "quota_or_rate_limit"
             with _LOCK:
-                _CIRCUIT_OPEN = True
+                state.circuit_open = True
             print("   [Visual QA] Gemini quota/rate-limit detected; circuit breaker opened; candidate remains uncertain.", flush=True)
         else:
-            LAST_VISUAL_QA_FAILURE = "request_exception"
+            state.last_failure = "request_exception"
             print(f"   [Visual QA] Gemini request failed: {type(exc).__name__}: {exc}; candidate remains uncertain.", flush=True)
         return None
 
@@ -203,8 +215,8 @@ def strict_gemini_check_batch(
     _allow_transient_retry=True,
 ):
     """Verify several candidates for the same subject in one entity-only Gemini call."""
-    global _VIDEO_CALLS, _SCENE_CALLS, _CIRCUIT_OPEN, LAST_VISUAL_QA_FAILURE
-    LAST_VISUAL_QA_FAILURE = ""
+    state = _qa_state()
+    state.last_failure = ""
     image_items = [
         (int(index), bytes(data))
         for index, data in enumerate(images or [])
@@ -214,7 +226,7 @@ def strict_gemini_check_batch(
     if not image_items:
         return results
     if not api_key:
-        LAST_VISUAL_QA_FAILURE = "no_api_key"
+        state.last_failure = "no_api_key"
         return results
 
     uncached = []
@@ -229,18 +241,18 @@ def strict_gemini_check_batch(
         return results
 
     with _LOCK:
-        if _CIRCUIT_OPEN:
-            LAST_VISUAL_QA_FAILURE = "circuit_breaker"
+        if state.circuit_open:
+            state.last_failure = "circuit_breaker"
             return results
-        if _VIDEO_CALLS >= GEMINI_VISUAL_MAX_REQUESTS:
-            LAST_VISUAL_QA_FAILURE = "video_budget_exhausted"
+        if state.video_calls >= GEMINI_VISUAL_MAX_REQUESTS:
+            state.last_failure = "video_budget_exhausted"
             return results
-        if _SCENE_CALLS >= GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE:
-            LAST_VISUAL_QA_FAILURE = "scene_budget_exhausted"
+        if state.scene_calls >= GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE:
+            state.last_failure = "scene_budget_exhausted"
             return results
-        _VIDEO_CALLS += 1
-        _SCENE_CALLS += 1
-        call_no = _VIDEO_CALLS
+        state.video_calls += 1
+        state.scene_calls += 1
+        call_no = state.video_calls
 
     print(
         f"   [Visual QA] ENTITY-BATCH | Gemini request {call_no}/{GEMINI_VISUAL_MAX_REQUESTS} "
@@ -292,7 +304,7 @@ def strict_gemini_check_batch(
                 _CACHE[key] = False
 
         if len(verdicts) != len(uncached):
-            LAST_VISUAL_QA_FAILURE = "ambiguous_response"
+            state.last_failure = "ambiguous_response"
         return results
     except Exception as exc:
         msg = str(exc).lower()
@@ -324,15 +336,15 @@ def strict_gemini_check_batch(
                 for local_index, verdict in retry_results.items():
                     original_index = retry_group[int(local_index)][0]
                     results[original_index] = verdict
-            LAST_VISUAL_QA_FAILURE = ""
+            state.last_failure = ""
             return results
 
         if any(x in msg for x in ("429", "quota", "resource exhausted", "rate limit")):
-            LAST_VISUAL_QA_FAILURE = "quota_or_rate_limit"
+            state.last_failure = "quota_or_rate_limit"
             with _LOCK:
-                _CIRCUIT_OPEN = True
+                state.circuit_open = True
         else:
-            LAST_VISUAL_QA_FAILURE = "request_exception"
+            state.last_failure = "request_exception"
         print(
             f"   [Visual QA] ENTITY-BATCH failed: {type(exc).__name__}: {exc}",
             flush=True,
