@@ -199,11 +199,12 @@ def score_story(story: dict) -> dict:
     headline = _clean(
         " ".join(
             str(story.get(key) or "")
-            for key in ("title", "source_headline", "canonical_title", "event_search_text")
+            for key in ("title", "source_headline", "canonical_title")
         )
     )
     # Headline evidence is the key signal because 81%+ of this channel's Shorts
     # traffic comes from the Shorts Feed, where the opening promise matters most.
+    title = str(story.get("title") or "")
     conflict = _hits(_CONFLICT_TERMS, headline)
     quote = _hits(_QUOTE_TERMS, headline)
     quoted_title = bool(re.search(r'["“”]', title))
@@ -219,9 +220,7 @@ def score_story(story: dict) -> dict:
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", headline)
     )
 
-    title = str(story.get("title") or "")
     question = "?" in title
-    combined = f"{headline} {_text_blob(story)}"
     scope_score = _headline_scope_score(story)
 
     score = 0.0
