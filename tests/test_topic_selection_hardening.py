@@ -103,19 +103,24 @@ def test_event_clustering_preserves_category_provenance():
 def test_production_selection_does_not_call_legacy_gather(monkeypatch):
     import story_ranker
 
-    calls = {"collect": 0, "rank": 0}
+    calls = {"collect": 0, "rank_discovery": 0, "legacy_rank": 0}
 
     def canonical_collect(*args, **kwargs):
         calls["collect"] += 1
         return ([{"title": "Canonical event"}], ["social signal"])
 
     def canonical_rank(stories, **kwargs):
-        calls["rank"] += 1
+        calls["rank_discovery"] += 1
         assert stories == [{"title": "Canonical event"}]
         return stories
 
+    def legacy_rank(stories, **kwargs):
+        calls["legacy_rank"] += 1
+        raise AssertionError("legacy top-3 ranker must not be called")
+
     monkeypatch.setattr(story_ranker, "collect_high_recall_stories", canonical_collect)
-    monkeypatch.setattr(story_ranker, "rank_story_candidates", canonical_rank)
+    monkeypatch.setattr(story_ranker, "rank_discovery_candidates", canonical_rank)
+    monkeypatch.setattr(story_ranker, "rank_story_candidates", legacy_rank)
 
     def legacy_gather(*_args, **_kwargs):
         raise AssertionError("legacy gather must not be called")
@@ -130,7 +135,7 @@ def test_production_selection_does_not_call_legacy_gather(monkeypatch):
     )
 
     assert result == [{"title": "Canonical event"}]
-    assert calls == {"collect": 1, "rank": 1}
+    assert calls == {"collect": 1, "rank_discovery": 1, "legacy_rank": 0}
 
 
 def test_diversity_reranker_separates_repeated_subjects():
