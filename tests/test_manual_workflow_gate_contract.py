@@ -42,7 +42,7 @@ def test_dashboard_manual_script_gate_is_core_and_waits():
     def worker():
         result["value"] = config["_manual_script_review_hook"](script)
 
-    thread = threading.Thread(target=worker)
+    thread = threading.Thread(target=worker, daemon=True)
     thread.start()
 
     for _ in range(100):
@@ -63,17 +63,19 @@ def test_dashboard_manual_script_gate_is_core_and_waits():
     assert "human_contributed" not in result["value"]["script"][-1]
 
 
-def test_dashboard_manual_visual_gate_is_core_and_blocks_render_until_approved():
+def test_dashboard_manual_visual_gate_is_core_and_blocks_render_until_approved(tmp_path):
     controller = DashboardWorkflowController(object())
     config = controller._prepare_production_config({})
 
-    packages = [[{"image": "scene.jpg", "visual_verified": False}]]
+    image_path = tmp_path / "scene.jpg"
+    image_path.write_bytes(b"image")
+    packages = [[{"image": str(image_path), "visual_verified": True, "visual_qc_blocked": False}]]
     result = {}
 
     def worker():
         result["value"] = config["_manual_visual_review_hook"](packages)
 
-    thread = threading.Thread(target=worker)
+    thread = threading.Thread(target=worker, daemon=True)
     thread.start()
 
     for _ in range(100):
