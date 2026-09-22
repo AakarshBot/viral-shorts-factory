@@ -88,6 +88,9 @@ def test_freshfeed_pattern_score_separates_winning_hook_combinations():
     assert conflict["freshfeed_pattern_score"] >= 3.0
     assert question["freshfeed_pattern_score"] >= 3.0
     assert quote["freshfeed_pattern_score"] > conflict["freshfeed_pattern_score"]
+    assert conflict["freshfeed_priority_pattern"] is True
+    assert question["freshfeed_priority_pattern"] is True
+    assert quote["freshfeed_priority_pattern"] is True
     assert quote["marquee_person_hits"] >= 1
     assert "marquee + tension synergy" in quote["freshfeed_pattern_reasons"]
 
