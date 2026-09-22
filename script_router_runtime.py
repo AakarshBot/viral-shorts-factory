@@ -8,8 +8,8 @@ The production path is deliberately single-owner:
 5) perform originality QC once,
 6) return one authoritative script.
 
-Duration control lives in run_robot(), where the actual previous draft is passed
-into the compression rewrite. No second research pass is allowed for that rewrite.
+Duration control lives in run_robot(), where the already validated script is
+compressed in one lightweight pass. No second research pass is allowed for that rewrite.
 """
 
 from __future__ import annotations
