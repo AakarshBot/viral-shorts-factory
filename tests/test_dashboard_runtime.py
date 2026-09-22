@@ -497,8 +497,7 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_choices(mon
             "target": 10,
             "hard_max": 10,
             "minimum_options": 0,
-            "available_options": 3,
-            "enough_options": True,
+            "available_options": 3,            "enough_options": True,
         }
 
     monkeypatch.setattr(
@@ -997,8 +996,7 @@ def test_dashboard_replacement_returns_used_pool_asset_without_duplicate(tmp_pat
 
     controller = DashboardWorkflowController(_Bot())
     controller._visual_pool = [{
-        "path": str(selected),
-        "original_path": str(selected),
+        "path": str(selected),        "original_path": str(selected),
         "hash": "selected-hash",
         "source": "Commons",
         "used": True,
@@ -1357,14 +1355,14 @@ def test_dashboard_metadata_approval_defers_widget_value_updates_until_rerun():
 
 
 
-def test_public_release_policy_cannot_be_bypassed_by_ui():
+def test_public_release_ui_does_not_reintroduce_a_factory_specific_block():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = source.index("def render_upload_panel")
     end = source.index("\ndef _perform_upload", start)
     panel = source[start:end]
-    assert "public_blocked = fallback_mode == \"extractive_source_grounded\"" in panel
-    assert "public_ready = upload_unlocked and not public_blocked" in panel
-    assert 'if public_blocked:' in panel
+    assert "public_blocked" not in panel
+    assert "public_ready = upload_unlocked" in panel
+    assert "fallback_mode" not in panel
 
 
 def test_dashboard_progress_uses_latest_known_progress_line():
@@ -1497,8 +1495,7 @@ def test_regular_script_release_structure_rejects_compressed_three_beat_stub():
 
 
 def test_renderer_has_no_artificial_scene_audio_padding():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "audio.duration + 0.25" not in source
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")    assert "audio.duration + 0.25" not in source
     assert "Audio is already encoded at its natural duration" in source
 
 
@@ -1642,3 +1639,22 @@ def test_legacy_learning_metrics_ignore_non_publishable_rows(tmp_path):
 
     assert scores["technology"]["count"] == 1
     conn.close()
+
+def test_dashboard_workflow_is_compact_and_uses_progressive_disclosure():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    assert "workflow-shell" in source
+    assert "workflow-node done" in source
+    assert "workflow-node next" in source
+    assert 'st.popover("⚙ Production settings", width="stretch")' in source
+    assert "apply_dashboard_theme()" in source
+
+
+def test_dashboard_shows_video_id_after_upload():
+    source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    panel_start = source.index("def render_upload_panel")
+    panel = source[panel_start:source.index("\ndef _perform_upload", panel_start)]
+    assert "snapshot.get(\"uploaded_video_id\")" in panel
+    assert "VIDEO ID" in panel
+    assert "https://www.youtube.com/watch?v={uploaded_video_id}" in panel
+    assert "release-success" in panel
+
