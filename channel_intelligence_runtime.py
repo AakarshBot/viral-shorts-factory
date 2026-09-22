@@ -211,7 +211,11 @@ def _render_intelligence(st) -> None:
             migrate_vault(conn)
             result = sync_factory_analytics(ultimate_bot, conn)
             conn.close()
-            st.success(f"Refreshed {result['updated']} videos; retention available for {result['retention_ready']}.")
+            st.success(
+                f"Refreshed {result['updated']} videos; retention available for "
+                f"{result['retention_ready']}; stayed-to-watch available for "
+                f"{result.get('stayed_to_watch_ready', 0)}."
+            )
             st.rerun()
         except Exception as exc:
             st.error(f"Learning refresh failed: {type(exc).__name__}: {exc}")
