@@ -305,7 +305,6 @@ def bind_dashboard_patches(bot):
     except Exception as exc:
         print(f"   [Bindings] Production hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
     _patch_subtitles(bot)
-    _patch_youtube_creator_comments(bot)
 
     # Keep run_robot's production globals aligned with the live bot bindings.
     # Several pipeline stages are invoked by functions defined in ultimate_bot.py,
