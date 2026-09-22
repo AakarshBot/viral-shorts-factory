@@ -544,7 +544,26 @@ def select_manual_visual_candidate(
         for asset in commercial_verified
         if _manual_candidate_scene_score(asset, scene) >= MANUAL_SCENE_GOOD_SCORE
     ]
-    pool = scene_good or commercial_verified
+
+    # The first supplied manual query is the first-slide anchor. Prefer only
+    # first-query assets there, falling back to the broader verified pool when
+    # that query produced no usable candidate.
+    if int(scene.get("slide_index") or 0) == 1:
+        first_query_assets = [
+            asset
+            for asset in scene_good
+            if int(asset.get("manual_query_index") or 0) == 1
+        ]
+        if not first_query_assets:
+            first_query_assets = [
+                asset
+                for asset in commercial_verified
+                if int(asset.get("manual_query_index") or 0) == 1
+            ]
+        pool = first_query_assets or scene_good or commercial_verified
+    else:
+        pool = scene_good or commercial_verified
+
     if not pool:
         return None
 
