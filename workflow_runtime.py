@@ -360,6 +360,15 @@ class WorkflowController:
             raise FileNotFoundError(f"Final video file not found: {video_path}")
         from final_qc_runtime import validate_final_upload_metadata, validate_final_video
 
+        if (
+            str(publish_mode or "").strip().lower() == "public"
+            and bool((script_data or {}).get("public_publish_blocked"))
+        ):
+            raise RuntimeError(
+                "Public upload is blocked for this production run because the script "
+                "pipeline marked it private-only. Review or regenerate the script before publishing publicly."
+            )
+
         validate_final_video(video_path)
 
         clean_title, clean_description, clean_tags = _build_clean_metadata(
