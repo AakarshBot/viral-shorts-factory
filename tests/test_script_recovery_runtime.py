@@ -46,23 +46,29 @@ def _complete_script():
     }
 
 
-def test_one_two_three_scene_outputs_fail_without_a_scene_count_rule():
+def test_one_or_two_scene_outputs_fail_but_three_scene_compact_story_can_pass():
     for scenes in (
         [_scene("The latest development is confirmed today.", "hook")],
         [
             _scene("The latest development is confirmed today.", "hook"),
             _scene("Officials are now working through the reported issue.", "development"),
         ],
-        [
-            _scene("The latest development is confirmed today.", "hook"),
-            _scene("Officials are now working through the reported issue.", "development"),
-            _scene("The background explains why the issue matters.", "context"),
-        ],
     ):
         result = {"editorial_angle": "A useful explanatory angle for the selected story.", "script": scenes}
         valid, reason = validate_content_density(result, {}, "regular")
         assert valid is False
         assert "incomplete" in reason.lower() or "missing" in reason.lower()
+
+    compact = {
+        "editorial_angle": "This explains what changed, the relevant context, and why the outcome matters.",
+        "script": [
+            _scene("The latest development is confirmed today.", "hook"),
+            _scene("Officials are now working through the reported issue and its background.", "development"),
+            _scene("The immediate consequence is that the team must adjust its preparation.", "consequence"),
+        ],
+    }
+    valid, reason = validate_content_density(compact, {}, "regular")
+    assert valid, reason
 
 
 def test_four_role_story_passes_without_word_or_scene_quotas():
