@@ -969,6 +969,7 @@ class DashboardWorkflowController(WorkflowController):
                 video_title=video_title,
                 used_hashes=used_hashes,
                 used_source_image_urls=used_source_image_urls,
+                search_round=len(self._visual_search_groups) + 1,
             )
             assets = list(result.get("assets") or [])
             materialized = materialize_manual_visual_pool(
@@ -1465,6 +1466,7 @@ class DashboardWorkflowController(WorkflowController):
                 used_source_pages=used_source_pages,
                 min_options=0,
                 max_options=10,
+                search_round=attempt,
             )
             assets = list(result.get("assets") or [])
             # Zero is a valid result. There is no minimum threshold for a
