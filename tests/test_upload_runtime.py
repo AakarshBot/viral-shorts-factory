@@ -18,10 +18,29 @@ class _FakeVideos:
     def __init__(self, response):
         self.response = response
         self.insert_calls = []
+        self.update_calls = []
+        self.list_calls = []
+        self.update_error = None
+        self.update_response = None
+        self.list_response = None
 
     def insert(self, **kwargs):
         self.insert_calls.append(kwargs)
         return _FakeUploadRequest(self.response)
+
+    def update(self, **kwargs):
+        self.update_calls.append(kwargs)
+        if self.update_error is not None:
+            raise self.update_error
+        response = self.update_response
+        if response is None:
+            response = self.response
+        return _FakeCommentRequest(response)
+
+    def list(self, **kwargs):
+        self.list_calls.append(kwargs)
+        response = self.list_response or self.update_response or self.response
+        return _FakeCommentRequest({"items": [response]})
 
 
 class _FakeCommentRequest:
@@ -132,12 +151,40 @@ def test_youtube_upload_public_posts_approved_comment(monkeypatch, tmp_path):
     )
 
 
-def test_youtube_upload_public_reports_youtube_visibility_override(monkeypatch, tmp_path):
+def test_youtube_upload_public_recovers_existing_private_video_without_duplicate_upload(monkeypatch, tmp_path):
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"synthetic mp4")
 
     fake = _FakeYouTube()
     fake.videos_api.response["status"]["privacyStatus"] = "private"
+    fake.videos_api.update_response = {
+        "id": "video-123",
+        "status": {"privacyStatus": "public"},
+    }
+    _patch_youtube_upload(monkeypatch, fake)
+
+    video_id = ultimate_bot.upload_to_youtube(
+        str(video_path),
+        {"title": "Test Short", "seo_description": "Description.", "pinned_comment": "Comment."},
+        {"label": "News", "category_id": "25", "hashtags": ["#News"]},
+        "public",
+    )
+
+    assert video_id == "video-123"
+    assert len(fake.videos_api.insert_calls) == 1
+    assert len(fake.videos_api.update_calls) == 1
+    assert fake.videos_api.update_calls[0]["body"]["id"] == "video-123"
+    assert fake.videos_api.update_calls[0]["body"]["status"]["privacyStatus"] == "public"
+    assert len(fake.comments_api.insert_calls) == 1
+
+
+def test_youtube_upload_public_reports_unrecoverable_visibility_block(monkeypatch, tmp_path):
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"synthetic mp4")
+
+    fake = _FakeYouTube()
+    fake.videos_api.response["status"]["privacyStatus"] = "private"
+    fake.videos_api.update_error = RuntimeError("403 forbiddenPrivacySetting")
     _patch_youtube_upload(monkeypatch, fake)
 
     try:
@@ -149,10 +196,11 @@ def test_youtube_upload_public_reports_youtube_visibility_override(monkeypatch, 
         )
     except Exception as exc:
         assert type(exc).__name__ == "YouTubePublicVisibilityError"
-        assert "kept it private instead of public" in str(exc)
+        assert "could not make it public" in str(exc)
+        assert "forbiddenPrivacySetting" in str(exc)
         assert exc.video_id == "video-123"
     else:
-        raise AssertionError("A YouTube privacy override should be reported to the caller.")
+        raise AssertionError("An unrecoverable public-visibility block must be reported to the caller.")
 
 
 def test_workflow_controller_rejects_duplicate_upload_for_same_run(monkeypatch, tmp_path):
