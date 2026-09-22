@@ -1018,8 +1018,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Add evidence-backed context, comparison, mechanism, timeline, limitation, implication, or consequence wherever supported. Never invent motives, predictions, quotes, statistics, opinions presented as facts, or unsupported causal claims.\n"
         "- The result should feel authored through selection, order and explanation of the evidence. Do not produce a source-article readout.\n\n"
         "STORY SHAPE:\n"
-        "- Preserve every distinct narrative beat as its own scene. Do not cram multiple important developments into one overloaded scene, and never add filler solely to make the video longer. Let the story's real complexity determine how many scenes it needs.\n"
-        "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep those beats meaningfully distinct.\n"
+        "- Preserve the distinct narrative beats without adding filler. For a compact 20–30 second story, one scene may combine a closely related development/context beat when that improves pacing; never split one idea into artificial filler scenes.\n"
+        "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep the hook and consequence distinct, and use the middle scenes for development/context as the story requires.\n"
         "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported conflict, bold quote, surprising result, consequential change, rivalry, or attributed statement. Never manufacture suspense by withholding the actual information.\n"
         "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Do not spend the first seconds on dates, venues, tournament names, match setup, or channel framing unless that detail is itself the story.\n"
         "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs, and must earn every extra second.\n"
@@ -1120,9 +1120,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 {"role": "user", "content": (
                     "Rewrite the complete script. Preserve supported facts and the editorial angle. "
                     "Lead the first scene with the strongest supported conflict, surprise, consequence, or "
-                    "attributed quote. Remove generic setup and retention-bait. Ensure distinct hook, "
-                    "development, context and consequence scenes remain present. Prefer a focused 20–30 "
-                    "second cut for a compact story and allow up to roughly 35 seconds only when the story genuinely earns it, without padding or forced compression."
+                    "attributed quote. Remove generic setup and retention-bait. Preserve the hook, development, "
+                    "context and consequence beats; a compact 20–30 second story may combine one middle beat "
+                    "into a single scene when needed for pacing. Prefer a focused 20–30 second cut and allow up to "
+                    "roughly 35 seconds only when the story genuinely earns it, without padding or forced compression."
                 )},
             ])
         except Exception as exc:
