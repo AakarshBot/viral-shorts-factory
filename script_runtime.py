@@ -249,16 +249,16 @@ def rank_title_candidates(script_data, story_data=None):
         for scene in (script_data.get("script") or [])
         if isinstance(scene, dict)
     ).strip()
-    source_terms = set(re.findall(r"[\\w]+(?:['’.-][\\w]+)*", f"{headline} {entity_text} {evidence}", flags=re.UNICODE))
+    source_terms = set(re.findall(r"[\w]+(?:['’.-][\w]+)*", f"{headline} {entity_text} {evidence}", flags=re.UNICODE))
     source_terms = {term.casefold() for term in source_terms if len(term) > 1}
-    headline_terms = set(re.findall(r"[\\w]+(?:['’.-][\\w]+)*", headline, flags=re.UNICODE))
+    headline_terms = set(re.findall(r"[\w]+(?:['’.-][\w]+)*", headline, flags=re.UNICODE))
     headline_terms = {term.casefold() for term in headline_terms if len(term) > 1}
-    has_number = bool(re.search(r"\\d|%", headline))
+    has_number = bool(re.search(r"\d|%", headline))
 
     scores = []
     for index, raw_title in enumerate(titles, 1):
-        title = re.sub(r"\\s+", " ", str(raw_title or "")).strip()
-        terms = re.findall(r"[\\w]+(?:['’.-][\\w]+)*", title, flags=re.UNICODE)
+        title = re.sub(r"\s+", " ", str(raw_title or "")).strip()
+        terms = re.findall(r"[\w]+(?:['’.-][\w]+)*", title, flags=re.UNICODE)
         lowered = [term.casefold() for term in terms if len(term) > 1]
         title_set = set(lowered)
         score = 0.0
@@ -280,7 +280,7 @@ def rank_title_candidates(script_data, story_data=None):
 
         entity_terms = set(
             term.casefold()
-            for term in re.findall(r"[\\w]+(?:['’.-][\\w]+)*", entity_text, flags=re.UNICODE)
+            for term in re.findall(r"[\w]+(?:['’.-][\w]+)*", entity_text, flags=re.UNICODE)
             if len(term) > 1
         )
         if entity_terms and title_set & entity_terms:
@@ -292,20 +292,20 @@ def rank_title_candidates(script_data, story_data=None):
             score += 1.0
             reasons.append("key term early")
 
-        if has_number and re.search(r"\\d|%", title):
+        if has_number and re.search(r"\d|%", title):
             score += 0.75
             reasons.append("specific detail")
-        elif not has_number and re.search(r"\\d|%", title):
+        elif not has_number and re.search(r"\d|%", title):
             score += 0.25
 
         if any(re.search(pattern, title, flags=re.IGNORECASE) for pattern in (
-            r"\\byou (?:won['’]?t|will not) believe\\b",
-            r"\\bwatch (?:this|what happens next)\\b",
-            r"\\bshocking\\b",
-            r"\\bunbelievable\\b",
-            r"\\bcraziest\\b",
-            r"\\binsane\\b",
-            r"\\bmust[- ]see\\b",
+            r"\byou (?:won['’]?t|will not) believe\b",
+            r"\bwatch (?:this|what happens next)\b",
+            r"\bshocking\b",
+            r"\bunbelievable\b",
+            r"\bcraziest\b",
+            r"\binsane\b",
+            r"\bmust[- ]see\b",
         )):
             score -= 4.0
             reasons.append("clickbait risk")
