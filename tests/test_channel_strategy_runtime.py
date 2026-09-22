@@ -143,3 +143,11 @@ def test_freshfeed_pattern_can_keep_a_strong_story_gate_eligible():
         "routine_or_admin": False,
     }
     assert candidate_gate(signal, hook_potential=5.0, importance=4.0)[0] is True
+
+
+def test_clustered_event_text_cannot_create_a_headline_hook():
+    signal = score_story({
+        "title": "India announce training update",
+        "event_search_text": "Gautam Gambhir calls India arrogant after controversy",
+    })
+    assert signal["strong_hook"] is False
