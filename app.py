@@ -523,7 +523,11 @@ def _init_state() -> None:
             if st.session_state.workflow_controller.restore_ready_upload():
                 # The worker may have disappeared with the previous Python
                 # process, but the database/artifact pair proves the run reached
-                # the manual upload gate. Restore the dashboard to that state.
+                # the manual upload gate. Restore the same production context
+                # used by the upload action, not just the visible artifact.
+                st.session_state.web_config = dict(
+                    getattr(ultimate_bot, "_active_web_config", {}) or {}
+                )
                 st.session_state.production_started = True
                 st.session_state.metadata_loaded_run_id = ""
                 st.session_state.metadata_approved = False
