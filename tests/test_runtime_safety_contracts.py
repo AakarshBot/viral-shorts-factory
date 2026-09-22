@@ -309,3 +309,15 @@ def test_recovery_prefers_human_approved_metadata_when_present():
     assert 'stored_metadata = script_data.get("approved_metadata")' in block
     assert 'stored_metadata.get("description")' in block
     assert 'stored_metadata.get("comment")' in block
+
+
+def test_obsolete_workspace_cleanup_protects_live_review_and_upload_runs():
+    source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("def cleanup_obsolete_run_workspaces(")
+    end = source.index("\ndef safe_cleanup(", start)
+    block = source[start:end]
+    assert "WAITING_SCRIPT_REVIEW" in block
+    assert "WAITING_VISUAL_REVIEW" in block
+    assert "READY_FOR_UPLOAD" in block
+    assert "if not os.path.isdir(path) or name in protected:" in block
+    assert 'cleanup_obsolete_run_workspaces(conn)' in source
