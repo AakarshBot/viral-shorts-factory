@@ -134,7 +134,7 @@ _NARRATIVE_ROLE_ALIASES = {
 
 
 def assess_narrative_completeness(script_data):
-    """Assess narrative completeness by semantic beats, not an arbitrary scene quota."""
+    """Require a real hook, middle development/context beat and payoff."""
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
         return {"passed": False, "reason": "Script contains no narration scenes.", "roles": {}}
@@ -145,7 +145,6 @@ def assess_narrative_completeness(script_data):
             return {"passed": False, "reason": f"Scene {index + 1} is malformed.", "roles": roles}
         if not str(scene.get("voiceover") or "").strip():
             return {"passed": False, "reason": f"Scene {index + 1} is empty.", "roles": roles}
-
         role = str(scene.get("narrative_role") or "").strip().lower().replace("-", "_").replace(" ", "_")
         role = _NARRATIVE_ROLE_ALIASES.get(role, role)
         if index == 0 and not role:
@@ -155,14 +154,10 @@ def assess_narrative_completeness(script_data):
         if role in {"hook", "development", "context", "consequence"}:
             roles.setdefault(role, []).append(index + 1)
 
-    if len(scenes) == 1:
+    if len(scenes) < 3:
         return {
-            "passed": "hook" in roles,
-            "reason": (
-                "Single-scene script accepted as a deliberately combined hook-and-payoff Short."
-                if "hook" in roles
-                else "Single-scene script lacks a clear hook."
-            ),
+            "passed": False,
+            "reason": "Narrative is incomplete: a regular Short needs a hook, a substantive middle beat, and a payoff.",
             "roles": roles,
         }
 
@@ -177,16 +172,6 @@ def assess_narrative_completeness(script_data):
         return {
             "passed": False,
             "reason": "Narrative has no closing consequence or payoff.",
-            "roles": roles,
-        }
-
-    if len(scenes) == 2:
-        return {
-            "passed": True,
-            "reason": (
-                "Compact two-scene narrative accepted; the second scene can combine "
-                "development, context and consequence to protect pacing."
-            ),
             "roles": roles,
         }
 
