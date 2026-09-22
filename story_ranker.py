@@ -2038,7 +2038,7 @@ def diversity_rerank(stories, max_items=28):
                             entity
                             for entity in _topic_entities(old)
                             if re.search(
-                                r"\\b(?:games?|cup|league|tournament|championship|series|world|open|premier)\\b",
+                                r"\b(?:games?|cup|league|tournament|championship|series|world|open|premier)\b",
                                 entity,
                             )
                         }
