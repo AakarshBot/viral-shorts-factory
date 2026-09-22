@@ -46,10 +46,13 @@ def test_duration_compression_contract_uses_the_actual_validated_draft():
     assert "the central hook, editorial angle and factual order" in source
 
 
-def test_duration_fallbacks_receive_the_previous_draft_too():
-    source = Path(__file__).resolve().parents[1].joinpath("research_runtime.py").read_text(encoding="utf-8")
-    assert "def _previous_draft_text" in source
-    assert "PREVIOUS DRAFT TO TIGHTEN:" in source
+def test_obsolete_duration_rewrite_architecture_is_removed():
+    root = Path(__file__).resolve().parents[1]
+    for filename in ("ultimate_bot.py", "research_runtime.py"):
+        source = root.joinpath(filename).read_text(encoding="utf-8")
+        assert "previous_script" not in source
+        assert "PREVIOUS DRAFT TO TIGHTEN:" not in source
+        assert "duration_story" not in source
 
 
 def test_script_router_reuses_existing_evidence_pack():
