@@ -198,8 +198,9 @@ def classify_hook_style(value):
     )
     result_terms = (
         "won", "wins", "lost", "loses", "beat", "beats", "defeated",
-        "clinched", "qualified", "eliminated", "secured", "record",
-        "milestone", "first", "fastest", "youngest", "oldest",
+        "clinched", "clinches", "qualified", "qualifies", "eliminated",
+        "eliminates", "secured", "secures", "record", "milestone",
+        "first", "fastest", "youngest", "oldest", "200th", "100th", "50th",
     )
     quote_terms = (
         "said", "says", "called", "claimed", "claims", "declared",
