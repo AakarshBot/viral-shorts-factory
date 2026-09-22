@@ -332,33 +332,14 @@ def parse_groq_json_response(content_str):
 
 
 def init_db(conn):
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS vault (
-        topic TEXT PRIMARY KEY, date_used TIMESTAMP, genre TEXT, video_id TEXT, 
-        reported INTEGER DEFAULT 0, views INTEGER DEFAULT 0, title_used TEXT, 
-        hook_type TEXT, structure_used TEXT, persona_used TEXT,
-        hook_strength REAL, narrative_completeness REAL, audience_fit REAL, 
-        monetization_risk REAL, shelf_life REAL, composite_score REAL, rejected_reason TEXT,
-        script_json TEXT, asset_credits_json TEXT, ai_image_ratio REAL, voice_gender TEXT, format_used TEXT,
-        language_used TEXT, avg_view_duration REAL, avg_view_percentage REAL, combo_key TEXT, title_ctr REAL,
-        hook_style_used TEXT, trend_keyword TEXT
-    )''')
-    
-    columns = [
-        "reported INTEGER DEFAULT 0", "views INTEGER DEFAULT 0", "title_used TEXT", 
-        "asset_credits_json TEXT",
-        "hook_type TEXT", "structure_used TEXT", "persona_used TEXT", "hook_strength REAL", 
-        "narrative_completeness REAL", "audience_fit REAL", "monetization_risk REAL", 
-        "shelf_life REAL", "composite_score REAL", "rejected_reason TEXT", "script_json TEXT", 
-        "ai_image_ratio REAL", "voice_gender TEXT", "format_used TEXT", "language_used TEXT", 
-        "avg_view_duration REAL", "avg_view_percentage REAL", "combo_key TEXT", "title_ctr REAL",
-        "hook_style_used TEXT", "trend_keyword TEXT"
-    ]
-    for col in columns:
-        try: c.execute(f"ALTER TABLE vault ADD COLUMN {col}")
-        except:
-            pass
-    conn.commit()
+    """Ensure the canonical run-identity schema is present.
+
+    Database ownership lives in db_architecture.py. Keeping a second legacy
+    topic-primary-key schema here allowed duplicate-topic runs to be silently
+    ignored whenever the identity bridge was not installed.
+    """
+    from db_architecture import migrate_vault
+    migrate_vault(conn)
 
 def safe_text(val, fallback=""):
     if val is None:
