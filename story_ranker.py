@@ -1697,9 +1697,6 @@ def _candidate_quality_pass(story):
     if shorts < 3.0:
         story["discovery_rejection"] = "Weak Shorts viability"
         return False
-    if scope < 3.0 and hook < 5.5:
-        story["discovery_rejection"] = "Story scope is too broad for a focused Short"
-        return False
     if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
         story["discovery_rejection"] = "Weak Shorts hook potential"
         return False
@@ -1735,9 +1732,6 @@ def _discovery_portfolio_pass(story):
         return False
     if freshness < 1.0 and momentum < 1.0:
         story["discovery_rejection"] = "Insufficient current-event signal"
-        return False
-    if scope < 2.5 and hook < 4.5:
-        story["discovery_rejection"] = "Story scope is too broad for a focused Short"
         return False
     if actionability < 3.0:
         story["discovery_rejection"] = "Headline lacks enough story substance for a Short"

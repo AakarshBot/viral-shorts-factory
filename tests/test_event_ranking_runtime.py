@@ -355,6 +355,7 @@ def test_short_scope_score_prefers_one_focused_event():
 
 def test_sports_discovery_portfolio_has_a_defined_hook_signal():
     story = {
+        "url": "https://example.com/story",
         "candidate_score": 12.0,
         "topic_actionability_score": 4.0,
         "event_source_count": 2,
