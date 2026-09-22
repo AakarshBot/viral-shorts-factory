@@ -28,7 +28,8 @@ def test_story_source_sufficiency_is_not_a_raw_character_cutoff():
         "title": "Rashid Khan praises an Indian batter",
         "text": (
             "Rashid Khan praised the Indian batter after the latest match. "
-            "The comment drew attention because of the rivalry and the timing."
+            "The comment drew attention because of the rivalry and the timing. "
+            "His remarks also created a clear player-focused angle for a short explanation of what was said and why it mattered."
         ),
     }
     result = assess_story_source_sufficiency(compact_but_structured)
