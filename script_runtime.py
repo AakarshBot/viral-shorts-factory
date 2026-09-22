@@ -157,6 +157,28 @@ def assess_narrative_completeness(script_data):
 
     missing = sorted({"hook", "development", "context", "consequence"} - set(roles))
     if missing:
+        # A compact 20–30s Short may legitimately combine the middle beats into
+        # one scene. Keep the hook and consequence distinct, but do not force a
+        # filler scene merely to satisfy a four-scene shape.
+        compact_roles = set(roles)
+        if (
+            len(scenes) == 3
+            and "hook" in compact_roles
+            and "consequence" in compact_roles
+            and ("development" in compact_roles or "context" in compact_roles)
+            and len(missing) == 1
+        ):
+            roles["compact_combined_beat"] = [
+                role for role in missing if role in {"development", "context"}
+            ]
+            return {
+                "passed": True,
+                "reason": (
+                    "Compact three-scene narrative accepted; one middle beat is combined "
+                    "to protect pacing without filler."
+                ),
+                "roles": roles,
+            }
         return {
             "passed": False,
             "reason": (
@@ -1135,10 +1157,10 @@ def assess_release_structure(script_data, format_mode="regular"):
 
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     count = len(scenes)
-    # Four distinct newsroom beats are the smallest coherent story: hook,
-    # development, context and consequence. This prevents 1–3 scene stubs
-    # without imposing a word or character target.
-    if count < 4:
+    # Three scenes are permitted when the compact assessment confirms that the
+    # middle context/development beat is combined. This matches the channel's
+    # 20–30s pacing target without allowing one- or two-scene stubs.
+    if count < 3:
         return False, "Script is too compressed: it lacks enough distinct narrative beats.", assessment
     if str(format_mode or "").lower() == "top5" and count < 5:
         return False, "Top-5 script is too compressed to present the list structure.", assessment
