@@ -209,3 +209,48 @@ def test_mega_event_score_identifies_saturated_mass_news_without_becoming_a_hard
         "event_article_count": 12,
     })
     assert score >= 3.5
+
+
+def test_hook_potential_prefers_conflict_and_quote_over_routine_cricket_news():
+    from story_ranker import _hook_potential_score
+
+    conflict = {
+        "title": "Former Pakistan batter calls India arrogant after the latest clash",
+        "description": "The former batter criticised India's approach and described the rivalry in unusually strong terms.",
+        "event_actions": ["comment"],
+        "event_entities": ["Pakistan batter", "India"],
+    }
+    routine = {
+        "title": "India vs Australia probable XI, schedule and match timings",
+        "description": "The teams prepare for the next match with the probable playing XI and scheduled timings.",
+        "event_actions": ["schedule"],
+        "event_entities": ["India", "Australia"],
+    }
+
+    assert _hook_potential_score(conflict) > _hook_potential_score(routine)
+    assert "conflict/tension" in conflict["hook_potential_signals"]
+    assert "routine-news penalty" in routine["hook_potential_signals"]
+
+
+def test_cricket_worthiness_is_not_satisfied_by_routine_headline_alone():
+    from story_ranker import _cricket_story_worthiness_score, _cricket_story_worthiness_pass
+
+    routine = {
+        "title": "India squad announced for upcoming series with schedule details",
+        "description": "The squad announcement covers the selected players and the upcoming series schedule.",
+        "event_entities": ["India", "BCCI"],
+        "event_actions": ["announce"],
+        "event_source_count": 3,
+        "event_article_count": 4,
+    }
+    strong = {
+        "title": "Former Pakistan batter calls India arrogant after major rivalry clash",
+        "description": "The former batter called India arrogant after the match, triggering a fresh debate around the rivalry.",
+        "event_entities": ["Pakistan batter", "India"],
+        "event_actions": ["comment"],
+        "event_source_count": 3,
+        "event_article_count": 4,
+    }
+
+    assert _cricket_story_worthiness_score(strong) > _cricket_story_worthiness_score(routine)
+    assert _cricket_story_worthiness_pass(routine, minimum_score=5.0) is False
