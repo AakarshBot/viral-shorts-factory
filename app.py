@@ -2843,10 +2843,14 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         1 for item in candidates
         if float(item.get("india_relevance_score") or 0.0) >= 5.0
     )
+    niche_led = sum(
+        1 for item in candidates
+        if float(item.get("niche_opportunity_score") or 0.0) >= 6.0
+    )
     st.markdown(
-        f"<div class='live-bar'><div class='live-bar-copy'><b>Event radar</b> · "
+        f"<div class='live-bar'><div class='live-bar-copy'><b>Story radar</b> · "
         f"Showing {start_index + 1}–{start_index + len(visible)} of {total} · "
-        f"{event_backed} event-backed · {india_led} India-led</div></div>",
+        f"{event_backed} event-backed · {niche_led} niche opportunities · {india_led} India-led</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -2869,6 +2873,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 actionability = float(candidate.get("topic_actionability_score") or 0.0)
                 shorts_viability = float(candidate.get("shorts_viability_score") or 0.0)
                 india_focus = float(candidate.get("india_relevance_score") or 0.0)
+                niche_opportunity = float(candidate.get("niche_opportunity_score") or 0.0)
                 development = _ui_text(candidate.get("event_development_state") or "event", "event")
                 source_count = int(evidence.get("independent_publishers") or evidence.get("independent_domains") or 0)
                 topic_descriptor = (
@@ -2885,6 +2890,7 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                         f"<div class='topic-chips'>"
                         f"<span class='topic-chip strong'>Event {actionability:.1f}</span>"
                         f"<span class='topic-chip strong'>Shorts {shorts_viability:.1f}</span>"
+                        f"<span class='topic-chip'>Niche {niche_opportunity:.1f}</span>"
                         f"<span class='topic-chip'>India {india_focus:.1f}</span>"
                         + (
                             f"<span class='topic-chip learning-chip'>Learning {channel_fit:.1f}/10 · {channel_fit_samples} upload(s)</span>"
