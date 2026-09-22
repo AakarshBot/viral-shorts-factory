@@ -158,7 +158,10 @@ class _SqliteModuleProxy:
 
 def run_robot_with_exact_identity(bot, web_config=None):
     """Run the factory and guarantee that a created run cannot remain pending."""
-    state = _IdentityState()
+    requested_run_id = None
+    if isinstance(web_config, dict):
+        requested_run_id = str(web_config.get("run_id") or "").strip() or None
+    state = _IdentityState(run_id=requested_run_id)
     bot._last_run_identity = state
     bot._last_run_row_id = None
     bot._last_run_run_id = state.run_id

@@ -1912,6 +1912,22 @@ def run_robot(web_config=None):
 
     conn = sqlite3.connect(DB_PATH)
 
+    # Every production execution gets an isolated workspace. The previous
+    # shared output directory allowed a new run to delete a different run's
+    # READY_FOR_UPLOAD video during the startup cleanup.
+    global ASSETS_DIR
+    requested_run_id = (
+        str(web_config.get("run_id") or "").strip()
+        if isinstance(web_config, dict)
+        else ""
+    )
+    workspace_id = requested_run_id or (
+        f"standalone-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}"
+    )
+    workspace_id = re.sub(r"[^A-Za-z0-9._-]+", "_", workspace_id).strip("._") or "run"
+    ASSETS_DIR = os.path.join(BASE_DIR, "output", workspace_id)
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+
     try:
         init_db(conn)
         enforce_cache_ttl_hygiene()
@@ -1952,9 +1968,9 @@ def run_robot(web_config=None):
                 except OSError:
                     pass
 
-        safe_cleanup(ASSETS_DIR)
-        os.makedirs(ASSETS_DIR, exist_ok=True)
-
+        # ASSETS_DIR is already a fresh run-scoped workspace. Never wipe
+        # the shared output root here: earlier READY_FOR_UPLOAD artifacts may
+        # still be waiting for human upload approval.
         trend_keyword = custom_q = custom_rss = None
 
         if web_config:

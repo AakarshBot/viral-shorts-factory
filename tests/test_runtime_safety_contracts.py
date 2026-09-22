@@ -161,3 +161,31 @@ def test_global_manual_search_pagination_is_scoped_per_query():
     block = source[start:end]
     assert 'if str(group.get("query") or "").strip().casefold()' in block
     assert "search_round=(" in block
+
+
+
+def test_dashboard_run_id_is_passed_into_exact_identity_bridge():
+    workflow = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
+    db_runtime = (REPO_ROOT / "db_runtime.py").read_text(encoding="utf-8")
+    assert 'config["run_id"] = run_id' in workflow
+    assert 'requested_run_id = None' in db_runtime
+    assert 'state = _IdentityState(run_id=requested_run_id)' in db_runtime
+
+
+def test_visual_qa_budget_and_failure_state_are_execution_local():
+    source = (REPO_ROOT / "visual_qa_runtime.py").read_text(encoding="utf-8")
+    assert '_QA_STATE = threading.local()' in source
+    assert 'def get_last_visual_qa_failure()' in source
+    assert 'global _VIDEO_CALLS' not in source
+    assert 'global _SCENE_CALLS' not in source
+    assert 'LAST_VISUAL_QA_FAILURE' not in source
+
+
+def test_production_uses_a_run_scoped_workspace_instead_of_wiping_shared_output():
+    source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("def run_robot(")
+    end = source.index("\nif __name__ == "__main__":", start)
+    block = source[start:end]
+    assert 'global ASSETS_DIR' in block
+    assert 'ASSETS_DIR = os.path.join(BASE_DIR, "output", workspace_id)' in block
+    assert 'safe_cleanup(ASSETS_DIR)' not in block

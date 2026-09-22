@@ -191,7 +191,12 @@ def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
         return False, f"{tier}:SEMANTIC_NO", max(0, source_score - 20), True
     try:
         import visual_qa_runtime
-        failure = str(getattr(visual_qa_runtime, "LAST_VISUAL_QA_FAILURE", "") or "").strip()
+        failure_reader = getattr(
+            visual_qa_runtime,
+            "get_last_visual_qa_failure",
+            None,
+        )
+        failure = str(failure_reader() if callable(failure_reader) else "").strip()
     except Exception:
         failure = ""
     normalized_failure = re.sub(r"[^A-Za-z0-9]+", "_", failure).upper().strip("_") or "UNCERTAIN"
