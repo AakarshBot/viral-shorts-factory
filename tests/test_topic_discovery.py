@@ -50,7 +50,12 @@ def test_recent_topic_cooldown_ignores_selected_but_not_posted_runs(tmp_path):
     finally:
         conn.close()
 
-    assert [item["title"] for item in kept] == ["India cricket squad update"]
+    assert [item["title"] for item in kept] == [
+        "India cricket squad update",
+        "India budget tax change",
+    ]
+    posted = next(item for item in kept if item["title"] == "India budget tax change")
+    assert posted["recent_topic_penalty"] > 0
 
 
 def test_deduplicate_stage_dedupes_similar_event_clusters():
