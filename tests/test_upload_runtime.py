@@ -178,6 +178,36 @@ def test_youtube_upload_public_recovers_existing_private_video_without_duplicate
     assert len(fake.comments_api.insert_calls) == 1
 
 
+def test_youtube_upload_public_uses_status_readback_when_update_response_is_incomplete(monkeypatch, tmp_path):
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"synthetic mp4")
+
+    fake = _FakeYouTube()
+    fake.videos_api.response["status"]["privacyStatus"] = "private"
+    fake.videos_api.update_response = {
+        "id": "video-123",
+        "status": {"privacyStatus": "private"},
+    }
+    fake.videos_api.list_response = {
+        "id": "video-123",
+        "status": {"privacyStatus": "public"},
+    }
+    _patch_youtube_upload(monkeypatch, fake)
+
+    video_id = ultimate_bot.upload_to_youtube(
+        str(video_path),
+        {"title": "Test Short", "seo_description": "Description.", "pinned_comment": "Comment."},
+        {"label": "News", "category_id": "25", "hashtags": ["#News"]},
+        "public",
+    )
+
+    assert video_id == "video-123"
+    assert len(fake.videos_api.insert_calls) == 1
+    assert len(fake.videos_api.update_calls) == 1
+    assert len(fake.videos_api.list_calls) == 1
+    assert fake.videos_api.list_calls[0]["id"] == "video-123"
+
+
 def test_youtube_upload_public_reports_unrecoverable_visibility_block(monkeypatch, tmp_path):
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"synthetic mp4")
