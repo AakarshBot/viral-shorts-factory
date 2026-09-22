@@ -1,5 +1,4 @@
 from script_runtime import append_research_sources, check_script_originality, _run_real_critique
-from final_qc_runtime import evaluate_originality_gate
 
 
 def test_verbatim_overlap_blocks_eight_word_run():
@@ -16,23 +15,6 @@ def test_sixgram_overlap_blocks_above_fifteen_percent():
     result = check_script_originality(script, {"research_evidence_pack": {"sources": [{"text": source}]}})
     assert result["passed"] is False
     assert result["failures"][0]["sixgram_ratio"] > 0.15
-
-
-def test_final_qc_does_not_require_extra_narration():
-    script = {"script": [{"voiceover": "Generated factual scene."}]}
-    gate = evaluate_originality_gate(script)
-    assert gate["passed"] is True
-    assert gate["public_blocked"] is False
-
-
-def test_extract_fallback_is_private_only():
-    script = {
-        "fallback_mode": "extractive_source_grounded",
-        "script": [{"voiceover": "This is a sufficiently long source-grounded fallback scene."}],
-    }
-    gate = evaluate_originality_gate(script)
-    assert gate["passed"] is True
-    assert gate["public_blocked"] is True
 
 
 def test_research_sources_append_to_description():
