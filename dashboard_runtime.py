@@ -1141,6 +1141,150 @@ class DashboardWorkflowController(WorkflowController):
         self.update("visual_approval", 76, "Crop saved for the selected pool image.")
         return True, "Crop saved."
 
+    def submit_script_review(self, reviewed_script: dict[str, Any]) -> tuple[bool, str]:
+        """Validate optional human edits, then release the paused script-review gate."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "script_review":
+            return False, "Script review is no longer active."
+
+        current = snapshot.get("script_data") or {}
+        original_scenes = current.get("script") if isinstance(current, dict) else None
+        edited_scenes = reviewed_script.get("script") if isinstance(reviewed_script, dict) else None
+        if not isinstance(original_scenes, list) or not original_scenes:
+            return False, "The current script is unavailable."
+        if not isinstance(edited_scenes, list) or len(edited_scenes) != len(original_scenes):
+            return False, "Script edits cannot change the number of scenes during this review."
+
+        candidate = dict(current)
+        candidate["script"] = []
+        for index, original_scene in enumerate(original_scenes):
+            if not isinstance(original_scene, dict):
+                return False, f"Scene {index + 1} is malformed."
+            incoming_scene = edited_scenes[index] if isinstance(edited_scenes[index], dict) else {}
+            updated_scene = dict(original_scene)
+            updated_scene["voiceover"] = str(
+                incoming_scene.get("voiceover", original_scene.get("voiceover") or "")
+                or ""
+            ).strip()
+            candidate["script"].append(updated_scene)
+
+        if isinstance(reviewed_script.get("titles"), list):
+            candidate["titles"] = [
+                str(title or "").strip()
+                for title in reviewed_script.get("titles", [])
+            ]
+        if "editorial_angle" in reviewed_script:
+            candidate["editorial_angle"] = str(
+                reviewed_script.get("editorial_angle") or ""
+            ).strip()
+
+        try:
+            selected_index = int(
+                reviewed_script.get(
+                    "recommended_title_index",
+                    current.get("recommended_title_index", 1),
+                )
+            )
+        except (TypeError, ValueError):
+            selected_index = 1
+        titles = candidate.get("titles") or []
+        if not isinstance(titles, list) or not titles:
+            return False, "At least one title candidate is required."
+        if selected_index < 1 or selected_index > len(titles):
+            return False, f"Title choice must be between 1 and {len(titles)}."
+        candidate["recommended_title_index"] = selected_index
+
+        try:
+            from script_runtime import (
+                assess_release_structure,
+                check_script_originality,
+                clean_script_data,
+                rank_title_candidates,
+                validate_content_density,
+                _run_real_critique,
+            )
+
+            story_data = dict(snapshot.get("selected_story") or {})
+            for key in (
+                "research_evidence_text",
+                "research_evidence_pack",
+                "research_sources",
+                "research_bundle",
+            ):
+                if key in current:
+                    story_data[key] = current[key]
+
+            cleaned, diagnostics = clean_script_data(
+                candidate,
+                story_data,
+                snapshot.get("format_mode") or "regular",
+            )
+            valid, reason = validate_content_density(
+                cleaned,
+                story_data,
+                snapshot.get("format_mode") or "regular",
+            )
+            if valid:
+                valid, reason, _assessment = assess_release_structure(
+                    cleaned,
+                    snapshot.get("format_mode") or "regular",
+                )
+            if not valid:
+                return False, f"Script edits need attention: {reason}"
+
+            rank_title_candidates(cleaned, story_data)
+            cleaned["recommended_title_index"] = selected_index
+
+            original_voice = [
+                str(scene.get("voiceover") or "").strip()
+                for scene in original_scenes
+                if isinstance(scene, dict)
+            ]
+            revised_voice = [
+                str(scene.get("voiceover") or "").strip()
+                for scene in cleaned.get("script") or []
+                if isinstance(scene, dict)
+            ]
+            voice_changed = original_voice != revised_voice
+            if voice_changed:
+                originality = check_script_originality(cleaned, story_data)
+                if not originality.get("passed"):
+                    return False, "Edited narration is too close to source wording. Rephrase the affected lines before approving."
+                critique = _run_real_critique(cleaned, story_data)
+                cleaned["originality_overlap"] = originality
+                cleaned["originality_critique"] = critique
+                if critique.get("unsupported_claims"):
+                    fixes = [
+                        str(item).strip()
+                        for item in (critique.get("fixes") or [])
+                        if str(item).strip()
+                    ]
+                    detail = fixes[0] if fixes else "The edited narration contains a claim that is not supported by the research evidence."
+                    return False, f"Edited narration needs a factual correction: {detail}"
+
+            cleaned["human_script_reviewed"] = True
+            cleaned["human_script_edit_applied"] = voice_changed
+            with self._lock:
+                self.state.script_data = cleaned
+                self._script_visual_queries = list(
+                    self._script_visual_queries
+                    or (snapshot.get("script_visual_queries") or [])
+                )
+                gate = self._manual_gate_state
+                if isinstance(gate, dict):
+                    gate["script_submitted"] = True
+
+            self.update(
+                "audio",
+                42,
+                "Script review approved. Creating the voiceover and preparing visuals.",
+            )
+            if isinstance(gate, dict):
+                gate["script_event"].set()
+            return True, "Script approved and the production pipeline is continuing."
+        except Exception as exc:
+            return False, f"Script review could not be completed safely: {type(exc).__name__}: {exc}"
+
     def submit_script_visual_queries(self, queries: list[str]) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "script_review":
