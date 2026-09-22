@@ -432,7 +432,13 @@ def _channel_performance_prior(rows, target_category="", target_format="", targe
         return 5.0, 0
 
     def _value(row):
-        return _safe_float(row.get("avg_view_percentage"))
+        retention = _safe_float(row.get("avg_view_percentage"))
+        stayed = _safe_float(row.get("stayed_to_watch"))
+        if retention is not None and stayed is not None:
+            # Keep the established retention signal dominant while adding the
+            # opening-choice signal YouTube reports for Shorts.
+            return retention * 0.60 + stayed * 0.40
+        return retention if retention is not None else stayed
 
     values = [value for value in (_value(row) for row in eligible) if value is not None]
     if not values:
