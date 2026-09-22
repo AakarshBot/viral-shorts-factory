@@ -134,6 +134,7 @@ _NARRATIVE_ROLE_ALIASES = {
 
 
 def assess_narrative_completeness(script_data):
+    """Assess narrative completeness by semantic beats, not an arbitrary scene quota."""
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
     if not scenes:
         return {"passed": False, "reason": "Script contains no narration scenes.", "roles": {}}
@@ -149,50 +150,58 @@ def assess_narrative_completeness(script_data):
         role = _NARRATIVE_ROLE_ALIASES.get(role, role)
         if index == 0 and not role:
             role = "hook"
-        elif index == len(scenes) - 1 and not role:
+        if index == len(scenes) - 1 and not role:
             role = "consequence"
-
         if role in {"hook", "development", "context", "consequence"}:
             roles.setdefault(role, []).append(index + 1)
 
-    missing = sorted({"hook", "development", "context", "consequence"} - set(roles))
-    if missing:
-        # A compact 20–30s Short may legitimately combine the middle beats into
-        # one scene. Keep the hook and consequence distinct, but do not force a
-        # filler scene merely to satisfy a four-scene shape.
-        compact_roles = set(roles)
-        if (
-            len(scenes) == 3
-            and "hook" in compact_roles
-            and "consequence" in compact_roles
-            and ("development" in compact_roles or "context" in compact_roles)
-            and len(missing) == 1
-        ):
-            roles["compact_combined_beat"] = [
-                role for role in missing if role in {"development", "context"}
-            ]
-            return {
-                "passed": True,
-                "reason": (
-                    "Compact three-scene narrative accepted; one middle beat is combined "
-                    "to protect pacing without filler."
-                ),
-                "roles": roles,
-            }
+    if len(scenes) == 1:
         return {
-            "passed": False,
+            "passed": "hook" in roles,
             "reason": (
-                "Narrative is incomplete; distinct hook, development, context and consequence "
-                "beats are missing. Missing: " + ", ".join(missing) + "."
+                "Single-scene script accepted as a deliberately combined hook-and-payoff Short."
+                if "hook" in roles
+                else "Single-scene script lacks a clear hook."
             ),
             "roles": roles,
         }
+
+    if "hook" not in roles:
+        return {
+            "passed": False,
+            "reason": "Narrative has no clear opening hook.",
+            "roles": roles,
+        }
+
+    if "consequence" not in roles:
+        return {
+            "passed": False,
+            "reason": "Narrative has no closing consequence or payoff.",
+            "roles": roles,
+        }
+
+    if len(scenes) == 2:
+        return {
+            "passed": True,
+            "reason": (
+                "Compact two-scene narrative accepted; the second scene can combine "
+                "development, context and consequence to protect pacing."
+            ),
+            "roles": roles,
+        }
+
+    if not ({"development", "context"} & set(roles)):
+        return {
+            "passed": False,
+            "reason": "Narrative needs at least one development or context beat between the hook and payoff.",
+            "roles": roles,
+        }
+
     return {
         "passed": True,
-        "reason": "Narrative covers distinct hook, development, context and consequence beats.",
+        "reason": "Narrative contains a clear hook, a substantive middle beat and a payoff.",
         "roles": roles,
     }
-
 
 def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
@@ -1150,24 +1159,17 @@ def _rewrite_for_originality_once(script_data, story_data, overlap):
     return rewritten
 
 def assess_release_structure(script_data, format_mode="regular"):
-    """Check production-ready narrative structure without word/character quotas."""
+    """Check production-ready narrative structure without imposing scene-count quotas."""
     assessment = assess_narrative_completeness(script_data)
     if not assessment.get("passed"):
         return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
-
-    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
-    count = len(scenes)
-    # Three scenes are permitted when the compact assessment confirms that the
-    # middle context/development beat is combined. This matches the channel's
-    # 20–30s pacing target without allowing one- or two-scene stubs.
-    if count < 3:
-        return False, "Script is too compressed: it lacks enough distinct narrative beats.", assessment
-    if str(format_mode or "").lower() == "top5" and count < 5:
-        return False, "Top-5 script is too compressed to present the list structure.", assessment
+    if str(format_mode or "").lower() == "top5":
+        scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+        if len(scenes) < 5:
+            return False, "Top-5 script does not contain enough list entries.", assessment
     return True, "Narrative structure is production-ready.", assessment
 
-
-def validate_content_density(script_data, story_data, format_mode):
+def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
     """Semantic script gate; no scene-count or word-count quotas."""
     if not isinstance(script_data, dict):
         return False, "Script is missing."
@@ -1185,10 +1187,11 @@ def validate_content_density(script_data, story_data, format_mode):
             return False, f"Scene {index} contains prohibited retention-bait phrasing."
         if _looks_like_filler(voiceover):
             return False, f"Scene {index} contains performative or generic filler."
-        if not str(scene.get("primary_entity") or "").strip():
-            return False, f"Scene {index} is missing a supported primary entity."
-        if not str(scene.get("specific_search_prompt") or "").strip():
-            return False, f"Scene {index} is missing a specific visual search prompt."
+        if require_visual_metadata:
+            if not str(scene.get("primary_entity") or "").strip():
+                return False, f"Scene {index} is missing a supported primary entity."
+            if not str(scene.get("specific_search_prompt") or "").strip():
+                return False, f"Scene {index} is missing a specific visual search prompt."
 
     editorial_angle = str(script_data.get("editorial_angle") or "").strip()
     if not editorial_angle or _looks_like_filler(editorial_angle) or contains_retention_bait(editorial_angle):
@@ -1211,6 +1214,20 @@ def validate_content_density(script_data, story_data, format_mode):
 
     return True, "Passed semantic narrative completeness, hook quality and anti-retention checks"
 
+
+
+def validate_visual_metadata(script_data):
+    """Validate visual fields separately from narration quality."""
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    if not isinstance(scenes, list) or not scenes:
+        return False, "No scenes available for visual metadata."
+    missing = []
+    for index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict) or not str(scene.get("primary_entity") or "").strip():
+            missing.append(index)
+    if missing:
+        return False, "Visual metadata needs grounding for scene(s): " + ", ".join(map(str, missing))
+    return True, "Visual metadata contains a grounded primary entity per scene."
 
 def _fallback_source_fragments(*values):
     """Return source-derived prose while rejecting prompt/schema/workflow leakage."""
