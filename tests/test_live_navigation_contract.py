@@ -22,9 +22,9 @@ def test_live_navigation_is_incremental_pill_hierarchy():
 def test_live_navigation_labels_sports_as_a_separate_lane():
     source = _live_navigation_source()
 
-    assert 'lane_label = "Sports lane" if live_format == "Sports" else "Topic lane"' in source
-    assert '"Sports lane"' in source
-    assert '"Topic lane"' in source
+    assert '"02 · Sports lane"' in source
+    assert '"02 · Topic"' in source
+    assert '"Cricket", "Niche Sports", "AI"' in source
 
 
 def test_live_navigation_reveals_sports_scope_only_after_sports_selection():
@@ -32,11 +32,11 @@ def test_live_navigation_reveals_sports_scope_only_after_sports_selection():
 
     sports = source.index('key="live_sports_menu"')
     cricket_scope = source.index('key="live_cricket_scope_menu"')
-    production_settings = source.index('with st.expander("Production settings"')
+    settings = source.index('with st.popover("⚙ Settings", width="stretch")')
 
-    assert sports < cricket_scope < production_settings
+    assert sports < cricket_scope < settings
     assert 'if sports_mode == "Cricket":' in source
-    assert 'elif sports_mode in {"Niche Sports", "AI"}:' in source
+    assert 'not cricket_scope' in source
 
 
 def test_live_navigation_does_not_require_the_large_css_surface():
@@ -59,13 +59,13 @@ def test_live_navigation_shows_a_compact_three_level_visual_hierarchy():
 def test_live_navigation_shows_selected_path_only_when_ready():
     source = _live_navigation_source()
 
-    ready = source.index('if live_format and final_path_ready:')
     path_parts = source.index('path_parts = [live_format]')
-    production = source.index('with st.expander("Production settings"')
+    ready = source.index('if final_path_ready:')
+    settings = source.index('with st.popover("⚙ Settings", width="stretch")')
 
-    assert ready < path_parts < production
-    assert '"Selected path"' in source
-    assert 'path_text = " · ".join(part for part in path_parts if part)' in source
+    assert path_parts < ready < settings
+    assert '"Path ready"' in source
+    assert '"Change path"' in source
 
 def test_dashboard_theme_uses_the_refreshed_cool_light_palette():
     theme_source = Path(__file__).resolve().parents[1].joinpath("dashboard_theme.py").read_text(encoding="utf-8")
