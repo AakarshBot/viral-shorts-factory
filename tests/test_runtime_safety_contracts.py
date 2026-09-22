@@ -314,8 +314,7 @@ def test_recovery_prefers_human_approved_metadata_when_present():
 def test_obsolete_workspace_cleanup_protects_live_review_and_upload_runs():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     start = source.index("def cleanup_obsolete_run_workspaces(")
-    end = source.index("
-def safe_cleanup(", start)
+    end = source.index("\ndef safe_cleanup(", start)
     block = source[start:end]
     assert "WAITING_SCRIPT_REVIEW" in block
     assert "WAITING_VISUAL_REVIEW" in block
