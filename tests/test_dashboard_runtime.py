@@ -288,9 +288,17 @@ def test_dashboard_start_production_reaches_script_review(monkeypatch):
     assert not controller.snapshot()["thread_alive"]
 
 
-def test_dashboard_controller_pauses_after_visuals_until_approval(monkeypatch):
+def test_dashboard_controller_pauses_after_visuals_until_approval(monkeypatch, tmp_path):
+    image_path = tmp_path / "scene_1.jpg"
+    image_path.write_bytes(b"image")
+
     async def fake_visuals(*_args, **_kwargs):
-        return [[{"image": "/tmp/scene_1.jpg", "source_type": "Pexels"}]]
+        return [[{
+            "image": str(image_path),
+            "source_type": "Pexels",
+            "visual_verified": True,
+            "visual_qc_blocked": False,
+        }]]
 
     def fake_install(self):
         self._patched = True
