@@ -51,3 +51,18 @@ def test_title_package_prefers_channel_length():
 def test_duration_policy_matches_channel_observation():
     assert CHANNEL_IDEAL_MAX_SECONDS == 30.0
     assert CHANNEL_SOFT_MAX_SECONDS == 35.0
+
+
+def test_final_editorial_gate_weights_hook_and_channel_fit_together():
+    from editorial_runtime import score_candidates
+
+    stories = [
+        {"title": "Strong hook", "freshfeed_channel_fit_score": 9.0},
+        {"title": "Broad but passive", "freshfeed_channel_fit_score": 1.0},
+    ]
+    scores = [
+        {"hook_strength": 9, "narrative_completeness": 6, "audience_fit": 6, "monetization_risk": 8, "shelf_life": 6},
+        {"hook_strength": 6, "narrative_completeness": 9, "audience_fit": 9, "monetization_risk": 8, "shelf_life": 9},
+    ]
+    ranked = score_candidates(scores, stories, {}, "", "regular")
+    assert ranked[0]["title"] == "Strong hook"
