@@ -1247,7 +1247,7 @@ class DashboardWorkflowController(WorkflowController):
             ]
             revised_voice = [
                 str(scene.get("voiceover") or "").strip()
-                for scene in cleaned.get("script") or []
+                for scene in candidate.get("script") or []
                 if isinstance(scene, dict)
             ]
             voice_changed = original_voice != revised_voice
