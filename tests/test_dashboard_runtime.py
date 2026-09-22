@@ -1363,8 +1363,10 @@ def test_public_release_ui_does_not_reintroduce_a_factory_specific_block():
     end = source.index("\ndef _perform_upload", start)
     panel = source[start:end]
     assert "public_blocked" not in panel
-    assert "public_ready = upload_unlocked" in panel
     assert "fallback_mode" not in panel
+    assert 'key="upload_public"' in panel
+    assert 'key="upload_private"' in panel
+    assert "metadata_approved" in panel
 
 
 def test_dashboard_progress_uses_latest_known_progress_line():
@@ -1513,7 +1515,8 @@ def test_dashboard_upload_unlock_is_metadata_only():
     start = source.index("def render_upload_panel")
     end = source.index("\ndef _perform_upload", start)
     panel = source[start:end]
-    assert "upload_unlocked = metadata_approved" in panel
+    assert "upload_unlocked = (" in panel
+    assert "metadata_approved" in panel
     assert "disabled=not upload_unlocked" in panel
     assert "Upload is locked until every release QC gate passes." not in panel
     assert "live_qc_passes(" not in panel
