@@ -435,24 +435,64 @@ def _normalise_critique(value, provider):
 
 
 def _run_real_critique(script_data, story_data):
-    script_text = "\n".join(str(s.get("voiceover") or "").strip() for s in script_data.get("script") or [] if isinstance(s, dict) and not s.get("human_contributed"))
+    script_text = "\n".join(
+        str(s.get("voiceover") or "").strip()
+        for s in script_data.get("script") or []
+        if isinstance(s, dict) and not s.get("human_contributed")
+    )
     evidence = "\n\n".join(_originality_sources(story_data)[:12])
-    prompt = ("Return ONLY JSON with keys score, unsupported_claims, exaggerations, fixes. "
-              "unsupported_claims are claims not supported by evidence; exaggerations are overstated wording; fixes are concrete corrections. "
-              "Do not invent criticism.\n\nSCRIPT:\n" + script_text + "\n\nEVIDENCE:\n" + evidence[:18000])
+    instructions = (
+        "Return ONLY JSON with keys score, unsupported_claims, exaggerations, fixes. "
+        "unsupported_claims are claims not supported by evidence; exaggerations are overstated wording; "
+        "fixes are concrete corrections. Do not invent criticism."
+    )
+    user_content = "SCRIPT:\n" + script_text + "\n\nEVIDENCE:\n" + evidence[:18000]
+
     groq = str(os.getenv("GROQ_API_KEY") or "").strip()
     if groq:
-        result = _originality_llm("https://api.groq.com/openai/v1/chat/completions",
-            {"model":"openai/gpt-oss-120b","messages":[{"role":"system","content":prompt},{"role":"user","content":prompt}],"response_format":{"type":"json_object"},"temperature":0},
-            {"Authorization":"Bearer "+groq,"Content-Type":"application/json"})
-        if result is not None: return _normalise_critique(result, "groq")
+        result = _originality_llm(
+            "https://api.groq.com/openai/v1/chat/completions",
+            {
+                "model": "openai/gpt-oss-120b",
+                "messages": [
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": user_content},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            },
+            {"Authorization": "Bearer " + groq, "Content-Type": "application/json"},
+        )
+        if result is not None:
+            return _normalise_critique(result, "groq")
+
     gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
     if gemini:
-        result = _originality_llm("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
-            {"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"responseMimeType":"application/json","temperature":0}},
-            {"x-goog-api-key":gemini,"Content-Type":"application/json"})
-        if result is not None: return _normalise_critique(result, "gemini")
-    return {"score": None, "unsupported_claims": ["Critique provider unavailable."], "exaggerations": [], "fixes": ["Run critique with Groq or Gemini."], "provider": "unavailable"}
+        result = _originality_llm(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            {
+                "contents": [{
+                    "parts": [{
+                        "text": instructions + "\n\n" + user_content
+                    }]
+                }],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "temperature": 0,
+                },
+            },
+            {"x-goog-api-key": gemini, "Content-Type": "application/json"},
+        )
+        if result is not None:
+            return _normalise_critique(result, "gemini")
+
+    return {
+        "score": None,
+        "unsupported_claims": ["Critique provider unavailable."],
+        "exaggerations": [],
+        "fixes": ["Run critique with Groq or Gemini."],
+        "provider": "unavailable",
+    }
 
 
 def append_research_sources(description, research_sources, max_chars=5000):
