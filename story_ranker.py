@@ -3123,7 +3123,7 @@ def patch_story_selection(bot):
                 flush=True,
             )
 
-        return rank_story_candidates(
+        return rank_discovery_candidates(
             relevant,
             conn=conn,
             target_category=config.get("category", genre_key or ""),
@@ -3131,6 +3131,7 @@ def patch_story_selection(bot):
             target_language=config.get("language", ""),
             social_titles=social_titles,
             ai_cricket=ai_cricket,
+            max_candidates=28,
         )
 
     gather._story_selection_patch = True
