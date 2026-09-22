@@ -29,7 +29,8 @@ def test_run_id_includes_microseconds_to_avoid_same_second_collisions():
     start = source.index("def start_production(")
     end = source.index("\n    def upload_manual(", start)
     block = source[start:end]
-    assert 'strftime(\n                    "run-%Y%m%d-%H%M%S-%f"' in block
+    assert "strftime(" in block
+    assert '"run-%Y%m%d-%H%M%S-%f"' in block
 
 
 def test_core_vault_writes_are_pinned_to_the_created_row():
