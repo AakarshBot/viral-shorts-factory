@@ -27,8 +27,8 @@ from story_ranker import patch_story_selection
 from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
 from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS
-
 from dashboard_theme import apply_dashboard_theme
+
 from dashboard_runtime import (
     DashboardWorkflowController,
     build_discovery_evidence,
@@ -497,9 +497,11 @@ def initialise_runtime() -> None:
             pass
     bind_dashboard_patches(ultimate_bot)
 
+
 def _channel_options() -> list[str]:
     configured = os.getenv("CHANNEL_OPTIONS", "").strip()
-    if configured:        values = [item.strip() for item in configured.split(",") if item.strip()]
+    if configured:
+        values = [item.strip() for item in configured.split(",") if item.strip()]
         if values:
             return values
     try:
@@ -749,7 +751,6 @@ def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
 def render_header(action_mode: str) -> None:
     titles = {
         "Live Factory": ("Live Factory", "Create, review and release a Short."),
-        "Live": ("Live Factory", "Create, review and release a Short."),
         "Test": ("Test", "Diagnostics, previews and engineering checks."),
         "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
         "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
@@ -817,7 +818,6 @@ def _clear_live_downstream() -> None:
         "live_cricket_scope_menu",
     ):
         st.session_state[key] = None if key.endswith("_menu") else ""
-
 
 def _clear_live_run_selection() -> None:
     """Clear headline/production state when a Live path changes."""
@@ -980,6 +980,7 @@ def render_live_navigation() -> Dict[str, Any]:
         return build_config()
 
     with st.popover("⚙ Production settings", width="stretch"):
+
         st.caption("Optional release settings.")
         columns = st.columns(3, gap="medium")
 
@@ -996,7 +997,8 @@ def render_live_navigation() -> Dict[str, Any]:
                 key="language_label",
             )
 
-        channels = _channel_options()        current_channel = st.session_state.get("selected_channel") or channels[0]
+        channels = _channel_options()
+        current_channel = st.session_state.get("selected_channel") or channels[0]
         if current_channel not in channels:
             current_channel = channels[0]
         with columns[1]:
@@ -1017,7 +1019,8 @@ def render_live_navigation() -> Dict[str, Any]:
         with columns[2]:
             st.selectbox(
                 "Visual pipeline",
-                visual_pipeline_labels,                index=visual_pipeline_labels.index(current_visual_pipeline),
+                visual_pipeline_labels,
+                index=visual_pipeline_labels.index(current_visual_pipeline),
                 key="visual_pipeline_label",
             )
 
@@ -1496,6 +1499,7 @@ def _render_crop_dialog(
             )
         except (TypeError, ValueError):
             crop_preview = None
+
     if crop_preview is not None:
         st.image(crop_preview, width=280)
 
@@ -1551,7 +1555,8 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if isinstance(group, dict)
     ]
     # Every retained image that passed AI identity verification is displayed.
-    # Provider rights/provenance stay visible as metadata for the human reviewer;    # they are not an automatic manual-QC acceptance filter.
+    # Provider rights/provenance stay visible as metadata for the human reviewer;
+    # they are not an automatic manual-QC acceptance filter.
     available = [
         item for item in pool
         if not bool(item.get("used"))
@@ -1994,7 +1999,8 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                 f"<div class='release-success-copy'>"
                 f"<div class='release-success-kicker'>RELEASE COMPLETE</div>"
                 f"<div class='release-success-title'>{_ui_html(heading)}</div>"
-                f"<div class='release-success-detail'>{_ui_html(copy)}</div>"                f"</div></div>",
+                f"<div class='release-success-detail'>{_ui_html(copy)}</div>"
+                f"</div></div>",
                 unsafe_allow_html=True,
             )
             st.markdown("<div class='release-id-label'>VIDEO ID</div>", unsafe_allow_html=True)
@@ -2041,28 +2047,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         "Approve the final metadata, then choose how the Short is published.",
     )
 
-    current_metadata = {
-        "title": str(
-            st.session_state.get("final_title")
-            or metadata.get("title")
-            or script_data.get("title")
-            or ""
-        ),
-        "description": str(
-            st.session_state.get("final_description")
-            or metadata.get("description")
-            or script_data.get("seo_description")
-            or ""
-        ),
-        "comment": str(
-            st.session_state.get("final_comment")
-            or metadata.get("pinned_comment")
-            or script_data.get("pinned_comment")
-            or ""
-        ),
-    }
     metadata_approved = bool(st.session_state.get("metadata_approved"))
-
     with st.container(border=True):
         st.markdown(
             "<div class='release-section-head'>"
@@ -2493,7 +2478,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
         f"<div class='live-bar'><div class='live-bar-copy'><b>Event radar</b> · "
         f"Showing {start_index + 1}–{start_index + len(visible)} of {total} · "
         f"{event_backed} event-backed · {india_led} India-led</div></div>",
-        unsafe_allow_html=True,    )
+        unsafe_allow_html=True,
+    )
 
     for row_start in range(0, len(visible), 3):
         row = visible[row_start:row_start + 3]
@@ -2657,6 +2643,7 @@ def render_channel_statistics() -> None:
             f"{int(refresh_result.get('retention_ready', 0) or 0)} with retention; "
             f"{int(refresh_result.get('analytics_errors', 0) or 0)} analytics issue(s)."
         )
+
     for label, table in (
         ("By format", stats["by_format"]),
         ("By language", stats["by_language"]),
