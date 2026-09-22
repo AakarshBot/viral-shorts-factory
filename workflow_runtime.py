@@ -197,6 +197,18 @@ class WorkflowController:
         selected_story = _validate_selected_story(selected_story)
         if self.state.thread_alive:
             return
+        with self._lock:
+            awaiting_upload = bool(
+                self.state.completed
+                and self.state.stage == "qc"
+                and self.state.video_path
+                and not self.state.uploaded_video_id
+            )
+        if awaiting_upload:
+            raise RuntimeError(
+                "The current production is ready for upload. Complete or discard its "
+                "upload decision before starting another production run."
+            )
         if not _PROCESS_PRODUCTION_LOCK.acquire(blocking=False):
             raise RuntimeError(
                 "Another production run is already active in this host process. "
