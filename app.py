@@ -28,6 +28,7 @@ from visual_qa_runtime import install_visual_qa_bridge
 import visual_runtime
 from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS
 
+from dashboard_theme import apply_dashboard_theme
 from dashboard_runtime import (
     DashboardWorkflowController,
     build_discovery_evidence,
@@ -392,6 +393,8 @@ section[data-testid="stSidebar"] .st-key-workspace_mode button[aria-checked="tru
 @media(max-width:700px){.stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>""", unsafe_allow_html=True)
 
+apply_dashboard_theme()
+
 REQUIRED_SECRET_NAMES = (
     "GEMINI_API_KEY",
     "GROQ_API_KEY",
@@ -497,8 +500,7 @@ def initialise_runtime() -> None:
 
 def _channel_options() -> list[str]:
     configured = os.getenv("CHANNEL_OPTIONS", "").strip()
-    if configured:
-        values = [item.strip() for item in configured.split(",") if item.strip()]
+    if configured:        values = [item.strip() for item in configured.split(",") if item.strip()]
         if values:
             return values
     try:
@@ -522,6 +524,7 @@ def _init_state() -> None:
         "web_config": {},
         "production_started": False,
         "upload_result": "",
+        "upload_mode": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
         "selected_channel": _channel_options()[0],
@@ -589,6 +592,7 @@ def reset_run() -> None:
         "web_config": {},
         "production_started": False,
         "upload_result": "",
+        "upload_mode": "",
         "confirm_public_upload": False,
         "candidate_page": 0,
         # final_title/final_description/final_comment belong to Streamlit widgets.
@@ -746,6 +750,7 @@ def _render_section_header(kicker: str, title: str, subtitle: str = "") -> None:
 def render_header(action_mode: str) -> None:
     titles = {
         "Live Factory": ("Live Factory", "Create, review and release a Short."),
+        "Live": ("Live Factory", "Create, review and release a Short."),
         "Test": ("Test", "Diagnostics, previews and engineering checks."),
         "Channel Statistics": ("Channel Statistics", "Recorded performance and connected-channel totals."),
         "Run Offline Diagnostics": ("Offline Diagnostics", "Safe code and runtime checks with zero provider calls."),
@@ -763,25 +768,42 @@ def render_header(action_mode: str) -> None:
                 logo_path = candidate_path
                 break
 
-    left, middle, right = st.columns([0.75, 5.45, 1.4], gap="medium")
+    left, middle, right = st.columns([0.42, 5.65, 1.15], gap="small")
     with left:
         if logo_path:
-            st.image(logo_path, width=72)
+            st.image(logo_path, width=48)
         else:
-            st.markdown("<div style='font-size:2.3rem;padding-top:10px'>🎬</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='studio-logo-fallback'>🎬</div>",
+                unsafe_allow_html=True,
+            )
     with middle:
+        snapshot = (
+            st.session_state.workflow_controller.snapshot()
+            if "workflow_controller" in st.session_state
+            else {}
+        )
+        status = (
+            "RUNNING"
+            if snapshot.get("thread_alive")
+            else ("DONE" if snapshot.get("completed") else "READY")
+        )
+        status_class = "live" if status == "RUNNING" else ("done" if status == "DONE" else "")
         st.markdown(
-            f"<div class='brand-card'><span class='brand-pill'>{title}</span>"
-            f"<div class='brand-title'>Viral Shorts Factory</div>"
-            f"<div class='brand-sub'>{_ui_html(subtitle)}</div></div>",
+            f"<div class='studio-masthead'>"
+            f"<div class='studio-masthead-kicker'>{_ui_html(title)}</div>"
+            f"<div class='studio-masthead-title'>Viral Shorts Factory</div>"
+            f"<div class='studio-masthead-sub'>{_ui_html(subtitle)}</div>"
+            f"</div>",
             unsafe_allow_html=True,
         )
     with right:
-        snapshot = st.session_state.workflow_controller.snapshot() if "workflow_controller" in st.session_state else {}
-        status = "RUNNING" if snapshot.get("thread_alive") else ("DONE" if snapshot.get("completed") else "READY")
         st.markdown(
-            f"<div class='factory-status'><div class='factory-status-label'>FACTORY STATUS</div>"
-            f"<div class='factory-status-value'>{_ui_html(status)}</div></div>",
+            f"<div class='studio-status {status_class}'>"
+            f"<span class='studio-status-dot'></span>"
+            f"<div><div class='studio-status-label'>FACTORY</div>"
+            f"<div class='studio-status-value'>{_ui_html(status)}</div></div>"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
@@ -958,7 +980,7 @@ def render_live_navigation() -> Dict[str, Any]:
         st.caption("Choose a topic lane to continue.")
         return build_config()
 
-    with st.expander("Production settings", expanded=False):
+    with st.popover("⚙ Production settings", width="stretch"):
         st.caption("Optional release settings.")
         columns = st.columns(3, gap="medium")
 
@@ -997,8 +1019,7 @@ def render_live_navigation() -> Dict[str, Any]:
         with columns[2]:
             st.selectbox(
                 "Visual pipeline",
-                visual_pipeline_labels,
-                index=visual_pipeline_labels.index(current_visual_pipeline),
+                visual_pipeline_labels,                index=visual_pipeline_labels.index(current_visual_pipeline),
                 key="visual_pipeline_label",
             )
 
@@ -1035,9 +1056,15 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
         "qc": (96, 100),
     }
     if current == "error":
-        current_key = next((key for key, (lo, hi) in bounds.items() if lo <= percent <= hi), "qc")
+        current_key = next(
+            (key for key, (lo, hi) in bounds.items() if lo <= percent <= hi),
+            "qc",
+        )
 
-    active_index = next((i for i, (_label, key) in enumerate(stages) if key == current_key), -1)
+    active_index = next(
+        (i for i, (_label, key) in enumerate(stages) if key == current_key),
+        -1,
+    )
     if snapshot.get("completed"):
         current_key = "qc"
         active_index = len(stages) - 1
@@ -1046,32 +1073,63 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     current_label = label_map.get(current_key, "Ready")
     message = _ui_text(snapshot.get("message"), "Ready.")
     if current == "error":
-        message = _ui_text(snapshot.get("error") or message, "The run stopped before completion.")
-
-    cards = []
-    for index, (label, key) in enumerate(stages):
-        if snapshot.get("completed") or (active_index >= 0 and index < active_index):
-            state, status = "done", "Done"
-        elif key == current_key:
-            state = "stopped" if current == "error" else "active"
-            status = "Stopped" if current == "error" else "Now"
-        else:
-            state, status = "", "Next"
-        cards.append(
-            f"<div class='progress-step {state}'>"
-            f"<div class='progress-step-index'>{index + 1:02d}</div>"
-            f"<div class='progress-step-name'>{_ui_html(label)}</div>"
-            f"<div class='progress-step-state'>{status}</div></div>"
+        message = _ui_text(
+            snapshot.get("error") or message,
+            "The run stopped before completion.",
         )
 
-    _render_section_header("Progress", "Production", "")
+    nodes = []
+    for index, (label, key) in enumerate(stages):
+        if snapshot.get("completed") or (active_index >= 0 and index < active_index):
+            node_state = "done"
+            icon = "✓"
+            state_label = "Done"
+        elif key == current_key:
+            node_state = "active-error" if current == "error" else "active"
+            icon = "!"
+            state_label = "Stopped" if current == "error" else "Current"
+        else:
+            node_state = "next"
+            icon = str(index + 1)
+            state_label = "Next"
+
+        connector = ""
+        if index < len(stages) - 1:
+            connector_state = "done" if (
+                snapshot.get("completed")
+                or (active_index >= 0 and index < active_index)
+            ) else ""
+            connector = f"<div class='workflow-connector {connector_state}'></div>"
+
+        nodes.append(
+            f"<div class='workflow-node {node_state}'>"
+            f"<div class='workflow-dot'>{icon}</div>"
+            f"<div class='workflow-node-copy'>"
+            f"<div class='workflow-node-name'>{_ui_html(label)}</div>"
+            f"<div class='workflow-node-state'>{state_label}</div>"
+            f"</div>"
+            f"</div>{connector}"
+        )
+
+    status_word = "RUNNING" if snapshot.get("thread_alive") else (
+        "ERROR" if current == "error" else ("READY" if active_index < 0 else "WAITING")
+    )
+    step_number = max(1, active_index + 1)
     st.markdown(
-        f"<div class='progress-hero'>"
-        f"<div class='progress-hero-head'><div class='progress-hero-title'>{_ui_html(current_label)}</div>"
-        f"<div class='progress-hero-value'>{percent}%</div></div>"
-        f"<div class='progress-track'><div class='progress-track-fill' style='width:{percent}%'></div></div>"
-        f"<div class='progress-meta'><span>{_ui_html(message)}</span><span>Step {max(1, active_index + 1)} of {len(stages)}</span></div>"
-        f"<div class='progress-steps'>{''.join(cards)}</div>"
+        f"<div class='workflow-shell'>"
+        f"<div class='workflow-topline'>"
+        f"<div><span class='workflow-kicker'>WORKFLOW</span>"
+        f"<span class='workflow-current'>{_ui_html(current_label)}</span></div>"
+        f"<div class='workflow-percent'>{percent}%</div>"
+        f"</div>"
+        f"<div class='workflow-rail'>{''.join(nodes)}</div>"
+        f"<div class='workflow-bottomline'>"
+        f"<span class='workflow-status-pill {('error' if current == 'error' else 'live' if snapshot.get('thread_alive') else '')}'>"
+        f"{_ui_html(status_word)}"
+        f"</span>"
+        f"<span class='workflow-message'>{_ui_html(message)}</span>"
+        f"<span class='workflow-step'>Step {step_number} / {len(stages)}</span>"
+        f"</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -1100,7 +1158,6 @@ def render_stage_progress(snapshot: Dict[str, Any]) -> None:
             st.error(snapshot.get("error") or "The run stopped with an error.")
         elif snapshot.get("completed"):
             render_logs(snapshot)
-
 
 def _script_text(script_data: Dict[str, Any]) -> str:
     scenes = script_data.get("script", [])
@@ -1497,8 +1554,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if isinstance(group, dict)
     ]
     # Every retained image that passed AI identity verification is displayed.
-    # Provider rights/provenance stay visible as metadata for the human reviewer;
-    # they are not an automatic manual-QC acceptance filter.
+    # Provider rights/provenance stay visible as metadata for the human reviewer;    # they are not an automatic manual-QC acceptance filter.
     available = [
         item for item in pool
         if not bool(item.get("used"))
@@ -1918,6 +1974,42 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     if not upload_ready_for_manual_decision(snapshot):
         return
 
+    uploaded_video_id = str(
+        snapshot.get("uploaded_video_id")
+        or st.session_state.get("upload_result")
+        or ""
+    ).strip()
+    upload_mode = str(st.session_state.get("upload_mode") or "").strip().lower()
+
+    if uploaded_video_id:
+        heading = "Published to YouTube" if upload_mode == "public" else "Upload complete"
+        copy = (
+            "The Short is public and the creator comment was submitted."
+            if upload_mode == "public"
+            else "The Short is stored on YouTube as a private upload."
+            if upload_mode == "private"
+            else "YouTube has accepted the video for this production run."
+        )
+        with st.container(border=True):
+            st.markdown(
+                f"<div class='release-success'>"
+                f"<div class='release-success-icon'>✓</div>"
+                f"<div class='release-success-copy'>"
+                f"<div class='release-success-kicker'>RELEASE COMPLETE</div>"
+                f"<div class='release-success-title'>{_ui_html(heading)}</div>"
+                f"<div class='release-success-detail'>{_ui_html(copy)}</div>"
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div class='release-id-label'>VIDEO ID</div>", unsafe_allow_html=True)
+            st.code(uploaded_video_id, language="text")
+            st.link_button(
+                "Open video on YouTube",
+                f"https://www.youtube.com/watch?v={uploaded_video_id}",
+                width="content",
+            )
+        return
+
     script_data = snapshot.get("script_data") or {}
     metadata = snapshot.get("final_metadata") or {}
     run_id = str(snapshot.get("run_id") or "")
@@ -1954,26 +2046,69 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     )
 
     current_metadata = {
-        "title": str(st.session_state.get("final_title") or metadata.get("title") or script_data.get("title") or ""),
-        "description": str(st.session_state.get("final_description") or metadata.get("description") or script_data.get("seo_description") or ""),
-        "comment": str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""),
+        "title": str(
+            st.session_state.get("final_title")
+            or metadata.get("title")
+            or script_data.get("title")
+            or ""
+        ),
+        "description": str(
+            st.session_state.get("final_description")
+            or metadata.get("description")
+            or script_data.get("seo_description")
+            or ""
+        ),
+        "comment": str(
+            st.session_state.get("final_comment")
+            or metadata.get("pinned_comment")
+            or script_data.get("pinned_comment")
+            or ""
+        ),
     }
     metadata_approved = bool(st.session_state.get("metadata_approved"))
+
     with st.container(border=True):
-        st.markdown("#### 1 · Metadata")
+        st.markdown(
+            "<div class='release-section-head'>"
+            "<div><span class='release-step-dot'>1</span><b>Metadata</b></div>"
+            f"<span class='release-state {'ready' if metadata_approved else 'waiting'}'>"
+            f"{'Approved' if metadata_approved else 'Needs approval'}</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         st.caption("Approve the exact title, description and pinned comment used for upload.")
 
-        title = st.text_input("YouTube title", max_chars=100, key="final_title", disabled=metadata_approved)
+        title = st.text_input(
+            "YouTube title",
+            max_chars=100,
+            key="final_title",
+            disabled=metadata_approved,
+        )
         meta_cols = st.columns(2)
         with meta_cols[0]:
-            description = st.text_area("YouTube description", height=140, key="final_description", disabled=metadata_approved)
+            description = st.text_area(
+                "YouTube description",
+                height=140,
+                key="final_description",
+                disabled=metadata_approved,
+            )
         with meta_cols[1]:
-            comment = st.text_area("Pinned comment", height=140, key="final_comment", disabled=metadata_approved)
+            comment = st.text_area(
+                "Pinned comment",
+                height=140,
+                key="final_comment",
+                disabled=metadata_approved,
+            )
 
         if not metadata_approved:
             approve_col, note_col = st.columns([1, 2])
             with approve_col:
-                if st.button("Approve metadata", type="primary", width="stretch", key="approve_metadata"):
+                if st.button(
+                    "Approve metadata",
+                    type="primary",
+                    width="stretch",
+                    key="approve_metadata",
+                ):
                     try:
                         from final_qc_runtime import validate_final_upload_metadata
                         clean_title, clean_description, clean_comment = validate_final_upload_metadata(
@@ -1991,8 +2126,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                         st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
             with note_col:
                 st.caption("Nothing uploads until this approval succeeds.")
-
-        if metadata_approved:
+        else:
             st.success("Metadata approved.", icon="✅")
             if st.button("Edit metadata", width="content", key="edit_metadata"):
                 st.session_state["metadata_approved"] = False
@@ -2005,19 +2139,39 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
 
     preview_col, publish_col = st.columns([1.35, .65], gap="large")
     with preview_col:
-        st.markdown("#### 2 · Watch")
+        st.markdown(
+            "<div class='release-subhead'><span class='release-step-dot'>2</span><b>Watch</b></div>",
+            unsafe_allow_html=True,
+        )
         st.video(video_path)
     with publish_col:
-        st.markdown("#### 3 · Publish")
-        st.caption("Private stays hidden. Public always requires a second confirmation.")
-        upload_unlocked = metadata_approved and not bool(st.session_state.get("upload_result")) and not bool(snapshot.get("uploaded_video_id"))
-        public_ready = upload_unlocked
+        st.markdown(
+            "<div class='release-subhead'><span class='release-step-dot'>3</span><b>Publish</b></div>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Public asks for one final confirmation. Private uploads remain hidden.")
+        upload_unlocked = (
+            metadata_approved
+            and not bool(st.session_state.get("upload_result"))
+            and not bool(snapshot.get("uploaded_video_id"))
+        )
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
-        if st.button("Upload Publicly", type="primary", width="stretch", key="upload_public", disabled=not public_ready):
+        if st.button(
+            "Upload Publicly",
+            type="primary",
+            width="stretch",
+            key="upload_public",
+            disabled=not upload_unlocked,
+        ):
             st.session_state["confirm_public_upload"] = True
             st.rerun()
-        if st.button("Upload Privately", width="stretch", key="upload_private", disabled=not upload_unlocked):
+        if st.button(
+            "Upload Privately",
+            width="stretch",
+            key="upload_private",
+            disabled=not upload_unlocked,
+        ):
             st.session_state["confirm_public_upload"] = False
             _perform_upload(
                 controller,
@@ -2032,7 +2186,12 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             st.warning("You are about to publish this video publicly. Continue?")
             confirm_col, cancel_col = st.columns(2)
             with confirm_col:
-                if st.button("Yes, publish", type="primary", width="stretch", key="confirm_upload_public"):
+                if st.button(
+                    "Yes, publish",
+                    type="primary",
+                    width="stretch",
+                    key="confirm_upload_public",
+                ):
                     st.session_state["confirm_public_upload"] = False
                     _perform_upload(
                         controller,
@@ -2043,7 +2202,11 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                         "public",
                     )
             with cancel_col:
-                if st.button("Cancel", width="stretch", key="cancel_upload_public"):
+                if st.button(
+                    "Cancel",
+                    width="stretch",
+                    key="cancel_upload_public",
+                ):
                     st.session_state["confirm_public_upload"] = False
                     st.rerun()
 
@@ -2076,6 +2239,7 @@ def _perform_upload(
             st.session_state.get("web_config", {}).get("trend_keyword", ""),
         )
         st.session_state.upload_result = str(result)
+        st.session_state.upload_mode = str(publish_mode).strip().lower()
         st.rerun()
     except Exception as exc:
         message = str(exc)
@@ -2498,7 +2662,6 @@ def render_channel_statistics() -> None:
             f"{int(refresh_result.get('retention_ready', 0) or 0)} with retention; "
             f"{int(refresh_result.get('analytics_errors', 0) or 0)} analytics issue(s)."
         )
-
     for label, table in (
         ("By format", stats["by_format"]),
         ("By language", stats["by_language"]),
