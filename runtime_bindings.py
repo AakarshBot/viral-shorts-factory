@@ -243,13 +243,6 @@ def _patch_subtitles(bot):
         return getattr(bot, "generate_karaoke_clip", None)
 
 
-def _patch_youtube_creator_comments(bot):
-    try:
-        from youtube_comment_runtime import patch_youtube_upload
-        return patch_youtube_upload(bot)
-    except Exception as exc:
-        print(f"   [Bindings] YouTube creator comment patch unavailable: {exc}", flush=True)
-        return getattr(bot, "upload_to_youtube", None)
 
 
 def _install_script_pipeline(bot):
