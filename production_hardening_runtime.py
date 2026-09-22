@@ -37,10 +37,16 @@ def install_production_wrappers(controller) -> None:
     """Install the canonical live workflow wrappers for one controller."""
     if controller._patched:
         return
-    run_robot = getattr(controller.bot, "run_robot", None)
+    run_robot = (
+        getattr(controller.bot, "_vsf_canonical_run_robot", None)
+        or getattr(controller.bot, "run_robot", None)
+    )
     if run_robot is None:
         raise RuntimeError("Legacy run_robot() is not available.")
     globals_dict = getattr(run_robot, "__globals__", {})
+    canonical = getattr(controller.bot, "_vsf_canonical_runtime_bindings", {})
+    if not isinstance(canonical, dict):
+        canonical = {}
 
     def _same_controller_wrapper(current):
         return (
@@ -49,7 +55,7 @@ def install_production_wrappers(controller) -> None:
             and getattr(current, "_workflow_controller", None) is controller
         )
 
-    original_write = globals_dict.get("write_script")
+    original_write = canonical.get("write_script") or globals_dict.get("write_script")
     if callable(original_write):
         if not _same_controller_wrapper(original_write):
             inner_write = original_write
@@ -68,7 +74,7 @@ def install_production_wrappers(controller) -> None:
             write_wrapper._workflow_controller = controller
             globals_dict["write_script"] = write_wrapper
 
-    original_audio = globals_dict.get("generate_voiceover_and_timestamps")
+    original_audio = canonical.get("generate_voiceover_and_timestamps") or globals_dict.get("generate_voiceover_and_timestamps")
     if callable(original_audio):
         if not _same_controller_wrapper(original_audio):
             inner_audio = original_audio
@@ -102,7 +108,7 @@ def install_production_wrappers(controller) -> None:
             audio_wrapper._workflow_controller = controller
             globals_dict["generate_voiceover_and_timestamps"] = audio_wrapper
 
-    original_visuals = globals_dict.get("process_visuals_async")
+    original_visuals = canonical.get("process_visuals_async") or globals_dict.get("process_visuals_async")
     if callable(original_visuals):
         if not _same_controller_wrapper(original_visuals):
             inner_visuals = original_visuals
@@ -123,7 +129,7 @@ def install_production_wrappers(controller) -> None:
             visuals_wrapper._workflow_controller = controller
             globals_dict["process_visuals_async"] = visuals_wrapper
 
-    original_compile = globals_dict.get("compile_video")
+    original_compile = canonical.get("compile_video") or globals_dict.get("compile_video")
     if callable(original_compile):
         if not _same_controller_wrapper(original_compile):
             inner_compile = original_compile
@@ -141,7 +147,7 @@ def install_production_wrappers(controller) -> None:
             compile_wrapper._workflow_controller = controller
             globals_dict["compile_video"] = compile_wrapper
 
-    real_upload = getattr(controller.bot, "upload_to_youtube", None)
+    real_upload = canonical.get("upload_to_youtube") or getattr(controller.bot, "upload_to_youtube", None)
     if callable(real_upload):
         if getattr(real_upload, "_workflow_upload_blocker", False):
             controller._real_uploader = getattr(

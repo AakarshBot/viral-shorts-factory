@@ -332,33 +332,14 @@ def parse_groq_json_response(content_str):
 
 
 def init_db(conn):
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS vault (
-        topic TEXT PRIMARY KEY, date_used TIMESTAMP, genre TEXT, video_id TEXT, 
-        reported INTEGER DEFAULT 0, views INTEGER DEFAULT 0, title_used TEXT, 
-        hook_type TEXT, structure_used TEXT, persona_used TEXT,
-        hook_strength REAL, narrative_completeness REAL, audience_fit REAL, 
-        monetization_risk REAL, shelf_life REAL, composite_score REAL, rejected_reason TEXT,
-        script_json TEXT, asset_credits_json TEXT, ai_image_ratio REAL, voice_gender TEXT, format_used TEXT,
-        language_used TEXT, avg_view_duration REAL, avg_view_percentage REAL, combo_key TEXT, title_ctr REAL,
-        hook_style_used TEXT, trend_keyword TEXT
-    )''')
-    
-    columns = [
-        "reported INTEGER DEFAULT 0", "views INTEGER DEFAULT 0", "title_used TEXT", 
-        "asset_credits_json TEXT",
-        "hook_type TEXT", "structure_used TEXT", "persona_used TEXT", "hook_strength REAL", 
-        "narrative_completeness REAL", "audience_fit REAL", "monetization_risk REAL", 
-        "shelf_life REAL", "composite_score REAL", "rejected_reason TEXT", "script_json TEXT", 
-        "ai_image_ratio REAL", "voice_gender TEXT", "format_used TEXT", "language_used TEXT", 
-        "avg_view_duration REAL", "avg_view_percentage REAL", "combo_key TEXT", "title_ctr REAL",
-        "hook_style_used TEXT", "trend_keyword TEXT"
-    ]
-    for col in columns:
-        try: c.execute(f"ALTER TABLE vault ADD COLUMN {col}")
-        except:
-            pass
-    conn.commit()
+    """Ensure the canonical run-identity schema is present.
+
+    Database ownership lives in db_architecture.py. Keeping a second legacy
+    topic-primary-key schema here allowed duplicate-topic runs to be silently
+    ignored whenever the identity bridge was not installed.
+    """
+    from db_architecture import migrate_vault
+    migrate_vault(conn)
 
 def safe_text(val, fallback=""):
     if val is None:
@@ -1790,6 +1771,13 @@ def upload_to_youtube(
         tags = tags[:30]
 
         privacy = "private" if publish_mode == "private" else "public"
+        if privacy == "public" and bool(
+            (script_data or {}).get("public_publish_blocked")
+        ):
+            raise RuntimeError(
+                "Public upload is blocked because the script pipeline marked this "
+                "production run as private-only."
+            )
         body = {
             "snippet": {
                 "title": title[:100],
@@ -2065,11 +2053,21 @@ def run_robot(web_config=None):
                 return
             story_payload, main_topic = cands[0], cands[0]["title"]
 
-        conn.execute(
+        insert_cursor = conn.execute(
             "INSERT OR IGNORE INTO vault "
             "(topic, date_used, genre, video_id) VALUES (?, ?, ?, ?)",
             (main_topic, datetime.now(), cat_choice, "PENDING_QC"),
         )
+        if getattr(insert_cursor, "rowcount", 1) != 1:
+            raise RuntimeError(
+                "Production run record was not created as a new vault row; "
+                "refusing to continue with ambiguous run identity."
+            )
+        run_row_id = getattr(insert_cursor, "lastrowid", None)
+        if not run_row_id:
+            raise RuntimeError(
+                "Production run row identity is unavailable; refusing to continue."
+            )
         conn.commit()
 
         dashboard_manual_control = bool(
@@ -2197,10 +2195,10 @@ def run_robot(web_config=None):
         # Persist the visual rights ledger before the human upload gate so the
         # selected/rejected render remains auditable.
         conn.execute(
-            "UPDATE vault SET asset_credits_json=? WHERE topic=?",
+            "UPDATE vault SET asset_credits_json=? WHERE rowid=?",
             (
                 json.dumps(script_data.get("visual_provenance") or [], ensure_ascii=False),
-                main_topic,
+                run_row_id,
             ),
         )
         conn.commit()
@@ -2244,7 +2242,7 @@ def run_robot(web_config=None):
             narrative_completeness=?, audience_fit=?, monetization_risk=?,
             shelf_life=?, composite_score=?, asset_credits_json=?, ai_image_ratio=?, voice_gender=?,
             format_used=?, language_used=?, combo_key=?, hook_style_used=?,
-            trend_keyword=? WHERE topic=?""",
+            trend_keyword=? WHERE rowid=?""",
             (
                 vid_id,
                 script_data["title"],
@@ -2265,7 +2263,7 @@ def run_robot(web_config=None):
                 combo_key,
                 script_data.get("hook_style_used", ""),
                 trend_keyword,
-                main_topic,
+                run_row_id,
             ),
         )
         conn.commit()

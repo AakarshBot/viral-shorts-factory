@@ -838,6 +838,7 @@ def _clear_live_run_selection() -> None:
     st.session_state.upload_notice = ""
     st.session_state.upload_notice_kind = ""
     st.session_state.metadata_approved = False
+    st.session_state.approved_metadata = {}
     st.session_state.metadata_editing = False
     st.session_state.metadata_loaded_run_id = ""
     st.session_state.confirm_public_upload = False
@@ -2341,6 +2342,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     approved_metadata = st.session_state.get("approved_metadata") or {}
     if metadata_approved and not isinstance(approved_metadata, dict):
         approved_metadata = {}
+    public_publish_blocked = bool(
+        (script_data or {}).get("public_publish_blocked")
+    )
     with st.container(border=True):
         if metadata_approved and not st.session_state.get("metadata_editing"):
             st.markdown(
@@ -2446,13 +2450,6 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     st.caption("Nothing uploads until this approval succeeds.")
             else:
                 st.success("Metadata approved.", icon="✅")
-                if st.button("Edit metadata", width="content", key="edit_metadata_inline"):
-                    st.session_state["final_title"] = str(approved_metadata.get("title") or "").strip()
-                    st.session_state["final_description"] = str(approved_metadata.get("description") or "").strip()
-                    st.session_state["final_comment"] = str(approved_metadata.get("comment") or "").strip()
-                    st.session_state["metadata_approved"] = False
-                    st.session_state["metadata_editing"] = True
-                    st.rerun()
 
     if not (video_path and os.path.isfile(video_path)):
         st.error("The final video path is recorded, but the file is not accessible from the dashboard process.")
@@ -2479,12 +2476,17 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         )
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
+        if public_publish_blocked:
+            st.warning(
+                "Public upload is disabled for this run because the script pipeline "
+                "marked the script as requiring private-only publication."
+            )
         if st.button(
             "Upload Publicly",
             type="primary",
             width="stretch",
             key="upload_public",
-            disabled=not upload_unlocked,
+            disabled=not upload_unlocked or public_publish_blocked,
         ):
             st.session_state["confirm_public_upload"] = True
             st.rerun()

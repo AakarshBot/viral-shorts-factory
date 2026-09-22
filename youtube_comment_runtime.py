@@ -106,100 +106,11 @@ def _build_clean_metadata(script_data, genre_cfg, trend_keyword):
 
 
 def patch_youtube_upload(bot):
-    """Install the creator-comment uploader on the already-bound runtime."""
-    current = getattr(bot, "upload_to_youtube", None)
-    if current is None or getattr(current, "_creator_comment_wrapped", False):
-        return current
+    """Compatibility shim; the canonical uploader already handles public comments.
 
-    def upload_with_creator_comment(
-        video_path,
-        script_data,
-        genre_cfg,
-        publish_mode,
-        trend_keyword=None,
-        title_override=None,
-        description_override=None,
-        comment_override=None,
-    ):
-        try:
-            import googleapiclient.discovery
-            from googleapiclient.http import MediaFileUpload
+    The old implementation duplicated YouTube videos.insert() and could diverge
+    from the canonical public-visibility recovery path. Keep this symbol stable
+    for older callers, but never install a second uploader implementation.
+    """
+    return getattr(bot, "upload_to_youtube", None)
 
-            if not video_path or not os.path.isfile(video_path):
-                raise FileNotFoundError(f"Video file not found: {video_path}")
-
-            creds = bot.get_google_credentials()
-            youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
-            generated_title, generated_description, tags = _build_clean_metadata(
-                script_data, genre_cfg, trend_keyword
-            )
-            title = ensure_shorts_title(title_override) if title_override is not None else generated_title
-            description = str(description_override).strip()[:5000] if description_override is not None else generated_description
-            comment_text = _clean_comment(comment_override) if comment_override is not None else build_pinned_comment(
-                script_data, title, genre_cfg.get("label", "")
-            )
-
-            body = {
-                "snippet": {
-                    "title": title,
-                    "description": description,
-                    "tags": tags,
-                    "categoryId": str(genre_cfg.get("category_id", "24")),
-                },
-                "status": {
-                    "privacyStatus": "private" if str(publish_mode).lower() == "private" else "public",
-                    "selfDeclaredMadeForKids": False,
-                },
-            }
-            media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
-            request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-            response = None
-            while response is None:
-                status, response = request.next_chunk()
-                if status:
-                    print(f"   [Upload Progress] {int(status.progress() * 100)}%", flush=True)
-
-            video_id = response.get("id") if response else None
-            if not video_id:
-                raise RuntimeError("YouTube upload completed without a video ID.")
-
-            if body["status"]["privacyStatus"] == "public":
-                from ultimate_bot import _ensure_youtube_public_visibility, _report_youtube_upload_visibility
-                response = _ensure_youtube_public_visibility(youtube, response, video_id)
-                _report_youtube_upload_visibility(response, video_id, "public")
-
-            print(f"   [+] Successfully uploaded to YouTube! Video ID: {video_id}", flush=True)
-
-            if body["status"]["privacyStatus"] == "public":
-                try:
-                    comment_id, posted_comment = post_creator_comment(
-                        youtube,
-                        video_id,
-                        {**script_data, "pinned_comment": comment_text},
-                        title,
-                        genre_cfg.get("label", ""),
-                    )
-                    script_data["creator_comment_id"] = comment_id or ""
-                    script_data["creator_comment"] = posted_comment
-                except Exception as exc:
-                    print(f"   [!] Creator comment failed, but upload succeeded: {exc}", flush=True)
-            else:
-                print("   [i] Creator comment skipped because the video is not public.", flush=True)
-
-            return video_id
-        except Exception as exc:
-            print(f"   [!] YouTube upload failed: {type(exc).__name__}: {exc}", flush=True)
-            try:
-                from ultimate_bot import YouTubePublicVisibilityError
-            except Exception:
-                YouTubePublicVisibilityError = None
-            if (
-                YouTubePublicVisibilityError is not None
-                and isinstance(exc, YouTubePublicVisibilityError)
-            ) or str(publish_mode).lower() == "public":
-                raise
-            return None
-
-    upload_with_creator_comment._creator_comment_wrapped = True
-    bot.upload_to_youtube = upload_with_creator_comment
-    return upload_with_creator_comment

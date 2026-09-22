@@ -309,9 +309,22 @@ def bind_dashboard_patches(bot):
         "auto_pilot_selection", "run_analytics_sweep",
         "upload_to_youtube", "generate_karaoke_clip",
     )
+
+    # Capture the first fully-patched runtime callable set before production
+    # controllers add per-run dashboard wrappers. Subsequent Streamlit reruns
+    # must rebind these canonical callables, never yesterday's wrapper chain.
+    canonical = getattr(bot, "_vsf_canonical_runtime_bindings", None)
+    if not isinstance(canonical, dict):
+        canonical = {}
+    for name in names:
+        current = getattr(bot, name, None)
+        if name not in canonical and callable(current):
+            canonical[name] = current
+    bot._vsf_canonical_runtime_bindings = canonical
+
     bound = []
     for name in names:
-        value = getattr(bot, name, None)
+        value = canonical.get(name) or getattr(bot, name, None)
         if value is not None:
             namespace[name] = value
             bound.append(name)

@@ -787,7 +787,10 @@ class DashboardWorkflowController(WorkflowController):
 
         self._ensure_manual_gate_state()
 
-        run_robot = getattr(self.bot, "run_robot", None)
+        run_robot = (
+            getattr(self.bot, "_vsf_canonical_run_robot", None)
+            or getattr(self.bot, "run_robot", None)
+        )
         namespace = getattr(run_robot, "__globals__", None)
         if not isinstance(namespace, dict):
             return
@@ -966,6 +969,15 @@ class DashboardWorkflowController(WorkflowController):
                 video_title=video_title,
                 used_hashes=used_hashes,
                 used_source_image_urls=used_source_image_urls,
+                search_round=(
+                    sum(
+                        1
+                        for group in self._visual_search_groups
+                        if str(group.get("query") or "").strip().casefold()
+                        == query.casefold()
+                    )
+                    + 1
+                ),
             )
             assets = list(result.get("assets") or [])
             materialized = materialize_manual_visual_pool(
@@ -1462,6 +1474,7 @@ class DashboardWorkflowController(WorkflowController):
                 used_source_pages=used_source_pages,
                 min_options=0,
                 max_options=10,
+                search_round=attempt,
             )
             assets = list(result.get("assets") or [])
             # Zero is a valid result. There is no minimum threshold for a
@@ -1719,21 +1732,35 @@ class DashboardWorkflowController(WorkflowController):
 
             self._return_slide_visual_to_pool(old_layer, replacement_scene)
 
+            replacement_provenance = dict(
+                replacement_scene.get("asset_provenance") or {}
+            )
             new_layer = {
                 "image": replacement_path,
+                "visual_original_path": str(
+                    replacement_scene.get("visual_original_path") or ""
+                ).strip(),
                 "text": "" if format_mode == "top5" else replacement_scene.get("voiceover", ""),
                 "ai_generated": used_ai,
                 "source_type": source_type,
                 "visual_type": visual_type,
                 "visual_genre": replacement_scene.get("visual_genre", "GENERAL_CONTEXT"),
                 "visual_verified": bool(replacement_scene.get("visual_verified", False)),
+                "visual_qc_blocked": bool(replacement_scene.get("visual_qc_blocked", False)),
+                "visual_qc_block_reason": replacement_scene.get("visual_qc_block_reason", ""),
                 "visual_rescue_reason": replacement_scene.get("visual_rescue_reason", ""),
                 "visual_fallback_reason": "",
                 "visual_query_used": replacement_scene.get("visual_query_used", ""),
                 "manual_visual_query": query,
                 "manual_visual_query_score": replacement_scene.get("manual_visual_query_score", 0),
                 "source_credit": source_credit,
-                "source_image_url": "",
+                "source_image_url": str(
+                    replacement_scene.get("source_image_url")
+                    or replacement_provenance.get("url")
+                    or replacement_provenance.get("source_page_url")
+                    or ""
+                ).strip(),
+                "asset_provenance": replacement_provenance,
             }
 
             with self._lock:

@@ -15,11 +15,12 @@ from db_architecture import migrate_vault, update_run_record
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
 MAX_DISCOVERY_CANDIDATES = 28
+_PROCESS_PRODUCTION_LOCK = threading.Lock()
 
 
 def _run_production_runner(bot, web_config: Dict[str, Any]):
     """Execute the production runner exactly once with the identity bridge."""
-    production_runner = getattr(bot, "run_robot", None)
+    production_runner = getattr(bot, "_vsf_canonical_run_robot", None) or getattr(bot, "run_robot", None)
     if not callable(production_runner):
         raise RuntimeError("Legacy run_robot() is not available.")
     if getattr(production_runner, "_exact_identity_runner", False):
@@ -196,33 +197,46 @@ class WorkflowController:
         selected_story = _validate_selected_story(selected_story)
         if self.state.thread_alive:
             return
-        self.reset()
-        config = dict(web_config)
-        config = self._prepare_production_config(config)
-        self._install_production_wrappers()
-        with self._lock:
-            self.state.selected_story = dict(selected_story)
-            self.state.run_id = datetime.now(timezone.utc).strftime("run-%Y%m%d-%H%M%S")
-            self.state.stage = "research"
-            self.state.percent = 16
-            self.state.message = "Researching multiple sources for the selected story…"
-            self.state.thread_alive = True
-            self.state.completed = False
-            self.state.error = ""
+        if not _PROCESS_PRODUCTION_LOCK.acquire(blocking=False):
+            raise RuntimeError(
+                "Another production run is already active in this host process. "
+                "Wait for it to finish before starting another run."
+            )
 
-        if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
-            config["format_mode"] = "cricket"
-        is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
-        config["publish_mode"] = "private"
-        config["manual_qc_required"] = True
-        self.bot._active_web_config = dict(config)
-        with self._lock:
-            self.state.format_mode = str(config.get("format_mode") or "").strip().lower()
+        try:
+            self.reset()
+            config = dict(web_config)
+            config = self._prepare_production_config(config)
+            self._install_production_wrappers()
+            with self._lock:
+                self.state.selected_story = dict(selected_story)
+                self.state.run_id = datetime.now(timezone.utc).strftime(
+                    "run-%Y%m%d-%H%M%S-%f"
+                )
+                self.state.stage = "research"
+                self.state.percent = 16
+                self.state.message = "Researching multiple sources for the selected story…"
+                self.state.thread_alive = True
+                self.state.completed = False
+                self.state.error = ""
+
+            if config.get("cricket_pipeline") or config.get("display_format") == "Cricket":
+                config["format_mode"] = "cricket"
+            is_top5 = str(config.get("format_mode", "")).strip().lower() == "top5"
+            config["publish_mode"] = "private"
+            config["manual_qc_required"] = True
+            self.bot._active_web_config = dict(config)
+            with self._lock:
+                self.state.format_mode = str(config.get("format_mode") or "").strip().lower()
+
+        except Exception:
+            _PROCESS_PRODUCTION_LOCK.release()
+            raise
 
         def worker():
             try:
                 self._worker_started()
-                run_robot = self.bot.run_robot
+                run_robot = getattr(self.bot, "_vsf_canonical_run_robot", None) or self.bot.run_robot
                 globals_dict = getattr(run_robot, "__globals__", {})
                 original_gather = globals_dict.get("gather_and_filter_stories")
                 selected = dict(selected_story)
@@ -310,10 +324,19 @@ class WorkflowController:
                     self._worker_finished()
                 except Exception:
                     pass
+                _PROCESS_PRODUCTION_LOCK.release()
                 with self._lock:
                     self.state.thread_alive = False
 
-        threading.Thread(target=worker, name="viral-shorts-production", daemon=True).start()
+        try:
+            threading.Thread(
+                target=worker,
+                name="viral-shorts-production",
+                daemon=True,
+            ).start()
+        except Exception:
+            _PROCESS_PRODUCTION_LOCK.release()
+            raise
 
     def upload_manual(
         self,
@@ -336,6 +359,15 @@ class WorkflowController:
         if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Final video file not found: {video_path}")
         from final_qc_runtime import validate_final_upload_metadata, validate_final_video
+
+        if (
+            str(publish_mode or "").strip().lower() == "public"
+            and bool((script_data or {}).get("public_publish_blocked"))
+        ):
+            raise RuntimeError(
+                "Public upload is blocked for this production run because the script "
+                "pipeline marked it private-only. Review or regenerate the script before publishing publicly."
+            )
 
         validate_final_video(video_path)
 
