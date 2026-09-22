@@ -1315,7 +1315,8 @@ def collect_manual_visual_search(
             source_plan = _source_plan(bot, visual_type)
 
     # Search each available provider concurrently. Each worker owns its URL
-    # set and performs the same bounded two-page fallback as the old serial path.
+    # set and performs a bounded multi-page fallback. Repeated searches advance
+    # to fresh provider pages rather than replaying the cached first pages.
     # Results are merged on the main thread in provider-plan order, preserving
     # deterministic ranking/deduplication while removing cumulative provider waits.
     provider_jobs = []
@@ -1352,7 +1353,7 @@ def collect_manual_visual_search(
                             visual_type,
                             visual_genre,
                             True,
-                            page,
+                            effective_page,
                         ),
                         source_name,
                         exact_query,
