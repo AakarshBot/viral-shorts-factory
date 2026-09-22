@@ -1,3 +1,4 @@
+import story_ranker
 """Focused tests for topic discovery quality and portfolio behavior."""
 
 from story_ranker import (
