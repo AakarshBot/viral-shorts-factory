@@ -37,7 +37,10 @@ def install_production_wrappers(controller) -> None:
     """Install the canonical live workflow wrappers for one controller."""
     if controller._patched:
         return
-    run_robot = getattr(controller.bot, "run_robot", None)
+    run_robot = (
+        getattr(controller.bot, "_vsf_canonical_run_robot", None)
+        or getattr(controller.bot, "run_robot", None)
+    )
     if run_robot is None:
         raise RuntimeError("Legacy run_robot() is not available.")
     globals_dict = getattr(run_robot, "__globals__", {})
