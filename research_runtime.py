@@ -67,8 +67,10 @@ def _script_evidence_text(story_data: Dict[str, Any]) -> str:
     )
 
 
-def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str) -> str:
+def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data: Dict[str, Any] | None = None) -> str:
     language_instruction = _clean((language_cfg or {}).get("script_instruction"))
+    from script_runtime import choose_editorial_angle
+    angle_strategy = choose_editorial_angle(story_data or {}, format_mode)
     return (
         "You are the factory's backup original-news Shorts writer. Return ONLY valid JSON. "
         "Use the supplied Phase 2 evidence as the factual foundation. Prefer corroborated claims and "
@@ -79,6 +81,9 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str) -> str:
         "timeline, limitation, implication, or consequence wherever supported. "
         "Preserve distinct hook, development, context and consequence beats rather than collapsing the story into "
         "a tiny summary. Let the story determine the number of scenes; never add filler solely for length. "
+        "EDITORIAL ANGLE CONTROL: "
+        f"Use this evidence-selected narrative lens when supported: {angle_strategy['type']}. {angle_strategy['instruction']} "
+        "Do not force the lens when the evidence does not support it. "
         "Make scene 1 a precise factual headline that names the concrete event or subject immediately, with no generic setup. "
         "Use curiosity through a specific supported fact, change, consequence, or tension rather than withholding information. "
         "Keep scene 1 tighter than the explanatory scenes that follow. "
@@ -136,7 +141,7 @@ def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[s
     payload = {
         "model": "openrouter/free",
         "messages": [
-            {"role": "system", "content": _fallback_prompt(language_cfg, format_mode)},
+            {"role": "system", "content": _fallback_prompt(language_cfg, format_mode, story_data)},
             {"role": "user", "content": "PHASE 2 EVIDENCE PACK:\n" + source_text},
         ],
         "response_format": {"type": "json_object"},
@@ -187,7 +192,7 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _fallback_prompt(language_cfg, format_mode)},
+            {"role": "system", "content": _fallback_prompt(language_cfg, format_mode, story_data)},
             {"role": "user", "content": "PHASE 2 EVIDENCE PACK:\n" + source_text},
         ],
         "stream": False,
