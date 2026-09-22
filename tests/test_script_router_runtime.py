@@ -1,13 +1,19 @@
-from script_router_runtime import _story_source_text, _usable_story_source_fallback
+from pathlib import Path
+
+from script_router_runtime import (
+    _story_source_text,
+    _usable_story_source_fallback,
+    assess_story_source_sufficiency,
+)
 
 
-def test_story_source_fallback_requires_real_selected_story_text():
+def test_story_source_fallback_requires_real_factual_structure():
     rich_story = {
         "title": "India announce a major change after a tense rivalry clash",
         "summary": (
-            "Officials confirmed the change after the latest match, and the decision will affect "
-            "the team's preparation for the upcoming tournament. The selected story contains enough "
-            "factual source text to draft a single-source script for human review."
+            "Officials confirmed the change after the latest match. "
+            "The decision will affect the team's preparation for the upcoming tournament. "
+            "The selected story contains enough factual source text to draft a single-source script for human review."
         ),
     }
     thin_story = {"title": "India update", "summary": "Short."}
@@ -17,27 +23,34 @@ def test_story_source_fallback_requires_real_selected_story_text():
     assert len(_story_source_text(rich_story)) >= 220
 
 
-def test_story_source_fallback_contains_no_generated_editorial_instructions():
-    story = {
-        "title": "Rashid Khan calls an Indian batter exceptional",
-        "text": "Rashid Khan praised the Indian batter after the latest match. "
-                "The comment drew attention because of the rivalry between the teams. "
-                "The selected report describes what was said and the immediate reaction.",
+def test_story_source_sufficiency_is_not_a_raw_character_cutoff():
+    compact_but_structured = {
+        "title": "Rashid Khan praises an Indian batter",
+        "text": (
+            "Rashid Khan praised the Indian batter after the latest match. "
+            "The comment drew attention because of the rivalry and the timing."
+        ),
     }
-
-    text = _story_source_text(story)
-
-    assert "Rashid Khan" in text
-    assert "praised" in text.lower()
-    assert "return only valid json" not in text.lower()
+    result = assess_story_source_sufficiency(compact_but_structured)
+    assert result["passed"] is True
+    assert "checks" in result
+    assert "enough_words" in result["checks"]
 
 
-def test_duration_rewrite_contract_reuses_existing_evidence_and_preserves_valid_original():
-    from pathlib import Path
-    import ultimate_bot
+def test_duration_rewrite_contract_passes_the_actual_previous_draft():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert 'duration_story["previous_script"]' in source
+    assert "PREVIOUS DRAFT TO TIGHTEN:" in source
+    assert "preserve the previous draft's supported facts" in source
 
-    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "Re-use the first evidence pack" not in source
-    assert "Reuse the first evidence pack during the tightening rewrite." in source
-    assert "retaining the original within-limit draft" in source
-    assert 'if duration_estimate["seconds"] <= 35.0' in source
+
+def test_duration_fallbacks_receive_the_previous_draft_too():
+    source = Path(__file__).resolve().parents[1].joinpath("research_runtime.py").read_text(encoding="utf-8")
+    assert "def _previous_draft_text" in source
+    assert "PREVIOUS DRAFT TO TIGHTEN:" in source
+
+
+def test_script_router_reuses_existing_evidence_pack():
+    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
+    assert "Reusing existing evidence pack." in source
+    assert "No second research pass" in source
