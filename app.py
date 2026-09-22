@@ -541,6 +541,7 @@ def _init_state() -> None:
         "visual_query_field_count": 0,
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
+        "approved_metadata": {},
         "metadata_editing": False,
         "metadata_loaded_run_id": "",
         "metadata_pending_values": None,
@@ -610,6 +611,7 @@ def reset_run() -> None:
         "visual_query_suggestions": [],
         "visual_query_field_count": 0,
         "metadata_approved": False,
+        "approved_metadata": {},
         "metadata_editing": False,
         "metadata_loaded_run_id": "",
         "metadata_pending_values": None,
@@ -2299,9 +2301,15 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         isinstance(pending_metadata, dict)
         and str(pending_metadata.get("run_id") or "").strip() == run_id
     ):
-        st.session_state["final_title"] = str(pending_metadata.get("title") or "").strip()
-        st.session_state["final_description"] = str(pending_metadata.get("description") or "").strip()
-        st.session_state["final_comment"] = str(pending_metadata.get("comment") or "").strip()
+        approved = {
+            "title": str(pending_metadata.get("title") or "").strip(),
+            "description": str(pending_metadata.get("description") or "").strip(),
+            "comment": str(pending_metadata.get("comment") or "").strip(),
+        }
+        st.session_state["approved_metadata"] = approved
+        st.session_state["final_title"] = approved["title"]
+        st.session_state["final_description"] = approved["description"]
+        st.session_state["final_comment"] = approved["comment"]
         st.session_state["metadata_approved"] = True
         st.session_state["metadata_editing"] = False
 
@@ -2319,6 +2327,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             metadata.get("pinned_comment") or script_data.get("pinned_comment") or ""
         ).strip()
         st.session_state["metadata_loaded_run_id"] = run_id
+        st.session_state["approved_metadata"] = {}
         st.session_state["metadata_approved"] = False
         st.session_state["metadata_editing"] = False
 
@@ -2329,6 +2338,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     )
 
     metadata_approved = bool(st.session_state.get("metadata_approved"))
+    approved_metadata = st.session_state.get("approved_metadata") or {}
+    if metadata_approved and not isinstance(approved_metadata, dict):
+        approved_metadata = {}
     with st.container(border=True):
         if metadata_approved and not st.session_state.get("metadata_editing"):
             st.markdown(
@@ -2361,6 +2373,10 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     )
             with action_cols[2]:
                 if st.button("Edit metadata", width="stretch", key="edit_metadata"):
+                    st.session_state["final_title"] = str(approved_metadata.get("title") or "").strip()
+                    st.session_state["final_description"] = str(approved_metadata.get("description") or "").strip()
+                    st.session_state["final_comment"] = str(approved_metadata.get("comment") or "").strip()
+                    st.session_state["metadata_approved"] = False
                     st.session_state["metadata_editing"] = True
                     st.rerun()
         else:
@@ -2378,7 +2394,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                 "YouTube title",
                 max_chars=100,
                 key="final_title",
-                disabled=metadata_approved,
+                disabled=metadata_approved and not st.session_state.get("metadata_editing"),
             )
             meta_cols = st.columns(2)
             with meta_cols[0]:
@@ -2386,14 +2402,14 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     "YouTube description",
                     height=140,
                     key="final_description",
-                    disabled=metadata_approved,
+                    disabled=metadata_approved and not st.session_state.get("metadata_editing"),
                 )
             with meta_cols[1]:
                 comment = st.text_area(
                     "Pinned comment",
                     height=140,
                     key="final_comment",
-                    disabled=metadata_approved,
+                    disabled=metadata_approved and not st.session_state.get("metadata_editing"),
                 )
 
             if not metadata_approved:
@@ -2416,6 +2432,11 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                                 "description": clean_description,
                                 "comment": clean_comment,
                             }
+                            st.session_state["approved_metadata"] = {
+                                "title": clean_title,
+                                "description": clean_description,
+                                "comment": clean_comment,
+                            }
                             st.session_state["metadata_approved"] = True
                             st.session_state["metadata_editing"] = False
                             st.rerun()
@@ -2426,6 +2447,10 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             else:
                 st.success("Metadata approved.", icon="✅")
                 if st.button("Edit metadata", width="content", key="edit_metadata_inline"):
+                    st.session_state["final_title"] = str(approved_metadata.get("title") or "").strip()
+                    st.session_state["final_description"] = str(approved_metadata.get("description") or "").strip()
+                    st.session_state["final_comment"] = str(approved_metadata.get("comment") or "").strip()
+                    st.session_state["metadata_approved"] = False
                     st.session_state["metadata_editing"] = True
                     st.rerun()
 
@@ -2473,9 +2498,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             _perform_upload(
                 controller,
                 snapshot,
-                st.session_state["final_title"],
-                st.session_state["final_description"],
-                st.session_state["final_comment"],
+                str(approved_metadata.get("title") or "").strip(),
+                str(approved_metadata.get("description") or "").strip(),
+                str(approved_metadata.get("comment") or "").strip(),
                 "private",
             )
 
@@ -2493,9 +2518,9 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                     _perform_upload(
                         controller,
                         snapshot,
-                        st.session_state["final_title"],
-                        st.session_state["final_description"],
-                        st.session_state["final_comment"],
+                        str(approved_metadata.get("title") or "").strip(),
+                        str(approved_metadata.get("description") or "").strip(),
+                        str(approved_metadata.get("comment") or "").strip(),
                         "public",
                     )
             with cancel_col:
