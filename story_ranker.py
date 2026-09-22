@@ -1075,7 +1075,7 @@ def _fact_source_stage(stories, max_items=8):
             or corroboration >= 2
             or (
                 _niche_opportunity_score(story) >= 5.0
-                and _story_substance_pass(story)
+                and _story_substance_pass(story, minimum_body_chars=150)
             )
         )
 
@@ -1782,13 +1782,9 @@ def _source_page_pass(story):
         story["source_page_pass"] = False
         return False
 
-    # A bare domain or very shallow homepage URL is a source, not a story.
-    segments = [segment for segment in path.split("/") if segment]
-    if len(segments) <= 1 and not story.get("event_id") and not story.get("event_evidence"):
-        story["discovery_rejection"] = "Publisher homepage instead of an article"
-        story["source_page_pass"] = False
-        return False
-
+    # URL depth alone is not a reliable article test: specialist publishers
+    # legitimately use shallow paths such as /12345. Explicit index/roundup
+    # patterns above are the safer rejection mechanism.
     story["source_page_pass"] = True
     return True
 
@@ -1856,7 +1852,7 @@ def _headline_noise_pass(story):
     return True
 
 
-def _story_substance_pass(story, minimum_body_chars=120):
+def _story_substance_pass(story, minimum_body_chars=150):
     """Reject headline-only candidates unless the event is independently corroborated."""
     body = " ".join(
         str(story.get(key) or "")
@@ -1872,7 +1868,7 @@ def _story_substance_pass(story, minimum_body_chars=120):
         return True
     if collection_source == "official" and body_chars >= max(80, int(minimum_body_chars)):
         return True
-    return body_chars >= max(180, int(minimum_body_chars) + 60)
+    return body_chars >= max(120, int(minimum_body_chars))
 
 
 def _topic_actionability(story):
