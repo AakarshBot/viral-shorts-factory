@@ -30,6 +30,7 @@ from workflow_runtime import CRICKET_CATEGORIES, FORMAT_OPTIONS
 from dashboard_theme import apply_dashboard_theme
 
 from dashboard_runtime import (
+    LIVE_STAGE_SPEC,
     DashboardWorkflowController,
     build_discovery_evidence,
     collect_channel_statistics,
@@ -538,6 +539,7 @@ def _init_state() -> None:
         "visual_query_field_count": 0,
         "editorial_mode": "Deep Dive",
         "metadata_approved": False,
+        "metadata_editing": False,
         "metadata_loaded_run_id": "",
         "metadata_pending_values": None,
         "workspace_mode": "Live",
@@ -604,6 +606,7 @@ def reset_run() -> None:
         "visual_query_suggestions": [],
         "visual_query_field_count": 0,
         "metadata_approved": False,
+        "metadata_editing": False,
         "metadata_loaded_run_id": "",
         "metadata_pending_values": None,
     }.items():
@@ -851,187 +854,253 @@ def render_workspace_navigation() -> str:
     return selected or current
 
 
+def _reset_live_navigation() -> None:
+    """Return the Live selector to its first decision without touching production state."""
+    for key in (
+        "live_format_selection",
+        "live_topic_selection",
+        "live_sports_selection",
+        "live_cricket_scope",
+        "live_format_menu",
+        "live_topic_menu",
+        "live_sports_menu",
+        "live_cricket_scope_menu",
+    ):
+        st.session_state[key] = None if key.endswith("_menu") else ""
+    st.session_state["live_path_ready"] = False
+    _clear_live_run_selection()
+
+
 def render_live_navigation() -> Dict[str, Any]:
-    """Render the deliberate Live hierarchy and return the production config."""
+    """Render Live choices with staged disclosure: only the next decision stays expanded."""
     st.session_state["live_path_ready"] = False
     _render_section_header(
         "Live",
         "Build a Short",
-        "Choose a format, then a topic lane.",
+        "Choose one decision at a time. Completed choices collapse into the path.",
     )
 
-    st.markdown(
-        "<div style='color:var(--muted-2);font-size:.62rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;margin:2px 0 7px'>01 · Format</div>",
-        unsafe_allow_html=True,
-    )
-    format_choice = st.pills(
-        "Live format",
-        ["Deep Dive", "Top 5", "Sports"],
-        selection_mode="single",
-        default=st.session_state.get("live_format_selection") or None,
-        key="live_format_menu",
-        required=False,
-        label_visibility="collapsed",
-        width="stretch",
-    )
-    previous_format = st.session_state.get("live_format_selection") or ""
-    if format_choice and format_choice != previous_format:
-        st.session_state.live_format_selection = format_choice
-        _clear_live_downstream()
-        _clear_live_run_selection()
+    live_format = str(st.session_state.get("live_format_selection") or "").strip()
+    topic_label = str(st.session_state.get("live_topic_selection") or "").strip()
+    sports_mode = str(st.session_state.get("live_sports_selection") or "").strip()
+    cricket_scope = str(st.session_state.get("live_cricket_scope") or "").strip()
 
-    live_format = st.session_state.get("live_format_selection") or ""
     if not live_format:
-        st.caption("Choose a format to continue.")
+        st.markdown(
+            "<div class='choice-kicker'>01 · Format</div>",
+            unsafe_allow_html=True,
+        )
+        format_choice = st.pills(
+            "Live format",
+            ["Deep Dive", "Top 5", "Sports"],
+            selection_mode="single",
+            default=None,
+            key="live_format_menu",
+            required=False,
+            label_visibility="collapsed",
+            width="stretch",
+        )
+        if format_choice:
+            st.session_state.live_format_selection = format_choice
+            _clear_live_downstream()
+            _clear_live_run_selection()
+            st.rerun()
+        st.caption("Start with the format.")
         return build_config()
 
-    lane_label = "Sports lane" if live_format == "Sports" else "Topic lane"
-    st.markdown(
-        f"<div style='color:var(--muted-2);font-size:.66rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;margin:14px 0 7px'>{lane_label}</div>",
-        unsafe_allow_html=True,
-    )
+    path_parts = [live_format]
 
-    final_path_ready = False
     if live_format in {"Deep Dive", "Top 5"}:
+        path_parts.append(topic_label)
+        st.markdown(
+            f"<div class='path-summary'>"
+            f"<div><span class='path-check'>✓</span><span class='path-label'>{_ui_html(live_format)}</span></div>"
+            f"<div class='path-summary-action' id='live-path-change'></div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        path_controls = st.columns([6.5, 1], gap="small")
+        with path_controls[0]:
+            st.caption("Format selected · choose the next lane below.")
+        with path_controls[1]:
+            if st.button("Change", key="change_live_format", width="stretch"):
+                _reset_live_navigation()
+                st.rerun()
+
         format_mode = "top5" if live_format == "Top 5" else "regular"
         options = category_options(format_mode, live_format)
-        st.markdown(
-            "<div style='color:var(--muted-2);font-size:.62rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;margin:14px 0 7px'>02 · Topic</div>",
-            unsafe_allow_html=True,
-        )
-        topic_choice = st.pills(
-            "Topic",
-            list(options.keys()),
-            selection_mode="single",
-            default=st.session_state.get("live_topic_selection") or None,
-            key="live_topic_menu",
-            label_visibility="collapsed",
-            width="stretch",
-            wrap=True,
-        )
-        previous_topic = st.session_state.get("live_topic_selection") or ""
-        if topic_choice and topic_choice != previous_topic:
-            st.session_state.live_topic_selection = topic_choice
-            _clear_live_run_selection()
-        final_path_ready = bool(st.session_state.get("live_topic_selection"))
-        st.session_state["live_path_ready"] = final_path_ready
-
-    elif live_format == "Sports":
-        st.markdown(
-            "<div style='color:var(--muted-2);font-size:.62rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;margin:14px 0 7px'>02 · Sports lane</div>",
-            unsafe_allow_html=True,
-        )
-        sports_choice = st.pills(
-            "Sports mode",
-            ["Cricket", "Niche Sports", "AI"],
-            selection_mode="single",
-            default=st.session_state.get("live_sports_selection") or None,
-            key="live_sports_menu",
-            label_visibility="collapsed",
-            width="stretch",
-        )
-        previous_sports = st.session_state.get("live_sports_selection") or ""
-        if sports_choice and sports_choice != previous_sports:
-            st.session_state.live_sports_selection = sports_choice
-            st.session_state.live_cricket_scope = ""
-            st.session_state.live_cricket_scope_menu = None
-            _clear_live_run_selection()
-
-        sports_mode = st.session_state.get("live_sports_selection") or ""
-        if sports_mode == "Cricket":
+        if not topic_label:
             st.markdown(
-                "<div style='color:var(--muted-2);font-size:.62rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;margin:14px 0 7px'>03 · Cricket scope</div>",
+                "<div class='choice-kicker'>02 · Topic</div>",
                 unsafe_allow_html=True,
             )
-            cricket_choice = st.pills(
-                "Cricket scope",
-                ["India / Asia", "Global"],
+            topic_choice = st.pills(
+                "Topic",
+                list(options.keys()),
                 selection_mode="single",
-                default=st.session_state.get("live_cricket_scope") or None,
-                key="live_cricket_scope_menu",
+                default=None,
+                key="live_topic_menu",
+                label_visibility="collapsed",
+                width="stretch",
+                wrap=True,
+            )
+            if topic_choice:
+                st.session_state.live_topic_selection = topic_choice
+                _clear_live_run_selection()
+                st.rerun()
+
+    elif live_format == "Sports":
+        if not sports_mode:
+            st.markdown(
+                "<div class='choice-kicker'>01 · Format</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='path-summary'><div><span class='path-check'>✓</span><span class='path-label'>{_ui_html(live_format)}</span></div></div>",
+                unsafe_allow_html=True,
+            )
+            path_controls = st.columns([6.5, 1], gap="small")
+            with path_controls[0]:
+                st.caption("Sports selected · choose the sports lane below.")
+            with path_controls[1]:
+                if st.button("Change", key="change_live_format_sports", width="stretch"):
+                    _reset_live_navigation()
+                    st.rerun()
+            st.markdown(
+                "<div class='choice-kicker'>02 · Sports lane</div>",
+                unsafe_allow_html=True,
+            )
+            sports_choice = st.pills(
+                "Sports mode",
+                ["Cricket", "Niche Sports", "AI"],
+                selection_mode="single",
+                default=None,
+                key="live_sports_menu",
                 label_visibility="collapsed",
                 width="stretch",
             )
-            if cricket_choice and cricket_choice != (st.session_state.get("live_cricket_scope") or ""):
-                st.session_state.live_cricket_scope = cricket_choice
+            if sports_choice:
+                st.session_state.live_sports_selection = sports_choice
+                st.session_state.live_cricket_scope = ""
+                st.session_state.live_cricket_scope_menu = None
                 _clear_live_run_selection()
-            final_path_ready = bool(st.session_state.get("live_cricket_scope"))
-            st.session_state["live_path_ready"] = final_path_ready
-        elif sports_mode in {"Niche Sports", "AI"}:
-            final_path_ready = True
-            st.session_state["live_path_ready"] = True
-
-    if live_format and final_path_ready:
-        path_parts = [live_format]
-        if live_format in {"Deep Dive", "Top 5"}:
-            path_parts.append(st.session_state.get("live_topic_selection") or "")
+                st.rerun()
         else:
-            path_parts.append(st.session_state.get("live_sports_selection") or "")
+            path_parts.append(sports_mode)
+            st.markdown(
+                f"<div class='path-summary'>"
+                f"<div><span class='path-check'>✓</span><span class='path-label'>Sports</span>"
+                f"<span class='path-separator'>·</span><span class='path-check'>✓</span><span class='path-label'>{_ui_html(sports_mode)}</span></div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            path_controls = st.columns([6.5, 1], gap="small")
+            with path_controls[0]:
+                st.caption("Sports lane selected · choose the scope when required.")
+            with path_controls[1]:
+                if st.button("Change", key="change_live_sports", width="stretch"):
+                    _reset_live_navigation()
+                    st.rerun()
+
             if sports_mode == "Cricket":
-                path_parts.append(st.session_state.get("live_cricket_scope") or "")
-        path_text = " · ".join(part for part in path_parts if part)
+                if not cricket_scope:
+                    st.markdown(
+                        "<div class='choice-kicker'>03 · Cricket scope</div>",
+                        unsafe_allow_html=True,
+                    )
+                    cricket_choice = st.pills(
+                        "Cricket scope",
+                        ["India / Asia", "Global"],
+                        selection_mode="single",
+                        default=None,
+                        key="live_cricket_scope_menu",
+                        label_visibility="collapsed",
+                        width="stretch",
+                    )
+                    if cricket_choice:
+                        st.session_state.live_cricket_scope = cricket_choice
+                        _clear_live_run_selection()
+                        st.rerun()
+                else:
+                    path_parts.append(cricket_scope)
+                    st.markdown(
+                        f"<div class='path-summary'>"
+                        f"<div><span class='path-check'>✓</span><span class='path-label'>Sports</span>"
+                        f"<span class='path-separator'>·</span><span class='path-check'>✓</span><span class='path-label'>Cricket</span>"
+                        f"<span class='path-separator'>·</span><span class='path-check'>✓</span><span class='path-label'>{_ui_html(cricket_scope)}</span></div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    final_path_ready = (
+        bool(topic_label) if live_format in {"Deep Dive", "Top 5"} else
+        bool(sports_mode) and (sports_mode != "Cricket" or bool(cricket_scope))
+    )
+    if final_path_ready:
+        st.session_state["live_path_ready"] = True
         st.markdown(
-            f"<div style='margin:12px 0 4px;color:var(--muted);font-size:.72rem;line-height:1.45'><span style='color:var(--accent);font-weight:900'>Selected path</span> · {_ui_html(path_text)}</div>",
+            f"<div class='path-ready'><span class='path-ready-dot'>✓</span>"
+            f"<span><b>Ready</b> · {' · '.join(_ui_html(part) for part in path_parts if part)}</span>"
+            f"</div>",
             unsafe_allow_html=True,
         )
+        if st.button("Change path", key="change_live_path_ready", width="content"):
+            _reset_live_navigation()
+            st.rerun()
 
-    if not final_path_ready:
-        st.caption("Choose a topic lane to continue.")
-        return build_config()
+        with st.popover("⚙ Settings", width="stretch"):
+            st.caption("Optional production settings")
+            columns = st.columns(3, gap="medium")
+            language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
+            language_labels = list(language_options.keys())
+            current_language = st.session_state.get("language_label") or (language_labels[0] if language_labels else "English")
+            if current_language not in language_labels and language_labels:
+                current_language = language_labels[0]
+            with columns[0]:
+                st.selectbox(
+                    "Language",
+                    language_labels or ["English"],
+                    index=language_labels.index(current_language) if language_labels else 0,
+                    key="language_label",
+                )
+            channels = _channel_options()
+            current_channel = st.session_state.get("selected_channel") or channels[0]
+            if current_channel not in channels:
+                current_channel = channels[0]
+            with columns[1]:
+                st.selectbox(
+                    "Channel",
+                    channels,
+                    index=channels.index(current_channel),
+                    key="selected_channel",
+                )
+            visual_pipeline_labels = [
+                "Option 1 · Current image sourcing",
+                "Option 2 · AI editorial storyboard",
+            ]
+            current_visual_pipeline = st.session_state.get("visual_pipeline_label") or visual_pipeline_labels[0]
+            if current_visual_pipeline not in visual_pipeline_labels:
+                current_visual_pipeline = visual_pipeline_labels[0]
+            with columns[2]:
+                st.selectbox(
+                    "Visual pipeline",
+                    visual_pipeline_labels,
+                    index=visual_pipeline_labels.index(current_visual_pipeline),
+                    key="visual_pipeline_label",
+                )
 
-    with st.popover("⚙ Production settings", width="stretch"):
-        st.caption("Optional release settings.")
-        columns = st.columns(3, gap="medium")
+        config = build_config()
+        st.markdown(
+            f"<div class='selection-rail'>"
+            f"<span class='meta-chip'>Format · {_ui_html(config.get('display_format'))}</span>"
+            f"<span class='meta-chip'>Language · {_ui_html(config.get('language_label'))}</span>"
+            f"<span class='meta-chip'>Channel · {_ui_html(config.get('channel'))}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return config
 
-        language_options = {cfg["label"]: key for key, cfg in ultimate_bot.LANGUAGES.items()}
-        language_labels = list(language_options.keys())
-        current_language = st.session_state.get("language_label") or (language_labels[0] if language_labels else "English")
-        if current_language not in language_labels and language_labels:
-            current_language = language_labels[0]
-        with columns[0]:
-            st.selectbox(
-                "Language",
-                language_labels or ["English"],
-                index=language_labels.index(current_language) if language_labels else 0,
-                key="language_label",
-            )
-
-        channels = _channel_options()
-        current_channel = st.session_state.get("selected_channel") or channels[0]
-        if current_channel not in channels:
-            current_channel = channels[0]
-        with columns[1]:
-            st.selectbox(
-                "Channel",
-                channels,
-                index=channels.index(current_channel),
-                key="selected_channel",
-            )
-
-        visual_pipeline_labels = [
-            "Option 1 · Current image sourcing",
-            "Option 2 · AI editorial storyboard",
-        ]
-        current_visual_pipeline = st.session_state.get("visual_pipeline_label") or visual_pipeline_labels[0]
-        if current_visual_pipeline not in visual_pipeline_labels:
-            current_visual_pipeline = visual_pipeline_labels[0]
-        with columns[2]:
-            st.selectbox(
-                "Visual pipeline",
-                visual_pipeline_labels,
-                index=visual_pipeline_labels.index(current_visual_pipeline),
-                key="visual_pipeline_label",
-            )
-
-    config = build_config()
-    st.markdown(
-        f"<div class='meta-row'><span class='meta-chip'>Path · {_ui_html(config.get('display_format'))}</span>"
-        f"<span class='meta-chip'>Language · {_ui_html(config.get('language_label'))}</span>"
-        f"<span class='meta-chip'>Channel · {_ui_html(config.get('channel'))}</span></div>",
-        unsafe_allow_html=True,
-    )
-    return config
-
+    return build_config()
 
 def render_stage_progress(snapshot: Dict[str, Any]) -> None:
     stages = [
@@ -2022,6 +2091,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         st.session_state["final_description"] = str(pending_metadata.get("description") or "").strip()
         st.session_state["final_comment"] = str(pending_metadata.get("comment") or "").strip()
         st.session_state["metadata_approved"] = True
+        st.session_state["metadata_editing"] = False
 
     if st.session_state.get("metadata_loaded_run_id") != run_id:
         st.session_state["final_title"] = str(
@@ -2038,6 +2108,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         ).strip()
         st.session_state["metadata_loaded_run_id"] = run_id
         st.session_state["metadata_approved"] = False
+        st.session_state["metadata_editing"] = False
 
     _render_section_header(
         "Final step",
@@ -2047,69 +2118,104 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
 
     metadata_approved = bool(st.session_state.get("metadata_approved"))
     with st.container(border=True):
-        st.markdown(
-            "<div class='release-section-head'>"
-            "<div><span class='release-step-dot'>1</span><b>Metadata</b></div>"
-            f"<span class='release-state {'ready' if metadata_approved else 'waiting'}'>"
-            f"{'Approved' if metadata_approved else 'Needs approval'}</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Approve the exact title, description and pinned comment used for upload.")
-
-        title = st.text_input(
-            "YouTube title",
-            max_chars=100,
-            key="final_title",
-            disabled=metadata_approved,
-        )
-        meta_cols = st.columns(2)
-        with meta_cols[0]:
-            description = st.text_area(
-                "YouTube description",
-                height=140,
-                key="final_description",
-                disabled=metadata_approved,
+        if metadata_approved and not st.session_state.get("metadata_editing"):
+            st.markdown(
+                f"<div class='approved-meta-row'>"
+                f"<div><span class='approved-meta-icon'>✓</span>"
+                f"<div><div class='approved-meta-kicker'>METADATA APPROVED</div>"
+                f"<div class='approved-meta-title'>{_ui_html(st.session_state.get('final_title') or metadata.get('title') or script_data.get('title') or 'Untitled')}</div>"
+                f"</div></div>",
+                unsafe_allow_html=True,
             )
-        with meta_cols[1]:
-            comment = st.text_area(
-                "Pinned comment",
-                height=140,
-                key="final_comment",
-                disabled=metadata_approved,
-            )
-
-        if not metadata_approved:
-            approve_col, note_col = st.columns([1, 2])
-            with approve_col:
-                if st.button(
-                    "Approve metadata",
-                    type="primary",
-                    width="stretch",
-                    key="approve_metadata",
-                ):
-                    try:
-                        from final_qc_runtime import validate_final_upload_metadata
-                        clean_title, clean_description, clean_comment = validate_final_upload_metadata(
-                            title, description, comment
-                        )
-                        st.session_state["metadata_pending_values"] = {
-                            "run_id": run_id,
-                            "title": clean_title,
-                            "description": clean_description,
-                            "comment": clean_comment,
-                        }
-                        st.session_state["metadata_approved"] = True
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
-            with note_col:
-                st.caption("Nothing uploads until this approval succeeds.")
+            action_cols = st.columns([1, 1, 1.35])
+            with action_cols[0]:
+                st.caption("Title, description and comment are locked.")
+            with action_cols[1]:
+                with st.popover("View metadata", width="stretch"):
+                    st.markdown(f"**Title**  \n{_ui_html(st.session_state.get('final_title') or metadata.get('title') or script_data.get('title') or '')}")
+                    st.text_area(
+                        "Description",
+                        value=str(st.session_state.get("final_description") or metadata.get("description") or ""),
+                        height=120,
+                        disabled=True,
+                        key=f"view_metadata_description_{run_id}",
+                    )
+                    st.text_area(
+                        "Pinned comment",
+                        value=str(st.session_state.get("final_comment") or metadata.get("pinned_comment") or ""),
+                        height=90,
+                        disabled=True,
+                        key=f"view_metadata_comment_{run_id}",
+                    )
+            with action_cols[2]:
+                if st.button("Edit metadata", width="stretch", key="edit_metadata"):
+                    st.session_state["metadata_editing"] = True
+                    st.rerun()
         else:
-            st.success("Metadata approved.", icon="✅")
-            if st.button("Edit metadata", width="content", key="edit_metadata"):
-                st.session_state["metadata_approved"] = False
-                st.rerun()
+            st.markdown(
+                "<div class='release-section-head'>"
+                "<div><span class='release-step-dot'>1</span><b>Metadata</b></div>"
+                f"<span class='release-state {'ready' if metadata_approved else 'waiting'}'>"
+                f"{'Approved' if metadata_approved else 'Needs approval'}</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption("Approve the exact title, description and pinned comment used for upload.")
+
+            title = st.text_input(
+                "YouTube title",
+                max_chars=100,
+                key="final_title",
+                disabled=metadata_approved,
+            )
+            meta_cols = st.columns(2)
+            with meta_cols[0]:
+                description = st.text_area(
+                    "YouTube description",
+                    height=140,
+                    key="final_description",
+                    disabled=metadata_approved,
+                )
+            with meta_cols[1]:
+                comment = st.text_area(
+                    "Pinned comment",
+                    height=140,
+                    key="final_comment",
+                    disabled=metadata_approved,
+                )
+
+            if not metadata_approved:
+                approve_col, note_col = st.columns([1, 2])
+                with approve_col:
+                    if st.button(
+                        "Approve metadata",
+                        type="primary",
+                        width="stretch",
+                        key="approve_metadata",
+                    ):
+                        try:
+                            from final_qc_runtime import validate_final_upload_metadata
+                            clean_title, clean_description, clean_comment = validate_final_upload_metadata(
+                                title, description, comment
+                            )
+                            st.session_state["metadata_pending_values"] = {
+                                "run_id": run_id,
+                                "title": clean_title,
+                                "description": clean_description,
+                                "comment": clean_comment,
+                            }
+                            st.session_state["metadata_approved"] = True
+                            st.session_state["metadata_editing"] = False
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Metadata needs attention: {type(exc).__name__}: {exc}")
+                with note_col:
+                    st.caption("Nothing uploads until this approval succeeds.")
+            else:
+                st.success("Metadata approved.", icon="✅")
+                if st.button("Edit metadata", width="content", key="edit_metadata_inline"):
+                    st.session_state["metadata_editing"] = True
+                    st.rerun()
 
     if not (video_path and os.path.isfile(video_path)):
         st.error("The final video path is recorded, but the file is not accessible from the dashboard process.")
