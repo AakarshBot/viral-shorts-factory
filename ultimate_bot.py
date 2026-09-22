@@ -1936,8 +1936,8 @@ def run_robot(web_config=None):
         c = conn.cursor()
         c.execute(
             "UPDATE vault SET video_id = 'REJECTED', reported = 1, "
-            "rejected_reason = 'Stale timeout' "
-            "WHERE video_id = 'PENDING_QC' AND date_used < ?",
+            "rejected_reason = 'Stale timeout', status = 'REJECTED', updated_at = CURRENT_TIMESTAMP "
+            "WHERE status = 'RUNNING' AND date_used < ?",
             (stale_threshold,),
         )
         conn.commit()
@@ -2097,6 +2097,15 @@ def run_robot(web_config=None):
             )
         conn.commit()
 
+        # PENDING_QC is reserved for an actual QC decision, not an active
+        # production. Active human-review stages can last up to 24 hours, so
+        # they must not look like stale runs to the startup sweeper.
+        conn.execute(
+            "UPDATE vault SET status='RUNNING', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
+            (run_row_id,),
+        )
+        conn.commit()
+
         dashboard_manual_control = bool(
             isinstance(web_config, dict) and web_config.get("_dashboard_manual_control")
         )
@@ -2114,11 +2123,23 @@ def run_robot(web_config=None):
             print("   [!] Error: Script generation returned None.")
             return
 
+        if dashboard_manual_control:
+            conn.execute(
+                "UPDATE vault SET status='WAITING_SCRIPT_REVIEW', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
+                (run_row_id,),
+            )
+            conn.commit()
         script_data = _run_manual_workflow_hook(
             script_data,
             "_manual_script_review_hook",
             "Manual script review is active. Waiting for the dashboard decision.",
         )
+        if dashboard_manual_control:
+            conn.execute(
+                "UPDATE vault SET status='RUNNING', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
+                (run_row_id,),
+            )
+            conn.commit()
         if not isinstance(script_data, dict):
             raise RuntimeError("Manual script review returned an invalid script payload.")
 
@@ -2191,11 +2212,23 @@ def run_robot(web_config=None):
                     "Rendering blocked: dashboard manual visual review hook is not installed."
                 )
 
+            if dashboard_manual_control:
+                conn.execute(
+                    "UPDATE vault SET status='WAITING_VISUAL_REVIEW', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
+                    (run_row_id,),
+                )
+                conn.commit()
             visuals = _run_manual_workflow_hook(
                 visuals,
                 "_manual_visual_review_hook",
                 "Manual visual review is active. Rendering is paused until the dashboard decision.",
             )
+            if dashboard_manual_control:
+                conn.execute(
+                    "UPDATE vault SET status='RUNNING', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
+                    (run_row_id,),
+                )
+                conn.commit()
             if not isinstance(visuals, list):
                 raise RuntimeError("Manual visual review returned an invalid visual package.")
 
