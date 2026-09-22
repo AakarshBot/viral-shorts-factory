@@ -239,6 +239,54 @@ PERSONA_PROFILES = {
     }
 }
 
+def cleanup_obsolete_run_workspaces(conn, retention_days=7):
+    """Remove old run workspaces only when no live/reviewable run references them."""
+    output_root = os.path.join(BASE_DIR, "output")
+    if not os.path.isdir(output_root):
+        return 0
+
+    try:
+        retention_seconds = max(86400, int(retention_days) * 86400)
+    except (TypeError, ValueError):
+        retention_seconds = 7 * 86400
+    cutoff = time.time() - retention_seconds
+
+    protected = {
+        str(row[0]).strip()
+        for row in conn.execute(
+            """SELECT run_id FROM vault
+               WHERE run_id IS NOT NULL
+                 AND status IN (
+                     'RUNNING', 'WAITING_SCRIPT_REVIEW', 'WAITING_VISUAL_REVIEW',
+                     'READY_FOR_UPLOAD'
+                 )"""
+        ).fetchall()
+        if str(row[0] or "").strip()
+    }
+
+    removed = 0
+    for name in os.listdir(output_root):
+        path = os.path.join(output_root, name)
+        if not os.path.isdir(path) or name in protected:
+            continue
+        try:
+            if os.path.getmtime(path) >= cutoff:
+                continue
+            safe_cleanup(path)
+            if not os.path.exists(path):
+                removed += 1
+        except OSError:
+            continue
+
+    if removed:
+        print(
+            f"   [Cleanup] Removed {removed} obsolete run workspace(s); "
+            f"retained all active/review/upload-ready runs.",
+            flush=True,
+        )
+    return removed
+
+
 def safe_cleanup(dir_path):
     if not os.path.exists(dir_path):
         return
@@ -1930,6 +1978,7 @@ def run_robot(web_config=None):
 
     try:
         init_db(conn)
+        cleanup_obsolete_run_workspaces(conn)
         enforce_cache_ttl_hygiene()
 
         stale_threshold = datetime.now() - timedelta(hours=2)
