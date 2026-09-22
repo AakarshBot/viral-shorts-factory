@@ -289,3 +289,23 @@ def test_ready_upload_recovery_restores_upload_context_into_dashboard_state():
     block = source[start:end]
     assert 'st.session_state.web_config = dict(' in block
     assert 'getattr(ultimate_bot, "_active_web_config", {})' in block
+
+
+def test_metadata_approval_is_persisted_before_upload_unlock():
+    app = (REPO_ROOT / "app.py").read_text(encoding="utf-8")
+    start = app.index("def render_upload_panel(")
+    end = app.index("\ndef _perform_upload(", start)
+    block = app[start:end]
+    persist_pos = block.index("controller.persist_approved_metadata(")
+    unlock_pos = block.index('st.session_state["metadata_approved"] = True', persist_pos)
+    assert persist_pos < unlock_pos
+
+
+def test_recovery_prefers_human_approved_metadata_when_present():
+    source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
+    start = source.index("    def restore_ready_upload(")
+    end = source.index("    def _worker_started", start)
+    block = source[start:end]
+    assert 'stored_metadata = script_data.get("approved_metadata")' in block
+    assert 'stored_metadata.get("description")' in block
+    assert 'stored_metadata.get("comment")' in block
