@@ -212,6 +212,93 @@ def _looks_like_filler(text):
     return any(re.fullmatch(pattern, value, flags=re.IGNORECASE) for pattern in _GENERIC_FILLER)
 
 
+def _hook_quality_score(script_data, story_data=None):
+    """Score the first spoken beat for immediate, factual scroll-stop value."""
+    script_data = script_data if isinstance(script_data, dict) else {}
+    scenes = script_data.get("script") or []
+    if not scenes or not isinstance(scenes[0], dict):
+        return {"score": 0.0, "reasons": ["missing opening scene"]}
+
+    first = str(scenes[0].get("voiceover") or "").strip()
+    story = story_data if isinstance(story_data, dict) else {}
+    source = " ".join(
+        str(story.get(key) or "").strip()
+        for key in ("title", "topic", "summary", "description", "research_evidence_text")
+    ).strip()
+    first_tokens = set(_originality_words(first))
+    source_tokens = set(_originality_words(source))
+    score = 0.0
+    reasons = []
+
+    if not first_tokens:
+        return {"score": 0.0, "reasons": ["empty opening"]}
+
+    relevance = len(first_tokens & source_tokens) / max(1, len(first_tokens))
+    if relevance >= 0.55:
+        score += 2.5
+        reasons.append("immediately story-relevant")
+    elif relevance >= 0.35:
+        score += 1.5
+        reasons.append("partly story-relevant")
+
+    lower = first.casefold()
+    conflict_terms = {
+        "arrogant", "accused", "accusation", "blasted", "criticized", "criticised",
+        "controversy", "controversial", "debate", "dispute", "feud", "hits back",
+        "insulted", "mocked", "rivalry", "ruin", "slammed", "warned", "scare",
+        "upset", "shock", "shocks",
+    }
+    surprise_terms = {
+        "record", "first", "fastest", "highest", "lowest", "historic", "surprise",
+        "unexpected", "upset", "comeback", "debut", "youngest", "oldest", "rare",
+    }
+    quote_terms = {
+        "said", "says", "called", "claimed", "claims", "declared", "praised",
+        "hailed", "warned", "revealed", "admitted", "responded", "criticized",
+        "criticised",
+    }
+
+    if any(term in lower for term in conflict_terms):
+        score += 2.0
+        reasons.append("tension stated immediately")
+    if any(term in lower for term in surprise_terms):
+        score += 1.75
+        reasons.append("surprise/novelty stated immediately")
+    if any(
+        re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", lower)
+        for term in quote_terms
+    ):
+        score += 1.5
+        reasons.append("attribution/quote signal")
+    if re.search(r"\b\d{2,}\b|%", first):
+        score += 0.75
+        reasons.append("specific detail")
+
+    generic_openers = (
+        "today we are going to", "in this video", "here is the latest",
+        "here's the latest", "let's talk about", "here is an update",
+        "here's an update", "the latest update", "big news today",
+    )
+    if first.casefold().startswith(generic_openers):
+        score -= 2.5
+        reasons.append("generic setup")
+    if contains_retention_bait(first):
+        score -= 3.0
+        reasons.append("retention bait")
+    words = len(_originality_words(first))
+    if 5 <= words <= 18:
+        score += 0.75
+        reasons.append("tight opening")
+    elif words > 28:
+        score -= 0.75
+        reasons.append("opening needs compression")
+
+    return {
+        "score": round(max(0.0, min(10.0, score)), 2),
+        "reasons": list(dict.fromkeys(reasons)),
+    }
+
+
 def _clean_titles(script_data):
     titles = script_data.get("titles")
     if not isinstance(titles, list): return
@@ -554,6 +641,7 @@ def clean_script_data(script_data, story_data, format_mode):
     result["script_focus"] = "information_dense_storytelling"
     result["script_structure"] = _story_structure(story_data, format_mode)
     _clean_titles(result)
+    result["hook_quality"] = _hook_quality_score(result, story_data)
     return result, {
         "removed_cta": removed_cta,
         "removed_scenes": removed_scenes,
@@ -700,7 +788,18 @@ def validate_content_density(script_data, story_data, format_mode):
     if not completeness["passed"]:
         return False, completeness["reason"]
 
-    return True, "Passed semantic narrative completeness and anti-retention checks"
+    hook_target = story_data.get("hook_potential_score") if isinstance(story_data, dict) else None
+    try:
+        hook_target = float(hook_target)
+    except (TypeError, ValueError):
+        hook_target = 0.0
+    hook_diagnostics = _hook_quality_score(script_data, story_data)
+    script_data["hook_quality_score"] = hook_diagnostics["score"]
+    script_data["hook_quality_reasons"] = hook_diagnostics["reasons"]
+    if hook_target >= 6.0 and hook_diagnostics["score"] < 3.0:
+        return False, "Opening hook is too weak for a high-potential story."
+
+    return True, "Passed semantic narrative completeness, hook quality and anti-retention checks"
 
 
 def _fallback_source_fragments(*values):
