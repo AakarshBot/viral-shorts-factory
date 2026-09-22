@@ -18,6 +18,7 @@ SURFACE_MAP: dict[str, str] = {
     "_remote_mode_enabled": "Internal",
     "_load_remote_youtube_credentials": "Internal",
     "safe_cleanup": "Live Factory",
+    "cleanup_obsolete_run_workspaces": "Internal",
     "enforce_cache_ttl_hygiene": "Live Factory",
     "parse_groq_json_response": "Demo / Diagnostics",
     "init_db": "Live Factory",
