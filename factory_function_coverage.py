@@ -56,6 +56,7 @@ SURFACE_MAP: dict[str, str] = {
     "_normalize_audio_loudness": "Internal",
     "compile_video": "Live Factory",
     "upload_to_youtube": "Live Factory",
+    "_report_youtube_upload_visibility": "Internal",
     "font_preflight_check": "Live Factory",
     "run_robot": "Live Factory",
 }
