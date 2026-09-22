@@ -644,7 +644,8 @@ def _google_trends_items(geo="IN", max_items=10):
             if not title or not url_value:
                 continue
             output.append({
-                "title": title,
+                "title": _clean_source_headline(title, publisher),
+                "source_headline": title,
                 "text": snippet or title,
                 "description": snippet,
                 "source": publisher or "Google Trends",
@@ -746,6 +747,20 @@ def _source_url_from_item(item):
     return str(item.get("url") or item.get("link") or "").strip()
 
 
+def _clean_source_headline(title, publisher=""):
+    """Remove only an exact trailing publisher suffix; keep the raw source headline separately."""
+    clean_title = re.sub(r"\\s+", " ", str(title or "")).strip()
+    clean_publisher = re.sub(r"\\s+", " ", str(publisher or "")).strip()
+    if not clean_title or not clean_publisher:
+        return clean_title
+    suffix = re.compile(
+        r"\\s*(?:[-–—|:]\\s*)" + re.escape(clean_publisher) + r"\\s*$",
+        re.IGNORECASE,
+    )
+    stripped = suffix.sub("", clean_title).strip(" -–—|:")
+    return stripped or clean_title
+
+
 def _rss_items(url, genre_key, collection_source="rss", max_items=60):
     if not url:
         return []
@@ -804,8 +819,11 @@ def _rss_items(url, genre_key, collection_source="rss", max_items=60):
                 )
 
             if title and link:
+                source_headline = title
+                title = _clean_source_headline(title, publisher)
                 items.append({
                     "title": title,
+                    "source_headline": source_headline,
                     "text": description,
                     "description": description,
                     "source": publisher,
