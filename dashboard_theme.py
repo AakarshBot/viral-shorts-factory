@@ -177,20 +177,20 @@ p{color:var(--vsf-ink)!important}
   transform:translateY(-1px);
   transition:all .16s ease;
 }
-.story-rank,.candidate-rank{
+.story-rank{
   color:var(--vsf-teal)!important;
   font-size:.58rem!important;
   font-weight:900!important;
   letter-spacing:.14em!important;
 }
-.story-title,.candidate-title{
+.story-title{
   color:var(--vsf-ink)!important;
   font-size:.96rem!important;
   font-weight:850!important;
   line-height:1.28!important;
   margin:5px 0 7px!important;
 }
-.story-meta,.story-reason,.candidate-reason{
+.story-meta,.story-reason{
   color:var(--vsf-muted)!important;
   font-size:.72rem!important;
   line-height:1.42!important;
@@ -422,7 +422,7 @@ div[data-testid="stExpander"]{
 }
 
 /* Keep long generated headlines from wrecking card geometry. */
-.story-title,.story-reason,.candidate-title,.candidate-reason,.output-card,
+.story-title,.story-reason,.output-card,
 .release-gate,.release-gate-detail,.timeline-message,.brand-sub,.sidebar-status-copy{
   min-width:0!important;
   overflow-wrap:anywhere!important;
@@ -903,6 +903,14 @@ div[data-testid="stExpander"]{
 }
 .stCodeBlock{
   border-radius:10px!important;
+}
+
+.release-success.blocked{
+  border-color:#e6bfb3;
+}
+.release-success.blocked .release-success-icon{
+  background:var(--vsf-coral);
+  box-shadow:0 8px 20px rgba(201,95,67,.14);
 }
 
 /* Compact production controls: settings are available on demand instead of consuming the main canvas. */
