@@ -280,3 +280,12 @@ def test_vault_migration_preserves_explicit_active_production_states():
     ):
         assert status in block
     assert "WHEN status IN (" in block
+
+
+def test_ready_upload_recovery_restores_upload_context_into_dashboard_state():
+    source = (REPO_ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("def _init_state()")
+    end = source.index("\ndef _topic_identity", start)
+    block = source[start:end]
+    assert 'st.session_state.web_config = dict(' in block
+    assert 'getattr(ultimate_bot, "_active_web_config", {})' in block
