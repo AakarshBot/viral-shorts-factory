@@ -597,6 +597,25 @@ def _hook_quality_score(script_data, story_data=None):
     if first.casefold().startswith(generic_openers):
         score -= 2.5
         reasons.append("generic setup")
+
+    setup_lead = re.match(
+        r"^(?:in|on|at|during|before|after)\s+(?:the\s+)?"
+        r"(?:first|opening|latest|2026|match|tournament|league|series|day)",
+        first.casefold(),
+    )
+    concrete_hook = any(
+        term in lower
+        for term in (
+            "accused","accusation","arrogant","controversy","dispute","feud",
+            "clash","slammed","blasted","said","says","called","claimed",
+            "praised","warned","revealed","record","first","fastest","historic",
+            "won","wins","lost","beat","defeated","upset","comeback","debut",
+        )
+    )
+    if setup_lead and not concrete_hook and "?" not in first:
+        score -= 1.50
+        reasons.append("delayed contextual setup")
+
     if contains_retention_bait(first):
         score -= 3.0
         reasons.append("retention bait")
@@ -669,13 +688,16 @@ def rank_title_candidates(script_data, story_data=None):
 
         char_count = len(title)
         if 20 <= char_count <= 55:
-            score += 1.25
+            score += 1.50
             reasons.append("compact package")
-        elif char_count <= 70:
-            score += 0.25
+        elif char_count <= 60:
+            score -= 0.75
+            reasons.append("title above channel target")
         else:
-            score -= 1.75
+            score -= 2.25
             reasons.append("title too long")
+        if char_count > 70:
+            score -= 0.75
 
         if "#" in title or "|" in title:
             score -= 0.75

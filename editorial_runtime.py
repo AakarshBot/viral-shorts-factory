@@ -90,7 +90,21 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         af = max(0.0, min(10.0, _num(scores.get("audience_fit"), 5.0)))
         mr = max(0.0, min(10.0, _num(scores.get("monetization_risk"), 5.0)))
         sl = max(0.0, min(10.0, _num(scores.get("shelf_life"), 5.0)))
-        quality_score = hs * 0.25 + nc * 0.20 + af * 0.20 + (10.0 - mr) * 0.20 + sl * 0.15
+        channel_fit = max(
+            0.0, min(10.0, _num(story.get("freshfeed_channel_fit_score"), 0.0))
+        )
+        # The channel report shows the first-second promise is more predictive
+        # than generic audience fit. Keep safety/completeness/risk in the gate,
+        # but give the model's hook judgment + deterministic channel fit the
+        # largest share of the final editorial composite.
+        quality_score = (
+            hs * 0.35
+            + nc * 0.15
+            + af * 0.15
+            + (10.0 - mr) * 0.15
+            + sl * 0.10
+            + channel_fit * 0.10
+        )
 
         trend_bonus = _num(story.get("trend_bonus"), 0.0)
         velocity_boost = _num(story.get("velocity_score"), 0.0)
@@ -106,6 +120,7 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
             "audience_fit": round(af, 2),
             "monetization_risk": round(mr, 2),
             "shelf_life": round(sl, 2),
+            "freshfeed_channel_fit_score": round(channel_fit, 2),
             "repetition_penalty": round(repetition, 3),
             "composite_score": round(composite, 2),
         })

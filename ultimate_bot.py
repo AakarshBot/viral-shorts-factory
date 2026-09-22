@@ -1020,9 +1020,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "STORY SHAPE:\n"
         "- Preserve every distinct narrative beat as its own scene. Do not cram multiple important developments into one overloaded scene, and never add filler solely to make the video longer. Let the story's real complexity determine how many scenes it needs.\n"
         "- Label every scene with exactly one narrative_role: hook, development, context, or consequence. Keep those beats meaningfully distinct.\n"
-        "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported tension, surprising result, consequential change, or attributed quote. Never manufacture suspense by withholding the actual information.\n"
-        "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Never open with a generic 'latest update', 'here is what happened', or setup sentence.\n"
-        "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs.\n"
+        "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported conflict, bold quote, surprising result, consequential change, rivalry, or attributed statement. Never manufacture suspense by withholding the actual information.\n"
+        "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Do not spend the first seconds on dates, venues, tournament names, match setup, or channel framing unless that detail is itself the story.\n"
+        "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs, and must earn every extra second.\n"
         "- Prefer roughly 20–30 seconds for a focused single-event story, and allow up to roughly 35 seconds when a second perspective or necessary context genuinely improves the explanation. Do not pad a short story or force a complex story into an arbitrary duration.\n"
         "- Start with a factual hook. Build through the important development and relevant context. End with the most useful consequence, implication, limitation, comparison, or final fact.\n\n"
         "RETENTION-BAIT BAN:\n"
@@ -1039,7 +1039,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
-        "- Keep generated titles compact, ideally under 55 characters, and never stuff them with schedules, venues, match metadata or hashtags.\n"\
+        "- Keep generated titles compact at 55 characters or fewer whenever possible. Prefer a strong factual statement, attributed quote, or curiosity question tied to the story's central tension; never stuff them with schedules, venues, match metadata or hashtags.\n"\
         "- No spoken like/share/subscribe/follow CTA.\n"        "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
         "VISUAL DATA:\n"
         "- Every scene needs one primary_entity supported by the evidence and a grounded specific_search_prompt. Never invent identities.\n\n"
@@ -1785,9 +1785,10 @@ def upload_to_youtube(
         raw_title = safe_text(
             title_override or script_data.get("title"), genre_cfg.get("label", "Shorts")
         )
-        if trend_keyword and trend_keyword.lower() not in raw_title.lower():
-            raw_title = f"{trend_keyword}: {raw_title}"
 
+        # Keep the approved editorial title intact. Trend keywords may enrich
+        # the description, but they must never be prepended to the title after
+        # the channel-specific title scorer has already selected it.
         title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip()[:100]
         if not title:
             title = "Shorts"
@@ -2207,16 +2208,16 @@ def run_robot(web_config=None):
             flush=True,
         )
 
-        if duration_estimate["seconds"] > 35.0:
+        if duration_estimate["seconds"] > 30.0:
             duration_story = dict(story_payload)
             duration_story["duration_control_instruction"] = (
                 f"Previous draft is estimated at {duration_estimate['seconds']:.1f} seconds. "
-                "Tighten it once before human review so the narration is no longer than 35 seconds, "
-                "preferably 20–30 seconds. Preserve every supported essential fact and the editorial angle. "
-                "Remove repetition, generic setup and nonessential context; do not add filler or invent facts. "
-                "Return a complete replacement script, not commentary about the rewrite."
+                "Tighten it once before human review toward the channel's 20–30 second sweet spot. "
+                "The final narration must not exceed 35 seconds. Preserve every supported essential fact "
+                "and the editorial angle. Remove repetition, generic setup and nonessential context; "
+                "do not add filler or invent facts. Return a complete replacement script, not commentary about the rewrite."
             )
-            print("   [Script Duration] Over 35s; performing exactly one pre-TTS tightening rewrite.", flush=True)
+            print("   [Script Duration] Over 30s; performing exactly one pre-TTS tightening rewrite toward the 20–30s sweet spot.", flush=True)
             rewritten = write_script(
                 duration_story, language_cfg, genre_key=cat_choice, conn=conn, format_mode=format_mode
             )
