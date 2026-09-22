@@ -2003,33 +2003,33 @@ def _story_key(story):
 def _candidate_reason(story):
     dimensions = story.get("discovery_dimensions") or {}
     parts = []
-    if _safe_float(dimensions.get("importance")) >= 7:
+    if (_safe_float(dimensions.get("importance")) or 0.0) >= 7:
         parts.append("strong editorial importance")
-    if _safe_float(dimensions.get("audience_potential")) >= 7:
+    if (_safe_float(dimensions.get("audience_potential")) or 0.0) >= 7:
         parts.append("strong audience-interest signal")
-    if _safe_float(dimensions.get("niche_opportunity")) >= 6:
+    if (_safe_float(dimensions.get("niche_opportunity")) or 0.0) >= 6:
         parts.append("specific niche opportunity")
-    if _safe_float(dimensions.get("cricket_story_worthiness")) >= 7:
+    if (_safe_float(dimensions.get("cricket_story_worthiness")) or 0.0) >= 7:
         parts.append("strong cricket story development")
-    if _safe_float(dimensions.get("shorts_viability")) >= 7:
+    if (_safe_float(dimensions.get("shorts_viability")) or 0.0) >= 7:
         parts.append("strong Shorts potential")
-    if _safe_float(dimensions.get("hook_potential")) >= 7:
+    if (_safe_float(dimensions.get("hook_potential")) or 0.0) >= 7:
         parts.append("strong scroll-stop hook potential")
-    if _safe_float(dimensions.get("channel_fit")) >= 6:
+    if (_safe_float(dimensions.get("channel_fit")) or 0.0) >= 6:
         parts.append("strong FreshFeed channel fit")
-    if _safe_float(dimensions.get("momentum")) >= 5:
+    if (_safe_float(dimensions.get("momentum")) or 0.0) >= 5:
         parts.append("strong current momentum")
-    if _safe_float(dimensions.get("event_momentum")) >= 4:
+    if (_safe_float(dimensions.get("event_momentum")) or 0.0) >= 4:
         parts.append("coverage accelerating")
-    if _safe_float(dimensions.get("event_velocity")) >= 2:
+    if (_safe_float(dimensions.get("event_velocity")) or 0.0) >= 2:
         parts.append("high reporting velocity")
     if dimensions.get("development_state") == "developing":
         parts.append("new event development detected")
     if dimensions.get("discovery_gap"):
         parts.append("independent discovery-gap signal")
-    if _safe_float(dimensions.get("freshness")) >= 6:
+    if (_safe_float(dimensions.get("freshness")) or 0.0) >= 6:
         parts.append("very fresh")
-    if _safe_float(dimensions.get("corroboration")) >= 2:
+    if (_safe_float(dimensions.get("corroboration")) or 0.0) >= 2:
         parts.append("multi-source coverage")
     article_count = int(story.get("event_article_count") or 1)
     source_count = int(story.get("event_source_count") or 0)
@@ -2037,13 +2037,13 @@ def _candidate_reason(story):
         parts.append(f"{article_count} articles clustered")
     elif source_count >= 2:
         parts.append(f"{source_count} publishers covering the event")
-    if _safe_float(dimensions.get("social_signal")) >= 2:
+    if (_safe_float(dimensions.get("social_signal")) or 0.0) >= 2:
         parts.append("social-interest signal")
-    if _safe_float(dimensions.get("google_trends")) >= 1:
+    if (_safe_float(dimensions.get("google_trends")) or 0.0) >= 1:
         parts.append("Google Trends signal")
-    if _safe_float(dimensions.get("channel_history")) >= 2:
+    if (_safe_float(dimensions.get("channel_history")) or 0.0) >= 2:
         parts.append("relevant channel history")
-    if _safe_float(dimensions.get("originality")) >= 7:
+    if (_safe_float(dimensions.get("originality")) or 0.0) >= 7:
         parts.append("strong originality")
     if not parts:
         parts.append("strong editorial score after staged discovery checks")

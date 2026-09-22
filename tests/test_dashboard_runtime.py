@@ -676,7 +676,7 @@ def test_collect_channel_statistics_reads_recorded_vault_data(tmp_path):
 
 
 def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
-    import story_ranker
+    import dashboard_topic_discovery_runtime
 
     class Bot:
         CONTENT_CATEGORIES = {"technology": {"gnews_q": "technology news"}}
@@ -718,12 +718,8 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
             "event_source_domains": ["reuters.com", "bbc.com"],
             "event_evidence_publishers": ["Reuters", "BBC"],
             "event_evidence": [
-                {
-                    "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),
-                },
-                {
-                    "publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
-                },
+                {"publishedAt": (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()},
+                {"publishedAt": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()},
             ],
             "velocity_score": 5.0,
             "trend_bonus": 2.0,
@@ -731,24 +727,17 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
         for index, (title, subject) in enumerate(topic_specs, 1)
     ]
 
-    def fake_collect_high_recall_stories(
-        bot,
-        genre_key,
-        genre_cfg,
-        trend_keyword=None,
-        custom_gnews_q=None,
-        custom_rss_url=None,
-        ai_cricket=False,
-        broad_discovery=False,
-    ):
-        assert broad_discovery is True
-        return list(topics), []
-
     monkeypatch.setattr(
-        story_ranker,
-        "collect_high_recall_stories",
-        fake_collect_high_recall_stories,
+        dashboard_topic_discovery_runtime,
+        "_collect_articles",
+        lambda *args, **kwargs: (list(topics), []),
     )
+    monkeypatch.setattr(
+        dashboard_topic_discovery_runtime,
+        "cluster_news_events",
+        lambda rows: [dict(row) for row in rows],
+    )
+
     pool = __import__("dashboard_runtime").discover_ranked_topics(
         Bot(),
         {"format_mode": "regular", "category": "technology", "language": "english"},
@@ -758,6 +747,7 @@ def test_dashboard_discovery_retains_twenty_ranked_topics(monkeypatch):
 
     assert 15 <= len(pool) <= 20
     assert [item["discovery_rank"] for item in pool] == list(range(1, len(pool) + 1))
+
 
 
 def test_recent_topic_cooldown_removes_only_recent_repeats(tmp_path):
@@ -893,14 +883,12 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
 
 def test_dashboard_ai_discovery_uses_shared_broad_radar():
     source = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
-    assert "collect_high_recall_stories(" in source
-    assert "custom_gnews_q=requested_topic or None" in source
-    assert "broad_discovery=True" in source
-    assert "_cheap_filter(raw, max_items=120, max_age_hours=48)" in source
-    assert "_infer_discovery_category(item)" in source
-    assert "diversity_rerank(ranked, max_items=max_candidates)" in source
-    assert 'category = "sports" if ai_sports_mode else _infer_discovery_category(item)' in source
-    assert "Sports-scoped AI ranking is active." in source
+    assert "from dashboard_topic_discovery_runtime import discover_dashboard_topics" in source
+    assert "def discover_ai_topics(" in source
+    assert "requested_topic=requested_topic" in source
+    assert "target_category=target_category" in source
+    assert "_merge_retained_topics(" in source
+
 
 
 def test_dashboard_manual_crop_returns_shorts_frame():

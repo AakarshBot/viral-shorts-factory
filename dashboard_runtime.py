@@ -227,84 +227,53 @@ def _merge_retained_topics(
     return output
 
 
-def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: int = 28, retained_candidates: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """Build the Sports-AI topic portfolio from the canonical sports discovery radar."""
-    from story_ranker import (
-        _candidate_reason,
-        _cheap_filter,
-        _discovery_portfolio_pass,
-        _deduplicate_stage,
-        _editorial_score,
-        _infer_discovery_category,
-        _load_history,
-        _load_used_topics,
-        _originality_stage,
-        _recent_topic_cooldown,
-        _source_label,
-        _story_key,
-        _story_url,
-        collect_high_recall_stories,
-        diversity_rerank,
-    )
+def discover_ai_topics(
+    bot,
+    web_config: dict[str, Any],
+    conn,
+    max_candidates: int = 28,
+    retained_candidates: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Build the AI dashboard portfolio through the same broad-recall topic desk."""
+    from dashboard_topic_discovery_runtime import discover_dashboard_topics
+    from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
 
     max_candidates = max(1, min(28, int(max_candidates or 28)))
-    rows = _load_history(conn)
-    used_topics = _load_used_topics(conn)
-    language = str(web_config.get("language", "english"))
     requested_topic = str(web_config.get("requested_topic", "") or "").strip()
     configured_category = str(web_config.get("category", "") or "").strip().lower()
-    editorial_mode = str(web_config.get("editorial_mode", "") or "").strip().lower()
+    language = str(web_config.get("language", "english"))
+
     ai_sports_mode = (
         str(web_config.get("discovery_mode", "") or "").strip().lower() == "ai_sports"
-        or (editorial_mode == "ai" and configured_category in {"sports", "ai_recommendation"})
+        or configured_category in {"sports", "ai_recommendation"}
     )
 
-    # The dashboard's AI choice is nested inside Sports. Keep it on the Sports
-    # discovery lanes and let the AI ranking decide which current sports event
-    # is strongest instead of opening a generic all-news radar.
-    genre_key = "sports" if ai_sports_mode else ""
-    genre_cfg = dict(bot.CONTENT_CATEGORIES.get("sports", {})) if ai_sports_mode else {}
-    raw, social_titles = collect_high_recall_stories(
+    if ai_sports_mode:
+        genre_key = "sports"
+        genre_cfg = dict(bot.CONTENT_CATEGORIES.get("sports", {}))
+        target_category = "sports"
+    else:
+        genre_key = configured_category or "national_global_affairs"
+        genre_cfg = dict(bot.CONTENT_CATEGORIES.get(genre_key, {}))
+        if not genre_cfg:
+            raise ValueError(f"Unknown category: {genre_key}")
+        target_category = configured_category or genre_key
+
+    ranked = discover_dashboard_topics(
         bot,
         genre_key,
         genre_cfg,
-        custom_gnews_q=requested_topic or None,
-        broad_discovery=True,
+        conn=conn,
+        requested_topic=requested_topic,
+        custom_rss_url="",
+        cricket_scope="",
+        target_category=target_category,
+        target_format=web_config.get("format_mode", "regular"),
+        target_language=language,
+        ai_cricket=False,
+        max_candidates=max_candidates,
     )
 
-    # Sports-AI already receives category-scoped Google News/RSS/Trends/GDELT
-    # intake from the canonical collector. Do not run a second keyword-only
-    # inference gate here; it can reject valid sports headlines whose titles
-    # omit words such as "match" or "tournament".
-    stage30 = _cheap_filter(raw, max_items=120, max_age_hours=48)
-    stage20 = _deduplicate_stage(stage30, max_items=90)
-    stage20 = _recent_topic_cooldown(conn, stage20, hours=36)
-    stage20 = [item for item in stage20 if item.get("url")]
-    stage10 = _originality_stage(stage20, used_topics, max_items=max_candidates * 2)
-
-    ranked = []
-    for item in stage10:
-        category = "sports" if ai_sports_mode else _infer_discovery_category(item)
-        scored = _editorial_score(
-            item,
-            rows,
-            category,
-            "regular",
-            language,
-            social_titles,
-            ai_cricket=False,
-        )
-        if not _discovery_portfolio_pass(scored):
-            continue
-        scored["recommended_category"] = category
-        scored["recommended_format"] = "regular"
-        scored["ai_recommendation"] = True
-        scored["channel_history_fit"] = float(
-            (scored.get("discovery_dimensions") or {}).get("channel_history") or 0.0
-        )
-        ranked.append(scored)
-
-    ranked = diversity_rerank(ranked, max_items=max_candidates)
     ranked = _merge_retained_topics(
         bot,
         web_config,
@@ -314,24 +283,23 @@ def discover_ai_topics(bot, web_config: dict[str, Any], conn, max_candidates: in
         max_candidates=max_candidates,
     )
     pool = ranked[:max_candidates]
+
     for rank, item in enumerate(pool, 1):
         item["discovery_rank"] = rank
-        item["discovery_reason"] = _candidate_reason(item)
-        item["source_label"] = _source_label(item)
-        item["story_url"] = _story_url(item)
-        item["story_key"] = _story_key(item)
+        item["discovery_reason"] = item.get("discovery_reason") or _candidate_reason(item)
+        item["source_label"] = item.get("source_label") or _source_label(item)
+        item["story_url"] = item.get("story_url") or _story_url(item)
+        item["story_key"] = item.get("story_key") or _story_key(item)
+        item["recommended_category"] = item.get("recommended_category") or target_category
+        item["recommended_format"] = "regular"
+        item["ai_recommendation"] = True
         item["ai_fit_summary"] = (
-            f"Current momentum + freshness + source support + channel-history fit "
-            f"({item.get('channel_history_fit', 0):.1f}/10)."
+            f"Current momentum + freshness + source support + channel-history fit."
         )
 
     print(
-        f"   [AI Discovery] {'sports ' if ai_sports_mode else ''}intake={len(raw)} -> Top {len(pool)}; "
-        + (
-            "Sports-scoped AI ranking is active."
-            if ai_sports_mode
-            else "category inferred after discovery."
-        ),
+        f"   [AI Discovery] intake desk returned {len(pool)} topics for {genre_key}; "
+        f"dashboard discovery v2 is active.",
         flush=True,
     )
     return pool
@@ -344,13 +312,8 @@ def discover_ranked_topics(
     max_candidates: int = 28,
     retained_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Dashboard discovery pool: return up to 28 diverse, evidence-backed topics."""
-    from story_ranker import (
-        _cricket_relevance_pass,
-        _requested_topic_pass,
-        collect_high_recall_stories,
-        rank_discovery_candidates,
-    )
+    """Dashboard discovery entry point using the dedicated broad-recall topic desk."""
+    from dashboard_topic_discovery_runtime import discover_dashboard_topics
     from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
     from workflow_runtime import CRICKET_CATEGORIES
 
@@ -361,6 +324,9 @@ def discover_ranked_topics(
     bot._active_web_config = dict(web_config)
 
     is_cricket = fmt == "cricket" or bool(web_config.get("cricket_pipeline"))
+    cricket_name = ""
+    requested_topic = str(web_config.get("requested_topic", "") or "").strip()
+
     if is_cricket:
         cricket_name = str(
             web_config.get("cricket_category", "AI-assisted top story in cricket")
@@ -371,63 +337,41 @@ def discover_ranked_topics(
         )
         genre_key = "sports_stories_of_day"
         genre_cfg = dict(bot.CONTENT_CATEGORIES.get(genre_key, {}))
+
         if cricket_name == "India / Asia":
-            # Scope-specific cricket discovery: do not mix the global lane into
-            # the India/Asia result set.
             genre_cfg["india_gnews_q"] = cricket_cfg["query"]
             genre_cfg["global_gnews_q"] = ""
             genre_cfg["gnews_q"] = cricket_cfg["query"]
         elif cricket_name == "Global":
-            # Scope-specific cricket discovery: keep the selected result set
-            # on the global lane rather than re-adding India-first headlines.
             genre_cfg["india_gnews_q"] = ""
             genre_cfg["global_gnews_q"] = cricket_cfg["query"]
             genre_cfg["gnews_q"] = cricket_cfg["query"]
-        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-        custom_q = requested_topic or None if cricket_name != "AI-assisted top story in cricket" else (
-            requested_topic or cricket_cfg["query"]
-        )
+
         custom_rss = cricket_cfg["rss"]
+        # Cricket dashboard discovery must use the cricket-specific editorial
+        # scorer even when the UI also carries a generic sports category value.
+        target_category = genre_key
+        ai_cricket = cricket_name == "AI-assisted top story in cricket"
     else:
         genre_key = category or "national_global_affairs"
         genre_cfg = bot.CONTENT_CATEGORIES.get(genre_key)
         if not genre_cfg:
             raise ValueError(f"Unknown category: {genre_key}")
-        requested_topic = str(web_config.get("requested_topic", "") or "").strip()
-        custom_q = requested_topic or None
-        custom_rss = None
+        custom_rss = ""
+        target_category = category or genre_key
+        ai_cricket = False
 
-    raw, social_titles = collect_high_recall_stories(
+    ranked = discover_dashboard_topics(
         bot,
         genre_key,
         genre_cfg,
-        web_config.get("trend_keyword"),
-        custom_q,
-        custom_rss,
-        broad_discovery=True,
-    )
-
-    relevance_filtered = []
-    for candidate in raw:
-        if not _cricket_relevance_pass(candidate, genre_key):
-            continue
-        if not _requested_topic_pass(candidate, requested_topic):
-            continue
-        relevance_filtered.append(candidate)
-
-    ai_cricket = (
-        genre_key == "sports_stories_of_day"
-        and str(web_config.get("cricket_category", ""))
-        == "AI-assisted top story in cricket"
-    )
-
-    ranked = rank_discovery_candidates(
-        relevance_filtered,
         conn=conn,
-        target_category=category or genre_key,
+        requested_topic=requested_topic,
+        custom_rss_url=custom_rss,
+        cricket_scope=cricket_name,
+        target_category=target_category,
         target_format=web_config.get("format_mode", "regular"),
         target_language=language,
-        social_titles=social_titles,
         ai_cricket=ai_cricket,
         max_candidates=max_candidates,
     )
@@ -441,16 +385,17 @@ def discover_ranked_topics(
         max_candidates=max_candidates,
     )
     pool = ranked[:max_candidates]
+
     for rank, story in enumerate(pool, 1):
         story["discovery_rank"] = rank
-        story["discovery_reason"] = _candidate_reason(story)
-        story["source_label"] = _source_label(story)
-        story["story_url"] = _story_url(story)
-        story["story_key"] = _story_key(story)
+        story["discovery_reason"] = story.get("discovery_reason") or _candidate_reason(story)
+        story["source_label"] = story.get("source_label") or _source_label(story)
+        story["story_url"] = story.get("story_url") or _story_url(story)
+        story["story_key"] = story.get("story_key") or _story_key(story)
 
     print(
-        f"   [Dashboard Discovery] {len(raw)} event candidates -> "
-        f"{len(relevance_filtered)} relevant -> {len(pool)} diverse ranked headline(s).",
+        f"   [Dashboard Discovery] {len(pool)} diverse headline(s) returned by "
+        f"{'cricket ' + cricket_name if is_cricket else genre_key} discovery v2.",
         flush=True,
     )
     return pool
