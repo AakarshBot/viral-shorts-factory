@@ -1742,6 +1742,8 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         strategy_input["event_search_text"] = ""
     channel_strategy = score_channel_strategy(strategy_input)
     channel_signal = _safe_float(channel_strategy.get("score")) or 0.0
+    freshfeed_pattern_score = _safe_float(channel_strategy.get("freshfeed_pattern_score")) or 0.0
+    freshfeed_scope_score = _safe_float(channel_strategy.get("freshfeed_scope_score")) or 0.0
     title_packaging = title_package_score(story.get("title") or "")
     cricket_event_family = _cricket_event_family(story) if is_cricket else ""
 
@@ -1761,7 +1763,11 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         + channel_history * 0.60
         + channel_fit * 0.40
         + hook_fit * 0.25
-        + channel_signal * (1.30 if is_cricket else 1.10)
+        # FreshFeed pattern fit is intentionally separate from generic channel
+        # strategy so the actual winning combinations (conflict, bold quotes,
+        # marquee people, rivalry and concise scope) materially affect ranking.
+        + freshfeed_pattern_score * (1.45 if is_cricket else 1.25)
+        + channel_signal * (1.05 if is_cricket else 0.90)
         + title_packaging * (0.45 if is_cricket else 0.25)
         + niche * 0.18
         + niche_opportunity * 0.45
@@ -1771,6 +1777,11 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
     )
     story["candidate_score"] = round(final_score, 3)
     story["freshfeed_channel_fit_score"] = channel_signal
+    story["freshfeed_pattern_score"] = freshfeed_pattern_score
+    story["freshfeed_scope_score"] = freshfeed_scope_score
+    story["freshfeed_pattern_reasons"] = channel_strategy.get("freshfeed_pattern_reasons", [])
+    story["freshfeed_marquee_person_hits"] = int(channel_strategy.get("marquee_person_hits") or 0)
+    story["freshfeed_rivalry_signal"] = bool(channel_strategy.get("rivalry_signal"))
     story["title_package_score"] = round(title_packaging, 3)
     story["cricket_event_family"] = cricket_event_family
     story["freshfeed_channel_fit_reasons"] = channel_strategy.get("reasons", [])
@@ -1808,6 +1819,11 @@ def _editorial_score(story, rows, target_category, target_format, target_languag
         "hook_potential": round(hook_potential, 2),
         "channel_fit": round(channel_signal, 2),
         "channel_fit_reasons": channel_strategy.get("reasons", []),
+        "freshfeed_pattern": round(freshfeed_pattern_score, 2),
+        "freshfeed_scope": round(freshfeed_scope_score, 2),
+        "freshfeed_pattern_reasons": channel_strategy.get("freshfeed_pattern_reasons", []),
+        "freshfeed_marquee_person_hits": int(channel_strategy.get("marquee_person_hits") or 0),
+        "freshfeed_rivalry_signal": bool(channel_strategy.get("rivalry_signal")),
         "topic_actionability": round(topic_actionability, 2),
         "india_relevance": round(india_relevance, 2),
         "momentum": round(momentum, 2),
@@ -1885,6 +1901,7 @@ def _candidate_quality_pass(story):
     channel_ok, channel_reason = candidate_gate(
         {
             "score": channel_signal,
+            "freshfeed_pattern_score": freshfeed_pattern_score,
             "strong_hook": bool(story.get("freshfeed_channel_strong_hook")),
             "routine_or_admin": bool(
                 story.get("freshfeed_channel_fit_reasons")
