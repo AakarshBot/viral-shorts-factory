@@ -39,6 +39,7 @@ def sync_factory_analytics(bot, conn):
 
         updated = 0
         retention_ready = 0
+        stayed_to_watch_ready = 0
         analytics_errors = 0
 
         for row_id, video_id, date_used, reported in rows:
@@ -75,22 +76,47 @@ def sync_factory_analytics(bot, conn):
                 end_date = datetime.now().strftime("%Y-%m-%d")
                 avg_pct = None
                 avg_duration = None
+                engaged_views = None
+                analytics_views = None
+                stayed_to_watch = None
                 ctr = None
 
-                # Shorts retention. New videos can legitimately have no row yet.
+                # Shorts engagement. YouTube defines engagedViews as views that
+                # continue past the initial seconds; views now count when playback
+                # starts. Their ratio therefore provides a stored, comparable
+                # stayed-to-watch signal for the factory's learning layer.
                 try:
                     retention = yt_analytics.reports().query(
                         ids="channel==MINE",
                         startDate=start_date,
                         endDate=end_date,
-                        metrics="averageViewPercentage,averageViewDuration",
+                        metrics="engagedViews,views,averageViewPercentage,averageViewDuration",
                         dimensions="video",
                         filters=f"video=={video_id}",
                     ).execute()
                     if retention.get("rows"):
                         values = retention["rows"][0]
-                        avg_pct = _safe_float(values[1]) if len(values) > 1 else None
-                        avg_duration = _safe_float(values[2]) if len(values) > 2 else None
+                        engaged_views = (
+                            int(float(values[1]))
+                            if len(values) > 1 and values[1] is not None
+                            else None
+                        )
+                        analytics_views = (
+                            int(float(values[2]))
+                            if len(values) > 2 and values[2] is not None
+                            else None
+                        )
+                        avg_pct = _safe_float(values[3]) if len(values) > 3 else None
+                        avg_duration = _safe_float(values[4]) if len(values) > 4 else None
+                        if (
+                            engaged_views is not None
+                            and analytics_views is not None
+                            and analytics_views > 0
+                        ):
+                            stayed_to_watch = round(
+                                min(100.0, max(0.0, engaged_views / analytics_views * 100.0)),
+                                2,
+                            )
                 except Exception as exc:
                     analytics_errors += 1
                     print(f"   [Learning] Retention unavailable for {video_id}: {exc}")
@@ -121,6 +147,12 @@ def sync_factory_analytics(bot, conn):
                 if avg_duration is not None:
                     sets.append("avg_view_duration=?")
                     params.append(avg_duration)
+                if engaged_views is not None:
+                    sets.append("engaged_views=?")
+                    params.append(engaged_views)
+                if stayed_to_watch is not None:
+                    sets.append("stayed_to_watch=?")
+                    params.append(stayed_to_watch)
                 if ctr is not None:
                     sets.append("title_ctr=?")
                     params.append(ctr)
@@ -134,9 +166,12 @@ def sync_factory_analytics(bot, conn):
                 updated += 1
                 if avg_pct is not None:
                     retention_ready += 1
+                if stayed_to_watch is not None:
+                    stayed_to_watch_ready += 1
 
                 print(
                     f"   [Learning] {video_id}: views={views if views is not None else 'n/a'} "
+                    f"stayed_to_watch={stayed_to_watch if stayed_to_watch is not None else 'pending'} "
                     f"retention={avg_pct if avg_pct is not None else 'pending'} "
                     f"duration={avg_duration if avg_duration is not None else 'pending'}"
                 )
@@ -152,8 +187,9 @@ def sync_factory_analytics(bot, conn):
         return {
             "updated": updated,
             "retention_ready": retention_ready,
+            "stayed_to_watch_ready": stayed_to_watch_ready,
             "analytics_errors": analytics_errors,
         }
     except Exception as exc:
         print(f"   [Learning] YouTube analytics sync unavailable: {type(exc).__name__}: {exc}")
-        return {"updated": 0, "retention_ready": 0, "analytics_errors": 1}
+        return {"updated": 0, "retention_ready": 0, "stayed_to_watch_ready": 0, "analytics_errors": 1}
