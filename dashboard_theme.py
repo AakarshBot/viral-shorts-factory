@@ -214,38 +214,7 @@ p{color:var(--vsf-ink)!important}
   font-weight:900!important;
 }
 
-/* Pipeline: clear visual rhythm, less copy. */
-.stage-strip{
-  gap:6px!important;
-  margin:9px 0 12px!important;
-}
-.stage-card{
-  padding:8px 9px!important;
-  border-radius:10px!important;
-  background:rgba(255,253,249,.72)!important;
-  border:1px solid var(--vsf-line)!important;
-}
-.stage-name{
-  font-size:.66rem!important;
-  font-weight:850!important;
-}
-.stage-state{
-  color:var(--vsf-muted)!important;
-  font-size:.56rem!important;
-  margin-top:3px!important;
-}
-.stage-card.active{
-  border-color:#9dbbb8!important;
-  background:var(--vsf-teal-soft)!important;
-}
-.stage-card.done{
-  border-color:#bdd9c9!important;
-  background:var(--vsf-green-soft)!important;
-}
-.stage-card.stopped{
-  border-color:#e8c8aa!important;
-  background:var(--vsf-amber-soft)!important;
-}
+/* Pipeline is rendered as the compact workflow rail below. */
 .live-bar{
   padding:8px 11px!important;
   margin:7px 0 12px!important;
@@ -408,16 +377,11 @@ div[data-testid="stExpander"]{
 }
 
 /* Responsive: avoid dense desktop cards becoming cramped. */
-@media(max-width:1100px){
-  .stage-strip{grid-template-columns:repeat(3,minmax(0,1fr))!important}
-}
 @media(max-width:800px){
-  .stage-strip{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   .section-title{font-size:1.25rem!important}
   .brand-title{font-size:1.45rem!important}
 }
 @media(max-width:560px){
-  .stage-strip{grid-template-columns:1fr!important}
   .section-subtitle{font-size:.7rem!important}
 }
 
@@ -682,13 +646,17 @@ div[data-testid="stExpander"]{
   align-items:center;
   width:100%;
   gap:6px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  scrollbar-width:none;
 }
+.workflow-rail::-webkit-scrollbar{display:none}
 .workflow-node{
   min-width:0;
   display:flex;
   align-items:center;
   gap:6px;
-  flex:0 1 auto;
+  flex:0 0 auto;
 }
 .workflow-dot{
   width:22px;
