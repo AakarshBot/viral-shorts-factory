@@ -357,8 +357,12 @@ def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> b
         return False
     story["age_hours"] = round(age, 2)
 
-    if genre_key == "sports_stories_of_day" and not sr._cricket_relevance_pass(story, genre_key):
-        return False
+    if genre_key == "sports_stories_of_day":
+        # Factual cricket lanes are already query-scoped to cricket. Only
+        # cross-category trend items need an explicit cricket relevance check.
+        collection_source = str(story.get("collection_source") or "").strip().casefold()
+        if collection_source == "google_trends" and not sr._cricket_relevance_pass(story, genre_key):
+            return False
     if requested_topic and not sr._requested_topic_pass(story, requested_topic):
         return False
 
