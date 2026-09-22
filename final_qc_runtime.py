@@ -58,9 +58,14 @@ def _install_exact_run_identity(controller_cls):
         original_install(self)
         if getattr(self, "_exact_identity_runner_installed", False):
             return
-        original_run_robot = getattr(self.bot, "run_robot", None)
+        original_run_robot = (
+            getattr(self.bot, "_vsf_canonical_run_robot", None)
+            or getattr(self.bot, "run_robot", None)
+        )
         if not callable(original_run_robot):
             return
+
+        self.bot._vsf_canonical_run_robot = original_run_robot
 
         def exact_identity_runner(web_config=None):
             from db_runtime import run_robot_with_exact_identity
@@ -71,6 +76,7 @@ def _install_exact_run_identity(controller_cls):
                 self.bot.run_robot = exact_identity_runner
 
         exact_identity_runner._exact_identity_runner = True
+        exact_identity_runner._canonical_run_robot = original_run_robot
         self.bot.run_robot = exact_identity_runner
         self._exact_identity_runner_installed = True
         print("   [Final QC] Exact production run identity bridge installed.", flush=True)
