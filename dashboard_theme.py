@@ -581,6 +581,14 @@ div[data-testid="stExpander"]{
 .workflow-node-copy{
   min-width:0;
 }
+.workflow-node.done .workflow-node-copy,
+.workflow-node.next .workflow-node-copy{
+  display:none!important;
+}
+.workflow-node.done,
+.workflow-node.next{
+  cursor:help;
+}
 .workflow-node-name{
   color:#7b878a;
   font-size:.56rem;
