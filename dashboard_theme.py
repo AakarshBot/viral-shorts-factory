@@ -429,6 +429,132 @@ div[data-testid="stExpander"]{
   word-break:break-word!important;
 }
 
+/* Staged path selection: the current choice stays visible while the next decision gets the space. */
+.choice-kicker{
+  color:var(--vsf-faint);
+  font-size:.52rem;
+  font-weight:950;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+  margin:3px 0 7px;
+}
+.path-summary{
+  min-height:34px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  width:max-content;
+  max-width:100%;
+  margin:2px 0 7px;
+  padding:5px 8px;
+  border:1px solid #cfe0dc;
+  border-radius:999px;
+  background:rgba(234,244,238,.84);
+  color:var(--vsf-green);
+}
+.path-check{
+  width:17px;
+  height:17px;
+  border-radius:50%;
+  display:inline-grid;
+  place-items:center;
+  flex:0 0 17px;
+  background:var(--vsf-green);
+  color:#fff;
+  font-size:.52rem;
+  font-weight:950;
+}
+.path-label{
+  color:var(--vsf-ink);
+  font-size:.63rem;
+  font-weight:900;
+}
+.path-summary-copy{
+  color:var(--vsf-muted);
+  font-size:.55rem;
+  font-weight:750;
+}
+.path-separator{color:var(--vsf-faint);font-size:.56rem}
+.path-ready{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:7px 0 10px;
+  padding:8px 10px;
+  border:1px solid #cfe0dc;
+  border-radius:11px;
+  background:linear-gradient(90deg,rgba(234,244,238,.86),rgba(255,255,255,.72));
+}
+.path-ready-dot{
+  width:23px;height:23px;
+  display:grid;
+  place-items:center;
+  flex:0 0 23px;
+  border-radius:50%;
+  background:var(--vsf-green);
+  color:#fff;
+  font-size:.58rem;
+  font-weight:950;
+}
+.path-ready-copy{
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:6px;
+  min-width:0;
+}
+.path-ready-copy b{
+  color:var(--vsf-green);
+  font-size:.61rem;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+.path-ready-value{
+  color:var(--vsf-ink);
+  font-size:.67rem;
+  font-weight:850;
+  overflow-wrap:anywhere;
+}
+.selection-rail{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:5px 0 2px;
+}
+.approved-meta-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:42px;
+}
+.approved-meta-icon{
+  width:28px;height:28px;
+  display:grid;
+  place-items:center;
+  flex:0 0 28px;
+  border-radius:50%;
+  background:var(--vsf-green);
+  color:#fff;
+  font-size:.7rem;
+  font-weight:950;
+}
+.approved-meta-kicker{
+  color:var(--vsf-green);
+  font-size:.5rem;
+  font-weight:950;
+  letter-spacing:.14em;
+}
+.approved-meta-title{
+  margin-top:2px;
+  color:var(--vsf-ink);
+  font-size:.72rem;
+  font-weight:900;
+  line-height:1.25;
+  max-width:780px;
+  overflow-wrap:anywhere;
+}
+
 /* VSF WORKFLOW SHELL — dense by default, expressive only at the active step. */
 .studio-masthead{
   min-height:58px;
