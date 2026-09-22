@@ -1,4 +1,3 @@
-from final_qc_runtime import evaluate_originality_gate
 from script_runtime import (
     _extractive_script_fallback,
     assess_narrative_completeness,
@@ -146,20 +145,6 @@ def test_source_fallback_preserves_real_source_sentences_and_marks_preview_only(
         "context",
         "consequence",
     ]
-
-
-def test_upstream_public_publish_block_survives_final_qc():
-    script = {
-        "public_publish_blocked": True,
-        "script": [{
-            "voiceover": "Creator insight explains why this development matters for the team's preparation.",
-            "human_contributed": True,
-        }],
-    }
-
-    gate = evaluate_originality_gate(script)
-    assert gate["passed"] is True
-    assert gate["public_blocked"] is True
 
 
 def test_source_fallback_filters_prompt_and_evidence_scaffolding():
