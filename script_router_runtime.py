@@ -108,7 +108,6 @@ def _validate_script_result(result, story_data, format_mode):
             cleaned,
             story_data,
             format_mode,
-            require_visual_metadata=False,
         )
         assessment = {}
         if valid:
