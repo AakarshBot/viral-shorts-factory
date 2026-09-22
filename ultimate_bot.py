@@ -862,6 +862,9 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
     
     sys_prompt = (
         "Score each story in the input array (1-10) on: hook_strength, narrative_completeness, audience_fit, monetization_risk, shelf_life. "
+        "For hook_strength, judge the immediate scroll-stop potential of the story headline and opening fact: reward a specific conflict, surprising result, consequential change, record, or attributed quote that can be understood immediately; "
+        "penalize generic setup, routine schedules/previews, and empty 'latest update' framing. Never reward unsupported sensationalism or clickbait. "
+        "For narrative_completeness, judge whether the event has enough substance for a concise but complete Short. "
         "Return ONLY this exact JSON object structure: {\"results\": [{\"hook_strength\": 8, \"narrative_completeness\": 8, \"audience_fit\": 8, \"monetization_risk\": 9, \"shelf_life\": 7, \"hard_reject\": false, \"one_line_reasoning\": \"...\"}]} "
         "matching the input order one-to-one."
     )
