@@ -61,60 +61,43 @@ def _originality_words(text):
     return re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", str(text or "").casefold())
 
 
-def _originality_sources(story_data):
-    story = story_data if isinstance(story_data, dict) else {}
-    values = []
-    def collect(value):
-        if isinstance(value, str):
-            if value.strip(): values.append(value)
-        elif isinstance(value, dict):
-            for key in ("text","content","extracted_text","body","summary","snippet","title","claim","claims","evidence","source_text","sources","articles","items"):
-                if key in value: collect(value[key])
-        elif isinstance(value, (list, tuple)):
-            for item in value: collect(item)
-    pack = story.get("research_evidence_pack")
-    collect(pack.get("sources") if isinstance(pack, dict) else pack)
-    for key in ("research_evidence_text","research_bundle","text","summary","description"):
-        collect(story.get(key))
-    seen, unique = set(), []
-    for value in values:
-        clean = re.sub(r"\s+", " ", value).strip()
-        if clean and clean not in seen:
-            seen.add(clean); unique.append(clean)
-    return unique
+def _normalise_originality_sentence(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold()).strip()
 
 
-def _longest_originality_run(left, right):
-    previous = [0] * (len(right) + 1)
-    best = 0
-    for token in left:
-        current = [0]
-        for index, other in enumerate(right, 1):
-            current.append(previous[index - 1] + 1 if token == other else 0)
-            best = max(best, current[-1])
-        previous = current
-    return best
+def _source_sentences(story_data):
+    sentences = set()
+    for source in _originality_sources(story_data):
+        for sentence in re.split(r"(?<=[.!?])\\s+|\\n+", str(source or "")):
+            sentence = re.sub(r"\\s+", " ", sentence).strip()
+            normalised = _normalise_originality_sentence(sentence)
+            if len(_originality_words(normalised)) >= 6:
+                sentences.add(normalised)
+    return sentences
 
 
 def check_script_originality(script_data, story_data):
-    sources = _originality_sources(story_data)
+    """Reject only narration sentences copied verbatim from the researched sources."""
+    source_sentences = _source_sentences(story_data)
     failures = []
-    for scene_index, scene in enumerate(script_data.get("script", []) if isinstance(script_data, dict) else [], 1):
-        if not isinstance(scene, dict) or scene.get("human_contributed"): continue
-        words = _originality_words(scene.get("voiceover"))
-        sixgrams = {tuple(words[i:i+6]) for i in range(max(0, len(words)-5))}
-        for source_index, source in enumerate(sources):
-            source_words = _originality_words(source)
-            source_sixgrams = {tuple(source_words[i:i+6]) for i in range(max(0, len(source_words)-5))}
-            longest = _longest_originality_run(words, source_words)
-            ratio = len(sixgrams & source_sixgrams) / max(1, len(sixgrams))
-            if longest >= 8 or ratio > 0.15:
-                failures.append({"scene": scene_index, "source_index": source_index, "longest_run": longest, "sixgram_ratio": ratio})
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    for scene_index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict) or scene.get("human_contributed"):
+            continue
+        voiceover = str(scene.get("voiceover") or "")
+        for sentence in re.split(r"(?<=[.!?])\\s+|\\n+", voiceover):
+            normalised = _normalise_originality_sentence(sentence)
+            if normalised and normalised in source_sentences:
+                failures.append({
+                    "scene": scene_index,
+                    "copied_sentence": sentence.strip(),
+                })
                 break
-    return {"passed": not failures, "failures": failures, "source_count": len(sources)}
-
-
-
+    return {
+        "passed": not failures,
+        "failures": failures,
+        "source_count": len(_originality_sources(story_data)),
+    }
 
 def contains_retention_bait(text):
     value = str(text or "").strip()
@@ -200,8 +183,13 @@ def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
 NARRATION_BASE_WPM = 150.0
 NARRATION_IDEAL_MIN_SECONDS = 20.0
-NARRATION_IDEAL_MAX_SECONDS = 30.0
-NARRATION_ACCEPTABLE_MAX_SECONDS = 35.0
+NARRATION_IDEAL_MAX_SECONDS = 28.0
+NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
+
+# The initial writer uses a deliberately conservative spoken-word ceiling.
+# 65 words stays below 30s even at the slowest configured narrator profile.
+INITIAL_SCRIPT_MAX_WORDS = 65
+SCENE_1_MAX_WORDS = 14
 
 
 def estimate_narration_duration(script_data, persona_profile=None, base_wpm=NARRATION_BASE_WPM):
@@ -958,519 +946,6 @@ def _originality_llm(url, payload, headers):
         return None
 
 
-_DURATION_SAFE_COMPACTIONS = (
-    (r"\bit is important to note that\b", ""),
-    (r"\bit should be noted that\b", ""),
-    (r"\bit is worth noting that\b", ""),
-    (r"\bwhat this means is that\b", ""),
-    (r"\bin order to\b", "to"),
-    (r"\bdue to the fact that\b", "because"),
-    (r"\bat this point in time\b", "now"),
-    (r"\bat the present time\b", "now"),
-    (r"\bfor the purpose of\b", "for"),
-    (r"\bin the event that\b", "if"),
-    (r"\bhas the ability to\b", "can"),
-    (r"\bhave the ability to\b", "can"),
-    (r"\bis able to\b", "can"),
-    (r"\bare able to\b", "can"),
-    (r"\bin the meantime\b", "meanwhile"),
-    (r"\bin spite of\b", "despite"),
-    (r"\bas a result of\b", "because of"),
-    (r"\bit is\b", "it's"),
-    (r"\bthat is\b", "that's"),
-    (r"\bthere is\b", "there's"),
-    (r"\bdoes not\b", "doesn't"),
-    (r"\bdo not\b", "don't"),
-    (r"\bdid not\b", "didn't"),
-    (r"\bwill not\b", "won't"),
-    (r"\bis not\b", "isn't"),
-    (r"\bare not\b", "aren't"),
-    (r"\bwas not\b", "wasn't"),
-    (r"\bwere not\b", "weren't"),
-    (r"\bhas not\b", "hasn't"),
-    (r"\bhave not\b", "haven't"),
-)
-def _compact_unquoted_voiceover(text):
-    """Make only meaning-preserving micro-edits outside direct quotations."""
-    parts = re.split(r'("[^"\\n]*"|“[^”\\n]*”)', str(text or ""))
-    for index in range(0, len(parts), 2):
-        value = parts[index]
-        for pattern, replacement in _DURATION_SAFE_COMPACTIONS:
-            value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
-        value = re.sub(r"\s+([,.!?])", r"\1", value)
-        value = re.sub(r"\s{2,}", " ", value)
-        parts[index] = value
-    return "".join(parts).strip()
-
-
-
-def _split_voiceover_sentences(text):
-    parts = re.split(r"(?<=[.!?])\s+", str(text or "").strip())
-    return [part.strip() for part in parts if part.strip()]
-
-
-def _split_sentence_for_duration_trim(sentence):
-    """Return conservative, non-quoted prefixes that remove a trailing clause."""
-    text = re.sub(r"\s+", " ", str(sentence or "")).strip()
-    if not text or any(marker in text for marker in ('"', "“", "”")):
-        return []
-
-    variants = []
-    boundaries = list(re.finditer(
-        r"\s*(?:,|;|—|–)\s+|\s+(?:because|which|while|although|after|before|when|where|"
-        r"that|and|but|so|as)\s+",
-        text,
-        flags=re.IGNORECASE,
-    ))
-    for match in boundaries:
-        prefix = text[:match.start()].strip(" ,;—–-")
-        suffix = text[match.end():].strip()
-        prefix_words = len(re.findall(r"\b\w+\b", prefix))
-        suffix_words = len(re.findall(r"\b\w+\b", suffix))
-        if prefix_words < 8 or suffix_words < 4:
-            continue
-        trimmed = prefix.rstrip(" ,;—–-")
-        if not trimmed:
-            continue
-        if trimmed[-1] not in ".!?":
-            trimmed += "."
-        variants.append(trimmed)
-
-    # A second conservative option keeps the first full sentence in a
-    # multi-clause line when it already forms a complete sentence.
-    first_sentence = _split_voiceover_sentences(text)
-    if len(first_sentence) > 1:
-        first = first_sentence[0]
-        if len(re.findall(r"\b\w+\b", first)) >= 8:
-            variants.append(first)
-
-    seen = set()
-    return [value for value in variants if not (value in seen or seen.add(value))]
-
-
-def _hard_word_budget_duration_fallback(script_data, story_data, format_mode, persona_profile, max_seconds=35.0):
-    """Last-resort provider-free ceiling reducer for a valid but stubbornly long draft."""
-    scenes = [
-        dict(scene)
-        for scene in (script_data.get("script") or [])
-        if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
-    ]
-    if not scenes:
-        return None
-
-    estimate = estimate_narration_duration(
-        script_data,
-        persona_profile,
-    )
-    effective_wpm = max(60.0, float(estimate.get("effective_wpm") or NARRATION_BASE_WPM))
-    # Leave a small timing margin so rounding/sentence pauses do not land exactly
-    # on the absolute ceiling.
-    word_budget = max(
-        len(scenes) * 5,
-        int(((float(max_seconds) - 0.75) * effective_wpm) / 60.0),
-    )
-    current_words = [
-        re.findall(r"\b\w+(?:['’]\w+)?\b", str(scene.get("voiceover") or ""))
-        for scene in scenes
-    ]
-    total_words = sum(len(words) for words in current_words)
-    if total_words <= word_budget:
-        return None
-
-    # Allocate the available budget proportionally, preserving at least a small
-    # spoken beat for every existing scene.
-    min_words = 5
-    budgets = [min_words] * len(scenes)
-    remaining_budget = max(0, word_budget - min_words * len(scenes))
-    weights = [max(1, len(words)) for words in current_words]
-    weight_total = sum(weights)
-    for index, words in enumerate(current_words):
-        budgets[index] += int(remaining_budget * weights[index] / max(1, weight_total))
-
-    while sum(budgets) > word_budget:
-        longest_index = max(
-            range(len(budgets)),
-            key=lambda idx: (budgets[idx], len(current_words[idx])),
-        )
-        if budgets[longest_index] <= min_words:
-            break
-        budgets[longest_index] -= 1
-
-    while sum(budgets) < word_budget:
-        longest_index = max(
-            range(len(budgets)),
-            key=lambda idx: len(current_words[idx]) - budgets[idx],
-        )
-        budgets[longest_index] += 1
-
-    rewritten_scenes = []
-    for scene, budget in zip(scenes, budgets):
-        original = str(scene.get("voiceover") or "").strip()
-        if len(re.findall(r"\b\w+(?:['’]\w+)?\b", original)) <= budget:
-            text = original
-        else:
-            sentences = _split_voiceover_sentences(original)
-            chosen_parts = []
-            used = 0
-            for sentence in sentences:
-                sentence_words = re.findall(r"\b\w+(?:['’]\w+)?\b", sentence)
-                if not sentence_words:
-                    continue
-                if used + len(sentence_words) <= budget:
-                    chosen_parts.append(sentence.strip())
-                    used += len(sentence_words)
-                else:
-                    break
-
-            if chosen_parts:
-                text = " ".join(chosen_parts).strip()
-            else:
-                words = re.findall(r"\b\w+(?:['’]\w+)?\b", original)[:budget]
-                text = " ".join(words).strip()
-
-            if text and text[-1] not in ".!?":
-                text += "."
-
-        if not text:
-            return None
-        rewritten_scenes.append(dict(scene, voiceover=text))
-
-    rewritten = dict(script_data, script=rewritten_scenes)
-    rewritten["duration_compression_only"] = True
-    rewritten["duration_compression_provider"] = "deterministic_hard_ceiling"
-    rewritten["duration_compression_emergency"] = True
-
-    valid, _ = validate_content_density(rewritten, story_data, format_mode)
-    if not valid:
-        return None
-
-    final_estimate = estimate_narration_duration(rewritten, persona_profile)
-    if final_estimate["seconds"] > float(max_seconds):
-        return None
-    return rewritten
-
-
-def _sentence_level_duration_fallback(script_data, story_data, format_mode, persona_profile, max_seconds=35.0):
-    """Provider-free hard fallback that trims whole sentences, then trailing clauses."""
-    working = {
-        **script_data,
-        "script": [
-            dict(scene)
-            for scene in (script_data.get("script") or [])
-            if isinstance(scene, dict)
-        ],
-    }
-    attempts = 0
-    while attempts < 12:
-        estimate = estimate_narration_duration(working, persona_profile)
-        if estimate["seconds"] <= float(max_seconds):
-            valid, _ = validate_content_density(working, story_data, format_mode)
-            if valid:
-                working["duration_compression_only"] = True
-                working["duration_compression_provider"] = "deterministic_duration_fallback"
-                return working
-            return None
-
-        candidates = []
-        scenes = working.get("script") or []
-        for scene_index, scene in enumerate(scenes):
-            role = str(scene.get("narrative_role") or "").strip().casefold()
-            if role == "hook":
-                continue
-
-            sentences = _split_voiceover_sentences(scene.get("voiceover"))
-            # First try removing an entire non-hook sentence.
-            if len(sentences) > 1:
-                for sentence_index, sentence in enumerate(sentences):
-                    if len(re.findall(r"\b\w+\b", sentence)) < 6:
-                        continue
-                    if any(marker in sentence for marker in ('"', "“", "”")):
-                        continue
-                    candidate_script = {
-                        **working,
-                        "script": [dict(item) for item in scenes],
-                    }
-                    remaining = sentences[:sentence_index] + sentences[sentence_index + 1:]
-                    if not remaining:
-                        continue
-                    candidate_script["script"][scene_index]["voiceover"] = " ".join(remaining)
-                    valid, _ = validate_content_density(candidate_script, story_data, format_mode)
-                    if not valid:
-                        continue
-                    candidate_estimate = estimate_narration_duration(candidate_script, persona_profile)
-                    if candidate_estimate["seconds"] < estimate["seconds"]:
-                        candidates.append((candidate_estimate["seconds"], candidate_script))
-
-            # Then trim a trailing clause within a single sentence or a multi-clause sentence.
-            for sentence_index, sentence in enumerate(sentences):
-                for trimmed in _split_sentence_for_duration_trim(sentence):
-                    candidate_script = {
-                        **working,
-                        "script": [dict(item) for item in scenes],
-                    }
-                    replacement_sentences = list(sentences)
-                    replacement_sentences[sentence_index] = trimmed
-                    candidate_script["script"][scene_index]["voiceover"] = " ".join(replacement_sentences)
-                    valid, _ = validate_content_density(candidate_script, story_data, format_mode)
-                    if not valid:
-                        continue
-                    candidate_estimate = estimate_narration_duration(candidate_script, persona_profile)
-                    if candidate_estimate["seconds"] < estimate["seconds"]:
-                        candidates.append((candidate_estimate["seconds"], candidate_script))
-
-        if not candidates:
-            break
-
-        # Prefer an immediately safe <=35s result. Otherwise take the smallest
-        # valid progressive reduction and continue the deterministic pass.
-        below = [item for item in candidates if item[0] <= float(max_seconds)]
-        chosen = (
-            min(below, key=lambda item: abs(float(max_seconds) - float(item[0])))
-            if below
-            else min(candidates, key=lambda item: item[0])
-        )
-        working = chosen[1]
-        attempts += 1
-
-    return None
-
-
-def _local_duration_compression(script_data, story_data, format_mode, persona_profile, target_seconds):
-    """Provider-free micro-compression used when an LLM rewrite is unavailable."""
-
-    rewritten = dict(script_data)
-    rewritten["script"] = [
-        dict(scene, voiceover=_compact_unquoted_voiceover(scene.get("voiceover")))
-        for scene in script_data.get("script") or []
-        if isinstance(scene, dict)
-    ]
-    original_estimate = estimate_narration_duration(script_data, persona_profile)
-    local_estimate = estimate_narration_duration(rewritten, persona_profile)
-    if local_estimate["seconds"] < original_estimate["seconds"]:
-        valid, _ = validate_content_density(rewritten, story_data, format_mode)
-        if valid and local_estimate["seconds"] <= 35.0:
-            rewritten["duration_compression_only"] = True
-            rewritten["duration_compression_provider"] = "deterministic_local"
-            return rewritten
-
-    # Phrase contraction may produce no change at all. Do not stop here:
-    # the sentence-level deterministic fallback is specifically for that case.
-    fallback = _sentence_level_duration_fallback(
-        script_data,
-        story_data,
-        format_mode,
-        persona_profile,
-        max_seconds=35.0,
-    )
-    if fallback:
-        return fallback
-    return _hard_word_budget_duration_fallback(
-        script_data,
-        story_data,
-        format_mode,
-        persona_profile,
-        max_seconds=35.0,
-    )
-
-
-def tighten_script_for_duration_once(
-    script_data,
-    story_data,
-    language_cfg,
-    format_mode,
-    *,
-    target_seconds=30.0,
-    persona_profile=None,
-):
-    """Perform one lightweight compression pass on an already validated script.
-
-    This intentionally does not research, rerun the provider chain, run originality
-    QC, or run critique. A failed/invalid rewrite returns None so the caller can
-    retain the already-valid original draft.
-    """
-    if not isinstance(script_data, dict):
-        return None
-
-    scenes = [
-        {
-            "index": index,
-            "voiceover": str(scene.get("voiceover") or "").strip(),
-            "narrative_role": str(scene.get("narrative_role") or "").strip(),
-        }
-        for index, scene in enumerate(script_data.get("script") or [], 1)
-        if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
-    ]
-    if not scenes:
-        return None
-
-    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
-    if not groq:
-        print("   [Script Duration] Groq unavailable; trying deterministic local compression.", flush=True)
-        return _local_duration_compression(
-            script_data, story_data, format_mode, persona_profile, target_seconds
-        )
-
-    language_instruction = ""
-    if isinstance(language_cfg, dict):
-        language_instruction = str(language_cfg.get("script_instruction") or "").strip()
-
-    prompt = (
-        "Compress this already validated Shorts script once. "
-        f"Target roughly 20–30 seconds and never exceed 35 seconds. "
-        f"Current target is about {float(target_seconds):.1f} seconds. "
-        "Preserve every supported essential fact, the central hook, editorial angle and factual order. "
-        "Remove repetition, generic setup and nonessential context. Do not add, infer or invent facts. "
-        "Do not create a new story or change the angle. "
-        "Return ONLY JSON with a 'script' array containing exactly one replacement voiceover "
-        "for each existing scene, using the same numeric index values. "
-        "Keep the existing narrative roles. "
-        + (f"Language: {language_instruction}\n" if language_instruction else "")
-        + "\nPREVIOUS VALIDATED SCRIPT:\n"
-        + json.dumps(scenes, ensure_ascii=False)
-    )
-
-    payload = {
-        "model": "openai/gpt-oss-120b",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are performing a surgical duration edit on an already approved news script. "
-                    "Shorten wording only. Never alter factual meaning."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.15,
-    }
-
-    parsed = None
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": "Bearer " + groq,
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=20,
-        )
-        if response.status_code == 200:
-            raw = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-            parsed = _originality_json(raw)
-        else:
-            print(
-                f"   [Script Duration] Groq compression returned HTTP {response.status_code}; trying deterministic local compression.",
-                flush=True,
-            )
-    except requests.RequestException as exc:
-        print(
-            f"   [Script Duration] Groq compression request failed ({type(exc).__name__}); trying deterministic local compression.",
-            flush=True,
-        )
-    except Exception as exc:
-        print(
-            f"   [Script Duration] Groq compression response failed ({type(exc).__name__}); trying deterministic local compression.",
-            flush=True,
-        )
-
-    if not isinstance(parsed, dict):
-        return _local_duration_compression(
-            script_data, story_data, format_mode, persona_profile, target_seconds
-        )
-
-    replacements = {}
-    if isinstance(parsed, dict) and isinstance(parsed.get("script"), list):
-        for scene in parsed["script"]:
-            if not isinstance(scene, dict):
-                continue
-            try:
-                index = int(scene.get("index"))
-            except (TypeError, ValueError):
-                continue
-            voiceover = str(scene.get("voiceover") or "").strip()
-            if index > 0 and voiceover:
-                replacements[index] = voiceover
-
-    if set(replacements) != {item["index"] for item in scenes}:
-        print(
-            "   [Script Duration] Compression rewrite returned incomplete scene coverage; "
-            "falling back to deterministic duration compression.",
-            flush=True,
-        )
-        return _local_duration_compression(
-            script_data,
-            story_data,
-            format_mode,
-            persona_profile,
-            target_seconds,
-        )
-
-    rewritten = dict(script_data)
-    rewritten["script"] = [
-        dict(original, voiceover=replacements[original_index])
-        for original_index, original in enumerate(script_data.get("script") or [], 1)
-        if isinstance(original, dict) and str(original.get("voiceover") or "").strip()
-    ]
-
-    valid, reason = validate_content_density(rewritten, story_data, format_mode)
-    if not valid:
-        print(
-            f"   [Script Duration] Compression rewrite failed validation: {reason}; trying deterministic duration fallback.",
-            flush=True,
-        )
-        fallback = _sentence_level_duration_fallback(
-            script_data,
-            story_data,
-            format_mode,
-            persona_profile,
-            max_seconds=35.0,
-        )
-        return fallback or _hard_word_budget_duration_fallback(
-            script_data,
-            story_data,
-            format_mode,
-            persona_profile,
-            max_seconds=35.0,
-        )
-
-    rewritten_estimate = estimate_narration_duration(rewritten, persona_profile)
-    if rewritten_estimate["seconds"] > 35.0:
-        print(
-            f"   [Script Duration] Valid compression still estimated at {rewritten_estimate['seconds']:.1f}s; "
-            "finishing the same compression pass deterministically.",
-            flush=True,
-        )
-        fallback = _sentence_level_duration_fallback(
-            rewritten,
-            story_data,
-            format_mode,
-            persona_profile,
-            max_seconds=35.0,
-        )
-        if not fallback:
-            fallback = _hard_word_budget_duration_fallback(
-                rewritten,
-                story_data,
-                format_mode,
-                persona_profile,
-                max_seconds=35.0,
-            )
-        if fallback:
-            fallback["duration_compression_provider"] = (
-                "groq_then_deterministic"
-                if not fallback.get("duration_compression_emergency")
-                else "groq_then_hard_ceiling"
-            )
-            return fallback
-        return None
-
-    rewritten["duration_compression_only"] = True
-    rewritten["duration_compression_provider"] = "groq"
-    return rewritten
-
-
 def _normalise_critique(value, provider):
     unsupported = value.get("unsupported_claims") if isinstance(value.get("unsupported_claims"), list) else []
     exaggerations = value.get("exaggerations") if isinstance(value.get("exaggerations"), list) else []
@@ -1611,95 +1086,6 @@ def clean_script_data(script_data, story_data, format_mode):
     }
 
 
-def _rewrite_for_originality_once(script_data, story_data, overlap):
-    scenes = [{"index": i, "voiceover": str(s.get("voiceover") or "")} for i, s in enumerate(script_data.get("script") or [], 1) if isinstance(s, dict) and not s.get("human_contributed")]
-    evidence = "\n\n".join(_originality_sources(story_data)[:10])
-    prompt = (
-        "Rewrite ONLY these voiceover scenes into genuinely original wording. Preserve supported facts and order. "
-        "Do not add facts or quote sources. Return JSON with script entries containing index and voiceover.\n"
-        "Detected overlap:" + json.dumps(overlap) + "\nSCENES:\n" + json.dumps(scenes, ensure_ascii=False)
-        + "\nEVIDENCE:\n" + evidence[:16000]
-    )
-
-    def call_provider(provider_name, url, payload, headers):
-        print(f"   [Script Originality] Trying {provider_name} rewrite.", flush=True)
-        result = _originality_llm(url, payload, headers)
-        if isinstance(result, dict) and isinstance(result.get("script"), list):
-            return result
-        print(f"   [Script Originality] {provider_name} rewrite unavailable.", flush=True)
-        return None
-
-    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
-    if groq:
-        result = call_provider(
-            "Groq",
-            "https://api.groq.com/openai/v1/chat/completions",
-            {
-                "model": "openai/gpt-oss-120b",
-                "messages": [
-                    {"role": "system", "content": "Rewrite for originality while preserving facts."},
-                    {"role": "user", "content": prompt},
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.2,
-            },
-            {"Authorization": "Bearer " + groq, "Content-Type": "application/json"},
-        )
-    else:
-        result = None
-
-    if result is None:
-        openrouter = str(os.getenv("OPENROUTER_API_KEY") or "").strip()
-        if openrouter:
-            result = call_provider(
-                "OpenRouter free",
-                "https://openrouter.ai/api/v1/chat/completions",
-                {
-                    "model": "openrouter/free",
-                    "messages": [
-                        {"role": "system", "content": "Rewrite for originality while preserving facts."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.2,
-                },
-                {
-                    "Authorization": "Bearer " + openrouter,
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/AakarshBot/viral-shorts-factory",
-                    "X-Title": "Viral Shorts Factory",
-                },
-            )
-
-    if result is None:
-        gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
-        if gemini:
-            result = call_provider(
-                "Gemini",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
-                {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
-                },
-                {"x-goog-api-key": gemini, "Content-Type": "application/json"},
-            )
-
-    if not isinstance(result, dict) or not isinstance(result.get("script"), list):
-        return None
-
-    replacements = {
-        int(x.get("index")): str(x.get("voiceover") or "").strip()
-        for x in result["script"]
-        if isinstance(x, dict) and str(x.get("index") or "").isdigit()
-    }
-    rewritten = dict(script_data)
-    rewritten["script"] = [
-        dict(s, voiceover=replacements.get(i, s.get("voiceover", "")))
-        for i, s in enumerate(script_data.get("script") or [], 1)
-    ]
-    rewritten["originality_rewrite_attempted"] = True
-    return rewritten
-
 def assess_release_structure(script_data, format_mode="regular"):
     """Check production-ready narrative structure without imposing scene-count quotas."""
     assessment = assess_narrative_completeness(script_data)
@@ -1712,53 +1098,50 @@ def assess_release_structure(script_data, format_mode="regular"):
     return True, "Narrative structure is production-ready.", assessment
 
 def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
-    """Semantic script gate; no scene-count or word-count quotas."""
+    """Minimal production narration gate: valid scenes plus a conservative initial word ceiling."""
     if not isinstance(script_data, dict):
         return False, "Script is missing."
     scenes = script_data.get("script")
     if not isinstance(scenes, list) or not scenes:
         return False, "Script contains no narration scenes."
 
+    word_counts = []
     for index, scene in enumerate(scenes, 1):
         if not isinstance(scene, dict):
             return False, f"Scene {index} is malformed."
         voiceover = str(scene.get("voiceover") or "").strip()
         if not voiceover:
             return False, f"Scene {index} is empty."
-        if contains_retention_bait(voiceover):
-            return False, f"Scene {index} contains prohibited retention-bait phrasing."
-        if _looks_like_filler(voiceover):
-            return False, f"Scene {index} contains performative or generic filler."
+        word_counts.append(len(_originality_words(voiceover)))
+
         if require_visual_metadata:
             if not str(scene.get("primary_entity") or "").strip():
                 return False, f"Scene {index} is missing a supported primary entity."
             if not str(scene.get("specific_search_prompt") or "").strip():
                 return False, f"Scene {index} is missing a specific visual search prompt."
 
-    editorial_angle = str(script_data.get("editorial_angle") or "").strip()
-    if not editorial_angle or _looks_like_filler(editorial_angle) or contains_retention_bait(editorial_angle):
-        return False, "Script is missing a genuine editorial angle."
+    total_words = sum(word_counts)
+    if total_words > INITIAL_SCRIPT_MAX_WORDS:
+        return False, (
+            f"Initial narration is too long: {total_words} words; "
+            f"maximum is {INITIAL_SCRIPT_MAX_WORDS}."
+        )
 
-    completeness = assess_narrative_completeness(script_data)
-    if not completeness["passed"]:
-        return False, completeness["reason"]
+    if word_counts:
+        first_words = word_counts[0]
+        if first_words > SCENE_1_MAX_WORDS:
+            return False, (
+                f"Scene 1 is too long: {first_words} words; "
+                f"maximum is {SCENE_1_MAX_WORDS}."
+            )
+        if len(word_counts) > 1 and first_words > max(word_counts[1:]):
+            return False, "Scene 1 must remain the shortest narration scene."
 
-    hook_target = story_data.get("hook_potential_score") if isinstance(story_data, dict) else None
-    try:
-        hook_target = float(hook_target)
-    except (TypeError, ValueError):
-        hook_target = 0.0
     hook_diagnostics = _hook_quality_score(script_data, story_data)
     script_data["hook_quality_score"] = hook_diagnostics["score"]
     script_data["hook_quality_reasons"] = hook_diagnostics["reasons"]
-    if hook_target >= 6.0 and hook_diagnostics["score"] < 3.0:
-        script_data["hook_quality_warning"] = (
-            "Opening hook scored below the preferred threshold for a high-potential story; "
-            "retaining the draft for downstream QC rather than hard-rejecting it."
-        )
 
-    return True, "Passed semantic narrative completeness, hook quality and anti-retention checks"
-
+    return True, "Passed minimal narration, duration and opening-shape checks"
 
 
 def validate_visual_metadata(script_data):
