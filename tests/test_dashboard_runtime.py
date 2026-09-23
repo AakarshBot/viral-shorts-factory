@@ -1518,7 +1518,7 @@ def test_regular_script_release_structure_accepts_compact_semantic_story():
     }
     passed, reason, _ = assess_release_structure(two_scene, "regular")
     assert passed is False
-    assert "middle beat" in reason.lower()
+    assert "3 or 4 scenes" in reason.lower()
 
 
 def test_renderer_has_no_artificial_scene_audio_padding():
