@@ -258,6 +258,33 @@ def test_dashboard_discovery_can_request_full_sixty_topic_portfolio(monkeypatch)
     discovery._DASHBOARD_DISCOVERY_CACHE.clear()
 
 
+def test_sports_hard_gate_rejects_non_sports_headline_but_keeps_niche_sport(monkeypatch):
+    non_sports = _fresh_story(
+        "New smartphone launch expands battery life",
+        event_source_count=2,
+        event_article_count=2,
+        genre="sports",
+    )
+    niche_sport = _fresh_story(
+        "India badminton pair reaches surprise BWF final",
+        event_source_count=1,
+        event_article_count=1,
+        genre="sports",
+    )
+
+    monkeypatch.setattr(discovery.sr, "_source_page_pass", lambda item: True)
+    monkeypatch.setattr(discovery.sr, "_discovery_source_pass", lambda item: True)
+    assert discovery._hard_dashboard_pass(non_sports, "sports", "") is False
+    assert discovery._hard_dashboard_pass(niche_sport, "sports", "") is True
+
+
+def test_dashboard_ranked_topic_default_pool_is_sixty():
+    import inspect
+    from dashboard_runtime import discover_ranked_topics
+
+    assert inspect.signature(discover_ranked_topics).parameters["max_candidates"].default == 60
+
+
 def test_dashboard_discovery_short_cache_avoids_duplicate_provider_sweep(monkeypatch):
     discovery._DASHBOARD_DISCOVERY_CACHE.clear()
     calls = {"collect": 0}
