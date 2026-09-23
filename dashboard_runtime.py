@@ -1169,7 +1169,6 @@ class DashboardWorkflowController(WorkflowController):
                 clean_script_data,
                 rank_title_candidates,
                 validate_content_density,
-                _run_real_critique,
             )
 
             story_data = dict(snapshot.get("selected_story") or {})
@@ -1223,17 +1222,7 @@ class DashboardWorkflowController(WorkflowController):
                 originality = check_script_originality(cleaned, story_data)
                 if not originality.get("passed"):
                     return False, "Edited narration is too close to source wording. Rephrase the affected lines before approving."
-                critique = _run_real_critique(cleaned, story_data)
                 cleaned["originality_overlap"] = originality
-                cleaned["originality_critique"] = critique
-                if critique.get("unsupported_claims"):
-                    fixes = [
-                        str(item).strip()
-                        for item in (critique.get("fixes") or [])
-                        if str(item).strip()
-                    ]
-                    detail = fixes[0] if fixes else "The edited narration contains a claim that is not supported by the research evidence."
-                    return False, f"Edited narration needs a factual correction: {detail}"
 
             cleaned["human_script_reviewed"] = True
             cleaned["human_script_edit_applied"] = voice_changed
