@@ -177,55 +177,58 @@ def _merge_retained_topics(
     *,
     max_candidates: int,
 ) -> list[dict[str, Any]]:
-    """Revalidate unpublished topics through the current discovery gate."""
-    retained = [dict(item) for item in (retained_candidates or []) if isinstance(item, dict) and str(item.get("title") or "").strip()]
-    if not retained:
-        return list(fresh_candidates or [])[:max_candidates]
-    from story_ranker import _cricket_relevance_pass, _requested_topic_pass, rank_discovery_candidates
-    category = str(web_config.get("category") or "").strip()
-    format_mode = str(web_config.get("format_mode") or "regular").strip()
-    language = str(web_config.get("language") or "english").strip()
-    requested_topic = str(web_config.get("requested_topic") or "").strip()
-    genre_key = category or ("sports_stories_of_day" if web_config.get("cricket_pipeline") else "national_global_affairs")
-    eligible = [
-        item for item in retained
-        if _cricket_relevance_pass(item, genre_key)
-        and _requested_topic_pass(item, requested_topic)
-    ]
-    if not eligible:
-        return list(fresh_candidates or [])[:max_candidates]
-    validated = rank_discovery_candidates(
-        eligible,
-        conn=conn,
-        target_category=category or genre_key,
-        target_format=format_mode,
-        target_language=language,
-        social_titles=[],
-        ai_cricket=(genre_key == "sports_stories_of_day"),
-        max_candidates=len(eligible),
-    )
-    validated_keys = {
-        str(item.get("story_key") or item.get("story_url") or item.get("url") or item.get("title") or "").strip().casefold()
-        for item in validated
+    """Keep every unpublished selection visible; only completed uploads suppress it."""
+    from story_ranker import _load_uploaded_story_identities, _uploaded_story_match
+
+    limit = max(1, int(max_candidates or 1))
+    uploaded = _load_uploaded_story_identities(conn)
+
+    retained = [
+        dict(item)
+        for item in (retained_candidates or [])
         if isinstance(item, dict)
-    }
+        and str(item.get("title") or "").strip()
+        and not _uploaded_story_match(item, uploaded)
+    ]
+    fresh = [
+        dict(item)
+        for item in (fresh_candidates or [])
+        if isinstance(item, dict)
+        and str(item.get("title") or "").strip()
+        and not _uploaded_story_match(item, uploaded)
+    ]
+
     output = []
     seen = set()
-    for item in [*validated, *(fresh_candidates or [])]:
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("story_key") or item.get("story_url") or item.get("url") or item.get("title") or "").strip().casefold()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        item = dict(item)
-        if key in validated_keys:
-            item["retained_from_previous_run"] = True
-        output.append(item)
-        if len(output) >= max_candidates:
-            break
-    return output
 
+    def identity(item):
+        return str(
+            item.get("event_identity_key")
+            or item.get("event_id")
+            or item.get("story_key")
+            or item.get("story_url")
+            or item.get("url")
+            or item.get("title")
+            or ""
+        ).strip().casefold()
+
+    # A user-selected but unpublished headline has priority over a newly
+    # rediscovered representation of the same event. This prevents a click from
+    # making the headline disappear on the next dashboard refresh.
+    for source, is_retained in ((retained, True), (fresh, False)):
+        for item in source:
+            key = identity(item)
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            if is_retained:
+                item["retained_from_previous_run"] = True
+            output.append(item)
+            if len(output) >= limit:
+                return output
+
+    return output[:limit]
 
 def discover_ai_topics(
     bot,
@@ -238,7 +241,7 @@ def discover_ai_topics(
     from dashboard_topic_discovery_runtime import discover_dashboard_topics
     from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
 
-    max_candidates = max(1, min(30, int(max_candidates or 30)))
+    max_candidates = max(1, min(60, int(max_candidates or 60)))
     requested_topic = str(web_config.get("requested_topic", "") or "").strip()
     configured_category = str(web_config.get("category", "") or "").strip().lower()
     language = str(web_config.get("language", "english"))
@@ -316,7 +319,7 @@ def discover_ranked_topics(
     from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
     from workflow_runtime import CRICKET_CATEGORIES
 
-    max_candidates = max(1, min(28, int(max_candidates or 28)))
+    max_candidates = max(1, min(60, int(max_candidates or 60)))
     fmt = str(web_config.get("format_mode", "regular"))
     category = str(web_config.get("category", ""))
     language = str(web_config.get("language", "english"))
@@ -367,7 +370,7 @@ def discover_ranked_topics(
             conn=conn,
             scope=cricket_name,
             requested_topic=requested_topic,
-            max_candidates=30,
+            max_candidates=60,
             retained_candidates=retained_candidates,
         )
     else:
