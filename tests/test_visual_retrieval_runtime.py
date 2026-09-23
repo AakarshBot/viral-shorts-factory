@@ -1821,13 +1821,19 @@ def test_new_manual_search_does_not_apply_monetization_filter(monkeypatch):
 
 
 
-def test_manual_pool_searches_every_available_provider_before_qa(monkeypatch):
+def test_manual_pool_searches_only_first_two_preferred_providers_before_qa(monkeypatch):
     calls = []
 
     def make_provider(name):
         def fetch(*args):
             calls.append(name)
-            candidate = _licensed_candidate(_jpeg_bytes((1200, 1600), color=(40 + len(calls) * 20, 70, 100)), "cc-by-nc")
+            candidate = _licensed_candidate(
+                _jpeg_bytes(
+                    (1200, 1600),
+                    color=(40 + len(calls) * 20, 70, 100),
+                ),
+                "cc-by-nc",
+            )
             candidate["source_image_url"] = f"https://{name}.example/image-{len(calls)}.jpg"
             candidate["search_title"] = f"{name} result"
             return [candidate]
@@ -1846,18 +1852,18 @@ def test_manual_pool_searches_every_available_provider_before_qa(monkeypatch):
         "_source_plan",
         lambda *args: [
             ("Commons", make_provider("Commons")),
-            ("Wikipedia", make_provider("Wikipedia")),
+            ("DDG", make_provider("DDG")),
             ("Openverse", make_provider("Openverse")),
             ("Pexels", make_provider("Pexels")),
             ("Unsplash", make_provider("Unsplash")),
-            ("Pixabay", make_provider("Pixabay")),
-            ("DDG", make_provider("DDG")),
         ],
     )
     monkeypatch.setattr(
         visual_qa,
         "strict_gemini_check_batch",
-        lambda images, *args, **kwargs: {index: True for index in range(len(images))},
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
     )
 
     result = retrieval.collect_manual_visual_pool(
@@ -1866,22 +1872,31 @@ def test_manual_pool_searches_every_available_provider_before_qa(monkeypatch):
         [{"primary_entity": "Rishabh Pant", "voiceover": "Rishabh Pant appears."}],
         ["Rishabh Pant"],
         "Test story",
-        pool_target=7,
-        pool_max=7,
+        pool_target=2,
+        pool_max=2,
         allow_auto_backfill=False,
     )
 
-    assert calls == [
-        "Commons",
-        "Wikipedia",
-        "Openverse",
-        "Pexels",
-        "Unsplash",
-        "Pixabay",
-        "DDG",
-    ]
-    assert len(result["assets"]) == 7
-    assert result["rejection_counts"]["monetization"] == 0
+    assert calls == ["Commons", "DDG"]
+    assert len(result["assets"]) == 2
+def test_gemini_transient_503_has_no_recursive_retry():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("visual_qa_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    start = source.index("def strict_gemini_check_batch(")
+    end = source.index("\ndef install_visual_qa_bridge", start)
+    block = source[start:end]
+
+    assert "_allow_transient_retry" not in block
+    assert "retrying once as" not in block
+    assert "strict_gemini_check_batch(" not in block.split(
+        "except Exception as exc:", 1
+    )[1].split(
+        "install_visual_qa_bridge", 1
+    )[0]
+    assert "transient_unavailable" in block
 
 
 def test_manual_source_plan_can_include_ddg_without_global_unlicensed_flag(monkeypatch):
