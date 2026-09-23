@@ -57,8 +57,6 @@ def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
 
 def test_cricket_desk_fans_out_google_queries_only_after_sparse_first_wave(monkeypatch):
     calls = []
-    empty = []
-
     def fake_google(query, *args, **kwargs):
         calls.append(query)
         return []
@@ -111,6 +109,7 @@ def test_cricket_desk_primary_google_burst_is_bounded(monkeypatch):
 
     monkeypatch.setattr(desk.sr, "_google_news_search_items", fake_google)
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "cluster_news_events", lambda rows: [dict(row) for row in rows])
     monkeypatch.setattr(desk, "_direct_listing_source", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
