@@ -2541,15 +2541,20 @@ def run_robot(web_config=None):
             return
 
         try:
+            from final_qc_runtime import validate_final_video
+            validate_final_video(video_path)
             from moviepy import VideoFileClip
             with VideoFileClip(video_path) as vfc:
-                actual_dur = vfc.duration
+                actual_dur = float(vfc.duration or 0.0)
             print(
                 f"   [+] Validation Passed: Output generated successfully "
                 f"({actual_dur:.1f}s, {video_size / 1_000_000:.1f}MB)."
             )
         except Exception as exc:
-            print(f"   [!] Could not validate video duration: {exc}")
+            reason = f"Post-render validation failed: {type(exc).__name__}: {exc}"
+            _mark_run_status("FAILED", reason)
+            print(f"   [!] {reason}", flush=True)
+            raise RuntimeError(reason) from exc
 
         post_render_hook = web_config.get("_manual_post_render_hook") if isinstance(web_config, dict) else None
         if callable(post_render_hook):
