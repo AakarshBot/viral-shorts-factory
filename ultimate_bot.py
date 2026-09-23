@@ -1099,7 +1099,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Do not invent facts, quotes, motives, numbers, or outcomes.\n\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         + word_contract
-        + "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
+        + "- Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14. It must be a factual headline and the most compact scene.\n"
         "- Scene 1 is the only headline-style beat. Do not turn later scenes into separate headlines or title rewrites.\n"
         "- Later scenes must add new, story-specific information: verified evidence, a key number, an attribution, necessary context, a mechanism, a timeline point, or a consequence.\n"
         "- Normally use four scenes for a regular story so the explanation has room to breathe; combine beats only when they are genuinely inseparable.\n"
