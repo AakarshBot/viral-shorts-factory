@@ -99,6 +99,74 @@ def test_exact_source_sentence_is_rejected():
     assert result["failures"][0]["scene"] == 1
 
 
+def test_rephrased_source_sentence_still_passes_near_verbatim_guard():
+    source = {
+        "research_evidence_text": (
+            "Former CSK player made a major claim about the investigation."
+        )
+    }
+    script = _script([
+        "A former CSK player has made a new allegation tied to the investigation.",
+        "The claim is still awaiting public confirmation.",
+    ])
+
+    result = check_script_originality(script, source)
+
+    assert result["passed"] is True
+
+
+def test_unsupported_numeric_metadata_is_rejected():
+    from quality_runtime import validate_deterministic_script_quality
+
+    script = {
+        "creator_insight": "The documented change includes 99 affected players in this update.",
+        "editorial_angle": "Explain the confirmed change and immediate consequence.",
+        "seo_description": "This explains the confirmed event and the evidence behind it.",
+        "titles": ["India squad change", "India confirms the change", "What changes now"],
+        "recommended_title_index": 1,
+        "script": [
+            {
+                "voiceover": "India confirmed the squad change.",
+                "narrative_role": "hook",
+                "primary_entity": "India",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India squad change",
+                "sport_or_topic_category": "Cricket",
+            },
+            {
+                "voiceover": "Officials explained the decision after review.",
+                "narrative_role": "development",
+                "primary_entity": "India",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India squad review",
+                "sport_or_topic_category": "Cricket",
+            },
+            {
+                "voiceover": "The change affects preparation for the next assignment.",
+                "narrative_role": "consequence",
+                "primary_entity": "India",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India squad consequence",
+                "sport_or_topic_category": "Cricket",
+            },
+        ],
+    }
+    ok, reason = validate_deterministic_script_quality(
+        script,
+        "regular",
+        {
+            "title": "India squad change",
+            "research_evidence_text": (
+                "India confirmed the squad change. "
+                "Officials explained the decision after review."
+            ),
+        },
+    )
+    assert ok is False
+    assert "Creator Insight" in reason
+    assert "99" in reason
+
+
 def test_rephrased_source_sentence_is_allowed():
     source = {
         "research_evidence_text": (
