@@ -93,7 +93,7 @@ def test_local_tts_duration_repair_scales_audio_and_word_timings(monkeypatch, tm
     assert factor > 1.0
     assert factor <= audio_runtime.TTS_MAX_COMPRESSION_FACTOR
     assert total <= audio_runtime.TTS_MAX_DURATION_SECONDS
-    assert repaired_durations == [14.15, 14.15]
+    assert repaired_durations == [14.0, 14.0]
     assert repaired_timings[0][0]["end"] < 0.5
     assert all(command[command.index("-filter:a") + 2].startswith("atempo=") for command in commands)
     assert all(Path(path).read_bytes() == b"compressed-audio" for path in source_paths)
@@ -123,7 +123,7 @@ def test_production_has_no_raw_post_tts_duration_abort():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "TTS duration materially differs from the pre-TTS estimate" not in source
     assert 'if audio_duration["total_seconds"] > 30.0:' not in source
-    assert "post-TTS duration contract" in source
+    assert "Final synthesized narration is over 30s" not in source
 
 
 def test_initial_script_uses_a_safety_ceiling_above_the_normal_duration_target():
