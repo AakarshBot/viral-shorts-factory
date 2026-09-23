@@ -138,6 +138,7 @@ def migrate_vault(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vault_genre ON vault(genre)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_vault_run_id ON vault(run_id) WHERE run_id IS NOT NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vault_status ON vault(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vault_discovery_event_key ON vault(discovery_event_key)")
     conn.commit()
 
 
