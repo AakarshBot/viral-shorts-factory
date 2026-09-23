@@ -1982,6 +1982,53 @@ def test_manual_pool_exposes_candidates_when_gemini_hits_quota(monkeypatch):
     assert len(result["assets"]) == 3
     assert all(item["status"] == "manual-review-unverified" for item in result["assets"])
 
+def test_manual_pool_human_review_mode_does_not_call_gemini(monkeypatch):
+    def provider(*args):
+        return [
+            {
+                "bytes": _jpeg_bytes((1200, 1600), (40 + index * 10, 70, 100)),
+                "source_image_url": f"https://manual.example/image-{index}.jpg",
+                "search_title": "IPL logo",
+                "provenance": {"provider": "Commons", "license": "cc0"},
+            }
+            for index in range(6)
+        ]
+
+    class FakeBot:
+        ASSETS_DIR = "/tmp"
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return provider(*args)
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("Gemini must not block an explicit manual-QC pool build.")
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args, **kwargs: [("Commons", provider), ("DDG", provider)],
+    )
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", should_not_run)
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "IPL", "voiceover": "IPL logo"}],
+        ["IPL logo"],
+        "IPL logo",
+        pool_target=3,
+        pool_max=3,
+        allow_auto_backfill=False,
+        verify_with_ai=False,
+    )
+
+    assert len(result["assets"]) == 3
+    assert all(item["status"] == "manual-review-unverified" for item in result["assets"])
+    assert result["query_stats"][0]["qa_requests"] == 0
+
+
 def test_gemini_transient_503_has_no_recursive_retry():
     from pathlib import Path
 
