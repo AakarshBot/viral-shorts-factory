@@ -474,7 +474,7 @@ def _collect(scope="India / Asia"):
                 query,
                 "sports_stories_of_day",
                 GOOGLE_RESULT_LIMIT,
-                GOOGLE_REQUEST_TIMEOUT,
+                timeout=GOOGLE_REQUEST_TIMEOUT,
             )
             primary_jobs[future] = "Google News"
 
@@ -514,7 +514,7 @@ def _collect(scope="India / Asia"):
                 sr._google_trends_items,
                 geo,
                 20,
-                TREND_REQUEST_TIMEOUT,
+                timeout=TREND_REQUEST_TIMEOUT,
             )
             secondary_jobs[future] = f"Google Trends {geo}"
 
