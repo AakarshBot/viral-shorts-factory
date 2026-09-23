@@ -101,6 +101,23 @@ def _normalise_originality_sentence(text):
     return re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold()).strip()
 
 
+def _near_verbatim_source_sentence(candidate, source):
+    """Detect high-overlap copied phrasing while leaving normal paraphrasing alone."""
+    candidate_words = _originality_words(candidate)
+    source_words = _originality_words(source)
+    if len(candidate_words) < 8 or len(source_words) < 8:
+        return False
+    candidate_norm = _normalise_originality_sentence(candidate)
+    source_norm = _normalise_originality_sentence(source)
+    if not candidate_norm or not source_norm:
+        return False
+    sequence = SequenceMatcher(None, candidate_norm, source_norm).ratio()
+    candidate_set = set(candidate_words)
+    source_set = set(source_words)
+    coverage = len(candidate_set & source_set) / max(1, len(candidate_set))
+    return sequence >= 0.92 or (sequence >= 0.86 and coverage >= 0.88)
+
+
 def _source_sentences(story_data):
     sentences = set()
     for source in _originality_sources(story_data):
@@ -113,7 +130,7 @@ def _source_sentences(story_data):
 
 
 def check_script_originality(script_data, story_data):
-    """Reject only narration sentences copied verbatim from the researched sources."""
+    """Reject verbatim and near-verbatim source copying while allowing genuine paraphrase."""
     source_sentences = _source_sentences(story_data)
     failures = []
     scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
@@ -123,10 +140,23 @@ def check_script_originality(script_data, story_data):
         voiceover = str(scene.get("voiceover") or "")
         for sentence in re.split(r"(?<=[.!?])\s+|\n+", voiceover):
             normalised = _normalise_originality_sentence(sentence)
-            if normalised and normalised in source_sentences:
+            if not normalised:
+                continue
+            if normalised in source_sentences:
                 failures.append({
                     "scene": scene_index,
                     "copied_sentence": sentence.strip(),
+                    "match_type": "verbatim",
+                })
+                break
+            if any(
+                _near_verbatim_source_sentence(normalised, source)
+                for source in source_sentences
+            ):
+                failures.append({
+                    "scene": scene_index,
+                    "copied_sentence": sentence.strip(),
+                    "match_type": "near_verbatim",
                 })
                 break
     return {
@@ -246,6 +276,8 @@ SCRIPT_OUTPUT_JSON_SCHEMA = {
         },
         "titles": {
             "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
             "items": {"type": "string"}
         },
         "recommended_title_index": {
@@ -260,6 +292,8 @@ SCRIPT_OUTPUT_JSON_SCHEMA = {
         },
         "script": {
             "type": "array",
+            "minItems": 3,
+            "maxItems": 6,
             "items": {
                 "type": "object",
                 "properties": {
