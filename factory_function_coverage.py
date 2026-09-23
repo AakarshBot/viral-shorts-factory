@@ -56,6 +56,7 @@ SURFACE_MAP: dict[str, str] = {
     "_caption_y_position": "Internal",
     "_normalize_audio_loudness": "Internal",
     "_groq_script_output_schema": "Internal",
+    "_normalise_groq_script_result": "Internal",
     "compile_video": "Live Factory",
     "upload_to_youtube": "Live Factory",
     "_report_youtube_upload_visibility": "Internal",
