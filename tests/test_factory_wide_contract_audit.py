@@ -34,20 +34,20 @@ def test_multilingual_script_grounding_and_metadata():
             "title": "भारत ने नई ऊर्जा नीति की घोषणा की",
             "summary": "भारत सरकार ने नई ऊर्जा नीति की घोषणा की है। नीति में सौर ऊर्जा, भंडारण और ग्रिड निवेश के लिए नए लक्ष्य शामिल हैं। राज्यों के लिए भी नई योजनाएं जारी की गई हैं।",
             "script": [
-                {"voiceover": "भारत सरकार ने नई ऊर्जा नीति की घोषणा की है जिसमें सौर ऊर्जा के लिए नए लक्ष्य शामिल हैं।", "narrative_role": "hook", "primary_entity": "भारत", "specific_search_prompt": "भारत नई ऊर्जा नीति"},
-                {"voiceover": "नई नीति में ऊर्जा भंडारण और ग्रिड निवेश के लिए अतिरिक्त योजनाओं का उल्लेख किया गया है।", "narrative_role": "development", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा भंडारण ग्रिड"},
-                {"voiceover": "राज्यों के लिए भी योजना के तहत नई कार्यान्वयन व्यवस्था और लक्ष्य बताए गए हैं।", "narrative_role": "context", "primary_entity": "भारत", "specific_search_prompt": "भारत राज्य ऊर्जा योजना"},
-                {"voiceover": "इसका व्यावहारिक असर ग्रिड क्षमता, भंडारण की तैयारी और राज्य स्तर की ऊर्जा योजनाओं पर पड़ सकता है।", "narrative_role": "consequence", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा नीति प्रभाव"},
+                {"voiceover": "भारत सरकार ने नई ऊर्जा नीति में सौर ऊर्जा के नए लक्ष्य बताए।", "narrative_role": "hook", "primary_entity": "भारत", "specific_search_prompt": "भारत नई ऊर्जा नीति"},
+                {"voiceover": "नीति में ऊर्जा भंडारण और ग्रिड निवेश के लिए अतिरिक्त योजनाएं हैं।", "narrative_role": "development", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा भंडारण ग्रिड"},
+                {"voiceover": "राज्यों के लिए भी नई कार्यान्वयन योजनाएं और लक्ष्य तय किए गए।", "narrative_role": "context", "primary_entity": "भारत", "specific_search_prompt": "भारत राज्य ऊर्जा योजना"},
+                {"voiceover": "इससे ग्रिड क्षमता, भंडारण तैयारी और राज्य ऊर्जा योजनाओं पर असर पड़ेगा।", "narrative_role": "consequence", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा नीति प्रभाव"},
             ],
         },
         "telugu": {
             "title": "భారతదేశం కొత్త ఇంధన విధానాన్ని ప్రకటించింది",
             "summary": "భారత ప్రభుత్వం కొత్త ఇంధన విధానాన్ని ప్రకటించింది. ఈ విధానంలో సౌర విద్యుత్, నిల్వ వ్యవస్థలు మరియు గ్రిడ్ పెట్టుబడులకు కొత్త లక్ష్యాలు ఉన్నాయి. రాష్ట్రాల కోసం కూడా కొత్త అమలు ప్రణాళికలను విడుదల చేశారు.",
             "script": [
-                {"voiceover": "భారత ప్రభుత్వం కొత్త ఇంధన విధానాన్ని ప్రకటించింది, ఇందులో సౌర విద్యుత్‌కు కొత్త లక్ష్యాలు ఉన్నాయి.", "narrative_role": "hook", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం"},
+                {"voiceover": "భారత ప్రభుత్వం కొత్త ఇంధన విధానంలో సౌర విద్యుత్ లక్ష్యాలను ప్రకటించింది.", "narrative_role": "hook", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం"},
                 {"voiceover": "కొత్త విధానంలో నిల్వ వ్యవస్థలు మరియు గ్రిడ్ పెట్టుబడులకు అదనపు ప్రణాళికలు ఉన్నాయి.", "narrative_role": "development", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం నిల్వ గ్రిడ్ పెట్టుబడులు"},
                 {"voiceover": "రాష్ట్రాల కోసం కూడా అమలు ప్రణాళికలు మరియు కొత్త లక్ష్యాలను ప్రభుత్వం వివరించింది.", "narrative_role": "context", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం రాష్ట్ర ఇంధన ప్రణాళిక"},
-                {"voiceover": "ఈ విధానం రాష్ట్రాల అమలు, గ్రిడ్ సామర్థ్యం మరియు నిల్వ సిద్ధతపై కూడా ప్రభావం చూపవచ్చు.", "narrative_role": "consequence", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం ఇంధన విధానం ప్రభావం"},
+                {"voiceover": "ఈ విధానం గ్రిడ్ సామర్థ్యం, నిల్వ సిద్ధత మరియు రాష్ట్ర ఇంధన ప్రణాళికలపై ప్రభావం చూపవచ్చు.", "narrative_role": "consequence", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం ఇంధన విధానం ప్రభావం"},
             ],
         },
     }
