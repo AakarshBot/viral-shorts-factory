@@ -30,7 +30,7 @@ def _test_imports():
         "visual_qa_runtime", "visual_strategy_runtime", "visual_semantic_guard_runtime",
         "visual_query_entities_runtime", "visual_content_runtime", "visual_retrieval_runtime",
         "visual_provider_boundary_runtime", "provider_runtime", "quality_runtime",
-        "runtime_bindings", "workflow_runtime", "subtitle_runtime", "youtube_comment_runtime",
+        "runtime_bindings", "workflow_runtime", "sports_topic_desk_runtime", "subtitle_runtime", "youtube_comment_runtime",
     ]
     for name in modules:
         __import__(name)
