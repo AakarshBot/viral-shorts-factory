@@ -1084,6 +1084,8 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
     hook_diagnostics = _hook_quality_score(script_data, story_data)
     script_data["hook_quality_score"] = hook_diagnostics["score"]
     script_data["hook_quality_reasons"] = hook_diagnostics["reasons"]
+    if hook_diagnostics["score"] < 5.0:
+        script_data["hook_quality_warning"] = "Opening is weak; human review should consider a sharper factual hook."
 
     return True, "Passed minimal narration, duration and opening-shape checks"
 
