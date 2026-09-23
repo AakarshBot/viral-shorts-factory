@@ -517,7 +517,7 @@ def select_manual_visual_candidate(
     scene: dict,
     used_hashes: set[str] | None = None,
 ):
-    """Choose a scene-suitable unused pool image without another AI call."""
+    """Choose a scene-suitable unused manual-pool image without another AI call."""
     used_hashes = used_hashes or set()
     candidates = [
         asset
@@ -728,11 +728,10 @@ def _manual_query_visual_context(query: str, scenes: list[dict]) -> tuple[str, s
 
 
 def _manual_query_target(query_index: int) -> int:
-    """Return the hard per-query acceptance cap.
+    """Return the hard per-query human-review candidate cap.
 
     There is deliberately no minimum. A query may return zero useful images,
-    while a productive query can contribute up to ten AI-verified,
-    monetization-retainable images.
+    while a productive query can contribute up to ten candidates for manual QC.
     """
     _ = query_index
     return 10
