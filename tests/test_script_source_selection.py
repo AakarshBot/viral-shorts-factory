@@ -88,7 +88,7 @@ def test_writer_contract_has_initial_duration_limits():
     import ultimate_bot
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling." in source
+    assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words, a factual headline, and the most compact scene." in source
     assert "Spoken duration is authoritative" in source
     assert "Use as many scenes as the story genuinely needs" not in source

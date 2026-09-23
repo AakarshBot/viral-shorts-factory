@@ -73,5 +73,33 @@ jobs:
           print(f"Offline diagnostics passed: {report['passed']}/{report['total']}")
           PY
 
+      - name: Validate pytest test-module uniqueness
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          patterns = ("test_*.py", "*_test.py")
+          files = []
+          for pattern in patterns:
+              files.extend(
+                  path for path in Path(".").rglob(pattern)
+                  if not any(part in {".git", "__pycache__", ".venv", "venv"} for part in path.parts)
+              )
+
+          by_name = {}
+          for path in sorted(set(files)):
+              by_name.setdefault(path.name, []).append(path)
+
+          duplicates = {name: paths for name, paths in by_name.items() if len(paths) > 1}
+          if duplicates:
+              for name, paths in sorted(duplicates.items()):
+                  print(f"Duplicate pytest module basename: {name}")
+                  for path in paths:
+                      print(f"  - {path}")
+              raise SystemExit(1)
+
+          print(f"Pytest test-module uniqueness passed: {len(set(files))} test files checked.")
+          PY
+
       - name: Run repository regression tests
         run: python -m pytest -q --durations=20 --durations-min=1

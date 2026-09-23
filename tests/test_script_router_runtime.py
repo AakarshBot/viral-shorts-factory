@@ -821,9 +821,9 @@ def test_fallback_prompt_uses_the_current_duration_contract():
         "regular",
         {},
     )
-    assert "50–60 spoken words" in prompt
+    assert "60–72 spoken words" in prompt
     assert "90-word safety ceiling" in prompt
-    assert "MUST contain 3 or 4 scenes" in prompt
+    assert "A regular Short normally uses 4 scenes" in prompt
     assert "55–65 spoken words" not in prompt
     assert "65–75 spoken words" not in prompt
 
@@ -904,7 +904,7 @@ def test_fallback_prompt_supports_top5_scene_contract():
     )
 
     assert "MUST contain 6 scenes" in prompt
-    assert "65–75 spoken words" in prompt
+    assert "50–60 spoken words in Top-5 mode" in prompt
     assert "3 or 4 scenes" not in prompt
 
 

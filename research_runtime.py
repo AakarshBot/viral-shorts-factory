@@ -273,7 +273,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
         "STORY SHAPE: Scene 1 states the concrete event/person immediately. Scene 2 adds the most important new evidence or development. "
         "Scene 3 adds useful context, explanation, timeline, comparison, or a second factual development when supported. "
-        "The final scene closes with the immediate consequence or most useful factual takeaway. Curiosity must come from a real supported fact.\n"
+        "The final scene closes with the immediate consequence or most useful factual takeaway. Curiosity must come from a real supported fact. The finished narration should feel like one explained story, not a stack of headlines.\n"
         f"EDITORIAL ANGLE: {choose_editorial_angle(story_data or {}, format_mode)['instruction']}\n"
         "CREATOR INSIGHT: Give one concise evidence-grounded synthesis of why the event matters; do not invent facts or predictions.\n"
         f"Language: {language_instruction}"
