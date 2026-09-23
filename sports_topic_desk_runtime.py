@@ -28,6 +28,7 @@ CORE_DISCOVERY_TIMEOUT = 8.0
 GOOGLE_REQUEST_TIMEOUT = 5.0
 SOURCE_TIMEOUT = 5.0
 SECONDARY_REQUEST_TIMEOUT = 2.5
+GOOGLE_FALLBACK_TIMEOUT = 6.0
 GDELT_REQUEST_TIMEOUT = 4.0
 
 PER_BUCKET = 20
@@ -1009,13 +1010,20 @@ def _collect(scope="India / Asia"):
             {},
         ))
 
-    rows, source_counts, failures = _run_jobs(primary_jobs, CORE_DISCOVERY_TIMEOUT)
+    # Run factual providers and secondary signals in the same wall-clock pass.
+    # Signals enrich the result but never decide whether factual discovery succeeded.
+    first_wave_jobs = [*primary_jobs, *secondary_jobs]
+    rows, source_counts, failures = _run_jobs(first_wave_jobs, CORE_DISCOVERY_TIMEOUT)
 
     def _unique_core_event_count(values):
         factual = [
             dict(item)
             for item in values
-            if isinstance(item, dict) and not item.get("social_post")
+            if (
+                isinstance(item, dict)
+                and not item.get("social_post")
+                and _clean(item.get("collection_source")).casefold() != "google_trends"
+            )
         ]
         if not factual:
             return 0
@@ -1049,19 +1057,11 @@ def _collect(scope="India / Asia"):
             ))
         fallback_rows, fallback_counts, fallback_failures = _run_jobs(
             secondary_google_jobs,
-            CORE_DISCOVERY_TIMEOUT,
+            GOOGLE_FALLBACK_TIMEOUT,
         )
         rows.extend(fallback_rows)
         source_counts.update(fallback_counts)
         failures.extend(fallback_failures)
-
-    signal_rows, signal_counts, signal_failures = _run_jobs(
-        secondary_jobs,
-        CORE_DISCOVERY_TIMEOUT,
-    )
-    rows.extend(signal_rows)
-    source_counts.update(signal_counts)
-    failures.extend(signal_failures)
 
     compact_counts = ", ".join(
         f"{label}={count}" for label, count in sorted(source_counts.items())
