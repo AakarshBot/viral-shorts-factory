@@ -228,10 +228,10 @@ def install_script_pipeline(bot):
                 print(f"   [Script Pipeline] Provider: {provider_name}.", flush=True)
                 candidate = provider_call()
             except Exception as exc:
-                candidate = None
                 reason = f"{provider_name} failed: {type(exc).__name__}: {exc}"
                 attempt_reasons.append(reason)
                 print(f"   [Script Pipeline] {reason}", flush=True)
+                continue
             if candidate is None:
                 reason = f"{provider_name} returned no script candidate."
                 attempt_reasons.append(reason)
