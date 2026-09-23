@@ -30,7 +30,8 @@ def test_india_asia_query_lanes_cover_multiple_cricket_editorial_angles():
     assert "india pakistan" in joined
     assert "india women" in joined
     assert "ranji" in joined
-    assert "asian games cricket india" in joined
+    assert "japan" in joined
+    assert "umpire" in joined
 
 
 def test_hard_dashboard_gate_is_not_a_production_quality_gate(monkeypatch):
