@@ -95,7 +95,7 @@ def test_router_rejects_overlong_provider_output_before_acceptance():
     script["script"][1]["voiceover"] = " ".join(["word"] * 60)
     result, reason = _validate_script_result(script, {"title": "India squad change"}, "regular")
     assert result is None
-    assert "maximum is 65" in reason
+    assert "maximum is 60" in reason
 
 
 def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
