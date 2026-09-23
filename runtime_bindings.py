@@ -19,7 +19,9 @@ def _install_visual_cache_safety():
         original_save = getattr(visual_runtime, "save_to_cache", None)
         original_get = getattr(visual_runtime, "get_cached_asset", None)
         if not original_gate or not original_save or not original_get:
-            return False
+            raise RuntimeError(
+                "Visual cache safety guard cannot install because the canonical visual cache API is incomplete."
+            )
 
         def strict_gate_with_cache_state(*args, **kwargs):
             result = original_gate(*args, **kwargs)
