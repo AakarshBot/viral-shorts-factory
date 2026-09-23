@@ -6,6 +6,10 @@ garbage, score the survivors, and return a diverse portfolio.
 """
 from __future__ import annotations
 
+import copy
+import threading
+import time
+
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -15,6 +19,13 @@ import story_ranker as sr
 
 
 DASHBOARD_DISCOVERY_VERSION = "dashboard-discovery-v2-2026-09"
+
+# This is intentionally a very short anti-duplication cache, not a news freshness
+# cache. Streamlit reruns can otherwise launch the entire multi-provider discovery
+# desk again before the user has even changed their selection.
+DASHBOARD_DISCOVERY_CACHE_TTL_SECONDS = 20.0
+_DASHBOARD_DISCOVERY_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+_DASHBOARD_DISCOVERY_CACHE_LOCK = threading.Lock()
 
 GOOGLE_QUERY_LIMIT = 10
 GDELT_QUERY_LIMIT = 2
@@ -446,6 +457,31 @@ def _rank_dashboard_events(
     return selected
 
 
+def _dashboard_discovery_cache_key(
+    genre_key: str,
+    requested_topic: str,
+    custom_rss_url: str,
+    cricket_scope: str,
+    target_category: str,
+    target_format: str,
+    target_language: str,
+    ai_cricket: bool,
+    max_candidates: int,
+) -> tuple:
+    """Build a stable key for the short-lived rerun de-duplication cache."""
+    return (
+        str(genre_key or "").strip().casefold(),
+        str(requested_topic or "").strip().casefold(),
+        str(custom_rss_url or "").strip(),
+        str(cricket_scope or "").strip().casefold(),
+        str(target_category or "").strip().casefold(),
+        str(target_format or "").strip().casefold(),
+        str(target_language or "").strip().casefold(),
+        bool(ai_cricket),
+        int(max_candidates),
+    )
+
+
 def discover_dashboard_topics(
     bot,
     genre_key: str,
@@ -462,6 +498,33 @@ def discover_dashboard_topics(
     max_candidates: int = 28,
 ) -> list[dict]:
     """Collect and rank the dashboard portfolio without production gates."""
+    max_candidates = max(1, min(28, int(max_candidates or 28)))
+    cache_key = _dashboard_discovery_cache_key(
+        genre_key,
+        requested_topic,
+        custom_rss_url,
+        cricket_scope,
+        target_category,
+        target_format,
+        target_language,
+        ai_cricket,
+        max_candidates,
+    )
+    now = time.monotonic()
+
+    with _DASHBOARD_DISCOVERY_CACHE_LOCK:
+        cached = _DASHBOARD_DISCOVERY_CACHE.get(cache_key)
+        if cached is not None:
+            cached_at, cached_topics = cached
+            if now - cached_at <= DASHBOARD_DISCOVERY_CACHE_TTL_SECONDS:
+                print(
+                    "   [Dashboard Discovery v2] cache hit; reusing the "
+                    "just-built topic portfolio for this Streamlit rerun.",
+                    flush=True,
+                )
+                return copy.deepcopy(cached_topics)
+            _DASHBOARD_DISCOVERY_CACHE.pop(cache_key, None)
+
     raw, social_titles = _collect_articles(
         bot,
         genre_key,
@@ -503,7 +566,21 @@ def discover_dashboard_topics(
         f"   [Dashboard Discovery v2] final dashboard topics={len(selected)}",
         flush=True,
     )
-    return selected
+
+    cached_selected = copy.deepcopy(selected)
+    with _DASHBOARD_DISCOVERY_CACHE_LOCK:
+        now = time.monotonic()
+        # Keep this process-local cache tiny and disposable.
+        expired = [
+            key
+            for key, (cached_at, _topics) in _DASHBOARD_DISCOVERY_CACHE.items()
+            if now - cached_at > DASHBOARD_DISCOVERY_CACHE_TTL_SECONDS
+        ]
+        for key in expired:
+            _DASHBOARD_DISCOVERY_CACHE.pop(key, None)
+        _DASHBOARD_DISCOVERY_CACHE[cache_key] = (now, cached_selected)
+
+    return copy.deepcopy(cached_selected)
 
 
 __all__ = ["DASHBOARD_DISCOVERY_VERSION", "discover_dashboard_topics"]
