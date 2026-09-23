@@ -78,13 +78,13 @@ def test_generated_script_is_cleaned_and_marked_authoritative():
             "seo_description": "A factual explanation of the development, its background, and practical consequence.",
             "script": [
                 {
-                    "voiceover": "India&nbsp;announced <b>a new plan</b> today. Officials explained the immediate implementation details.",
+                    "voiceover": "India&nbsp;announced <b>a new plan</b> today.",
                     "narrative_role": "hook",
                     "primary_entity": "India",
                     "specific_search_prompt": "India new plan",
                 },
                 {
-                    "voiceover": "Officials are coordinating the rollout while departments prepare for the announced change.",
+                    "voiceover": "Officials are coordinating the rollout while departments prepare for the announced change in the affected sectors.",
                     "narrative_role": "development",
                     "primary_entity": "India",
                     "specific_search_prompt": "India rollout",
