@@ -73,9 +73,9 @@ def test_cricket_desk_keeps_social_leads_separate():
     rows = [
         _article("Player responds after controversial umpiring call", "one.example"),
         {
-            "title": "Fans debate the controversial umpiring call",
-            "text": "Fans debate the controversial umpiring call",
-            "description": "Fans debate the controversial umpiring call",
+            "title": "Player responds after controversial umpiring call",
+            "text": "Player responds after controversial umpiring call",
+            "description": "Player responds after controversial umpiring call",
             "source": "Reddit r/Cricket",
             "source_name": "Reddit r/Cricket",
             "url": "https://reddit.com/r/Cricket/example",
@@ -86,9 +86,9 @@ def test_cricket_desk_keeps_social_leads_separate():
             "social_reply": 45,
         },
     ]
-    concepts = desk._cluster(rows)
+    concepts = desk._enrich_events(desk.cluster_news_events(rows), rows)
     assert any(concept["social_post_count"] == 1 for concept in concepts)
-    assert any(concept["article_count"] == 1 for concept in concepts)
+    assert any(concept["event_article_count"] == 1 for concept in concepts)
 
 
 
@@ -144,7 +144,7 @@ def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(mo
         bot=None,
         scope="Global",
         requested_topic="",
-        max_candidates=30,
+        max_candidates=60,
         retained_candidates=[],
     )
     assert len(result) == 36
@@ -193,8 +193,8 @@ def test_cricket_desk_scope_keeps_india_asia_primary(monkeypatch):
 def test_cricket_desk_uses_scope_specific_google_lanes():
     india = desk._google_queries_for_scope("India / Asia")
     global_queries = desk._google_queries_for_scope("Global")
-    assert len(india) == 7
-    assert len(global_queries) == 7
+    assert len(india) == 10
+    assert len(global_queries) == 10
     assert any("India" in query for query in india)
     assert any("Australia" in query for query in global_queries)
 
@@ -272,7 +272,7 @@ def test_cricket_desk_treats_india_japan_headlines_as_one_event_family():
             "undercovered_score": 2,
             "social_post_count": 0,
         }
-        for index, item in enumerate(desk._cluster(rows))
+        for index, item in enumerate(desk.cluster_news_events(rows))
     ]
 
     family = [
@@ -310,3 +310,59 @@ def test_india_asia_scope_accepts_player_only_india_story_and_rejects_unrelated_
         {"title": "England opener breaks record in county cricket", "event_entities": ["England"]},
         "India / Asia",
     ) is False
+
+
+
+def test_cricket_discovery_suppresses_uploaded_event_but_not_unpublished_selection(tmp_path, monkeypatch):
+    import sqlite3
+    from db_architecture import migrate_vault
+
+    conn = sqlite3.connect(tmp_path / "vault.db")
+    migrate_vault(conn)
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """INSERT INTO vault
+        (run_id, topic, video_id, status, discovery_event_key, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        ("uploaded", "India-Japan cricket final", "yt-123", "UPLOADED", "event-uploaded", now, now),
+    )
+    conn.commit()
+
+    uploaded = desk.sr._load_uploaded_story_identities(conn)
+    assert desk.sr._uploaded_story_match(
+        {"title": "India-Japan cricket final", "event_identity_key": "event-uploaded"},
+        uploaded,
+    ) is True
+    assert desk.sr._uploaded_story_match(
+        {"title": "India-Japan cricket final", "event_identity_key": "event-unpublished"},
+        uploaded,
+    ) is True  # exact old-title fallback still protects legacy rows
+
+    conn.close()
+
+
+def test_dashboard_retained_topic_is_not_revalidated_through_production_quality_gate(monkeypatch):
+    import dashboard_runtime
+
+    retained = [{
+        "title": "Unusual India cricket development",
+        "event_identity_key": "unpublished-1",
+        "story_key": "unpublished-1",
+    }]
+    fresh = [{
+        "title": "Unusual India cricket development",
+        "event_identity_key": "unpublished-1",
+        "story_key": "fresh-1",
+    }]
+
+    result = dashboard_runtime._merge_retained_topics(
+        None,
+        {"category": "sports_stories_of_day", "cricket_pipeline": True},
+        None,
+        fresh,
+        retained,
+        max_candidates=60,
+    )
+
+    assert len(result) == 1
+    assert result[0]["retained_from_previous_run"] is True
