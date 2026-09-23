@@ -196,13 +196,28 @@ def _is_cricket(item):
     )).casefold()
     cricket_term_hits = sum(1 for term in CRICKET_TERMS if _word_match(text, term))
     if cricket_term_hits >= 1:
-        # Generic terms such as "coach", "captain", "pace" and "test" are not
-        # sufficient by themselves. They need a second cricket-specific anchor.
+        # Generic words such as "coach", "captain", "pace" and "test" are not
+        # enough on their own. Require an unambiguous cricket anchor.
         specific_hits = sum(
-            1 for term in ("cricket", "icc", "bcci", "pcb", "wpl", "ipl", "psl", "t20", "odi", "wicket", "innings")
+            1 for term in (
+                "cricket", "icc", "bcci", "pcb", "wpl", "ipl", "psl",
+                "t20", "odi", "wicket", "wickets", "innings", "batter",
+                "bowler", "batting", "bowling",
+            )
             if _word_match(text, term)
         )
-        if specific_hits or cricket_term_hits >= 2:
+        entity_hits = sum(
+            1 for term in (
+                "virat kohli", "rohit sharma", "jasprit bumrah", "shubman gill",
+                "rishabh pant", "hardik pandya", "ravindra jadeja",
+                "suryakumar yadav", "yashasvi jaiswal", "kl rahul",
+                "sanju samson", "smriti mandhana", "harmapreet kaur",
+                "harmanpreet kaur", "rashid khan", "babar azam", "pat cummins",
+                "travis head", "ben stokes", "joe root", "steve smith",
+            )
+            if _word_match(text, term)
+        )
+        if specific_hits or entity_hits:
             return True
     if any(marker in source_hint for marker in (
         "icc-cricket.com", "bcci.tv", "cricbuzz", "wisden", "espncricinfo", "cricinfo.com",
@@ -222,7 +237,10 @@ def _scope_pass(item, scope):
         str(item.get(k) or "")
         for k in ("title", "text", "description", "summary", "snippet", "event_search_text")
     ))
-    anchors = [term for term in INDIA_ASIA_ANCHORS if _word_match(text, term)]
+    entity_anchors = tuple(dict.fromkeys(
+        (*INDIA_ASIA_ANCHORS, *tuple(getattr(sr, "CRICKET_MARQUEE_NAMES", ()))),
+    ))
+    anchors = [term for term in entity_anchors if _word_match(text, term)]
     if anchors:
         return True
     entities = {
