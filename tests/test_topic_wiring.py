@@ -67,21 +67,21 @@ def test_query_budget_is_parallel_budgeted_not_unbounded():
 
 def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
     import dashboard_runtime
-    import dashboard_topic_discovery_runtime
+    import sports_topic_desk_runtime
+
     captured = []
 
-    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
+    def fake_desk(bot, conn=None, scope="", requested_topic="", max_candidates=30, retained_candidates=None):
         captured.append({
-            "genre_key": genre_key,
-            "genre_cfg": dict(genre_cfg),
-            "cricket_scope": kwargs.get("cricket_scope"),
+            "scope": scope,
+            "max_candidates": max_candidates,
         })
         return []
 
     monkeypatch.setattr(
-        dashboard_topic_discovery_runtime,
-        "discover_dashboard_topics",
-        fake_discovery,
+        sports_topic_desk_runtime,
+        "discover_cricket_topics",
+        fake_desk,
     )
 
     bot = type(
@@ -96,11 +96,8 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
         None,
         max_candidates=5,
     )
-    india_cfg = captured[-1]
-    assert india_cfg["cricket_scope"] == "India / Asia"
-    assert india_cfg["genre_key"] == "sports_stories_of_day"
-    assert india_cfg["genre_cfg"]["global_gnews_q"] == ""
-    assert "India" in india_cfg["genre_cfg"]["india_gnews_q"]
+    assert captured[-1]["scope"] == "India / Asia"
+    assert captured[-1]["max_candidates"] == 30
 
     dashboard_runtime.discover_ranked_topics(
         bot,
@@ -108,10 +105,8 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
         None,
         max_candidates=5,
     )
-    global_cfg = captured[-1]
-    assert global_cfg["cricket_scope"] == "Global"
-    assert global_cfg["genre_cfg"]["india_gnews_q"] == ""
-    assert "ICC" in global_cfg["genre_cfg"]["global_gnews_q"]
+    assert captured[-1]["scope"] == "Global"
+    assert captured[-1]["max_candidates"] == 30
 
 
 def test_dual_geo_genre_query_budget_skips_redundant_base_lane():
