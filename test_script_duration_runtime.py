@@ -44,6 +44,13 @@ def test_tts_duration_qc_stops_on_material_mismatch():
     assert result["passed"] is False
     assert result["delta_seconds"] == 6.0
 
+def test_production_does_not_fail_only_on_estimate_variance():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "TTS duration materially differs from the pre-TTS estimate" not in source
+    assert 'if audio_duration["total_seconds"] > 30.0:' in source
+
 
 def test_initial_script_uses_a_safety_ceiling_above_the_normal_duration_target():
     script = _script(["Hook words only."] + [" ".join(["word"] * 75)])
