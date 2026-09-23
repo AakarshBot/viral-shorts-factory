@@ -1078,9 +1078,6 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
                 f"Scene 1 is too long: {first_words} words; "
                 f"maximum is {SCENE_1_MAX_WORDS}."
             )
-        if len(word_counts) > 1 and first_words >= min(word_counts[1:]):
-            return False, "Scene 1 must remain strictly shorter than every later narration scene."
-
     hook_diagnostics = _hook_quality_score(script_data, story_data)
     script_data["hook_quality_score"] = hook_diagnostics["score"]
     script_data["hook_quality_reasons"] = hook_diagnostics["reasons"]
