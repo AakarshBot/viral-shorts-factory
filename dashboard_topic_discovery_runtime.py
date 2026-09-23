@@ -565,7 +565,7 @@ def discover_dashboard_topics(
     target_format: str = "regular",
     target_language: str = "english",
     ai_cricket: bool = False,
-    max_candidates: int = 28,
+    max_candidates: int = 60,
 ) -> list[dict]:
     """Collect and rank the dashboard portfolio without production gates."""
     max_candidates = max(1, min(28, int(max_candidates or 28)))
