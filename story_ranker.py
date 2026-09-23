@@ -320,6 +320,26 @@ CRICKET_MARQUEE_NAMES = (
 )
 
 CRICKET_EVENT_FAMILY_PATTERNS = (
+    ("india_japan_matchup", (
+        r"\bindia\b.{0,45}\bjapan\b",
+        r"\bjapan\b.{0,45}\bindia\b",
+    )),
+    ("india_sri_lanka_matchup", (
+        r"\bindia\b.{0,45}\bsri\s+lanka\b",
+        r"\bsri\s+lanka\b.{0,45}\bindia\b",
+    )),
+    ("india_bangladesh_matchup", (
+        r"\bindia\b.{0,45}\bbangladesh\b",
+        r"\bbangladesh\b.{0,45}\bindia\b",
+    )),
+    ("india_afghanistan_matchup", (
+        r"\bindia\b.{0,45}\bafghanistan\b",
+        r"\bafghanistan\b.{0,45}\bindia\b",
+    )),
+    ("india_nepal_matchup", (
+        r"\bindia\b.{0,45}\bnepal\b",
+        r"\bnepal\b.{0,45}\bindia\b",
+    )),
     ("india_pakistan_rivalry", (
         r"\bindia[\s-]*(?:vs|v|versus)[\s-]*pakistan\b",
         r"\bpakistan[\s-]*(?:vs|v|versus)[\s-]*india\b",
@@ -2193,6 +2213,18 @@ def diversity_rerank(stories, max_items=28):
                 )
                 if family and repeats >= family_cap:
                     continue
+
+                max_semantic_similarity = max(
+                    (_story_theme_similarity(item, old) for old in selected),
+                    default=0.0,
+                )
+                # Avoid a second/third headline about the same event even when
+                # family extraction missed the event label. This only affects
+                # portfolio ordering; it never deletes the underlying lead.
+                semantic_cap = 0.78 if len(selected) < CRICKET_PORTFOLIO_TOP_WINDOW else 0.86
+                if max_semantic_similarity >= semantic_cap:
+                    continue
+
                 diversified.append((index, item))
 
             if diversified:
