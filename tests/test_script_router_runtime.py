@@ -142,6 +142,19 @@ def test_router_rejects_incomplete_regular_narrative_before_dashboard_review():
     assert "middle beat" in reason.lower()
 
 
+def test_groq_parser_preserves_empty_title_for_canonical_rejection():
+    import ultimate_bot
+
+    parsed = ultimate_bot.parse_groq_json_response(
+        {
+            "titles": ["Useful title", "", "Another title"],
+            "script": [],
+        }
+    )
+
+    assert parsed["titles"] == ["Useful title", "", "Another title"]
+
+
 def test_router_rejects_incomplete_title_set_before_dashboard_review():
     script = _valid_script()
     script["titles"] = ["Only one title"]
