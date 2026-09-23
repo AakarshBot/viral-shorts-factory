@@ -14,7 +14,7 @@ from db_runtime import run_robot_with_exact_identity
 from db_architecture import migrate_vault, update_run_record
 
 WORKFLOW_VERSION = "2026-09-16-newsroom-v2"
-MAX_DISCOVERY_CANDIDATES = 28
+MAX_DISCOVERY_CANDIDATES = 60
 _PROCESS_PRODUCTION_LOCK = threading.Lock()
 
 
