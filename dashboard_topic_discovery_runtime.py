@@ -177,17 +177,23 @@ def _query_lanes(
             lanes = CRICKET_ALL_QUERIES
         queries.extend(lanes)
     else:
-        for key in ("india_gnews_q", "global_gnews_q", "gnews_q"):
-            value = str(genre_cfg.get(key) or "").strip()
-            if value:
-                queries.append(value)
-        queries.extend(DEFAULT_NON_CRICKET_LANES.get(genre_key, ()))
+        # Sports has a deliberately partitioned ten-lane desk. Do not prepend
+        # the legacy single-bucket config queries because they would consume the
+        # query budget and hide several specialist sports lenses.
+        if genre_key == "sports":
+            queries.extend(DEFAULT_NON_CRICKET_LANES["sports"])
+        else:
+            for key in ("india_gnews_q", "global_gnews_q", "gnews_q"):
+                value = str(genre_cfg.get(key) or "").strip()
+                if value:
+                    queries.append(value)
+            queries.extend(DEFAULT_NON_CRICKET_LANES.get(genre_key, ()))
 
-        niche = str(
-            sr.NICHE_DISCOVERY_QUERIES.get(genre_key, "")
-        ).strip()
-        if niche:
-            queries.append(niche)
+            niche = str(
+                sr.NICHE_DISCOVERY_QUERIES.get(genre_key, "")
+            ).strip()
+            if niche:
+                queries.append(niche)
 
     seen: set[str] = set()
     result: list[str] = []
