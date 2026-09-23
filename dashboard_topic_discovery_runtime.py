@@ -411,6 +411,13 @@ def _collect_articles(
     return raw, social_titles
 
 
+def _sports_relevance_pass(story: dict) -> bool:
+    """Require a genuine sports signal while retaining niche-sport headlines."""
+    if not isinstance(story, dict):
+        return False
+    return sr._discovery_category_allowed("sports", story)
+
+
 def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> bool:
     title = str(story.get("title") or "").strip()
     if len(title) < 12:
@@ -423,6 +430,9 @@ def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> b
         return False
 
     if not sr._source_page_pass(story):
+        return False
+    if genre_key == "sports" and not _sports_relevance_pass(story):
+        story["discovery_rejection"] = "Outside selected sports lane"
         return False
     if genre_key == "sports_stories_of_day":
         # Cricket discovery is intentionally permissive because the dashboard has
