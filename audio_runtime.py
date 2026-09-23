@@ -239,8 +239,6 @@ def _repair_total_audio_duration(
                 subprocess.run(
                     command,
                     capture_output=True,
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
                     text=True,
                     timeout=30,
                     check=True,

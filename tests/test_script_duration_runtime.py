@@ -55,6 +55,7 @@ def test_tts_duration_qc_allows_material_estimate_error_when_actual_audio_is_val
 
 def test_local_tts_duration_repair_scales_audio_and_word_timings(monkeypatch, tmp_path):
     import audio_runtime
+    from pathlib import Path
 
     source_paths = []
     for index in range(2):
