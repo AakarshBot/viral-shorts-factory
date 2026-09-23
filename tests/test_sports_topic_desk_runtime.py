@@ -303,6 +303,16 @@ def test_cricket_detection_accepts_player_only_headlines():
     ) is True
 
 
+def test_india_asia_scope_keeps_global_player_when_linked_to_india():
+    assert desk._scope_pass(
+        {
+            "title": "Ben Stokes reacts after India's controversial win",
+            "event_entities": ["Ben Stokes", "India"],
+        },
+        "India / Asia",
+    ) is True
+
+
 def test_india_asia_scope_does_not_include_unrelated_global_player_only_story():
     assert desk._scope_pass(
         {"title": "Ben Stokes returns to training after injury", "event_entities": ["Ben Stokes"]},
