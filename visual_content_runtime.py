@@ -505,6 +505,9 @@ def patch_content_first_visuals(bot):
         manual_pool_materialized = []
         manual_available_pool = []
         if manual_queries:
+            # This is an explicit human-QC workflow. Do not make dashboard entry
+            # depend on a remote Gemini identity verdict; candidates stay labelled
+            # unverified until the reviewer approves the visual package.
             manual_pool_result = collect_manual_visual_pool(
                 visual_runtime,
                 bot,
@@ -513,6 +516,7 @@ def patch_content_first_visuals(bot):
                 video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
                 used_hashes=used_hashes,
                 allow_auto_backfill=False,
+                verify_with_ai=False,
             )
             for asset in manual_pool_result.get("assets") or []:
                 if str(asset.get("provenance_status") or "").strip() != "commercial-verified":
