@@ -58,8 +58,20 @@ def test_cricket_desk_keeps_social_leads_separate():
 def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
     concepts = []
     for index in range(36):
+        subjects = [
+            "uncapped spinner breakthrough",
+            "women's domestic record",
+            "associate upset win",
+            "young batter debut",
+            "pace bowler comeback",
+            "umpire law dispute",
+            "captain leadership change",
+            "domestic coaching appointment",
+            "keeper fitness update",
+            "board selection decision",
+        ]
         concepts.append(_article(
-            f"Undercovered cricket development story {index} player {index} milestone in {['Mumbai','Lahore','Sydney','London','Colombo','Dubai','Kigali','Nairobi','Perth','Durban'][index % 10]}",
+            f"Undercovered cricket {subjects[index % len(subjects)]} in {['Mumbai','Lahore','Sydney','London','Colombo','Dubai','Kigali','Nairobi','Perth','Durban'][index % 10]} involving player {index}",
             f"source{index}.example",
         ))
     monkeypatch.setattr(desk, "_collect", lambda: concepts)

@@ -1026,7 +1026,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Scene 1 is the retention entry point: make it a precise factual headline. State the concrete subject/event immediately, remove setup filler, and create curiosity through the strongest supported conflict, bold quote, surprising result, consequential change, rivalry, or attributed statement. Never manufacture suspense by withholding the actual information.\n"
         "- For conflict or quote-led stories, name the relevant person/team/side and the concrete claim or action in the opening sentence. For result or record stories, state the result or record immediately. Do not spend the first seconds on dates, venues, tournament names, match setup, or channel framing unless that detail is itself the story.\n"
         "- Keep scene 1 noticeably tighter than the explanatory scenes that follow. Later scenes should carry the evidence, context, mechanism, comparison, timeline, or consequence that the story actually needs, and must earn every extra second.\n"
-        "- Prefer roughly 20–30 seconds for a focused single-event story, and allow up to roughly 35 seconds when a second perspective or necessary context genuinely improves the explanation. Do not pad a short story or force a complex story into an arbitrary duration.\n"
+        "- RUNTIME TARGET: Write the finished narration to land naturally around 25–28 seconds. Treat 20–30 seconds as the normal production range. Do not aim for 35 seconds. The 35-second mark is an absolute safety ceiling, not a writing target; only approach it when essential evidence-backed context genuinely cannot be omitted. Every sentence must earn its speaking time.\n"
         "- Start with a factual hook. Build through the important development and relevant context. End with the most useful consequence, implication, limitation, comparison, or final fact.\n\n"
         "RETENTION-BAIT BAN:\n"
         "- Never use phrases such as 'wait till the end', 'wait until the end', 'wait for it', 'stay tuned', 'keep watching', "
@@ -1037,7 +1037,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"- Recommended narrative lens: {angle_strategy['type']}. {angle_strategy['instruction']}\n"
         "- Use that lens only when the evidence supports it; never invent conflict, surprise, comparison, or consequences just to make the story more dramatic.\n\n"
         "RUNTIME SCOPE CONTROL:\n"
-        f"- Story scope fit score: {story_data.get('shorts_scope_score', 0)}. Prefer a focused 20–30 second cut for a compact single-event story; allow up to roughly 35 seconds only when a second perspective or necessary context genuinely earns the extra time. Never pad or force compression.\n"
+        f"- Story scope fit score: {story_data.get('shorts_scope_score', 0)}. Generate for the 25–28 second target and keep the normal range inside 20–30 seconds. Treat 35 seconds as a hard safety ceiling only for genuinely necessary context. Never write toward the ceiling, pad the script, or rely on downstream compression.\n"
         f"- Duration controller instruction: {str(story_data.get('duration_control_instruction') or '').strip()}\n"
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
@@ -1145,9 +1145,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                     "Rewrite the complete script. Preserve supported facts and the editorial angle. "
                     "Lead the first scene with the strongest supported conflict, surprise, consequence, or "
                     "attributed quote. Remove generic setup and retention-bait. Preserve the hook, development, "
-                    "context and consequence beats; a compact 20–30 second story may combine one middle beat "
-                    "into a single scene when needed for pacing. Prefer a focused 20–30 second cut and allow up to "
-                    "roughly 35 seconds only when the story genuinely earns it, without padding or forced compression."
+                    "context and consequence beats; a compact story may combine one middle beat when needed for pacing. "
+                    "Write the replacement toward a 25–28 second final narration, keep the normal range within 20–30 seconds, "
+                    "and treat 35 seconds as an absolute safety ceiling rather than a target. Remove nonessential context instead "
+                    "of writing up to the ceiling, without losing supported facts."
                 )},
             ])
         except Exception as exc:
