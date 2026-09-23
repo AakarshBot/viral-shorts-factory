@@ -322,7 +322,7 @@ def discover_ranked_topics(
     bot,
     web_config: dict[str, Any],
     conn,
-    max_candidates: int = 28,
+    max_candidates: int = 60,
     retained_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Dashboard discovery entry point using the dedicated broad-recall topic desk."""
