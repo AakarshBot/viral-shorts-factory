@@ -875,30 +875,56 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
     )
     
     groq_api_key = str(os.getenv("GROQ_API_KEY") or globals().get("GROQ_API_KEY") or "").strip()
-    for attempt in range(1, 4):
-        try:
-            groq_url = "https://api.groq.com/openai/v1/chat/completions"
-            resp = requests.post(
-                groq_url, headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
-                json={"model": "openai/gpt-oss-120b", "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": json.dumps([{"title": s['title'], "text": s['text'][:200]} for s in batch_stories])}], "response_format": {"type": "json_object"}}, timeout=25
-            )
-            
-            if resp.status_code == 429:
-                print(f"   [!] Groq rate limit hit (429). Retrying in {attempt * 3}s...")
-                time.sleep(attempt * 3)
-                continue
-                
-            if resp.status_code != 200:
-                print(f"   [!] Groq editorial scoring returned status {resp.status_code}. Retrying...")
-                time.sleep(2)
-                continue
+    if groq_api_key:
+        for attempt in range(1, 3):
+            try:
+                groq_url = "https://api.groq.com/openai/v1/chat/completions"
+                resp = requests.post(
+                    groq_url,
+                    headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "openai/gpt-oss-120b",
+                        "messages": [
+                            {"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": json.dumps([
+                                {"title": s["title"], "text": s["text"][:200]}
+                                for s in batch_stories
+                            ])},
+                        ],
+                        "response_format": {"type": "json_object"},
+                    },
+                    timeout=20,
+                )
+                if resp.status_code == 200:
+                    parsed_json = parse_groq_json_response(
+                        resp.json()["choices"][0]["message"]["content"]
+                    )
+                    return process_scored_candidates(
+                        parsed_json["results"],
+                        batch_stories,
+                        bonuses,
+                        last_genre,
+                        format_mode,
+                    )
 
-            parsed_json = parse_groq_json_response(resp.json()['choices'][0]['message']['content'])
-            scored_data = parsed_json["results"]
-            return process_scored_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode)
-            
-        except Exception as e:
-            time.sleep(2)
+                retryable = resp.status_code == 429 or 500 <= resp.status_code < 600
+                print(
+                    f"   [!] Groq editorial scoring returned status {resp.status_code}"
+                    + ("; bounded retry." if retryable and attempt < 2 else "; falling through."),
+                    flush=True,
+                )
+                if retryable and attempt < 2:
+                    time.sleep(2 if resp.status_code == 429 else 1)
+                else:
+                    break
+            except Exception as exc:
+                print(
+                    f"   [!] Groq editorial scoring failed: {type(exc).__name__}"
+                    + ("; bounded retry." if attempt < 2 else "; falling through."),
+                    flush=True,
+                )
+                if attempt < 2:
+                    time.sleep(1)
 
     if GEMINI_API_KEY:
         print("   [!] Groq editorial gate exhausted. Falling back to Gemini API...")
@@ -979,7 +1005,7 @@ def self_critique_pass(script_data, format_mode):
 
 
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
-    """Generate one compact original script; overlong output is rejected, never compressed later."""
+    """Generate one compact original script; the router may request one bounded duration repair."""
     print(f"\n✍️ Generating Original Editorial Script ({str(format_mode).upper()} MODE)...")
 
     research_evidence_text = str(story_data.get("research_evidence_text", "") or "").strip()
@@ -1009,10 +1035,10 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Never copy any complete sentence verbatim from the evidence. "
         "Do not invent facts, quotes, motives, numbers, or outcomes.\n\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
-        "- Voiceover total: 55–60 words. Never exceed 60 words.\n"
+        "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
         "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
         "- Prefer 3 or 4 scenes. Put the substance in later scenes; do not let Scene 1 carry the detail.\n"
-        "- The entire narration must naturally fit below 30 seconds at the factory's configured voice rate.\n"
+        "- Spoken duration is authoritative: keep the narration below 30 seconds at the factory's configured voice rate.\n"
         "- No intro, greeting, CTA, retention bait, generic filler, or production instructions.\n"
         "- Curiosity must come from a real fact or tension, not withheld information.\n\n"
         "STORY SHAPE:\n"
@@ -1023,15 +1049,25 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         f"Language: {language_cfg['script_instruction']}\n"
     )
 
+    duration_repair_script = story_data.get("_duration_tighten_script")
+    if duration_repair_script:
+        system_prompt += (
+            "\nBOUNDED DURATION REPAIR:\n"
+            + str(story_data.get("_duration_tighten_instruction") or "")
+            + "\nRewrite the supplied draft instead of starting a longer new script. "
+              "Preserve supported facts, entities, numbers, attributions and narrative roles."
+        )
+
+    user_content = (
+        f"STORY TITLE: {str(story_data.get('title') or story_data.get('topic') or '').strip()}\n"
+        f"VERIFIED EVIDENCE:\n{source_text}"
+    )
+    if duration_repair_script:
+        user_content += "\n\nEXISTING DRAFT TO TIGHTEN:\n" + str(duration_repair_script)
+
     messages = [
         {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": (
-                f"STORY TITLE: {str(story_data.get('title') or story_data.get('topic') or '').strip()}\n"
-                f"VERIFIED EVIDENCE:\n{source_text}"
-            ),
-        },
+        {"role": "user", "content": user_content},
     ]
 
     groq_api_key = str(os.getenv("GROQ_API_KEY") or globals().get("GROQ_API_KEY") or "").strip()
@@ -2094,8 +2130,8 @@ def run_robot(web_config=None):
             print("   [!] Error: Script generation returned None.")
             return
 
-        # The writer/router already enforce the initial compact-script contract.
-        # This is a fail-closed check only; there is no downstream rewriting.
+        # The script router owns the one bounded pre-review duration repair.
+        # This remains a fail-closed assertion in case an alternate binding bypasses it.
         persona_key = str(script_data.get("persona_used") or "LISTICLE HOST").upper()
         persona_profile = PERSONA_PROFILES.get(persona_key, PERSONA_PROFILES["LISTICLE HOST"])
         duration_estimate = estimate_narration_duration(script_data, persona_profile)
@@ -2189,9 +2225,23 @@ def run_robot(web_config=None):
                 print("   [!] Error: Voiceover generation failed to produce audio files.")
                 return
 
-            # Definitive TTS QC: measure the one synthesized audio set and compare
-            # it with the pre-TTS estimate. Never silently rewrite after approval.
-            audio_duration = measure_audio_duration(audio_paths)
+            # The audio runtime already measures every generated scene. Reuse that
+            # authoritative total; only fall back to a second pass for legacy/alternate
+            # audio providers that do not populate the runtime duration fields.
+            stored_scene_durations = script_data.get("audio_scene_durations")
+            stored_total_duration = script_data.get("audio_total_duration")
+            if (
+                isinstance(stored_scene_durations, list)
+                and len(stored_scene_durations) == len(audio_paths)
+                and stored_total_duration is not None
+            ):
+                audio_duration = {
+                    "scene_durations": [float(value) for value in stored_scene_durations],
+                    "total_seconds": float(stored_total_duration),
+                    "scene_count": len(stored_scene_durations),
+                }
+            else:
+                audio_duration = measure_audio_duration(audio_paths)
             tts_qc = validate_tts_duration(
                 script_data.get("estimated_duration_seconds"),
                 audio_duration["total_seconds"],
