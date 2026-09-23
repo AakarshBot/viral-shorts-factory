@@ -1036,10 +1036,10 @@ def assess_release_structure(script_data, format_mode="regular"):
     assessment = assess_narrative_completeness(script_data)
     if not assessment.get("passed"):
         return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
-    if str(format_mode or "").lower() == "top5":
+    if str(format_mode or "").strip().lower() == "top5":
         scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
-        if len(scenes) < 5:
-            return False, "Top-5 script does not contain enough list entries.", assessment
+        if len(scenes) < 6:
+            return False, "Top-5 script must contain an opening beat plus five ranked entries.", assessment
     return True, "Narrative structure is production-ready.", assessment
 
 def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
