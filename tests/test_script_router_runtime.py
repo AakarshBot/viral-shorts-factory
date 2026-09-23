@@ -368,6 +368,13 @@ def test_fallback_prompt_uses_the_current_duration_contract():
     assert "55–60 words" not in prompt
 
 
+def test_primary_prompt_has_no_conflicting_top5_scene_instruction():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+
+    assert "Keep the scene count exactly aligned with the selected format contract below" in source
+    assert "- Prefer 3 or 4 scenes. Put the substance in later scenes" not in source
+
+
 def test_top5_release_structure_requires_exact_renderer_shape():
     from script_runtime import assess_release_structure
 
@@ -396,6 +403,38 @@ def test_top5_release_structure_requires_exact_renderer_shape():
     assert passed is False
 
 
+def test_top5_source_fallback_is_renderer_compatible():
+    import json
+    from script_runtime import _extractive_script_fallback
+
+    items = [
+        {
+            "title": f"Ranked story {index}",
+            "text": f"Story {index} has a concrete current development that matters to viewers.",
+        }
+        for index in range(1, 6)
+    ]
+    result = _extractive_script_fallback(
+        {
+            "title": "Today's cricket Top 5",
+            "text": json.dumps(items),
+        },
+        {},
+        "sports_stories_of_day",
+        "top5",
+    )
+
+    assert len(result["script"]) == 6
+    assert [scene["narrative_role"] for scene in result["script"]] == [
+        "hook",
+        "development",
+        "context",
+        "context",
+        "context",
+        "consequence",
+    ]
+
+
 def test_fallback_prompt_supports_top5_scene_contract():
     import research_runtime
 
@@ -405,6 +444,7 @@ def test_fallback_prompt_supports_top5_scene_contract():
     )
 
     assert "MUST contain 6 scenes" in prompt
+    assert "65–75 spoken words" in prompt
     assert "3 or 4 scenes" not in prompt
 
 
