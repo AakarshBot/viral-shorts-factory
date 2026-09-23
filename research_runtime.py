@@ -174,9 +174,11 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
     }
     local_hosts = {"localhost", "127.0.0.1", "::1"}
     if remote_mode and base_host in local_hosts:
-        raise RuntimeError(
-            "Local Ollama skipped in remote mode: localhost Ollama is not reachable from the remote runtime."
+        print(
+            "   [Research] Local Ollama skipped in remote mode; using the next script provider.",
+            flush=True,
         )
+        return None
 
     model = _clean(os.getenv("OLLAMA_SCRIPT_MODEL")) or "gpt-oss:20b"
     payload = {
