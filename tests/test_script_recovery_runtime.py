@@ -49,18 +49,18 @@ def test_four_scene_compact_story_passes():
     assert assessment["passed"] is True
 
 
-def test_overlong_story_is_rejected_by_word_budget():
+def test_story_beyond_safety_ceiling_is_rejected():
     script = {
         "editorial_angle": "A compact explanation of the selected development.",
         "script": [
             _scene("India confirms a major squad change.", "hook"),
-            _scene(" ".join(["word"] * 30), "development"),
-            _scene(" ".join(["word"] * 30), "consequence"),
+            _scene(" ".join(["word"] * 75), "development"),
+            _scene(" ".join(["word"] * 25), "consequence"),
         ],
     }
     valid, reason = validate_content_density(script, {}, "regular")
     assert valid is False
-    assert "maximum is 60" in reason
+    assert "maximum is 90" in reason
 
 
 def test_scene_one_compact_cap_is_independent_of_later_scene_length():
