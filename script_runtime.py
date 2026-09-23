@@ -1009,8 +1009,47 @@ def _split_voiceover_sentences(text):
     return [part.strip() for part in parts if part.strip()]
 
 
+def _split_sentence_for_duration_trim(sentence):
+    """Return conservative, non-quoted prefixes that remove a trailing clause."""
+    text = re.sub(r"\s+", " ", str(sentence or "")).strip()
+    if not text or any(marker in text for marker in ('"', "“", "”")):
+        return []
+
+    variants = []
+    boundaries = list(re.finditer(
+        r"\s*(?:,|;|—|–)\s+|\s+(?:because|which|while|although|after|before|when|where|"
+        r"that|and|but|so|as)\s+",
+        text,
+        flags=re.IGNORECASE,
+    ))
+    for match in boundaries:
+        prefix = text[:match.start()].strip(" ,;—–-")
+        suffix = text[match.end():].strip()
+        prefix_words = len(re.findall(r"\b\w+\b", prefix))
+        suffix_words = len(re.findall(r"\b\w+\b", suffix))
+        if prefix_words < 8 or suffix_words < 4:
+            continue
+        trimmed = prefix.rstrip(" ,;—–-")
+        if not trimmed:
+            continue
+        if trimmed[-1] not in ".!?":
+            trimmed += "."
+        variants.append(trimmed)
+
+    # A second conservative option keeps the first full sentence in a
+    # multi-clause line when it already forms a complete sentence.
+    first_sentence = _split_voiceover_sentences(text)
+    if len(first_sentence) > 1:
+        first = first_sentence[0]
+        if len(re.findall(r"\b\w+\b", first)) >= 8:
+            variants.append(first)
+
+    seen = set()
+    return [value for value in variants if not (value in seen or seen.add(value))]
+
+
 def _sentence_level_duration_fallback(script_data, story_data, format_mode, persona_profile, max_seconds=35.0):
-    """Provider-free hard fallback for near-limit scripts with no safe phrase contractions."""
+    """Provider-free hard fallback that trims whole sentences, then trailing clauses."""
     working = {
         **script_data,
         "script": [
@@ -1020,13 +1059,13 @@ def _sentence_level_duration_fallback(script_data, story_data, format_mode, pers
         ],
     }
     attempts = 0
-    while attempts < 6:
+    while attempts < 12:
         estimate = estimate_narration_duration(working, persona_profile)
         if estimate["seconds"] <= float(max_seconds):
             valid, _ = validate_content_density(working, story_data, format_mode)
             if valid:
                 working["duration_compression_only"] = True
-                working["duration_compression_provider"] = "deterministic_sentence_trim"
+                working["duration_compression_provider"] = "deterministic_duration_fallback"
                 return working
             return None
 
@@ -1035,48 +1074,58 @@ def _sentence_level_duration_fallback(script_data, story_data, format_mode, pers
         for scene_index, scene in enumerate(scenes):
             role = str(scene.get("narrative_role") or "").strip().casefold()
             if role == "hook":
-                # Keep the opening promise intact unless it is the only place where
-                # a removable sentence exists and the semantic gate explicitly allows it.
                 continue
 
             sentences = _split_voiceover_sentences(scene.get("voiceover"))
-            if len(sentences) <= 1:
-                continue
+            # First try removing an entire non-hook sentence.
+            if len(sentences) > 1:
+                for sentence_index, sentence in enumerate(sentences):
+                    if len(re.findall(r"\b\w+\b", sentence)) < 6:
+                        continue
+                    if any(marker in sentence for marker in ('"', "“", "”")):
+                        continue
+                    candidate_script = {
+                        **working,
+                        "script": [dict(item) for item in scenes],
+                    }
+                    remaining = sentences[:sentence_index] + sentences[sentence_index + 1:]
+                    if not remaining:
+                        continue
+                    candidate_script["script"][scene_index]["voiceover"] = " ".join(remaining)
+                    valid, _ = validate_content_density(candidate_script, story_data, format_mode)
+                    if not valid:
+                        continue
+                    candidate_estimate = estimate_narration_duration(candidate_script, persona_profile)
+                    if candidate_estimate["seconds"] < estimate["seconds"]:
+                        candidates.append((candidate_estimate["seconds"], candidate_script))
 
+            # Then trim a trailing clause within a single sentence or a multi-clause sentence.
             for sentence_index, sentence in enumerate(sentences):
-                if len(re.findall(r"\b\w+\b", sentence)) < 6:
-                    continue
-                if any(marker in sentence for marker in ('"', "“", "”")):
-                    continue
-                candidate_script = {
-                    **working,
-                    "script": [
-                        dict(item)
-                        for item in scenes
-                    ],
-                }
-                remaining = sentences[:sentence_index] + sentences[sentence_index + 1:]
-                if not remaining:
-                    continue
-                candidate_script["script"][scene_index]["voiceover"] = " ".join(remaining)
-                valid, _ = validate_content_density(
-                    candidate_script,
-                    story_data,
-                    format_mode,
-                )
-                if not valid:
-                    continue
-                candidate_estimate = estimate_narration_duration(candidate_script, persona_profile)
-                candidates.append((candidate_estimate["seconds"], candidate_script))
+                for trimmed in _split_sentence_for_duration_trim(sentence):
+                    candidate_script = {
+                        **working,
+                        "script": [dict(item) for item in scenes],
+                    }
+                    replacement_sentences = list(sentences)
+                    replacement_sentences[sentence_index] = trimmed
+                    candidate_script["script"][scene_index]["voiceover"] = " ".join(replacement_sentences)
+                    valid, _ = validate_content_density(candidate_script, story_data, format_mode)
+                    if not valid:
+                        continue
+                    candidate_estimate = estimate_narration_duration(candidate_script, persona_profile)
+                    if candidate_estimate["seconds"] < estimate["seconds"]:
+                        candidates.append((candidate_estimate["seconds"], candidate_script))
 
         if not candidates:
             break
 
-        # Choose the smallest valid duration still closest to the hard limit.
+        # Prefer an immediately safe <=35s result. Otherwise take the smallest
+        # valid progressive reduction and continue the deterministic pass.
         below = [item for item in candidates if item[0] <= float(max_seconds)]
-        chosen = min(
-            below or candidates,
-            key=lambda item: abs(float(max_seconds) - float(item[0])),
+        chosen = (
+            min(below, key=lambda item: abs(float(max_seconds) - float(item[0])))
+            if below
+            else min(candidates, key=lambda item: item[0])
         )
         working = chosen[1]
         attempts += 1
@@ -1086,6 +1135,7 @@ def _sentence_level_duration_fallback(script_data, story_data, format_mode, pers
 
 def _local_duration_compression(script_data, story_data, format_mode, persona_profile, target_seconds):
     """Provider-free micro-compression used when an LLM rewrite is unavailable."""
+
     rewritten = dict(script_data)
     rewritten["script"] = [
         dict(scene, voiceover=_compact_unquoted_voiceover(scene.get("voiceover")))
@@ -1247,12 +1297,38 @@ def tighten_script_for_duration_once(
     valid, reason = validate_content_density(rewritten, story_data, format_mode)
     if not valid:
         print(
-            f"   [Script Duration] Compression rewrite failed validation: {reason}; retaining the validated draft.",
+            f"   [Script Duration] Compression rewrite failed validation: {reason}; trying deterministic duration fallback.",
             flush=True,
         )
+        return _sentence_level_duration_fallback(
+            script_data,
+            story_data,
+            format_mode,
+            persona_profile,
+            max_seconds=35.0,
+        )
+
+    rewritten_estimate = estimate_narration_duration(rewritten, persona_profile)
+    if rewritten_estimate["seconds"] > 35.0:
+        print(
+            f"   [Script Duration] Valid compression still estimated at {rewritten_estimate['seconds']:.1f}s; "
+            "finishing the same compression pass deterministically.",
+            flush=True,
+        )
+        fallback = _sentence_level_duration_fallback(
+            rewritten,
+            story_data,
+            format_mode,
+            persona_profile,
+            max_seconds=35.0,
+        )
+        if fallback:
+            fallback["duration_compression_provider"] = "groq_then_deterministic"
+            return fallback
         return None
 
     rewritten["duration_compression_only"] = True
+    rewritten["duration_compression_provider"] = "groq"
     return rewritten
 
 
