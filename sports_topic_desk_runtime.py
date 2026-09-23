@@ -125,6 +125,16 @@ CRICKET_PLAYER_ALIASES = (
     "steve smith", "mohammed siraj", "siraj", "kane williamson",
 )
 
+INDIA_ASIA_PLAYER_ALIASES = (
+    "virat kohli", "kohli", "rohit sharma", "rohit", "jasprit bumrah", "bumrah",
+    "shubman gill", "gill", "rishabh pant", "pant", "hardik pandya", "hardik",
+    "ravindra jadeja", "jadeja", "suryakumar yadav", "suryakumar", "surya",
+    "yashasvi jaiswal", "jaiswal", "kl rahul", "sanju samson", "samson",
+    "smriti mandhana", "mandhana", "harmanpreet kaur", "harmanpreet",
+    "rashid khan", "rashid", "babar azam", "babar", "shaheen afridi",
+    "mohammed siraj", "siraj",
+)
+
 
 def _clean(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -265,7 +275,7 @@ def _scope_pass(item, scope):
         },
         *{
             str(alias).strip().casefold()
-            for alias in CRICKET_PLAYER_ALIASES
+            for alias in INDIA_ASIA_PLAYER_ALIASES
             if str(alias).strip()
         },
     }
