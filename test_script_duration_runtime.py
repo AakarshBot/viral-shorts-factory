@@ -58,7 +58,7 @@ def _long_valid_script():
             },
             {
                 "voiceover": (
-                    "The change matters because the original plan had already been communicated, while the new decision alters preparation and the role of the replacement."
+                    "The change matters because the original plan had already been communicated, while the new decision alters preparation and the role of the replacement before the next official team review."
                 ),
                 "narrative_role": "context",
             },
@@ -77,7 +77,7 @@ def test_over_35_second_script_has_a_provider_free_hard_ceiling(monkeypatch):
     script = _long_valid_script()
     before = estimate_narration_duration(script, {"rate": "0%"})
 
-    assert before["seconds"] >= 34.0
+    assert before["seconds"] > 35.0
 
     result = tighten_script_for_duration_once(
         script,
@@ -171,5 +171,6 @@ def test_extremely_long_valid_script_has_last_resort_hard_ceiling(monkeypatch):
     assert estimate_narration_duration(result, {"rate": "0%"})["seconds"] <= 35.0
     assert result.get("duration_compression_provider") in {
         "deterministic_duration_fallback",
+        "deterministic_sentence_trim",
         "deterministic_hard_ceiling",
     }
