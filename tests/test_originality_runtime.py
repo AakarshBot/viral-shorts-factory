@@ -7,7 +7,7 @@ def test_exact_source_sentence_is_rejected():
     )
     script = {
         "script": [{
-            "voiceover": "Alpha beta gamma delta epsilon zeta eta theta.",
+            "voiceover": "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda.",
             "narrative_role": "hook",
         }]
     }
@@ -51,7 +51,7 @@ def test_research_sources_append_to_description():
 
 def test_originality_checker_does_not_expose_legacy_overlap_metrics():
     source = "Alpha beta gamma delta epsilon zeta eta theta."
-    script = {"script": [{"voiceover": "Alpha beta gamma delta epsilon zeta."}]}
+    script = {"script": [{"voiceover": "Alpha beta gamma delta epsilon zeta eta theta."}]}
     result = check_script_originality(script, {"research_evidence_text": source})
     assert "longest_run" not in result["failures"][0]
     assert "sixgram_ratio" not in result["failures"][0]
