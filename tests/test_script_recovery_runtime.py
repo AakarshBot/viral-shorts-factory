@@ -60,7 +60,7 @@ def test_overlong_story_is_rejected_by_word_budget():
     }
     valid, reason = validate_content_density(script, {}, "regular")
     assert valid is False
-    assert "maximum is 65" in reason
+    assert "maximum is 60" in reason
 
 
 def test_scene_one_must_be_shorter_than_following_scenes():
