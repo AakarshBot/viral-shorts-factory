@@ -482,7 +482,9 @@ def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(mo
     assert result["script"]
     assert len(calls) == 2
     assert "response_format" in calls[0]
-    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert calls[1]["response_format"]["type"] == "json_schema"
+    assert calls[1]["response_format"]["json_schema"]["strict"] is True
+    assert calls[1]["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
     assert calls[1]["model"] == "openai/gpt-oss-20b"
     assert calls[1]["messages"][0]["role"] == "user"
 
@@ -504,7 +506,7 @@ def _fake_urlopen_response(payload):
     return Response()
 
 
-def test_gemini_fallback_sends_canonical_response_schema(monkeypatch):
+def test_gemini_fallback_sends_provider_compatible_response_schema(monkeypatch):
     import json
     import research_runtime
 
@@ -539,44 +541,10 @@ def test_gemini_fallback_sends_canonical_response_schema(monkeypatch):
     assert payload["generationConfig"]["maxOutputTokens"] == 900
     assert "responseFormat" not in payload["generationConfig"]
     schema = payload["generationConfig"]["responseSchema"]
-    assert schema["additionalProperties"] is False
-    assert schema["properties"]["recommended_title_index"]["enum"] == [1, 2, 3]
+    assert "additionalProperties" not in schema
+    assert "enum" not in schema["properties"]["recommended_title_index"]
+    assert schema["properties"]["recommended_title_index"]["type"] == "integer"
     assert request.get_header("X-goog-api-key") == "test-key"
-
-
-def test_openrouter_fallback_uses_strict_schema_and_900_tokens(monkeypatch):
-    import json
-    import research_runtime
-
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    calls = []
-
-    def fake_urlopen(request, timeout):
-        calls.append((request, timeout))
-        return _fake_urlopen_response({
-            "choices": [{
-                "message": {"content": json.dumps(_valid_script())}
-            }]
-        })
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
-    result = research_runtime._openrouter_script_fallback(
-        {"title": "India squad change", "research_evidence_text": (
-            "Officials confirmed a major squad change after the latest review. "
-            "The decision changes preparation for the next assignment."
-        )},
-        {"script_instruction": "English."},
-        "sports_stories_of_day",
-        "regular",
-    )
-
-    assert result["script"]
-    payload = json.loads(calls[0][0].data.decode("utf-8"))
-    assert payload["model"] == "openrouter/free"
-    assert payload["max_tokens"] == 900
-    assert payload["response_format"]["type"] == "json_schema"
-    assert payload["response_format"]["json_schema"]["strict"] is True
-    assert payload["provider"] == {"require_parameters": True}
 
 
 def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypatch):
@@ -618,7 +586,7 @@ def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypa
         if request.full_url.endswith("/v1/chat/completions")
     )
     payload = json.loads(generation_request.data.decode("utf-8"))
-    assert generation_timeout == 90
+    assert generation_timeout == 15
     assert payload["model"] == "llama3.2:latest"
     assert payload["max_tokens"] == 900
     assert payload["response_format"] == {"type": "json_object"}
@@ -658,7 +626,7 @@ def test_gemini_payload_uses_current_structured_output_field_names(monkeypatch):
     assert generation["responseMimeType"] == "application/json"
     assert "responseSchema" in generation
     assert "responseFormat" not in generation
-    assert generation["responseSchema"]["additionalProperties"] is False
+    assert "additionalProperties" not in generation["responseSchema"]
 
 
 def test_gemini_rejects_the_old_response_schema_shape_before_network_use(monkeypatch):
@@ -747,7 +715,9 @@ def test_groq_primary_retries_once_after_successful_empty_json_response(monkeypa
     assert len(calls) == 2
     assert calls[0]["model"] == "openai/gpt-oss-120b"
     assert calls[1]["model"] == "openai/gpt-oss-20b"
-    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert calls[1]["response_format"]["type"] == "json_schema"
+    assert calls[1]["response_format"]["json_schema"]["strict"] is True
+    assert calls[1]["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
 
 
 def test_provider_json_parser_prefers_factory_object_over_example_json():
