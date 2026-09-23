@@ -1048,6 +1048,108 @@ def _split_sentence_for_duration_trim(sentence):
     return [value for value in variants if not (value in seen or seen.add(value))]
 
 
+def _hard_word_budget_duration_fallback(script_data, story_data, format_mode, persona_profile, max_seconds=35.0):
+    """Last-resort provider-free ceiling reducer for a valid but stubbornly long draft."""
+    scenes = [
+        dict(scene)
+        for scene in (script_data.get("script") or [])
+        if isinstance(scene, dict) and str(scene.get("voiceover") or "").strip()
+    ]
+    if not scenes:
+        return None
+
+    estimate = estimate_narration_duration(
+        script_data,
+        persona_profile,
+    )
+    effective_wpm = max(60.0, float(estimate.get("effective_wpm") or NARRATION_BASE_WPM))
+    # Leave a small timing margin so rounding/sentence pauses do not land exactly
+    # on the absolute ceiling.
+    word_budget = max(
+        len(scenes) * 5,
+        int(((float(max_seconds) - 0.75) * effective_wpm) / 60.0),
+    )
+    current_words = [
+        re.findall(r"\b\w+(?:['’]\w+)?\b", str(scene.get("voiceover") or ""))
+        for scene in scenes
+    ]
+    total_words = sum(len(words) for words in current_words)
+    if total_words <= word_budget:
+        return None
+
+    # Allocate the available budget proportionally, preserving at least a small
+    # spoken beat for every existing scene.
+    min_words = 5
+    budgets = [min_words] * len(scenes)
+    remaining_budget = max(0, word_budget - min_words * len(scenes))
+    weights = [max(1, len(words)) for words in current_words]
+    weight_total = sum(weights)
+    for index, words in enumerate(current_words):
+        budgets[index] += int(remaining_budget * weights[index] / max(1, weight_total))
+
+    while sum(budgets) > word_budget:
+        longest_index = max(
+            range(len(budgets)),
+            key=lambda idx: (budgets[idx], len(current_words[idx])),
+        )
+        if budgets[longest_index] <= min_words:
+            break
+        budgets[longest_index] -= 1
+
+    while sum(budgets) < word_budget:
+        longest_index = max(
+            range(len(budgets)),
+            key=lambda idx: len(current_words[idx]) - budgets[idx],
+        )
+        budgets[longest_index] += 1
+
+    rewritten_scenes = []
+    for scene, budget in zip(scenes, budgets):
+        original = str(scene.get("voiceover") or "").strip()
+        if len(re.findall(r"\b\w+(?:['’]\w+)?\b", original)) <= budget:
+            text = original
+        else:
+            sentences = _split_voiceover_sentences(original)
+            chosen_parts = []
+            used = 0
+            for sentence in sentences:
+                sentence_words = re.findall(r"\b\w+(?:['’]\w+)?\b", sentence)
+                if not sentence_words:
+                    continue
+                if used + len(sentence_words) <= budget:
+                    chosen_parts.append(sentence.strip())
+                    used += len(sentence_words)
+                else:
+                    break
+
+            if chosen_parts:
+                text = " ".join(chosen_parts).strip()
+            else:
+                words = re.findall(r"\b\w+(?:['’]\w+)?\b", original)[:budget]
+                text = " ".join(words).strip()
+
+            if text and text[-1] not in ".!?":
+                text += "."
+
+        if not text:
+            return None
+        rewritten_scenes.append(dict(scene, voiceover=text))
+
+    rewritten = dict(script_data, script=rewritten_scenes)
+    rewritten["duration_compression_only"] = True
+    rewritten["duration_compression_provider"] = "deterministic_hard_ceiling"
+    rewritten["duration_compression_emergency"] = True
+
+    valid, _ = validate_content_density(rewritten, story_data, format_mode)
+    if not valid:
+        return None
+
+    final_estimate = estimate_narration_duration(rewritten, persona_profile)
+    if final_estimate["seconds"] > float(max_seconds):
+        return None
+    return rewritten
+
+
 def _sentence_level_duration_fallback(script_data, story_data, format_mode, persona_profile, max_seconds=35.0):
     """Provider-free hard fallback that trims whole sentences, then trailing clauses."""
     working = {
@@ -1160,7 +1262,15 @@ def _local_duration_compression(script_data, story_data, format_mode, persona_pr
         persona_profile,
         max_seconds=35.0,
     )
-    return fallback
+    if fallback:
+        return fallback
+    return _hard_word_budget_duration_fallback(
+        script_data,
+        story_data,
+        format_mode,
+        persona_profile,
+        max_seconds=35.0,
+    )
 
 
 def tighten_script_for_duration_once(
@@ -1322,8 +1432,20 @@ def tighten_script_for_duration_once(
             persona_profile,
             max_seconds=35.0,
         )
+        if not fallback:
+            fallback = _hard_word_budget_duration_fallback(
+                rewritten,
+                story_data,
+                format_mode,
+                persona_profile,
+                max_seconds=35.0,
+            )
         if fallback:
-            fallback["duration_compression_provider"] = "groq_then_deterministic"
+            fallback["duration_compression_provider"] = (
+                "groq_then_deterministic"
+                if not fallback.get("duration_compression_emergency")
+                else "groq_then_hard_ceiling"
+            )
             return fallback
         return None
 
