@@ -267,10 +267,11 @@ def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
 
 def test_primary_writer_uses_duration_first_contract():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling." in source
+    assert "Target roughly 50–60 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words" in source
     assert "Spoken duration is authoritative" in source
     assert 'For Top-5 mode, output 6 scenes' in source
+    assert "Target roughly 50–60 spoken words in Top-5 mode" in source
     assert "For a regular Short, output 3 or 4 scenes" in source
 
 
