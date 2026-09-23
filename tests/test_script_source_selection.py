@@ -129,6 +129,7 @@ def test_title_ranking_uses_one_based_index_consistently():
     script = {
         "titles": ["India policy update", "India announces policy change", "Policy change explained for India"],
         "recommended_title_index": 1,
+        "creator_insight": "The documented policy change matters because it alters the process and affected departments.",
         "editorial_angle": "This explains the policy change, its background and practical consequence.",
         "seo_description": "A factual explanation of the policy change, its background and practical consequence.",
         "script": [
@@ -136,25 +137,33 @@ def test_title_ranking_uses_one_based_index_consistently():
                 "voiceover": "India announced the policy change today.",
                 "narrative_role": "hook",
                 "primary_entity": "India",
+                "visual_intent": "news_event",
                 "specific_search_prompt": "India policy change",
+                "sport_or_topic_category": "policy",
             },
             {
                 "voiceover": "Officials are implementing the policy across affected departments.",
                 "narrative_role": "development",
                 "primary_entity": "India",
+                "visual_intent": "news_event",
                 "specific_search_prompt": "India policy implementation",
+                "sport_or_topic_category": "policy",
             },
             {
                 "voiceover": "The background explains what the new policy changes from the previous process.",
                 "narrative_role": "context",
                 "primary_entity": "India",
+                "visual_intent": "news_event",
                 "specific_search_prompt": "India policy background",
+                "sport_or_topic_category": "policy",
             },
             {
                 "voiceover": "The practical consequence is a new implementation process for the affected departments.",
                 "narrative_role": "consequence",
                 "primary_entity": "India",
+                "visual_intent": "news_event",
                 "specific_search_prompt": "India policy consequence",
+                "sport_or_topic_category": "policy",
             },
         ],
     }
