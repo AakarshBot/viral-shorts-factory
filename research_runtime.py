@@ -245,7 +245,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "- Top-5 mode MUST contain 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
         "the fifth entry should deliver the final payoff.\n"
         if top5
-        else "- A regular Short MUST contain 3 or 4 scenes: hook, development/context, and consequence/payoff.\n"
+        else "- A regular Short normally uses 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple.\n"
     )
     word_contract = (
         "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
@@ -271,8 +271,9 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "- Put the substance in the middle beats; do not let Scene 1 carry the detail.\n"
         "- The full narration must naturally fit below 30 seconds.\n"
         "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
-        "STORY SHAPE: Scene 1 states the concrete event/person immediately. Later scenes carry the key evidence, "
-        "context, and consequence. Curiosity must come from a real supported fact.\n"
+        "STORY SHAPE: Scene 1 states the concrete event/person immediately. Scene 2 adds the most important new evidence or development. "
+        "Scene 3 adds useful context, explanation, timeline, comparison, or a second factual development when supported. "
+        "The final scene closes with the immediate consequence or most useful factual takeaway. Curiosity must come from a real supported fact.\n"
         f"EDITORIAL ANGLE: {choose_editorial_angle(story_data or {}, format_mode)['instruction']}\n"
         "CREATOR INSIGHT: Give one concise evidence-grounded synthesis of why the event matters; do not invent facts or predictions.\n"
         f"Language: {language_instruction}"
