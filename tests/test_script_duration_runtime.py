@@ -95,7 +95,7 @@ def test_local_tts_duration_repair_scales_audio_and_word_timings(monkeypatch, tm
     assert total <= audio_runtime.TTS_MAX_DURATION_SECONDS
     assert repaired_durations == [14.0, 14.0]
     assert repaired_timings[0][0]["end"] < 0.5
-    assert all(command[command.index("-filter:a") + 2].startswith("atempo=") for command in commands)
+    assert all(command[command.index("-filter:a") + 1].startswith("atempo=") for command in commands)
     assert all(Path(path).read_bytes() == b"compressed-audio" for path in source_paths)
 
 
