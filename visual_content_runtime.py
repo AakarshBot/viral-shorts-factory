@@ -553,7 +553,7 @@ def patch_content_first_visuals(bot):
                 manual_pool_result.get("rejection_counts") or {}
             )
             print(
-                f"   [Manual Visual Pool] total entity-verified candidates="
+                f"   [Manual Visual Pool] total candidates available for manual QC="
                 f"{len(manual_pool_materialized)}; scene selection begins now.",
                 flush=True,
             )
