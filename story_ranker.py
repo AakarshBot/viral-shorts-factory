@@ -2054,7 +2054,7 @@ def _load_uploaded_story_identities(conn, limit=2000):
         try:
             rows = conn.execute(
                 """
-                SELECT topic, title_used, trend_keyword
+                SELECT topic, title_used
                 FROM vault
                 WHERE status IN ('UPLOADED', 'UPLOADED_PRIVATE', 'COMPLETED')
                   AND video_id IS NOT NULL
@@ -2065,7 +2065,7 @@ def _load_uploaded_story_identities(conn, limit=2000):
                 """,
                 (int(limit),),
             ).fetchall()
-            rows = [(None, row[0] if len(row) > 0 else "", row[1] if len(row) > 1 else "", "") for row in rows]
+            rows = [(None, row[0] if len(row) > 0 else "", row[1] if len(row) > 1 else "") for row in rows]
         except Exception:
             rows = []
 
