@@ -138,6 +138,7 @@ def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[s
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
+        "max_tokens": 450,
     }
     return _call_chat_completion(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -190,6 +191,7 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
         "stream": False,
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
+        "max_tokens": 450,
     }
     return _call_chat_completion(
         base_url.rstrip("/") + "/v1/chat/completions",
