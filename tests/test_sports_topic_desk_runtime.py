@@ -57,21 +57,46 @@ def test_cricket_desk_keeps_social_leads_separate():
 
 def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
     concepts = []
-    for index in range(36):
-        subjects = [
-            "uncapped spinner breakthrough",
-            "women's domestic record",
-            "associate upset win",
-            "young batter debut",
-            "pace bowler comeback",
-            "umpire law dispute",
-            "captain leadership change",
-            "domestic coaching appointment",
-            "keeper fitness update",
-            "board selection decision",
-        ]
+    unique_story_phrases = [
+        "uncapped spinner takes five wickets",
+        "women's batter breaks a domestic record",
+        "associate nation pulls a stunning upset",
+        "teenage batter earns surprise debut",
+        "pace bowler completes comeback",
+        "umpire ruling sparks law debate",
+        "captain confirms leadership change",
+        "domestic coach lands national appointment",
+        "wicketkeeper cleared after fitness scare",
+        "board reverses an earlier selection call",
+        "left-arm seamer produces historic spell",
+        "opening batter reaches rare milestone",
+        "veteran announces sudden retirement",
+        "young all-rounder earns first contract",
+        "overlooked player gets shock recall",
+        "club reveals controversial fixture change",
+        "rookie bowler removes star batter twice",
+        "women's side overturns a huge deficit",
+        "associate captain breaks tournament record",
+        "coach responds to player criticism",
+        "selector explains surprise omission",
+        "former captain returns to domestic cricket",
+        "new keeper replaces injured starter",
+        "fast bowler records fastest spell",
+        "academy graduate earns senior contract",
+        "board issues unexpected statement",
+        "match referee hands out rare sanction",
+        "batter survives dramatic final over",
+        "underdog chase seals last-ball win",
+        "teen spinner becomes youngest five-for",
+        "captain changes batting order",
+        "domestic final ends in record chase",
+        "international debut sparks online debate",
+        "injury setback changes squad plans",
+        "senior star faces uncertain comeback",
+    ]
+    for index, phrase in enumerate(unique_story_phrases):
         concepts.append(_article(
-            f"Undercovered cricket {subjects[index % len(subjects)]} in {['Mumbai','Lahore','Sydney','London','Colombo','Dubai','Kigali','Nairobi','Perth','Durban'][index % 10]} involving player {index}",
+            f"Undercovered cricket story: {phrase} involving player {index}",
             f"source{index}.example",
         ))
     monkeypatch.setattr(desk, "_collect", lambda: concepts)

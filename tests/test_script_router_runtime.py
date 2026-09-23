@@ -85,6 +85,38 @@ def test_script_validation_does_not_require_visual_search_metadata():
     assert valid, reason
 
 
+def test_title_generation_prompt_requires_keyword_led_intrigue():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "three genuinely different YouTube title approaches" in source
+    assert "core searchable keyword/entity near the beginning" in source
+    assert "evidence-backed hook" in source
+    assert "Dramatic truthful angle title" in source
+    assert "snubbed" in source
+    assert "Do not invent outrage, shock, conflict or certainty" in source
+
+
+def test_title_ranker_rewards_grounded_intensity():
+    from script_runtime import rank_title_candidates
+
+    script = {
+        "titles": [
+            "Rohit Sharma Dropped From India Squad",
+            "Rohit Sharma Dropped: India Makes A Huge Call",
+            "Why Did India Drop Rohit Sharma?",
+        ],
+        "script": [{"primary_entity": "Rohit Sharma"}],
+    }
+    story = {
+        "title": "Rohit Sharma dropped from India squad",
+        "research_evidence_text": (
+            "India dropped Rohit Sharma from the squad in a dramatic selection decision."
+        ),
+    }
+    result = rank_title_candidates(script, story)
+    assert result["recommended_title_index"] == 2
+    assert any("surprise tension packaging" in reason for reason in result["scores"][1]["reasons"])
+
+
 def test_primary_writer_has_explicit_25_to_28_second_runtime_target():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "25–28 seconds" in source
@@ -150,22 +182,25 @@ def test_duration_compression_has_sentence_level_fallback_without_phrase_matches
         "script": [
             {
                 "voiceover": (
-                    "The board confirmed a late squad change after a meeting on Tuesday. "
-                    "The decision affects the team's next assignment."
+                    "The board confirmed a late squad change after a meeting on Tuesday, and the decision affects "
+                    "the team's next assignment. Officials said the change followed the latest assessment. "
+                    "The player was informed before the public announcement."
                 ),
                 "narrative_role": "hook",
             },
             {
                 "voiceover": (
-                    "Officials reviewed the latest information before informing the player. "
-                    "The board then approved the change later that day."
+                    "The player had completed the earlier preparation and remained part of the original group. "
+                    "Officials reviewed the latest medical and selection information before making the decision. "
+                    "The board then approved the change later that day and informed the wider squad."
                 ),
                 "narrative_role": "development",
             },
             {
                 "voiceover": (
                     "The immediate consequence is that the squad must adjust its plans for the next match. "
-                    "The replacement will take a different role."
+                    "The replacement will take a different role in the group. "
+                    "The wider impact should become clearer once the next assignment begins."
                 ),
                 "narrative_role": "consequence",
             },

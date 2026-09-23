@@ -699,6 +699,21 @@ def rank_title_candidates(script_data, story_data=None):
     headline_terms = {term.casefold() for term in headline_terms if len(term) > 1}
     has_number = bool(re.search(r"\d|%", headline))
     hook_family = classify_hook_style(script_data)
+    combined_source = f"{headline} {entity_text} {evidence}".casefold()
+    grounded_title_intensity = {
+        "conflict": (
+            "slams", "blasts", "fires back", "hits back", "under fire",
+            "backlash", "clash", "feud", "accused", "controversy",
+        ),
+        "surprise": (
+            "stuns", "shocks", "unexpected", "surprise", "dramatic",
+            "huge", "snubbed", "dropped", "benched", "breaks silence",
+        ),
+        "consequence": (
+            "ruled out", "banned", "suspended", "set to miss", "forced out",
+            "faces", "could miss", "returns", "comeback",
+        ),
+    }
 
     scores = []
     for index, raw_title in enumerate(titles, 1):
@@ -708,6 +723,15 @@ def rank_title_candidates(script_data, story_data=None):
         title_set = set(lowered)
         score = 0.0
         reasons = []
+
+        title_lower = title.casefold()
+        intensity_hits = 0
+        for family, terms in grounded_title_intensity.items():
+            matched = [term for term in terms if term in title_lower]
+            if matched and any(term in combined_source for term in terms):
+                intensity_hits += len(matched)
+                reasons.append(f"{family} tension packaging")
+        score += min(2.0, intensity_hits * 0.7)
 
         char_count = len(title)
         if 20 <= char_count <= 55:

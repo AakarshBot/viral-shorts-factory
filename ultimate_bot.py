@@ -1042,7 +1042,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "STYLE:\n"
         "- Use complete, natural spoken sentences. No telegraphic fragments, caption-only narration, canned catchphrases, fake urgency, or generic filler.\n"
         "- The voiceover field must contain spoken narration only; never include field names, prompt instructions, JSON/schema text, markdown, workflow guidance, or production notes.\n"
-        "- Keep generated titles compact at 55 characters or fewer whenever possible. Prefer a strong factual statement, attributed quote, or curiosity question tied to the story's central tension; never stuff them with schedules, venues, match metadata or hashtags.\n"\
+        "- TITLE PACKAGING: Generate three genuinely different YouTube title approaches, not three rewrites of the same headline. Keep the core searchable keyword/entity near the beginning, then add an evidence-backed hook. Title 1 should be keyword + tension/consequence; Title 2 should be the most dramatic truthful angle; Title 3 should use a strong curiosity question when a real information gap exists. Use punchy verbs and emotional language such as 'stuns', 'fires back', 'under fire', 'breaks silence', 'snubbed', 'dropped', 'faces backlash', 'unexpected', 'dramatic', or 'huge' only when the supplied evidence genuinely supports that framing. Do not invent outrage, shock, conflict or certainty. Avoid bland newspaper constructions such as 'X says', 'X update', 'latest news' unless no stronger supported angle exists. Keep titles tight, put the most important keyword in the opening words, and avoid schedules, venues, match metadata, hashtags and generic branding.\n"\
         "- No spoken like/share/subscribe/follow CTA.\n"        "- Write naturally for speech; do not distort the factual wording for subtitle tricks.\n\n"
         "FRESHFEED CHANNEL SIGNALS:\n"
         f"- pattern_score={story_data.get('freshfeed_pattern_score', 0)}, "
@@ -1063,7 +1063,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "  \"step_3_critique\": \"...\",\n"
         "  \"step_4_metadata\": \"...\",\n"
         "  \"editorial_angle\": \"...\",\n"
-        "  \"titles\": [\"Factual Title 1\", \"Context Title 2\", \"Question Title 3\"],\n"
+        "  \"titles\": [\"Keyword + tension title\", \"Dramatic truthful angle title\", \"Curiosity question title\"],\n"
         "  \"recommended_title_index\": 1,\n"
         "  \"seo_description\": \"...\",\n"
         "  \"tags\": [\"Tag1\", \"Tag2\"],\n"
