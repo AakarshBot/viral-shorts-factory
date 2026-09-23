@@ -181,11 +181,10 @@ def assess_narrative_completeness(script_data):
             "roles": roles,
         }
 
-    first_role = next(iter(roles), "")
     first_scene_role = str(scenes[0].get("narrative_role") or "").strip().lower().replace("-", "_").replace(" ", "_")
-    first_scene_role = _NARRATIVE_ROLE_ALIASES.get(first_scene_role, first_scene_role)
+    first_scene_role = _NARRATIVE_ROLE_ALIASES.get(first_scene_role, first_scene_role) or "hook"
     last_scene_role = str(scenes[-1].get("narrative_role") or "").strip().lower().replace("-", "_").replace(" ", "_")
-    last_scene_role = _NARRATIVE_ROLE_ALIASES.get(last_scene_role, last_scene_role)
+    last_scene_role = _NARRATIVE_ROLE_ALIASES.get(last_scene_role, last_scene_role) or "consequence"
 
     if first_scene_role != "hook":
         return {
@@ -1215,7 +1214,13 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             "scene_id": index,
         })
 
-    if str(format_mode or "").lower() != "top5" and len(scenes) < 3:
+    if str(format_mode or "").lower() == "top5":
+        if len(scenes) < 5:
+            raise ValueError(
+                "Source-grounded fallback refused to invent narration: not enough distinct source beats "
+                "for a five-entry Top-5 script."
+            )
+    elif len(scenes) < 3:
         raise ValueError(
             "Source-grounded fallback refused to invent narration: not enough distinct narrative beats "
             "for a hook, middle beat and payoff."
@@ -1243,4 +1248,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     valid, reason = validate_content_density(result, story_data, format_mode)
     if not valid:
         raise ValueError(f"Source-grounded fallback refused to invent narration: {reason}")
+    release_valid, release_reason, _assessment = assess_release_structure(result, format_mode)
+    if not release_valid:
+        raise ValueError(f"Source-grounded fallback refused to invent narration: {release_reason}")
     return result
