@@ -178,6 +178,7 @@ def _merge_retained_topics(
     max_candidates: int,
 ) -> list[dict[str, Any]]:
     """Keep every unpublished selection visible; only completed uploads suppress it."""
+    import story_ranker as sr
     from story_ranker import _load_uploaded_story_identities, _uploaded_story_match
 
     limit = max(1, int(max_candidates or 1))
@@ -219,6 +220,15 @@ def _merge_retained_topics(
         for item in source:
             key = identity(item)
             if key and key in seen:
+                continue
+            # Event IDs can legitimately change when a fresh run finds an extra
+            # article, so also use a high semantic similarity threshold to stop
+            # the same underlying headline reappearing beside its retained copy.
+            if any(
+                sr._story_theme_similarity(item, old) >= 0.86
+                for old in output
+                if isinstance(old, dict)
+            ):
                 continue
             if key:
                 seen.add(key)
