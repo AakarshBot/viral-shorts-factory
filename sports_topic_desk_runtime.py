@@ -8,14 +8,14 @@ import re
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
 import story_ranker as sr
 from event_discovery_runtime import fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "cricket-desk-v4-2026-09-23"
+SPORTS_DESK_VERSION = "cricket-desk-v5-2026-09-23"
 LOOKBACK_HOURS = 72
 # Primary factual collection has its own bounded lane so social/trend work cannot
 # occupy the workers needed for the actual news sources.
@@ -357,8 +357,8 @@ def _direct_listing_source(name, url):
         anchor = _clean(re.sub(r"<[^>]+>", " ", match.group(2)))
         if not href or not anchor or len(anchor) < 12:
             continue
-        if href.startswith("/"):
-            href = f"https://www.{allowed_hosts[0]}{href}" if allowed_hosts else href
+        if not href.startswith(("http://", "https://")):
+            href = urljoin(str(getattr(response, "url", "") or url).strip(), href)
         if not href.startswith(("http://", "https://")):
             continue
 
