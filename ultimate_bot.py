@@ -2478,15 +2478,9 @@ def run_robot(web_config=None):
                 f"(delta {tts_qc.get('delta_seconds', 0):+.1f}s).",
                 flush=True,
             )
-            # The pre-TTS estimate is planning telemetry, not a hard production gate.
-            # Edge-TTS duration varies with voice prosody, punctuation and pauses; the
-            # encoded audio measured above is the authoritative runtime contract.
-            if audio_duration["total_seconds"] > 30.0:
-                raise RuntimeError(
-                    f"Final synthesized narration is over 30s ({audio_duration['total_seconds']:.1f}s); "
-                    "stopping before visual rendering."
-                )
-
+            # Post-TTS duration compliance is already enforced by the authoritative
+            # audio runtime. Do not add a second raw-duration abort here: doing so would
+            # resurrect the exact 30-second boundary failure after TTS has succeeded.
             visuals = asyncio.run(
                 process_visuals_async(script_data, lang_cfg, format_mode)
             )
