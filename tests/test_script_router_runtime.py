@@ -579,6 +579,7 @@ def test_gemini_fallback_sends_provider_compatible_response_schema(monkeypatch):
 
 
 def test_gemini_retries_one_transient_503(monkeypatch):
+    import io
     import json
     import urllib.error
     import research_runtime
@@ -594,7 +595,7 @@ def test_gemini_retries_one_transient_503(monkeypatch):
                 503,
                 "busy",
                 {"Retry-After": "1"},
-                None,
+                io.BytesIO(b'{"error":{"message":"busy"}}'),
             )
         return _fake_urlopen_response({
             "candidates": [{
