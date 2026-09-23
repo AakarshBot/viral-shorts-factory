@@ -22,9 +22,11 @@ LOOKBACK_HOURS = 72
 # occupy the workers needed for the actual news sources.
 PRIMARY_DESK_TIMEOUT = 5.5
 SECONDARY_DESK_TIMEOUT = 3.0
+GOOGLE_REQUEST_TIMEOUT = 4.0
+SOURCE_TIMEOUT = 4.0
 REQUEST_TIMEOUT = 2.5
+TREND_REQUEST_TIMEOUT = 2.5
 PER_BUCKET = 10
-SOURCE_TIMEOUT = 2.2
 GOOGLE_QUERY_LIMIT = 7
 GOOGLE_RESULT_LIMIT = 20
 
@@ -472,6 +474,7 @@ def _collect(scope="India / Asia"):
                 query,
                 "sports_stories_of_day",
                 GOOGLE_RESULT_LIMIT,
+                GOOGLE_REQUEST_TIMEOUT,
             )
             primary_jobs[future] = "Google News"
 
@@ -507,7 +510,12 @@ def _collect(scope="India / Asia"):
         secondary_jobs[future] = "Mastodon"
 
         for geo in TREND_GEOS:
-            future = secondary_pool.submit(sr._google_trends_items, geo, 20)
+            future = secondary_pool.submit(
+                sr._google_trends_items,
+                geo,
+                20,
+                TREND_REQUEST_TIMEOUT,
+            )
             secondary_jobs[future] = f"Google Trends {geo}"
 
         scope_lower = _clean(scope).casefold()
@@ -535,15 +543,19 @@ def _collect(scope="India / Asia"):
             )
             secondary_jobs[future] = label
 
-        # Both pools are already running concurrently. Use one combined deadline
-        # equal to the slower lane rather than waiting one timeout after the other.
-        all_jobs = tuple(primary_jobs) + tuple(secondary_jobs)
-        deadline = max(PRIMARY_DESK_TIMEOUT, SECONDARY_DESK_TIMEOUT)
-        done, pending = wait(all_jobs, timeout=deadline)
-        primary_done = {future for future in done if future in primary_jobs}
-        secondary_done = {future for future in done if future in secondary_jobs}
-        primary_pending = {future for future in pending if future in primary_jobs}
-        secondary_pending = {future for future in pending if future in secondary_jobs}
+        # Resolve each lane against its own wall-clock budget. Every HTTP request
+        # is bounded below its lane deadline, so a healthy request cannot be
+        # labelled "timeout" solely because the scheduler stopped waiting first.
+        primary_done, primary_pending = wait(
+            tuple(primary_jobs),
+            timeout=PRIMARY_DESK_TIMEOUT,
+        )
+        secondary_done, secondary_pending = wait(
+            tuple(secondary_jobs),
+            timeout=SECONDARY_DESK_TIMEOUT,
+        )
+        done = set(primary_done) | set(secondary_done)
+        pending = set(primary_pending) | set(secondary_pending)
 
         rows = []
         counts = {label: 0 for label in {
