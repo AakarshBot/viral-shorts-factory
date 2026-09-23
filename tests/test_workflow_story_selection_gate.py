@@ -14,7 +14,7 @@ def test_start_production_rejects_unverified_story_payload_before_runtime_setup(
     controller = object.__new__(WorkflowController)
     story = {"title": "A story without discovery metadata"}
 
-    with pytest.raises(ValueError, match="verified 28-candidate discovery pool"):
+    with pytest.raises(ValueError, match="verified 60-candidate discovery pool"):
         controller.start_production({}, story)
 
 
