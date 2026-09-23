@@ -146,3 +146,77 @@ def test_cricket_desk_scope_keeps_india_asia_primary(monkeypatch):
         any(term in str(item.get("title") or "").casefold() for term in ("india", "asia", "pakistan", "sri lanka", "bangladesh"))
         for item in result
     ) or not result
+
+
+
+def test_cricket_desk_uses_scope_specific_google_lanes():
+    india = desk._google_queries_for_scope("India / Asia")
+    global_queries = desk._google_queries_for_scope("Global")
+    assert len(india) == 7
+    assert len(global_queries) == 7
+    assert any("India" in query for query in india)
+    assert any("Australia" in query for query in global_queries)
+
+
+def test_direct_listing_source_accepts_cricinfo_story_paths_and_calendar_dates(monkeypatch):
+    class _Response:
+        status_code = 200
+        text = """
+        <article>
+          <a href="/story/india-women-record-win">India women complete record win</a>
+          <time datetime="2026-09-22T22:00:00Z"></time>
+        </article>
+        <article>
+          <a href="/cricket-news/another-story">Another fresh cricket story</a>
+          <div>Sep 22, 2026</div>
+        </article>
+        """
+
+    monkeypatch.setattr(desk.requests, "get", lambda *args, **kwargs: _Response())
+    rows = desk._direct_listing_source(
+        "ESPNcricinfo",
+        "https://www.espncricinfo.com/cricket-news",
+    )
+    assert len(rows) == 2
+    assert all(row["source"] == "ESPNcricinfo" for row in rows)
+
+
+def test_google_news_snippets_survive_until_event_clustering():
+    row = _article("India survive Japan scare in dramatic T20 finish", "news.google.com")
+    row["text"] = "Too short"
+    row["description"] = "Short"
+    row["collection_source"] = "google_news_rss"
+    result = desk._normalise_rows([row])
+    assert len(result) == 1
+
+
+def test_cricket_bucket_caps_one_event_family_in_the_top_window():
+    concepts = []
+    for index in range(8):
+        concepts.append({
+            "title": f"India win Asian Games cricket story {index}",
+            "news_score": 100 - index,
+            "viral_score": 80 - index,
+            "social_score": 60 - index,
+            "undercovered_score": 2,
+            "social_post_count": 0,
+        })
+    for index in range(30):
+        concepts.append({
+            "title": f"Distinct cricket development {index} in player {index}",
+            "news_score": 70 - index * 0.1,
+            "viral_score": 65 - index * 0.1,
+            "social_score": 60 - index * 0.1,
+            "undercovered_score": 8,
+            "social_post_count": 0,
+        })
+    result = desk._bucketize(concepts)
+    assert len(result) == 30
+    assert sum(
+        1 for item in result[:6]
+        if item.get("cricket_event_family") == "asian_games"
+    ) <= 2
+    assert sum(
+        1 for item in result
+        if item.get("cricket_event_family") == "asian_games"
+    ) <= 4
