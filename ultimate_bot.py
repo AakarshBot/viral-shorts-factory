@@ -1225,7 +1225,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Return ONLY JSON matching the provider contract below; do not wrap it in Markdown or add commentary. "
         "Titles are exactly three fixed fields: title_1, title_2, title_3. "
         "The script is a fixed object of scene slots, not an array: "
-        + ("scene_1 through scene_" + (format_mode_key == "top5" ? "6" : "4") + ". ")
+        + ("scene_1 through scene_" + ("6" if format_mode_key == "top5" else "4") + ". ")
         + "Use narrative_role values hook, development, context, consequence. "
 
         + scene_contract
