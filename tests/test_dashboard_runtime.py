@@ -968,8 +968,14 @@ def test_dashboard_retained_topics_are_merged_without_reapplying_production_gate
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert 'retained_candidates=st.session_state.get("retained_topics", [])' in source
     runtime = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
-    assert "def _merge_retained_topics(" in runtime
-    assert "return list(fresh_candidates or [])[:max_candidates]" in runtime
+    start = runtime.index("def _merge_retained_topics(")
+    end = runtime.index("\ndef discover_ai_topics(", start)
+    block = runtime[start:end]
+    assert "_load_uploaded_story_identities" in block
+    assert "_uploaded_story_match" in block
+    assert "retained_from_previous_run" in block
+    assert "rank_discovery_candidates(" not in block
+    assert "_story_theme_similarity(item, old)" in block
 
 
 def test_dashboard_error_progress_preserves_last_known_percent():
