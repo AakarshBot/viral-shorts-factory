@@ -376,7 +376,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         + "- Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14. It must be a factual headline and the most compact scene.\n"
         f"{scene_contract}"
         "- Scene 1 is the only headline-style beat. Every later scene must add new, story-specific information rather than restating the title.\n"
-        "- Normally use four scenes for a regular story; use three only when a fourth beat would be artificial.\n"
+        "- For regular Shorts, keep all four provider scene slots concise and substantive; do not omit a slot or pad it with generic filler.\n"
         "- Put the substance in the middle beats; do not let Scene 1 carry the detail.\n"
         "- The full narration must naturally fit below 30 seconds.\n"
         "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
