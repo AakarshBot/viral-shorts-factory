@@ -428,7 +428,9 @@ def load_streamlit_secrets_into_runtime() -> set[str]:
             os.environ[name] = value
             setattr(ultimate_bot, name, value)
             loaded.add(name)
-    return loaded
+
+    ultimate_bot._dashboard_loaded_secret_names = set(loaded)
+    return set(loaded)
 
 
 
@@ -475,6 +477,26 @@ def check_required_local_assets() -> list[str]:
     return problems
 
 
+def _canonical_runtime_bindings_need_refresh() -> bool:
+    """Check whether dashboard runtime globals have drifted from the canonical set."""
+    run_robot = (
+        getattr(ultimate_bot, "_vsf_canonical_run_robot", None)
+        or getattr(ultimate_bot, "run_robot", None)
+    )
+    canonical = getattr(ultimate_bot, "_vsf_canonical_runtime_bindings", None)
+    namespace = getattr(run_robot, "__globals__", None)
+
+    if not callable(run_robot) or not isinstance(canonical, dict) or not canonical:
+        return True
+    if not isinstance(namespace, dict):
+        return True
+
+    for name, canonical_callable in canonical.items():
+        if callable(canonical_callable) and namespace.get(name) is not canonical_callable:
+            return True
+    return False
+
+
 def initialise_runtime() -> None:
     if not getattr(ultimate_bot, "_dashboard_runtime_initialized", False):
         patch_dashboard_runtime(ultimate_bot)
@@ -496,7 +518,11 @@ def initialise_runtime() -> None:
                 return
         except Exception:
             pass
-    bind_dashboard_patches(ultimate_bot)
+
+    # The canonical production bindings are installed once, then only restored
+    # when a prior dashboard production wrapper has genuinely changed them.
+    if _canonical_runtime_bindings_need_refresh():
+        bind_dashboard_patches(ultimate_bot)
 
 
 def _channel_options() -> list[str]:
@@ -875,7 +901,6 @@ def render_workspace_navigation() -> str:
         "Workspace",
         options,
         selection_mode="single",
-        default=current,
         key="workspace_mode",
         label_visibility="collapsed",
         width="stretch",
@@ -3254,12 +3279,14 @@ def main() -> None:
     _remote_startup_guard()
     initialise_runtime()
 
-    try:
-        db = sqlite3.connect(ultimate_bot.DB_PATH)
-        migrate_vault(db)
-        db.close()
-    except Exception as exc:
-        st.warning(f"Database migration check failed: {exc}")
+    if not getattr(ultimate_bot, "_dashboard_db_migrated", False):
+        try:
+            db = sqlite3.connect(ultimate_bot.DB_PATH)
+            migrate_vault(db)
+            db.close()
+            ultimate_bot._dashboard_db_migrated = True
+        except Exception as exc:
+            st.warning(f"Database migration check failed: {exc}")
 
     _init_state()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
