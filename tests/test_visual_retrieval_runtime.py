@@ -1879,6 +1879,58 @@ def test_manual_pool_searches_only_first_two_preferred_providers_before_qa(monke
 
     assert calls == ["Commons", "DDG"]
     assert len(result["assets"]) == 2
+def test_manual_pool_exposes_candidates_for_human_review_when_gemini_is_temporarily_unavailable(monkeypatch):
+    calls = []
+
+    def provider(*args):
+        calls.append(1)
+        return [
+            {
+                "bytes": _jpeg_bytes((1200, 1600), (40, 70, 100)),
+                "source_image_url": "https://example.test/image.jpg",
+                "search_title": "IPL logo",
+                "provenance": {"provider": "Commons", "license": "cc0"},
+            }
+            for _ in range(6)
+        ]
+
+    class FakeBot:
+        ASSETS_DIR = "/tmp"
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return provider(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [("Commons", provider), ("DDG", provider)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: (
+            setattr(visual_qa._qa_state(), "last_failure", "transient_unavailable")
+            or {}
+        ),
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "IPL", "voiceover": "IPL logo"}],
+        ["IPL logo"],
+        "IPL logo",
+        pool_target=3,
+        pool_max=3,
+        allow_auto_backfill=False,
+    )
+
+    assert len(result["assets"]) == 3
+    assert all(item["status"] == "manual-review-unverified" for item in result["assets"])
+    assert result["query_stats"][0]["qa_requests"] == 1
+
 def test_gemini_transient_503_has_no_recursive_retry():
     from pathlib import Path
 
