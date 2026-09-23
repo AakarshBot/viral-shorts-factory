@@ -18,10 +18,9 @@ def _install_authoritative_visual_query_planner() -> None:
             flush=True,
         )
     except Exception as exc:
-        print(
-            f"   [Visual Strategy Hardening] Strict planner check failed: {type(exc).__name__}: {exc}",
-            flush=True,
-        )
+        raise RuntimeError(
+            f"Authoritative visual query planner is unavailable: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _patch_script_pipeline(bot) -> None:
