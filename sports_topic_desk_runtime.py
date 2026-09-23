@@ -25,15 +25,18 @@ MAX_DASHBOARD_HEADLINES = 60
 # All core requests are allowed to finish inside the shared wall-clock budget.
 # No task is intentionally abandoned while its own HTTP timeout is still live.
 CORE_DISCOVERY_TIMEOUT = 8.0
-GOOGLE_REQUEST_TIMEOUT = 6.0
-SOURCE_TIMEOUT = 6.0
-SECONDARY_REQUEST_TIMEOUT = 3.0
+GOOGLE_REQUEST_TIMEOUT = 5.0
+SOURCE_TIMEOUT = 5.0
+SECONDARY_REQUEST_TIMEOUT = 2.5
 GDELT_REQUEST_TIMEOUT = 4.0
 
 PER_BUCKET = 20
 GOOGLE_QUERY_LIMIT = 10
+GOOGLE_PRIMARY_QUERY_LIMIT = 4
+CRICKET_PRIMARY_EVENT_FLOOR = 18
 GOOGLE_RESULT_LIMIT = 30
 DIRECT_RESULT_LIMIT = 45
+ICC_RSS_URL = "https://www.icc-cricket.com/index?feed=rss2"
 
 # Reddit/Mastodon are secondary-only. They are disabled by default because the
 # public unauthenticated endpoints are not dependable enough to be discovery
@@ -899,19 +902,53 @@ def _bucketize(concepts):
 
 def _collect(scope="India / Asia"):
     google_queries = _google_queries_for_scope(scope)
-    primary_jobs = []
-    secondary_jobs = []
-
-    # Core factual intake: every Google lens and every direct cricket newsroom
-    # runs once. This is deliberately bounded but broad enough to avoid a single
-    # provider determining the entire dashboard.
     scope_key = _clean(scope).casefold()
     news_hl, news_gl, news_ceid = (
         ("en-IN", "IN", "IN:en")
         if scope_key == "india / asia"
         else ("en-GB", "GB", "GB:en")
     )
-    for query in google_queries:
+
+    def _run_jobs(jobs, timeout):
+        rows = []
+        source_counts = {}
+        failures = []
+        if not jobs:
+            return rows, source_counts, failures
+
+        pool = ThreadPoolExecutor(
+            max_workers=max(1, len(jobs)),
+            thread_name_prefix="cricket-discovery",
+        )
+        futures = {}
+        try:
+            for label, fn, args, kwargs in jobs:
+                future = pool.submit(fn, *args, **kwargs)
+                futures[future] = label
+            done, pending = wait(tuple(futures), timeout=timeout)
+
+            for future in done:
+                label = futures[future]
+                try:
+                    values = future.result() or []
+                    rows.extend(values)
+                    source_counts[label] = len(values)
+                except Exception as exc:
+                    failures.append(f"{label}:{type(exc).__name__}")
+
+            for future in pending:
+                label = futures[future]
+                failures.append(f"{label}:timeout")
+                future.cancel()
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        return rows, source_counts, failures
+
+    # Four Google lanes are enough for a fast first pass. The other six are
+    # conditional so a slow Google transport cannot make every dashboard refresh
+    # pay for ten simultaneous requests.
+    primary_jobs = []
+    for query in google_queries[:GOOGLE_PRIMARY_QUERY_LIMIT]:
         primary_jobs.append((
             f"Google News:{query}",
             sr._google_news_search_items,
@@ -923,6 +960,18 @@ def _collect(scope="India / Asia"):
                 "ceid": news_ceid,
             },
         ))
+
+    # ICC exposes a public RSS feed; unlike the HTML listing parser this needs
+    # no JavaScript page rendering and provides an independent official signal.
+    primary_jobs.append((
+        "ICC RSS",
+        sr._rss_items,
+        (ICC_RSS_URL, "sports_stories_of_day", "official", 40),
+        {"timeout": SOURCE_TIMEOUT},
+    ))
+
+    # Keep official/specialist pages in the same first pass, but do not make
+    # Google alone the discovery dependency.
     for name, url, _kind in DIRECT_CRICKET_SOURCES:
         primary_jobs.append((
             name,
@@ -931,9 +980,12 @@ def _collect(scope="India / Asia"):
             {},
         ))
 
-    # Secondary signal sources never determine factual discovery success.
-    secondary_jobs.append(("Bluesky", _bluesky, (BLUESKY_QUERIES[1] if _clean(scope).casefold() == "india / asia" else "cricket",), {}))
-    trend_geos = ("IN",) if _clean(scope).casefold() == "india / asia" else ("GB", "AU")
+    secondary_jobs = [
+        ("Bluesky", _bluesky, (
+            BLUESKY_QUERIES[1] if scope_key == "india / asia" else "cricket",
+        ), {}),
+    ]
+    trend_geos = ("IN",) if scope_key == "india / asia" else ("GB", "AU")
     for geo in trend_geos:
         secondary_jobs.append((
             f"Google Trends {geo}",
@@ -943,60 +995,83 @@ def _collect(scope="India / Asia"):
         ))
     if ENABLE_REDDIT_DISCOVERY:
         for subreddit in REDDIT_SUBREDDITS:
-            secondary_jobs.append((f"Reddit r/{subreddit}", _reddit_search, (subreddit, "cricket"), {}))
+            secondary_jobs.append((
+                f"Reddit r/{subreddit}",
+                _reddit_search,
+                (subreddit, "cricket"),
+                {},
+            ))
     if ENABLE_MASTODON_DISCOVERY:
-        secondary_jobs.append(("Mastodon", _mastodon, (MASTODON_QUERIES[1] if _clean(scope).casefold() == "india / asia" else MASTODON_QUERIES[0],), {}))
+        secondary_jobs.append((
+            "Mastodon",
+            _mastodon,
+            (MASTODON_QUERIES[1] if scope_key == "india / asia" else MASTODON_QUERIES[0],),
+            {},
+        ))
 
-    rows = []
-    source_counts = {}
-    failures = []
+    rows, source_counts, failures = _run_jobs(primary_jobs, CORE_DISCOVERY_TIMEOUT)
 
-    pool = ThreadPoolExecutor(
-        max_workers=max(1, len(primary_jobs) + len(secondary_jobs)),
-        thread_name_prefix="cricket-discovery",
+    def _unique_core_count(values):
+        seen = set()
+        for item in values:
+            if not isinstance(item, dict) or item.get("social_post"):
+                continue
+            key = sr._canonical_url(item.get("url") or item.get("link"))
+            if key:
+                seen.add(key)
+        return len(seen)
+
+    # Only spend the second Google wave when the first wave is genuinely sparse.
+    # This preserves the ten editorial lenses while sharply reducing the normal
+    # same-host request burst.
+    if _unique_core_count(rows) < CRICKET_PRIMARY_EVENT_FLOOR:
+        secondary_google_jobs = []
+        for query in google_queries[GOOGLE_PRIMARY_QUERY_LIMIT:]:
+            secondary_google_jobs.append((
+                f"Google News:{query}",
+                sr._google_news_search_items,
+                (query, "sports_stories_of_day", GOOGLE_RESULT_LIMIT),
+                {
+                    "timeout": GOOGLE_REQUEST_TIMEOUT,
+                    "hl": news_hl,
+                    "gl": news_gl,
+                    "ceid": news_ceid,
+                },
+            ))
+        fallback_rows, fallback_counts, fallback_failures = _run_jobs(
+            secondary_google_jobs,
+            CORE_DISCOVERY_TIMEOUT,
+        )
+        rows.extend(fallback_rows)
+        source_counts.update(fallback_counts)
+        failures.extend(fallback_failures)
+
+    signal_rows, signal_counts, signal_failures = _run_jobs(
+        secondary_jobs,
+        CORE_DISCOVERY_TIMEOUT,
     )
-    futures = {}
-    try:
-        for label, fn, args, kwargs in (*primary_jobs, *secondary_jobs):
-            future = pool.submit(fn, *args, **kwargs)
-            futures[future] = label
-        done, pending = wait(tuple(futures), timeout=CORE_DISCOVERY_TIMEOUT)
+    rows.extend(signal_rows)
+    source_counts.update(signal_counts)
+    failures.extend(signal_failures)
 
-        for future in done:
-            label = futures[future]
-            try:
-                values = future.result() or []
-                rows.extend(values)
-                source_counts[label] = len(values)
-            except Exception as exc:
-                failures.append(f"{label}:{type(exc).__name__}")
-
-        if pending:
-            # Requests in this collector all have bounded HTTP timeouts shorter
-            # than the shared budget. Anything still pending is therefore a
-            # provider implementation anomaly; don't conceal it as success.
-            for future in pending:
-                label = futures[future]
-                failures.append(f"{label}:timeout")
-                future.cancel()
-
-        compact_counts = ", ".join(f"{label}={count}" for label, count in sorted(source_counts.items()))
+    compact_counts = ", ".join(
+        f"{label}={count}" for label, count in sorted(source_counts.items())
+    )
+    print(
+        f"   [Cricket Desk] Raw source intake: {compact_counts or 'none'} "
+        f"| Google lanes {sum(1 for label in source_counts if label.startswith('Google News:'))}/{len(google_queries)}",
+        flush=True,
+    )
+    if failures:
         print(
-            f"   [Cricket Desk] Raw source intake: {compact_counts or 'none'} "
-            f"| Google lanes {sum(1 for label in source_counts if label.startswith('Google News:'))}/{len(google_queries)}",
+            f"   [Cricket Desk] Source issues: {', '.join(failures[:20])}",
             flush=True,
         )
-        if failures:
-            print(f"   [Cricket Desk] Source issues: {', '.join(failures[:20])}", flush=True)
 
-    finally:
-        for future in futures:
-            future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
-
-    # Conditional factual fallback: only pay for GDELT if the primary pool is
-    # actually sparse. Never let it slow a healthy discovery run.
-    core_rows = [row for row in rows if isinstance(row, dict) and not row.get("social_post")]
+    core_rows = [
+        row for row in rows
+        if isinstance(row, dict) and not row.get("social_post")
+    ]
     deduped_core = []
     seen = set()
     for row in core_rows:
@@ -1011,7 +1086,7 @@ def _collect(scope="India / Asia"):
     if len(deduped_core) < 45:
         gdelt_query = (
             "India cricket selection injury controversy records women domestic"
-            if _clean(scope).casefold() == "india / asia"
+            if scope_key == "india / asia"
             else "international cricket selection injury controversy records women"
         )
         try:
@@ -1027,7 +1102,10 @@ def _collect(scope="India / Asia"):
                 flush=True,
             )
         except Exception as exc:
-            print(f"   [Cricket Desk] GDELT fallback failed: {type(exc).__name__}", flush=True)
+            print(
+                f"   [Cricket Desk] GDELT fallback failed: {type(exc).__name__}",
+                flush=True,
+            )
 
     return rows
 
