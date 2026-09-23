@@ -302,6 +302,13 @@ def test_cricket_detection_accepts_player_only_headlines():
     ) is True
 
 
+def test_india_asia_scope_does_not_include_unrelated_global_player_only_story():
+    assert desk._scope_pass(
+        {"title": "Ben Stokes returns to training after injury", "event_entities": ["Ben Stokes"]},
+        "India / Asia",
+    ) is False
+
+
 def test_cricket_detection_does_not_confuse_substrings_with_cricket():
     assert desk._is_cricket({"title": "Latest space test opens new frontier"}) is False
     assert desk._is_cricket({"title": "Coach announces new football plan"}) is False
