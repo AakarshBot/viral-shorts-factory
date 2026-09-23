@@ -2192,43 +2192,50 @@ def diversity_rerank(stories, max_items=28):
         ]
 
         if is_cricket_portfolio:
-            diversified = []
-            for index, item in eligible_remaining:
-                family = _clean(item.get("cricket_event_family") or _cricket_event_family(item))
-                repeats = (
-                    sum(
-                        1
-                        for old in selected
-                        if family and family == _clean(
-                            old.get("cricket_event_family") or _cricket_event_family(old)
-                        )
+            def _family_counts():
+                counts = {}
+                for old in selected:
+                    family = _clean(
+                        old.get("cricket_event_family") or _cricket_event_family(old)
                     )
-                    if family
-                    else 0
-                )
-                family_cap = (
-                    CRICKET_MAX_SAME_FAMILY_IN_TOP_WINDOW
-                    if len(selected) < CRICKET_PORTFOLIO_TOP_WINDOW
-                    else CRICKET_MAX_SAME_FAMILY_IN_PORTFOLIO
-                )
-                if family and repeats >= family_cap:
-                    continue
+                    if family:
+                        counts[family] = counts.get(family, 0) + 1
+                return counts
 
-                max_semantic_similarity = max(
+            family_counts = _family_counts()
+            family_cap = (
+                CRICKET_MAX_SAME_FAMILY_IN_TOP_WINDOW
+                if len(selected) < CRICKET_PORTFOLIO_TOP_WINDOW
+                else CRICKET_MAX_SAME_FAMILY_IN_PORTFOLIO
+            )
+
+            # Family saturation is a hard portfolio constraint whenever there
+            # is at least one alternative. It cannot be reopened by a fallback.
+            family_filtered = []
+            for index, item in eligible_remaining:
+                family = _clean(
+                    item.get("cricket_event_family") or _cricket_event_family(item)
+                )
+                if family and family_counts.get(family, 0) >= family_cap:
+                    continue
+                family_filtered.append((index, item))
+
+            if family_filtered:
+                eligible_remaining = family_filtered
+
+            # Similarity is a second diversity brake. It may be relaxed when the
+            # pool is genuinely sparse, but family saturation above remains hard.
+            semantic_cap = 0.78 if len(selected) < CRICKET_PORTFOLIO_TOP_WINDOW else 0.86
+            similarity_filtered = [
+                (index, item)
+                for index, item in eligible_remaining
+                if max(
                     (_story_theme_similarity(item, old) for old in selected),
                     default=0.0,
-                )
-                # Avoid a second/third headline about the same event even when
-                # family extraction missed the event label. This only affects
-                # portfolio ordering; it never deletes the underlying lead.
-                semantic_cap = 0.78 if len(selected) < CRICKET_PORTFOLIO_TOP_WINDOW else 0.86
-                if max_semantic_similarity >= semantic_cap:
-                    continue
-
-                diversified.append((index, item))
-
-            if diversified:
-                eligible_remaining = diversified
+                ) < semantic_cap
+            ]
+            if similarity_filtered:
+                eligible_remaining = similarity_filtered
 
         for index, candidate in eligible_remaining:
             base_score = _safe_float(candidate.get("candidate_score")) or -9999.0
