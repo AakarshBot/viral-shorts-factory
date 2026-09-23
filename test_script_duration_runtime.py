@@ -28,7 +28,7 @@ def test_duration_estimate_uses_persona_rate():
 def test_duration_bands_match_initial_writer_policy():
     assert classify_narration_duration(20) == "ideal_or_acceptable"
     assert classify_narration_duration(28) == "ideal_or_acceptable"
-    assert classify_narration_duration(30) == "ideal_or_acceptable"
+    assert classify_narration_duration(30) == "too_long"
     assert classify_narration_duration(30.01) == "too_long"
     assert classify_narration_duration(19.9) == "short_but_valid"
 
