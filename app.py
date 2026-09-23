@@ -2882,9 +2882,30 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
 
 
     candidates = st.session_state.candidates
-    if str(config.get("category") or "").strip() == "sports_stories_of_day" and str(config.get("format_mode") or "").strip() == "cricket":
-        from sports_topic_desk_runtime import render_cricket_topic_desk
-        render_cricket_topic_desk(candidates, _ui_text, _ui_html, _remember_unpublished_topic)
+    sports_desk = (
+        (
+            str(config.get("category") or "").strip() == "sports_stories_of_day"
+            and str(config.get("format_mode") or "").strip() == "cricket"
+        )
+        or (
+            str(config.get("category") or "").strip() == "sports"
+            and str(config.get("editorial_mode") or "").strip() == "Niche Sports"
+        )
+    )
+    if sports_desk:
+        from sports_topic_desk_runtime import render_sports_topic_desk
+        sports_scope = (
+            str(config.get("cricket_category") or "").strip()
+            if str(config.get("format_mode") or "").strip() == "cricket"
+            else "Niche Sports"
+        )
+        render_sports_topic_desk(
+            candidates,
+            _ui_text,
+            _ui_html,
+            _remember_unpublished_topic,
+            scope=sports_scope or "India / Asia",
+        )
         return
     total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
     page_size = 6
