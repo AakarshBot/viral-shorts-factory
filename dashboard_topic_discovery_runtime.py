@@ -355,13 +355,20 @@ def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> b
 
     if not sr._source_page_pass(story):
         return False
-    if genre_key == "sports_stories_of_day" and not sr._cricket_service_title_pass(story):
-        story["discovery_rejection"] = "Low-value cricket service article"
-        return False
-    if not sr._headline_noise_pass(story):
-        return False
-    if not sr._discovery_source_pass(story):
-        return False
+    if genre_key == "sports_stories_of_day":
+        # Cricket discovery is intentionally permissive because the dashboard has
+        # human QC. Keep only safety, provenance, article-page and utility-page
+        # protections; do not hide unusual or weakly packaged cricket leads.
+        if not sr._cricket_service_title_pass(story):
+            story["discovery_rejection"] = "Low-value cricket service article"
+            return False
+        if not sr._discovery_source_pass(story):
+            return False
+    else:
+        if not sr._headline_noise_pass(story):
+            return False
+        if not sr._discovery_source_pass(story):
+            return False
 
     age = sr._age_hours(story)
     if age == 9999.0 or age > DASHBOARD_MAX_AGE_HOURS:
