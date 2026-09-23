@@ -167,7 +167,7 @@ def test_hook_quality_prefers_immediate_conflict_over_generic_setup():
     }
     weak = {
         "script": [{
-            "voiceover": "Here is the latest update on India cricket and what happened today.",
+            "voiceover": "India cricket has a fresh development today.",
             "narrative_role": "hook",
         }]
     }
