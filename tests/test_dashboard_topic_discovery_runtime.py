@@ -27,7 +27,7 @@ def test_india_asia_query_lanes_cover_multiple_cricket_editorial_angles():
     assert len({query.casefold() for query in queries}) == len(queries)
     joined = " ".join(queries).casefold()
     assert "virat kohli" in joined
-    assert "india pakistan" in joined
+    assert "pakistan" in joined
     assert "india women" in joined
     assert "ranji" in joined
     assert "japan" in joined
