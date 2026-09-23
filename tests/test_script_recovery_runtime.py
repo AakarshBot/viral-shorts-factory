@@ -67,8 +67,8 @@ def test_scene_one_must_be_shorter_than_following_scenes():
     script = {
         "editorial_angle": "Explain the event and consequence.",
         "script": [
-            _scene(" ".join(["word"] * 15), "hook"),
-            _scene(" ".join(["word"] * 16), "development"),
+            _scene(" ".join(["word"] * 12), "hook"),
+            _scene(" ".join(["word"] * 10), "development"),
         ],
     }
     valid, reason = validate_content_density(script, {}, "regular")
