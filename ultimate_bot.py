@@ -1124,9 +1124,21 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             print(
                 "   [Script Writer] Groq structured-output request returned HTTP 400"
                 + (f": {detail}" if detail else ".")
-                + " Retrying once with the minimal OpenAI-compatible payload.",
+                + " Retrying once with a minimal OpenAI-compatible payload.",
                 flush=True,
             )
+            compatibility_messages = [
+                {
+                    "role": "user",
+                    "content": (
+                        system_prompt
+                        + "\n\n"
+                        + user_content
+                        + "\n\nReturn ONLY a valid JSON object matching the factory schema. "
+                          "Do not output Markdown or any commentary."
+                    ),
+                }
+            ]
             response = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -1135,23 +1147,30 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 },
                 json={
                     "model": "openai/gpt-oss-120b",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": (
-                                system_prompt
-                                + "\n\n"
-                                + user_content
-                                + "\n\nReturn ONLY a valid JSON object matching the factory schema. "
-                                  "Do not output Markdown or any commentary."
-                            ),
-                        }
-                    ],
-                    "temperature": 0.5,
-                    "max_completion_tokens": 900,
+                    "messages": compatibility_messages,
                 },
                 timeout=30,
             )
+            if response.status_code == 400:
+                first_compat_detail = _provider_http_error_detail(response)
+                print(
+                    "   [Script Writer] Groq GPT-OSS 120B compatibility request returned HTTP 400"
+                    + (f": {first_compat_detail}" if first_compat_detail else ".")
+                    + " Trying GPT-OSS 20B with the same minimal request.",
+                    flush=True,
+                )
+                response = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "openai/gpt-oss-20b",
+                        "messages": compatibility_messages,
+                    },
+                    timeout=30,
+                )
 
         if response.status_code != 200:
             detail = _provider_http_error_detail(response)
