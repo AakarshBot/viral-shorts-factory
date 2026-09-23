@@ -1052,32 +1052,114 @@ def self_critique_pass(script_data, format_mode):
 
 
 
-def _groq_script_output_schema():
-    """Return the strict subset used only at the Groq provider boundary.
+def _groq_script_output_schema(format_mode="regular"):
+    """Build a strict provider boundary with fixed output slots.
 
-    Exact scene/title counts remain authoritative in canonical QC. The provider
-    schema intentionally avoids array cardinality keywords so the model-facing
-    contract stays small and portable; strict mode still guarantees every
-    required field and closed object shape.
+    The canonical factory contract still uses arrays, but the provider boundary
+    uses fixed keys so the model cannot legally choose the scene/title counts.
     """
-    import copy
-    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA
+    format_key = str(format_mode or "").strip().lower()
+    scene_count = 6 if format_key == "top5" else 4
 
-    schema = copy.deepcopy(SCRIPT_OUTPUT_JSON_SCHEMA)
+    scene_schema = {
+        "type": "object",
+        "properties": {
+            "voiceover": {"type": "string"},
+            "narrative_role": {
+                "type": "string",
+                "enum": ["hook", "development", "context", "consequence"],
+            },
+            "primary_entity": {"type": "string"},
+            "visual_intent": {"type": "string"},
+            "specific_search_prompt": {"type": "string"},
+            "sport_or_topic_category": {"type": "string"},
+        },
+        "required": [
+            "voiceover",
+            "narrative_role",
+            "primary_entity",
+            "visual_intent",
+            "specific_search_prompt",
+            "sport_or_topic_category",
+        ],
+        "additionalProperties": False,
+    }
 
-    def simplify(node):
-        if not isinstance(node, dict):
-            return
-        node.pop("minItems", None)
-        node.pop("maxItems", None)
-        for value in node.get("properties", {}).values():
-            simplify(value)
-        simplify(node.get("items"))
+    script_properties = {
+        f"scene_{index}": dict(scene_schema)
+        for index in range(1, scene_count + 1)
+    }
 
-    simplify(schema)
-    return schema
+    return {
+        "type": "object",
+        "properties": {
+            "creator_insight": {"type": "string"},
+            "editorial_angle": {"type": "string"},
+            "titles": {
+                "type": "object",
+                "properties": {
+                    "title_1": {"type": "string"},
+                    "title_2": {"type": "string"},
+                    "title_3": {"type": "string"},
+                },
+                "required": ["title_1", "title_2", "title_3"],
+                "additionalProperties": False,
+            },
+            "recommended_title_index": {
+                "type": "integer",
+                "enum": [1, 2, 3],
+            },
+            "seo_description": {"type": "string"},
+            "pinned_comment": {"type": "string"},
+            "script": {
+                "type": "object",
+                "properties": script_properties,
+                "required": list(script_properties),
+                "additionalProperties": False,
+            },
+        },
+        "required": [
+            "creator_insight",
+            "editorial_angle",
+            "titles",
+            "recommended_title_index",
+            "seo_description",
+            "pinned_comment",
+            "script",
+        ],
+        "additionalProperties": False,
+    }
 
 
+def _normalise_groq_script_result(result, format_mode):
+    """Convert Groq fixed slots back into the canonical array contract."""
+    if not isinstance(result, dict):
+        return result
+
+    normalized = dict(result)
+
+    titles = normalized.get("titles")
+    if isinstance(titles, dict):
+        normalized["titles"] = [
+            str(titles.get(f"title_{index}") or "").strip()
+            for index in range(1, 4)
+        ]
+
+    recommended_index = normalized.get("recommended_title_index")
+    if isinstance(recommended_index, str) and recommended_index.strip().isdigit():
+        normalized["recommended_title_index"] = int(recommended_index.strip())
+
+    scenes = normalized.get("script")
+    if isinstance(scenes, dict):
+        scene_count = 6 if str(format_mode or "").strip().lower() == "top5" else 4
+        normalized["script"] = [
+            dict(scene)
+            for index in range(1, scene_count + 1)
+            for scene in [scenes.get(f"scene_{index}")]
+            if isinstance(scene, dict)
+        ]
+
+    return normalized
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     """Generate one original information-dense script; the router may request one bounded duration repair."""
     format_mode_key = str(format_mode or "").strip().lower()
@@ -1129,7 +1211,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "- Scene 1 is the only headline-style beat. Do not turn later scenes into separate headlines or title rewrites.\n"
         "- Later scenes must add new, story-specific information: verified evidence, a key number, an attribution, necessary context, a mechanism, a timeline point, or a consequence.\n"
         "- Normally use four scenes for a regular story so the explanation has room to breathe; combine beats only when they are genuinely inseparable.\n"
-        "- Keep the scene count exactly aligned with the selected format contract below; do not pad with filler.\n"
+        "- The provider contract fixes regular Shorts to exactly 4 scene slots and Top-5 to exactly 6; keep each slot concise and substantive rather than padding with filler.\n"
         "- Spoken duration is authoritative: keep the narration below 30 seconds at the factory's configured voice rate.\n"
         "- No intro, greeting, CTA, retention bait, generic filler, or production instructions.\n"
         "- Curiosity must come from a real fact or tension, not withheld information.\n\n"
@@ -1140,13 +1222,12 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Final scene = the immediate consequence, implication, limitation, or most useful closing fact. "
         "The finished narration should feel like one explained story, not a stack of headlines. "
         "Every sentence must earn its speaking time.\n\n"
-        "Return ONLY JSON matching this exact object shape; do not wrap it in Markdown or add commentary. "
-        "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
-        "\"recommended_title_index\":1,\"seo_description\":\"...\",\"pinned_comment\":\"...\","
-        "\"script\":[{\"voiceover\":\"...\",\"narrative_role\":\"hook\","
-        "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
-        "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
-        "Use narrative_role values hook, development, context, consequence. "
+        "Return ONLY JSON matching the provider contract below; do not wrap it in Markdown or add commentary. "
+        "Titles are exactly three fixed fields: title_1, title_2, title_3. "
+        "The script is a fixed object of scene slots, not an array: "
+        + ("scene_1 through scene_" + (format_mode_key == "top5" ? "6" : "4") + ". ")
+        + "Use narrative_role values hook, development, context, consequence. "
+
         + scene_contract
         + f"EDITORIAL ANGLE — {editorial_angle['instruction']}\n"
         "CREATOR INSIGHT: Provide one concise evidence-grounded synthesis of why the documented event matters. "
@@ -1188,7 +1269,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 "json_schema": {
                     "name": "viral_shorts_script",
                     "strict": True,
-                    "schema": _groq_script_output_schema(),
+                    "schema": _groq_script_output_schema(format_mode_key),
                 },
             },
             "include_reasoning": False,
@@ -1211,7 +1292,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         if response.status_code == 200:
             try:
                 raw_content = response.json()["choices"][0]["message"]["content"]
-                data = parse_groq_json_response(raw_content)
+                data = _normalise_groq_script_result(parse_groq_json_response(raw_content), format_mode_key)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 retry_reason = (
                     "successful response was empty or not parseable JSON "
