@@ -228,7 +228,7 @@ def test_primary_writer_uses_duration_first_contract():
     assert "Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words" in source
     assert "Spoken duration is authoritative" in source
-    assert 'For Top-5 mode, output at least 5 substantive list-entry scenes' in source
+    assert 'For Top-5 mode, output 6 scenes' in source
     assert "For a regular Short, output 3 or 4 scenes" in source
 
 
@@ -364,8 +364,36 @@ def test_fallback_prompt_uses_the_current_duration_contract():
     )
     assert "55–65 spoken words" in prompt
     assert "90-word safety ceiling" in prompt
-    assert "at least 3 scenes" in prompt
+    assert "MUST contain 3 or 4 scenes" in prompt
     assert "55–60 words" not in prompt
+
+
+def test_top5_release_structure_requires_exact_renderer_shape():
+    from script_runtime import assess_release_structure
+
+    valid_script = {
+        "script": [
+            {"voiceover": "Top five stories today.", "narrative_role": "hook"},
+            {"voiceover": "Story five matters because of this development.", "narrative_role": "development"},
+            {"voiceover": "Story four has this important update.", "narrative_role": "context"},
+            {"voiceover": "Story three changed after this result.", "narrative_role": "context"},
+            {"voiceover": "Story two has this significant development.", "narrative_role": "context"},
+            {"voiceover": "Story one delivers the biggest consequence.", "narrative_role": "consequence"},
+        ]
+    }
+    passed, reason, _ = assess_release_structure(valid_script, "top5")
+    assert passed is True, reason
+
+    too_few = dict(valid_script, script=valid_script["script"][:5])
+    passed, reason, _ = assess_release_structure(too_few, "top5")
+    assert passed is False
+    assert "exactly one opening beat plus five ranked entries" in reason
+
+    too_many = dict(valid_script, script=valid_script["script"] + [
+        {"voiceover": "An extra seventh scene would duplicate a rendered rank.", "narrative_role": "context"},
+    ])
+    passed, reason, _ = assess_release_structure(too_many, "top5")
+    assert passed is False
 
 
 def test_fallback_prompt_supports_top5_scene_contract():
@@ -376,7 +404,7 @@ def test_fallback_prompt_supports_top5_scene_contract():
         "top5",
     )
 
-    assert "at least 5 substantive list-entry scenes" in prompt
+    assert "MUST contain 6 scenes" in prompt
     assert "3 or 4 scenes" not in prompt
 
 
