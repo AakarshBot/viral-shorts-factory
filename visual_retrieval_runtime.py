@@ -853,6 +853,7 @@ def collect_manual_visual_pool(
     pool_target: int | None = None,
     pool_max: int | None = None,
     allow_auto_backfill: bool = True,
+    verify_with_ai: bool = True,
 ) -> dict:
     """Build the shared entity-verified pool from the first two preferred manual sources."""
     from visual_qa_runtime import (
@@ -899,11 +900,44 @@ def collect_manual_visual_pool(
     def _verify(candidates, entity_anchor, query_index, target, source_label):
         if not candidates or len(assets) >= requested_max:
             return 0, 0
-        start_visual_qa_scene()
-        batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         added = 0
         qa_requests = 0
         query_added = 0
+        if not verify_with_ai:
+            # Explicit manual-QC runs must not block dashboard entry on a remote
+            # identity verdict. Keep the candidates marked unverified so the
+            # reviewer can make the final visual decision.
+            remaining = max(0, target - query_added)
+            for candidate in candidates[:remaining]:
+                assets.append(
+                    {
+                        "subject": entity_anchor,
+                        "bytes": candidate["bytes"],
+                        "hash": candidate["hash"],
+                        "source": candidate["source"],
+                        "query": candidate["query"],
+                        "visual_type": candidate["visual_type"],
+                        "visual_genre": candidate["visual_genre"],
+                        "provenance": dict(candidate["provenance"]),
+                        "provenance_status": str(
+                            candidate.get("provenance_status") or "commercial-verified"
+                        ),
+                        "priority": float(candidate["priority"]),
+                        "search_text": _candidate_search_text(candidate["data"]),
+                        "source_page_url": str(candidate.get("source_page_url") or "").strip(),
+                        "source_image_url": str(candidate.get("source_image_url") or "").strip(),
+                        "status": "manual-review-unverified",
+                        "manual_query_index": int(query_index or 0),
+                        "pool_origin": str(source_label or "manual"),
+                        "used": False,
+                    }
+                )
+                query_added += 1
+                added += 1
+            return added, qa_requests
+
+        start_visual_qa_scene()
+        batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         for offset in range(0, len(candidates), batch_size):
             if len(assets) >= requested_max or query_added >= target:
                 break
