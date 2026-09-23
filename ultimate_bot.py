@@ -1053,7 +1053,7 @@ def self_critique_pass(script_data, format_mode):
 
 
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
-    """Generate one compact original script; the router may request one bounded duration repair."""
+    """Generate one original information-dense script; the router may request one bounded duration repair."""
     format_mode_key = str(format_mode or "").strip().lower()
     print(f"\n✍️ Generating Original Editorial Script ({format_mode_key.upper()} MODE)...")
 
@@ -1082,12 +1082,12 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "For Top-5 mode, output 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
         "the fifth entry should deliver the final payoff. "
         if format_mode_key == "top5"
-        else "For a regular Short, output 3 or 4 scenes: hook, development/context, and consequence/payoff. "
+        else "For a regular Short, normally use 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple; use 5 when one additional distinct factual beat materially improves the explanation. "
     )
     word_contract = (
         "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
         if format_mode_key == "top5"
-        else "- Target roughly 50–60 spoken words; never exceed the 90-word safety ceiling.\n"
+        else "- Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling.\n
     )
     from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
     editorial_angle = choose_editorial_angle(story_data, format_mode)
@@ -1099,14 +1099,19 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Do not invent facts, quotes, motives, numbers, or outcomes.\n\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         + word_contract
-        + "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
+        + "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"        "- Scene 1 is the only headline-style beat. Do not turn later scenes into separate headlines or title rewrites.\n"
+        "- Later scenes must add new, story-specific information: verified evidence, a key number, an attribution, necessary context, a mechanism, a timeline point, or a consequence.\n"
+        "- Normally use four scenes for a regular story so the explanation has room to breathe; combine beats only when they are genuinely inseparable.\n"
         "- Keep the scene count exactly aligned with the selected format contract below; do not pad with filler.\n"
         "- Spoken duration is authoritative: keep the narration below 30 seconds at the factory's configured voice rate.\n"
         "- No intro, greeting, CTA, retention bait, generic filler, or production instructions.\n"
         "- Curiosity must come from a real fact or tension, not withheld information.\n\n"
         "STORY SHAPE:\n"
         "Scene 1 = the concrete event/person and strongest supported hook. "
-        "Later scenes = the most important evidence and context, then the immediate consequence or final useful fact. "
+        "Scene 2 = the most important new evidence or development. "
+        "Scene 3 = the most useful context, explanation, timeline, comparison, or second factual development when supported. "
+        "Final scene = the immediate consequence, implication, limitation, or most useful closing fact. "
+        "The finished narration should feel like one explained story, not a stack of headlines. "
         "Every sentence must earn its speaking time.\n\n"
         "Return ONLY JSON matching this exact object shape; do not wrap it in Markdown or add commentary. "
         "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
