@@ -43,8 +43,8 @@ def patch_audio_direction(bot):
 
     async def directed_audio(script_data, language_cfg):
         profile = choose_delivery_profile(bot, script_data)
-        script_data["persona_used"] = profile
         script_data["delivery_profile"] = profile
+        script_data["persona_used"] = profile
         print(f"   [Audio Direction] Delivery profile: {profile}", flush=True)
         return await original(script_data, language_cfg)
 
