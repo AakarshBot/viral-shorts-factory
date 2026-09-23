@@ -114,7 +114,7 @@ def _http_error_detail(raw_error: Any, max_chars: int = 900) -> str:
 
 
 def _parse_provider_json(raw: Any) -> Dict[str, Any]:
-    """Parse provider JSON even when a compatible model adds a code fence or short preamble."""
+    """Parse provider JSON without greedily swallowing multiple JSON objects."""
     text = str(raw or "").strip()
     text = re.sub(
         r"^\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60$",
@@ -122,13 +122,23 @@ def _parse_provider_json(raw: Any) -> Dict[str, Any]:
         text,
         flags=re.IGNORECASE,
     ).strip()
+    if not text:
+        raise ValueError("Provider returned empty content.")
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
+        decoder = json.JSONDecoder()
+        parsed = None
+        for match in re.finditer(r"\{", text):
+            try:
+                candidate, _end = decoder.raw_decode(text[match.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                parsed = candidate
+                break
+        if parsed is None:
             raise ValueError("Provider returned no parseable JSON object.")
-        parsed = json.loads(match.group(0))
     if not isinstance(parsed, dict):
         raise ValueError("Provider returned JSON that is not an object.")
     return parsed
@@ -159,8 +169,12 @@ def _gemini_script_fallback(
             }
         ],
         "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": SCRIPT_OUTPUT_JSON_SCHEMA,
+            "responseFormat": {
+                "text": {
+                    "mimeType": "application/json",
+                    "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
+                }
+            },
             "maxOutputTokens": 900,
             "thinkingConfig": {"thinkingLevel": "low"},
         },
@@ -311,6 +325,9 @@ def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[s
                 "strict": True,
                 "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
             },
+        },
+        "provider": {
+            "require_parameters": True,
         },
         "temperature": 0.2,
         "max_tokens": 900,
