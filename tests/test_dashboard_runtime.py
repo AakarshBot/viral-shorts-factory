@@ -1902,6 +1902,8 @@ def test_visual_approval_is_fail_closed_in_controller(tmp_path):
         "visual_qc_blocked": True,
     }]]
 
+    assert controller.approve_visual(1)[0] is True
+    assert controller._visual_manual_approved == {1}
     assert controller.approve_visuals() is True
     assert controller._manual_gate_state["visual_event"].is_set() is True
     assert controller._visual_packages[0][0]["human_visual_approved"] is True
