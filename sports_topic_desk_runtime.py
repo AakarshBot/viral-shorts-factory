@@ -884,7 +884,7 @@ def _score(item, trends, history_titles=None, retained=None, scope="India / Asia
     return item
 
 
-def _bucketize(concepts, scope="India / Asia")
+def _bucketize(concepts, scope="India / Asia"):
     # One event can appear in only one dashboard bucket. Bucketization is a
     # presentation layer; it must never duplicate the underlying event.
     candidates = []
