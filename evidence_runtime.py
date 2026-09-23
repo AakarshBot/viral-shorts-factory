@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -655,11 +656,41 @@ def _merge_claims(raw_claims: List[Dict[str, Any]]) -> tuple:
 
 def build_evidence_pack(story: Dict[str, Any], sources: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     candidates = list(sources if sources is not None else discover_sources(story))
-    enriched = []
-    for index, source in enumerate(candidates):
-        record = dict(source)
-        record["source_id"] = _source_id(record, index)
-        enriched.append(extract_article_source(record))
+    enriched = [None] * len(candidates)
+    if candidates:
+        # Article extraction is network-bound. Running the bounded source set
+        # concurrently removes the old N×12s worst-case serial bottleneck while
+        # retaining deterministic source ordering for IDs and audit records.
+        worker_count = min(5, len(candidates))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="evidence-extraction",
+        ) as pool:
+            future_map = {}
+            for index, source in enumerate(candidates):
+                record = dict(source)
+                record["source_id"] = _source_id(record, index)
+                future_map[
+                    pool.submit(extract_article_source, record)
+                ] = index
+
+            for future in as_completed(future_map):
+                index = future_map[future]
+                try:
+                    enriched[index] = future.result()
+                except Exception as exc:
+                    # extract_article_source is already defensive, but keep the
+                    # evidence pack total and auditable if a worker unexpectedly raises.
+                    record = dict(candidates[index])
+                    record["source_id"] = _source_id(record, index)
+                    record["extraction_status"] = "failed"
+                    record["extraction_method"] = ""
+                    record["clean_text"] = ""
+                    record["word_count"] = 0
+                    record["error"] = f"{type(exc).__name__}: {exc}"
+                    enriched[index] = record
+
+        enriched = [item for item in enriched if isinstance(item, dict)]
 
     usable = [
         item for item in enriched
