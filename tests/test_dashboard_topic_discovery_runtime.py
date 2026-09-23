@@ -291,3 +291,65 @@ def test_cricket_dashboard_does_not_reject_weird_but_source_backed_headlines(mon
         "sports_stories_of_day",
         "",
     ) is True
+
+
+
+def test_sports_dashboard_uses_ten_independent_editorial_query_lanes():
+    queries = discovery._query_lanes("sports", {"gnews_q": "sports"})
+    assert len(queries) == 10
+    joined = " ".join(queries).casefold()
+    for term in ("football", "tennis", "badminton", "hockey", "athletics", "boxing", "motorsport", "women", "olympics"):
+        assert term in joined
+
+
+def test_dashboard_collector_does_not_call_reddit_by_default(monkeypatch):
+    calls = {"reddit": 0, "google": 0}
+
+    def fake_google(*args, **kwargs):
+        calls["google"] += 1
+        return []
+
+    def fake_reddit(*args, **kwargs):
+        calls["reddit"] += 1
+        return []
+
+    monkeypatch.setattr(discovery.sr, "_google_news_search_items", fake_google)
+    monkeypatch.setattr(discovery.sr, "_reddit_items", fake_reddit)
+    monkeypatch.setattr(discovery.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(discovery, "fetch_gdelt_articles", lambda *args, **kwargs: [])
+
+    discovery._collect_articles(
+        type("Bot", (), {})(),
+        "sports",
+        {"rss_url": ""},
+    )
+
+    assert calls["google"] == 10
+    assert calls["reddit"] == 0
+
+
+def test_dashboard_uploaded_event_is_removed_but_unpublished_retained_is_not(tmp_path):
+    import sqlite3
+    from db_architecture import migrate_vault
+
+    conn = sqlite3.connect(tmp_path / "vault.db")
+    migrate_vault(conn)
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    conn.execute(
+        """INSERT INTO vault
+        (run_id, topic, video_id, status, discovery_event_key, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        ("uploaded", "Uploaded event", "yt-999", "UPLOADED", "event-999", now, now),
+    )
+    conn.commit()
+
+    uploaded = discovery.sr._load_uploaded_story_identities(conn)
+    assert discovery.sr._uploaded_story_match(
+        {"title": "Uploaded event", "event_identity_key": "event-999"},
+        uploaded,
+    ) is True
+    assert discovery.sr._uploaded_story_match(
+        {"title": "Unpublished event", "event_identity_key": "event-123"},
+        uploaded,
+    ) is False
+    conn.close()
