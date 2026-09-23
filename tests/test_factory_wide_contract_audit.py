@@ -34,7 +34,7 @@ def test_multilingual_script_grounding_and_metadata():
             "title": "भारत ने नई ऊर्जा नीति की घोषणा की",
             "summary": "भारत सरकार ने नई ऊर्जा नीति की घोषणा की है। नीति में सौर ऊर्जा, भंडारण और ग्रिड निवेश के लिए नए लक्ष्य शामिल हैं। राज्यों के लिए भी नई योजनाएं जारी की गई हैं।",
             "script": [
-                {"voiceover": "भारत ने नई ऊर्जा नीति में सौर लक्ष्य घोषित किए।", "narrative_role": "hook", "primary_entity": "भारत", "specific_search_prompt": "भारत नई ऊर्जा नीति"},
+                {"voiceover": "नई ऊर्जा नीति में सौर लक्ष्य घोषित हुए।", "narrative_role": "hook", "primary_entity": "भारत", "specific_search_prompt": "भारत नई ऊर्जा नीति"},
                 {"voiceover": "नीति में भंडारण और ग्रिड निवेश की योजनाएं हैं।", "narrative_role": "development", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा भंडारण ग्रिड"},
                 {"voiceover": "राज्यों के लिए भी नए क्रियान्वयन लक्ष्य तय हुए।", "narrative_role": "context", "primary_entity": "भारत", "specific_search_prompt": "भारत राज्य ऊर्जा योजना"},
                 {"voiceover": "इससे ग्रिड क्षमता और राज्य ऊर्जा योजनाओं पर असर पड़ेगा।", "narrative_role": "consequence", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा नीति प्रभाव"},
