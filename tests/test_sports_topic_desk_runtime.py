@@ -19,14 +19,14 @@ def _article(title, domain, hours=3):
 
 
 
-def test_cricket_desk_request_timeouts_fit_their_lane_budgets():
+def test_sports_desk_request_timeouts_fit_their_lane_budgets():
     assert desk.GOOGLE_REQUEST_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
     assert desk.SOURCE_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
     assert desk.SECONDARY_REQUEST_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
     assert desk.GDELT_REQUEST_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
 
 
-def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
+def test_sports_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
     calls = []
 
     def fake_google(*args, **kwargs):
@@ -55,7 +55,7 @@ def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
     assert all(item[2]["timeout"] == desk.SECONDARY_REQUEST_TIMEOUT for item in trends)
 
 
-def test_cricket_desk_fans_out_google_queries_only_after_sparse_first_wave(monkeypatch):
+def test_sports_desk_fans_out_google_queries_only_after_sparse_first_wave(monkeypatch):
     calls = []
     def fake_google(query, *args, **kwargs):
         calls.append(query)
@@ -93,7 +93,7 @@ def test_cricket_desk_fans_out_google_queries_only_after_sparse_first_wave(monke
     assert len(calls) == desk.GOOGLE_QUERY_LIMIT
 
 
-def test_cricket_desk_primary_google_burst_is_bounded(monkeypatch):
+def test_sports_desk_primary_google_burst_is_bounded(monkeypatch):
     calls = []
 
     def fake_google(query, *args, **kwargs):
@@ -120,7 +120,7 @@ def test_cricket_desk_primary_google_burst_is_bounded(monkeypatch):
     assert len(calls) == desk.GOOGLE_QUERY_LIMIT
 
 
-def test_cricket_desk_duplicate_headlines_form_one_concept():
+def test_sports_desk_duplicate_headlines_form_one_concept():
     rows = [
         _article("India survive Japan scare in dramatic T20 finish", "one.example"),
         _article("India survive Japan scare in dramatic T20 finish", "two.example"),
@@ -134,7 +134,7 @@ def test_cricket_desk_duplicate_headlines_form_one_concept():
     assert india["event_source_count"] == 3
 
 
-def test_cricket_desk_keeps_social_leads_separate():
+def test_sports_desk_keeps_social_leads_separate():
     rows = [
         _article("Player responds after controversial umpiring call", "one.example"),
         {
@@ -157,7 +157,7 @@ def test_cricket_desk_keeps_social_leads_separate():
 
 
 
-def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(monkeypatch):
+def test_sports_desk_buckets_are_unique_and_cover_three_editorial_categories(monkeypatch):
     concepts = []
     unique_story_phrases = [
         "uncapped spinner takes five wickets",
@@ -202,9 +202,9 @@ def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(mo
             f"source{index}.example",
         ))
     monkeypatch.setattr(desk, "_collect", lambda scope="India / Asia": concepts)
-    monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
+    monkeypatch.setattr(desk, "_normalise_rows", lambda rows, scope="India / Asia": rows)
 
-    result = desk.discover_cricket_topics(
+    result = desk.discover_sports_topics(
         bot=None,
         scope="Global",
         requested_topic="",
@@ -221,7 +221,7 @@ def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(mo
     }) == 35
 
 
-def test_cricket_desk_exposes_undercoverage_and_signal_dimensions():
+def test_sports_desk_exposes_undercoverage_and_signal_dimensions():
     item = _article("Uncapped bowler takes first five wicket haul in domestic thriller", "example.com")
     item["social_post_count"] = 3
     item["social_engagement_total"] = 7
@@ -233,14 +233,14 @@ def test_cricket_desk_exposes_undercoverage_and_signal_dimensions():
     assert "social_signal_score" in scored
 
 
-def test_cricket_desk_scope_keeps_india_asia_primary(monkeypatch):
+def test_sports_desk_scope_keeps_india_asia_primary(monkeypatch):
     rows = [
         _article("India domestic bowler breaks record", "india.example"),
         _article("England batter breaks record", "england.example"),
     ]
     monkeypatch.setattr(desk, "_collect", lambda scope="India / Asia": rows)
-    monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
-    result = desk.discover_cricket_topics(
+    monkeypatch.setattr(desk, "_normalise_rows", lambda rows, scope="India / Asia": rows)
+    result = desk.discover_sports_topics(
         bot=None,
         scope="India / Asia",
         requested_topic="",
@@ -254,13 +254,21 @@ def test_cricket_desk_scope_keeps_india_asia_primary(monkeypatch):
 
 
 
-def test_cricket_desk_uses_scope_specific_google_lanes():
+def test_sports_desk_uses_scope_specific_google_lanes():
     india = desk._google_queries_for_scope("India / Asia")
     global_queries = desk._google_queries_for_scope("Global")
+    niche = desk._google_queries_for_scope("Niche Sports")
     assert len(india) == 10
     assert len(global_queries) == 10
+    assert len(niche) == 10
     assert any("India" in query for query in india)
     assert any("Australia" in query for query in global_queries)
+    niche_blob = " ".join(niche).casefold()
+    for term in ("football", "tennis", "badminton", "hockey", "athletics", "basketball", "motogp", "boxing", "table tennis", "aquatics"):
+        assert term in niche_blob
+    for term in ("upset", "record", "injury", "controversy", "qualification", "breakthrough"):
+        assert term in niche_blob
+    assert "cricket" not in niche_blob
 
 
 def test_direct_listing_source_accepts_cricinfo_story_paths_and_calendar_dates(monkeypatch):
@@ -321,7 +329,7 @@ def test_cricket_bucket_does_not_suppress_distinct_events_in_one_competition():
 
 
 
-def test_cricket_desk_treats_india_japan_headlines_as_one_event_family():
+def test_sports_desk_treats_india_japan_headlines_as_one_event_family():
     rows = [
         _article("India survive Japan scare in dramatic T20 finish", "one.example"),
         _article("India-Japan match sparks umpiring controversy", "two.example"),
@@ -390,7 +398,7 @@ def test_matchup_merge_does_not_count_social_publishers_as_factual_sources():
     assert merged["event_evidence_publishers"] == ["factual.example"]
 
 
-def test_cricket_desk_keeps_unusual_article_headlines_for_manual_qc(monkeypatch):
+def test_sports_desk_keeps_unusual_article_headlines_for_manual_qc(monkeypatch):
     row = _article(
         "Japan bowler's bizarre final-over call leaves India stunned",
         "cricbuzz.example",
@@ -499,3 +507,56 @@ def test_dashboard_retained_topic_is_not_revalidated_through_production_quality_
 
     assert len(result) == 1
     assert result[0]["retained_from_previous_run"] is True
+
+
+def test_niche_sports_normalization_does_not_require_cricket(monkeypatch):
+    fresh = datetime.now(timezone.utc).isoformat()
+    football = _article("India football comeback reaches dramatic final", "sports.example")
+    football["publishedAt"] = fresh
+    cricket = _article("India cricket selection debate grows", "cricket.example")
+    cricket["publishedAt"] = fresh
+
+    monkeypatch.setattr(desk.sr, "_safety_gate", lambda story: (True, []))
+    monkeypatch.setattr(desk.sr, "_source_page_pass", lambda story: True)
+    monkeypatch.setattr(desk.sr, "_discovery_source_pass", lambda story: True)
+
+    result = desk._normalise_rows([football, cricket], scope="Niche Sports")
+    assert [item["title"] for item in result] == [football["title"]]
+
+
+def test_niche_sports_output_uses_the_shared_dashboard_contract(monkeypatch):
+    concepts = []
+    for index in range(9):
+        concepts.append({
+            "title": f"International tennis breakthrough event {index}",
+            "event_id": f"niche-event-{index}",
+            "event_identity_key": f"niche-identity-{index}",
+            "url": f"https://sports.example/story/{index}",
+            "source": "Sports Source",
+            "age_hours": 2,
+            "event_source_count": 2,
+            "event_article_count": 2,
+            "social_post_count": 0,
+            "news_score": 90 - index,
+            "viral_score": 80 - index,
+            "social_score": 70 - index,
+            "undercovered_score": 5,
+        })
+    monkeypatch.setattr(desk, "_collect", lambda scope="India / Asia": concepts)
+    monkeypatch.setattr(desk, "_normalise_rows", lambda rows, scope="India / Asia": list(rows))
+    monkeypatch.setattr(desk, "cluster_news_events", lambda rows: [dict(row) for row in rows])
+    monkeypatch.setattr(desk.sr, "_load_uploaded_story_identities", lambda conn: set())
+
+    result = desk.discover_sports_topics(
+        bot=None,
+        scope="Niche Sports",
+        requested_topic="",
+        max_candidates=60,
+        retained_candidates=[],
+    )
+    assert result
+    assert all(item["recommended_category"] == "sports" for item in result)
+    assert all(item["recommended_format"] == "regular" for item in result)
+    assert all(item["cricket_pipeline"] is False for item in result)
+    assert all(item["primary_genre"] == "sports" for item in result)
+    assert all(item["dashboard_discovery_version"] == desk.SPORTS_DESK_VERSION for item in result)
