@@ -248,14 +248,17 @@ def _scope_pass(item, scope):
         for entity in (item.get("event_entities") or [])
         if str(entity).strip()
     }
-    return bool(
-        entities
-        & {
-            "india", "indian", "bcci", "india a", "ranji", "duleep", "wpl", "ipl",
-            "pakistan", "pcb", "sri lanka", "bangladesh", "afghanistan",
-            "nepal", "uae", "hong kong", "japan", "asian games", "asia cup", "acc",
-        }
-    )
+    entity_scope_anchors = {
+        "india", "indian", "bcci", "india a", "ranji", "duleep", "wpl", "ipl",
+        "pakistan", "pcb", "sri lanka", "bangladesh", "afghanistan",
+        "nepal", "uae", "hong kong", "japan", "asian games", "asia cup", "acc",
+        *{
+            str(name).strip().casefold()
+            for name in getattr(sr, "CRICKET_MARQUEE_NAMES", ())
+            if str(name).strip()
+        },
+    }
+    return bool(entities & entity_scope_anchors)
 
 
 def _source_local_date(text, now=None):
