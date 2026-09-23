@@ -79,14 +79,6 @@ def _install_visual_cache_safety():
         return False
 
 
-def _patch_editorial_scoring(bot):
-    try:
-        from editorial_runtime import patch_editorial_scoring
-        return patch_editorial_scoring(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Corrected editorial scoring unavailable: {exc}", flush=True)
-        return bot
-
 
 def _wrap_editorial_provider_usage(bot):
     current = getattr(bot, "editorial_gate_batch", None)
@@ -166,7 +158,11 @@ def bind_dashboard_patches(bot):
         validate._index_normalized = True
         bot.validate_script = validate
 
-    _patch_editorial_scoring(bot)
+    try:
+        from editorial_runtime import patch_editorial_scoring
+        patch_editorial_scoring(bot)
+    except Exception as exc:
+        print(f"   [Bindings] Corrected editorial scoring unavailable: {exc}", flush=True)
     _wrap_editorial_provider_usage(bot)
     _install_script_pipeline(bot)
     _wrap_content_first_visuals(bot)
