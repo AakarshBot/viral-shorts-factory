@@ -271,3 +271,22 @@ def test_dashboard_discovery_short_cache_avoids_duplicate_provider_sweep(monkeyp
     assert first == second
 
     discovery._DASHBOARD_DISCOVERY_CACHE.clear()
+
+
+
+def test_cricket_dashboard_does_not_reject_weird_but_source_backed_headlines(monkeypatch):
+    story = _fresh_story(
+        "Japan bowler's bizarre final-over call leaves India stunned",
+        event_source_count=1,
+        event_article_count=1,
+        collection_source="google_news_rss",
+    )
+    monkeypatch.setattr(discovery.sr, "_source_page_pass", lambda item: True)
+    monkeypatch.setattr(discovery.sr, "_cricket_service_title_pass", lambda item: True)
+    monkeypatch.setattr(discovery.sr, "_headline_noise_pass", lambda item: False)
+    monkeypatch.setattr(discovery.sr, "_discovery_source_pass", lambda item: True)
+    assert discovery._hard_dashboard_pass(
+        story,
+        "sports_stories_of_day",
+        "",
+    ) is True
