@@ -111,6 +111,19 @@ def _validate_script_result(result, story_data, format_mode):
         if not valid:
             return None, reason
 
+        titles = cleaned.get("titles")
+        if not isinstance(titles, list) or len(titles) != 3:
+            return None, "Script must contain exactly three usable title candidates."
+        if any(not str(title or "").strip() for title in titles):
+            return None, "Script contains an empty title candidate."
+        try:
+            recommended_index = int(cleaned.get("recommended_title_index", 1))
+        except (TypeError, ValueError):
+            return None, "Script recommended title index is invalid."
+        if recommended_index not in (1, 2, 3):
+            return None, "Script recommended title index is invalid."
+        cleaned["recommended_title_index"] = recommended_index
+
         release_valid, release_reason, _release_assessment = sr.assess_release_structure(
             cleaned,
             format_mode,
@@ -138,7 +151,11 @@ def _estimate_script_duration(script_data):
     import script_runtime as sr
 
     scenes = script_data.get("script") if isinstance(script_data, dict) else None
-    persona_key = str(script_data.get("persona_used") or "LISTICLE HOST").upper()
+    persona_key = str(
+        script_data.get("delivery_profile")
+        or script_data.get("persona_used")
+        or "LISTICLE HOST"
+    ).upper()
     # Keep the estimate independent of ultimate_bot globals so this router remains
     # testable and authoritative even when runtime bindings are active.
     try:
@@ -199,6 +216,9 @@ def tighten_script_for_duration_once(
     if validated is None:
         return None, f"duration repair failed canonical QC: {reason}"
 
+    if isinstance(candidate, dict) and str(candidate.get("delivery_profile") or "").strip():
+        validated["delivery_profile"] = str(candidate.get("delivery_profile")).strip()
+
     estimate = _estimate_script_duration(validated)
     validated["duration_repair_attempted"] = True
     validated["duration_repair_target_seconds"] = DURATION_REPAIR_TARGET_SECONDS
@@ -215,6 +235,18 @@ def tighten_script_for_duration_once(
 
     validated["duration_repair_succeeded"] = True
     return validated, ""
+
+
+def _apply_delivery_profile(bot, script_data):
+    """Align pre-TTS duration estimates with the profile the audio layer will actually use."""
+    try:
+        from audio_direction_runtime import choose_delivery_profile
+        profile = str(choose_delivery_profile(bot, script_data) or "").strip()
+    except Exception:
+        profile = ""
+    if profile:
+        script_data["delivery_profile"] = profile
+    return profile
 
 
 def _prepare_story_data(data, pack, evidence_text, evidence_fallback_used):
@@ -356,6 +388,7 @@ def install_script_pipeline(bot):
                 continue
             validated, reason = _validate_script_result(candidate, data, format_mode)
             if validated is not None:
+                _apply_delivery_profile(bot, validated)
                 estimate = _estimate_script_duration(validated)
                 validated["estimated_duration_seconds"] = estimate["seconds"]
                 validated["estimated_duration_word_count"] = estimate["word_count"]
