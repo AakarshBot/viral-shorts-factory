@@ -18,6 +18,45 @@ def _article(title, domain, hours=3):
     }
 
 
+
+
+
+def test_cricket_desk_request_timeouts_fit_their_lane_budgets():
+    assert desk.GOOGLE_REQUEST_TIMEOUT < desk.PRIMARY_DESK_TIMEOUT
+    assert desk.SOURCE_TIMEOUT < desk.PRIMARY_DESK_TIMEOUT
+    assert desk.REQUEST_TIMEOUT < desk.SECONDARY_DESK_TIMEOUT
+    assert desk.TREND_REQUEST_TIMEOUT < desk.SECONDARY_DESK_TIMEOUT
+
+
+def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
+    calls = []
+
+    def fake_google(*args, **kwargs):
+        calls.append(("google", args, kwargs))
+        return []
+
+    def fake_trends(*args, **kwargs):
+        calls.append(("trends", args, kwargs))
+        return []
+
+    monkeypatch.setattr(desk.sr, "_google_news_search_items", fake_google)
+    monkeypatch.setattr(desk.sr, "_google_trends_items", fake_trends)
+    monkeypatch.setattr(desk, "_direct_listing_source", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_reddit_search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_mastodon", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
+
+    desk._collect("India / Asia")
+
+    google = [item for item in calls if item[0] == "google"]
+    trends = [item for item in calls if item[0] == "trends"]
+    assert google
+    assert all(item[2]["timeout"] == desk.GOOGLE_REQUEST_TIMEOUT for item in google)
+    assert len(trends) == len(desk.TREND_GEOS)
+    assert all(item[2]["timeout"] == desk.TREND_REQUEST_TIMEOUT for item in trends)
+
+
 def test_cricket_desk_duplicate_headlines_form_one_concept():
     rows = [
         _article("India survive Japan scare in dramatic T20 finish", "one.example"),
