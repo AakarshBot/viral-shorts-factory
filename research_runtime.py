@@ -182,12 +182,8 @@ def _gemini_script_fallback(
             }
         ],
         "generationConfig": {
-            "responseFormat": {
-                "text": {
-                    "mimeType": "application/json",
-                    "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
-                }
-            },
+            "responseMimeType": "application/json",
+            "responseSchema": SCRIPT_OUTPUT_JSON_SCHEMA,
             "maxOutputTokens": 900,
             "thinkingConfig": {"thinkingLevel": "low"},
         },
@@ -264,7 +260,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "Use narrative_role values hook, development, context, consequence.\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         + word_contract
-        + "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
+        + "- Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14. It must be a factual headline and the most compact scene.\n"
         f"{scene_contract}"
         "- Scene 1 is the only headline-style beat. Every later scene must add new, story-specific information rather than restating the title.\n"
         "- Normally use four scenes for a regular story; use three only when a fourth beat would be artificial.\n"
@@ -451,7 +447,7 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
         base_url.rstrip("/") + "/v1/chat/completions",
         payload,
         {"Content-Type": "application/json"},
-        30,
+        60,
         story_data,
         format_mode,
         f"ollama/{model}",
