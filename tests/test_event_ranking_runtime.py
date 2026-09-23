@@ -379,3 +379,45 @@ def test_sports_discovery_portfolio_has_a_defined_hook_signal():
         },
     }
     assert story_ranker._discovery_portfolio_pass(story) is True
+
+
+
+def test_cricket_event_family_recognizes_india_japan_matchup():
+    story = {
+        "title": "India survive Japan scare in dramatic T20 finish",
+        "event_search_text": "India survive Japan scare in dramatic T20 finish",
+        "event_entities": ["India", "Japan"],
+    }
+    assert story_ranker._cricket_event_family(story) == "india_japan_matchup"
+
+
+def test_cricket_diversity_rerank_caps_india_japan_family():
+    stories = []
+    for index in range(8):
+        stories.append({
+            "title": f"India Japan cricket development {index}",
+            "event_search_text": f"India Japan cricket development {index}",
+            "event_entities": ["India", "Japan"],
+            "event_actions": ["win"],
+            "candidate_score": 100 - index,
+            "freshness_score": 8,
+            "niche_opportunity_score": 2,
+            "discovery_target_category": "sports_stories_of_day",
+        })
+    for index in range(12):
+        stories.append({
+            "title": f"Distinct cricket development {index} elsewhere",
+            "event_search_text": f"Distinct cricket development {index} elsewhere",
+            "event_entities": [f"Player {index}", "Other team"],
+            "event_actions": ["comment"],
+            "candidate_score": 70 - index,
+            "freshness_score": 7,
+            "niche_opportunity_score": 8,
+            "discovery_target_category": "sports_stories_of_day",
+        })
+
+    selected = story_ranker.diversity_rerank(stories, max_items=12)
+
+    assert len(selected) == 12
+    assert sum(item["cricket_event_family"] == "india_japan_matchup" for item in selected[:6]) <= 2
+    assert sum(item["cricket_event_family"] == "india_japan_matchup" for item in selected) <= 4
