@@ -1187,17 +1187,17 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     )
 
     scene_contract = (
-        "For Top-5 mode, output 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
+        "For Top-5 mode, output exactly 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
         "the fifth entry should deliver the final payoff. "
         if format_mode_key == "top5"
-        else "For a regular Short, normally use 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple. "
+        else "For a regular Short, output exactly 4 scenes: hook, development, context, consequence. Keep each scene concise and substantive. "
     )
     word_contract = (
         "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
         if format_mode_key == "top5"
         else "- Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling.\n"
     )
-    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
+    from script_runtime import choose_editorial_angle
     editorial_angle = choose_editorial_angle(story_data, format_mode)
 
     system_prompt = (
