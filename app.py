@@ -1997,10 +1997,10 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if bool(asset.get("used")):
                             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
 
-    st.markdown("### Available verified images")
+    st.markdown("### Available manual-search images")
     render_pool_section(
-        "All AI-checked images",
-        "Every unused image that passed the AI identity check and lenient monetization check is shown here, regardless of context or soft resolution.",
+        "Manual-search image pool",
+        "Images returned by your manual search are shown here. AI identity verdicts, context and soft-resolution flags are diagnostics; your visual review decides what is usable.",
         available,
         "verified",
     )
