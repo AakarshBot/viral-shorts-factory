@@ -1005,32 +1005,13 @@ def get_insights_for_script(conn):
 
 def validate_script(script_data, source_text, format_mode):
     try:
-        story_data = {"research_evidence_text": str(source_text or "")}
-        valid, reason = validate_content_density(
+        return validate_content_density(
             script_data,
-            story_data,
+            {"research_evidence_text": str(source_text or "")},
             format_mode,
         )
-        if not valid:
-            return False, reason
-        from script_runtime import assess_release_structure
-        valid, reason, _assessment = assess_release_structure(script_data, format_mode)
-        if not valid:
-            return False, reason
-        titles = script_data.get("titles")
-        if not isinstance(titles, list) or len(titles) != 3:
-            return False, "Exactly three title candidates are required."
-        try:
-            recommended_index = int(script_data.get("recommended_title_index", 1))
-        except (TypeError, ValueError):
-            return False, "Recommended title index is invalid."
-        if recommended_index not in (1, 2, 3):
-            return False, "Recommended title index is invalid."
-        return True, "Passed canonical script validation"
     except Exception as exc:
         return False, f"Canonical script validation failed: {type(exc).__name__}: {exc}"
-
-
 def self_critique_pass(script_data, format_mode):
     """Compatibility surface; substantive script QC lives in script_runtime/quality_runtime."""
     try:
