@@ -222,29 +222,34 @@ def install_script_pipeline(bot):
         ]
 
         accepted = None
-        last_reason = ""
+        attempt_reasons = []
         for provider_name, provider_call in attempts:
             try:
                 print(f"   [Script Pipeline] Provider: {provider_name}.", flush=True)
                 candidate = provider_call()
             except Exception as exc:
                 candidate = None
-                last_reason = f"{provider_name} failed: {type(exc).__name__}: {exc}"
-                print(f"   [Script Pipeline] {last_reason}", flush=True)
+                reason = f"{provider_name} failed: {type(exc).__name__}: {exc}"
+                attempt_reasons.append(reason)
+                print(f"   [Script Pipeline] {reason}", flush=True)
             if candidate is None:
+                reason = f"{provider_name} returned no script candidate."
+                attempt_reasons.append(reason)
+                print(f"   [Script Pipeline] {reason}", flush=True)
                 continue
             validated, reason = _validate_script_result(candidate, data, format_mode)
             if validated is not None:
                 validated["provider_used"] = provider_name
                 accepted = validated
                 break
-            last_reason = f"{provider_name} rejected by canonical script QC: {reason}"
-            print(f"   [Script Pipeline] {last_reason}", flush=True)
+            reason = f"{provider_name} rejected by canonical script QC: {reason}"
+            attempt_reasons.append(reason)
+            print(f"   [Script Pipeline] {reason}", flush=True)
 
         if accepted is None:
+            details = " | ".join(dict.fromkeys(attempt_reasons)) or "No provider attempt completed."
             raise ValueError(
-                "Script acceptance gate failed after every original-writing provider: "
-                + (last_reason or "unknown failure")
+                "Script acceptance gate failed after every original-writing provider: " + details
             )
 
         if evidence_fallback_used:
