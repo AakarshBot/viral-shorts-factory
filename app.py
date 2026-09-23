@@ -1573,10 +1573,9 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
             bank_path = str(bank_item.get("path") or "").strip()
             if bank_path and os.path.isfile(bank_path):
                 bank.append(dict(bank_item))
-        # Dashboard display is intentionally simple: identity AI verification
-        # is the acceptance boundary; provider rights/provenance remain visible
-        # as metadata for the human reviewer. Context suitability and soft
-        # resolution are deliberately not display filters.
+        # This is an explicit human-QC checkpoint. AI identity verdicts,
+        # context suitability and soft resolution remain visible as diagnostics,
+        # but they must not disable a present image that the reviewer can inspect.
         unused_verified = [dict(item) for item in bank]
         items.append(
             {
@@ -1586,7 +1585,7 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                 "source": str(layer.get("source_type") or "visual"),
                 "visual_type": str(layer.get("visual_type") or "visual"),
                 "verified": verified,
-                "qc_passed": verified and not missing and not bool(layer.get("visual_qc_blocked", False)),
+                "qc_passed": not missing,
                 "qc_reason": (
                     "Rendered image file is missing from the dashboard host."
                     if missing
