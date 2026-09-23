@@ -878,7 +878,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
             resp = requests.post(
-                groq_url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                groq_url, headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
                 json={"model": "openai/gpt-oss-120b", "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": json.dumps([{"title": s['title'], "text": s['text'][:200]} for s in batch_stories])}], "response_format": {"type": "json_object"}}, timeout=25
             )
             
@@ -1033,9 +1033,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         },
     ]
 
-    if not GROQ_API_KEY:
-        print("   [Script Writer] Groq key unavailable; returning control to the canonical fallback chain.", flush=True)
-        return None
+    groq_api_key = str(os.getenv("GROQ_API_KEY") or globals().get("GROQ_API_KEY") or "").strip()
+    if not groq_api_key:
+        raise RuntimeError("Groq script provider unavailable: GROQ_API_KEY is not configured.")
 
     try:
         response = requests.post(
@@ -1054,14 +1054,12 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             timeout=30,
         )
         if response.status_code != 200:
-            print(f"   [Script Writer] Groq returned HTTP {response.status_code}; using fallback provider.", flush=True)
-            return None
+            raise RuntimeError(f"Groq script provider HTTP {response.status_code}; falling through to the next provider.")
 
         raw_content = response.json()["choices"][0]["message"]["content"]
         data = parse_groq_json_response(raw_content)
         if not isinstance(data, dict):
-            print("   [Script Writer] Groq returned invalid JSON; using fallback provider.", flush=True)
-            return None
+            raise ValueError("Groq script provider returned invalid JSON; falling through to the next provider.")
 
         data["hook_type"] = classify_hook_style(data)
         data["hook_style_used"] = data["hook_type"]
@@ -1070,8 +1068,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
 
         return data
     except Exception as exc:
-        print(f"   [Script Writer] Groq exception: {type(exc).__name__}: {exc}", flush=True)
-        return None
+        print(f"   [Script Writer] Groq failed: {type(exc).__name__}: {exc}", flush=True)
+        raise
 
 
 async def generate_voiceover_and_timestamps(script_data, language_cfg):
