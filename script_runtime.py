@@ -1179,13 +1179,25 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             items = json.loads(str(story_data.get("text")))
             if isinstance(items, list):
                 parts = []
+                parsed_fragments = []
                 for item in items:
-                    if isinstance(item, dict):
-                        parts.extend(
-                            str(item.get(key) or "").strip()
-                            for key in ("title", "text", "summary")
-                        )
-                parsed_fragments = _fallback_source_fragments(*parts)
+                    if not isinstance(item, dict):
+                        continue
+                    item_title = re.sub(r"\s+", " ", str(item.get("title") or "").strip())
+                    item_body = _fallback_source_fragments(
+                        item.get("text"),
+                        item.get("summary"),
+                        item.get("description"),
+                    )
+                    beat_parts = [part for part in (item_title, *item_body) if str(part or "").strip()]
+                    beat = " — ".join(beat_parts[:2])
+                    if beat and len(re.findall(r"\b\w+\b", beat)) >= 5:
+                        parsed_fragments.append(beat)
+                    parts.extend(
+                        str(item.get(key) or "").strip()
+                        for key in ("title", "text", "summary", "description")
+                        if str(item.get(key) or "").strip()
+                    )
                 if parsed_fragments:
                     source_fragments = parsed_fragments
                 raw_source = " ".join(part for part in parts if part).strip() or raw_source
@@ -1193,17 +1205,22 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             pass
 
     sentences = source_fragments
-    if str(format_mode or "").strip().lower() == "top5" and len(sentences) > 6:
-        sentences = sentences[:5] + [sentences[-1]]
+    is_top5 = str(format_mode or "").strip().lower() == "top5"
     entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category = str(genre_key or "news").replace("_", " ").title()
     scenes = []
-    fallback_sentences = list(sentences)
-    # The emergency path should still open with the concrete story headline,
-    # not with source boilerplate or a generic setup sentence. Replace the
-    # first source beat rather than adding a new scene.
-    if title and fallback_sentences:
-        fallback_sentences[0] = title
+    if is_top5:
+        # Top-5 rendering reserves scene 1 for the overall opener and maps
+        # scenes 2–6 to ranks 5–1. Preserve the five source stories as five
+        # distinct ranked beats instead of flattening them into arbitrary prose.
+        fallback_sentences = [title] + list(sentences[:5]) if title else list(sentences[:5])
+    else:
+        fallback_sentences = list(sentences)
+        # The emergency path should still open with the concrete story headline,
+        # not with source boilerplate or a generic setup sentence. Replace the
+        # first source beat rather than adding a new scene.
+        if title and fallback_sentences:
+            fallback_sentences[0] = title
     for index, sentence in enumerate(fallback_sentences, 1):
         role = (
             "hook" if index == 1
@@ -1222,7 +1239,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             "scene_id": index,
         })
 
-    if str(format_mode or "").strip().lower() == "top5":
+    if is_top5:
         if len(scenes) != 6:
             raise ValueError(
                 "Source-grounded fallback refused to invent narration: the source does not provide exactly "
