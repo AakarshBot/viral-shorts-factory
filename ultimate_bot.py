@@ -24,7 +24,7 @@ load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
 from script_runtime import (
-    append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
+    append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density, check_script_originality,
     estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
 )
 
