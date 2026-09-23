@@ -7,7 +7,7 @@ def test_exact_source_sentence_is_rejected():
     )
     script = {
         "script": [{
-            "voiceover": "Alpha beta gamma delta epsilon zeta eta theta iota.",
+            "voiceover": "Alpha beta gamma delta epsilon zeta eta theta.",
             "narrative_role": "hook",
         }]
     }
