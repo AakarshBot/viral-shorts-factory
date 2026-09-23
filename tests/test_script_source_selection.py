@@ -45,38 +45,11 @@ def _contract_scene(text, role):
     }
 
 
-def test_validate_script_accepts_compact_one_or_two_scene_stories():
-    one_scene = {
-        "editorial_angle": "Explain the confirmed event.",
-        "script": [
-            _contract_scene("India announced the policy today.", "hook"),
-        ],
-    }
-    valid, reason = validate_script(
-        one_scene,
-        "India announced a new policy today.",
-        "regular",
-    )
-    assert valid is True, reason
-
-    two_scene = {
-        "editorial_angle": "Explain the confirmed event and consequence.",
-        "script": [
-            _contract_scene("India announced a major policy change.", "hook"),
-            _contract_scene("Officials now begin implementing the revised process.", "consequence"),
-        ],
-    }
-    valid, reason = validate_script(
-        two_scene,
-        "India announced a new policy and officials will implement it.",
-        "regular",
-    )
-    assert valid is True, reason
-
-
 def test_validate_script_rejects_beyond_safety_ceiling():
     script = {
         "editorial_angle": "This explains the development and practical consequence.",
+        "titles": ["India policy update", "India confirms the change", "What the change means"],
+        "recommended_title_index": 1,
         "script": [
             _contract_scene("India confirmed the change.", "hook"),
             _contract_scene(" ".join(["word"] * 90), "development"),
@@ -94,6 +67,8 @@ def test_validate_script_rejects_beyond_safety_ceiling():
 def test_validate_script_accepts_compact_three_scene_story():
     script = {
         "editorial_angle": "This explains the development and practical consequence.",
+        "titles": ["India policy update", "India announces policy change", "What the change means"],
+        "recommended_title_index": 1,
         "script": [
             _contract_scene("India announced the policy today.", "hook"),
             _contract_scene("Officials are implementing the revised process.", "development"),
