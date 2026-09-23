@@ -1,4 +1,4 @@
-"""Sports-first cricket topic desk with maximum recall and event-level uniqueness."""
+"""Sports topic desk with maximum recall, event-level uniqueness and a shared dashboard contract."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events, event_identity_key, fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "cricket-desk-v8-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v9-2026-09-24"
 LOOKBACK_HOURS = 72
 MAX_DASHBOARD_HEADLINES = 60
 
@@ -38,6 +38,7 @@ CRICKET_PRIMARY_EVENT_FLOOR = 18
 GOOGLE_RESULT_LIMIT = 30
 DIRECT_RESULT_LIMIT = 45
 ICC_RSS_URL = "https://www.icc-cricket.com/index?feed=rss2"
+SPORTS_RSS_URL = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en"
 
 # Reddit/Mastodon are secondary-only. They are disabled by default because the
 # public unauthenticated endpoints are not dependable enough to be discovery
@@ -67,19 +68,33 @@ INDIA_ASIA_GOOGLE_QUERIES = (
 )
 
 GLOBAL_GOOGLE_QUERIES = (
-    'international cricket latest when:3d',
-    'Australia England South Africa New Zealand West Indies cricket when:3d',
-    'cricket selection injury retirement appointment coach captain when:3d',
-    'cricket statement reaction controversy dispute row debate when:3d',
-    'cricket record milestone first fastest historic upset comeback thriller scare when:3d',
-    'women cricket domestic associate emerging player when:7d',
-    'cricket uncapped debut breakthrough academy comeback when:7d',
-    'T20 Test franchise league auction coaching cricket when:7d',
-    'cricket bizarre unusual viral fans reaction social media when:3d',
-    'ICC cricket latest development when:3d',
+    '(ICC OR "international cricket") (Australia OR England OR South Africa OR New Zealand OR West Indies OR Pakistan OR Sri Lanka OR Bangladesh) when:3d',
+    'international cricket (upset OR comeback OR collapse OR breakthrough OR unexpected result OR last-ball win) when:3d',
+    'international cricket (record OR first OR fastest OR youngest OR oldest OR milestone OR historic OR unbeaten streak) when:3d',
+    'international cricket (injury OR injured OR comeback OR retirement OR debut OR selection OR selected OR recalled OR captain OR coach) when:3d',
+    'international cricket (controversy OR dispute OR sanction OR penalty OR suspension OR ban OR investigation OR criticism OR reaction OR ruling) when:3d',
+    'international cricket (final OR semifinal OR qualification OR elimination OR title race OR championship OR tournament development) when:3d',
+    'women cricket (record OR upset OR comeback OR breakthrough OR selection OR debut OR milestone OR controversy) when:7d',
+    '(Test OR ODI OR T20) cricket (record OR result OR upset OR controversy OR selection OR milestone) when:7d',
+    'cricket (domestic OR franchise OR league OR auction OR associate nation OR emerging player OR uncapped) (debut OR record OR breakthrough OR selection OR comeback) when:7d',
+    'ICC cricket (announced OR confirmed OR decision OR ruling OR development) when:3d',
+)
+
+NICHE_SPORTS_GOOGLE_QUERIES = (
+    'India football soccer (upset OR comeback OR record OR first OR breakthrough OR transfer OR coach OR controversy OR penalty OR qualification OR final) when:3d',
+    'India tennis badminton (upset OR comeback OR record OR first OR milestone OR injury OR retirement OR debut OR selection OR controversy OR final) when:3d',
+    'India hockey kabaddi athletics (upset OR comeback OR record OR medal OR qualification OR penalty OR suspension OR breakthrough OR final) when:3d',
+    'India basketball volleyball golf (upset OR record OR milestone OR transfer OR coach OR qualification OR final OR controversy OR breakthrough) when:3d',
+    'India motorsport "Formula 1" F1 MotoGP (penalty OR crash OR comeback OR record OR pole OR debut OR transfer OR controversy OR qualification) when:3d',
+    'international football soccer (upset OR comeback OR record OR first OR breakthrough OR transfer OR coach OR controversy OR penalty OR qualification OR final) when:3d',
+    'international tennis badminton (upset OR comeback OR record OR first OR milestone OR injury OR retirement OR debut OR selection OR controversy OR final) when:3d',
+    'international hockey athletics (record OR first OR medal OR qualification OR breakthrough OR ban OR suspension OR comeback OR championship) when:3d',
+    'international basketball volleyball golf (upset OR record OR milestone OR transfer OR injury OR qualification OR final OR controversy OR title) when:3d',
+    '(boxing OR wrestling OR "table tennis" OR squash OR archery OR shooting OR swimming OR aquatics OR cycling OR gymnastics OR weightlifting OR Olympics) (women OR emerging OR breakout OR record OR first OR medal OR qualification OR breakthrough OR debut OR comeback OR suspension OR controversy OR title) when:7d',
 )
 
 REDDIT_SUBREDDITS = ("Cricket", "IndiaCricket", "CricketShitpost")
+NICHE_BLUESKY_QUERIES = ("sports", "football", "tennis")
 BLUESKY_QUERIES = ("cricket", '"India cricket"', "cricket reaction")
 MASTODON_QUERIES = ("cricket", "India cricket")
 TREND_GEOS = ("IN", "GB", "AU", "US")
@@ -530,14 +545,44 @@ def _google_queries_for_scope(scope):
         return INDIA_ASIA_GOOGLE_QUERIES[:GOOGLE_QUERY_LIMIT]
     if scope_key == "global":
         return GLOBAL_GOOGLE_QUERIES[:GOOGLE_QUERY_LIMIT]
+    if scope_key == "niche sports":
+        return NICHE_SPORTS_GOOGLE_QUERIES[:GOOGLE_QUERY_LIMIT]
     merged = tuple(dict.fromkeys((*INDIA_ASIA_GOOGLE_QUERIES, *GLOBAL_GOOGLE_QUERIES)))
     return merged[:GOOGLE_QUERY_LIMIT]
 
 
-def _normalise_rows(rows):
+def _is_non_cricket_sports(item):
+    item = item if isinstance(item, dict) else {}
+    text = _clean(
+        " ".join(
+            str(item.get(key) or "")
+            for key in (
+                "title", "text", "description", "summary", "snippet",
+                "trend_query", "event_search_text", "event_entities",
+            )
+        )
+    ).casefold()
+    terms = (
+        "football", "soccer", "tennis", "badminton", "hockey", "athletics",
+        "basketball", "volleyball", "golf", "rugby", "motorsport", "formula 1",
+        "f1", "motogp", "wrestling", "boxing", "mma", "kabaddi", "table tennis",
+        "squash", "archery", "shooting", "swimming", "aquatics", "cycling",
+        "gymnastics", "weightlifting", "olympics", "olympic",
+    )
+    return any(_word_match(text, term) for term in terms)
+
+
+def _normalise_rows(rows, scope="India / Asia"):
+    scope_key = _clean(scope).casefold()
+    niche_scope = scope_key == "niche sports"
     output, seen = [], set()
     for raw in rows or []:
-        if not isinstance(raw, dict) or not _is_cricket(raw):
+        if not isinstance(raw, dict):
+            continue
+        if niche_scope:
+            if not _is_non_cricket_sports(raw):
+                continue
+        elif not _is_cricket(raw):
             continue
         item = dict(raw)
         age = _age_hours(item.get("publishedAt") or item.get("published_at") or item.get("created_at"))
@@ -549,7 +594,10 @@ def _normalise_rows(rows):
         if not item.get("social_post"):
             if not sr._source_page_pass(item):
                 continue
-            if not sr._cricket_service_title_pass(item):
+            if niche_scope:
+                if not sr._discovery_source_pass(item):
+                    continue
+            elif not sr._cricket_service_title_pass(item):
                 continue
         url = _clean(item.get("url") or item.get("link"))
         canonical = sr._canonical_url(url)
@@ -775,14 +823,18 @@ def _enrich_events(events, rows):
     return events
 
 
-def _score(item, trends, history_titles=None, retained=None):
+def _score(item, trends, history_titles=None, retained=None, scope="India / Asia")
     text = _clean(" ".join(
         str(item.get(k) or "")
         for k in ("title", "text", "description", "event_search_text")
     )).casefold()
     reaction_hits = sum(1 for term in REACTION_TERMS if _word_match(text, term))
     hook_hits = sum(1 for term in HOOK_TERMS if _word_match(text, term))
-    major_hits = sum(1 for term in SATURATION_TERMS if _word_match(text, term))
+    saturation_terms = SATURATION_TERMS if _clean(scope).casefold() != "niche sports" else (
+        "world cup", "final", "championship", "major final", "grand slam",
+        "olympics", "asian games", "commonwealth games", "world championships",
+    )
+    major_hits = sum(1 for term in saturation_terms if _word_match(text, term))
     source_count = int(item.get("event_source_count") or 0)
     article_count = int(item.get("event_article_count") or 0)
     coverage = min(10.0, source_count * 1.8 + min(4.0, article_count * 0.35))
@@ -832,7 +884,7 @@ def _score(item, trends, history_titles=None, retained=None):
     return item
 
 
-def _bucketize(concepts):
+def _bucketize(concepts, scope="India / Asia")
     # One event can appear in only one dashboard bucket. Bucketization is a
     # presentation layer; it must never duplicate the underlying event.
     candidates = []
@@ -889,7 +941,8 @@ def _bucketize(concepts):
             row = dict(best)
             row["discovery_bucket"] = bucket
             row["bucket_score"] = float(row.get(score_name) or 0.0)
-            row["cricket_event_family"] = sr._cricket_event_family(best)
+            if _clean(scope).casefold() != "niche sports":
+                row["cricket_event_family"] = sr._cricket_event_family(best)
             result.append(row)
 
     for bucket, score_name in (
@@ -906,7 +959,7 @@ def _collect(scope="India / Asia"):
     scope_key = _clean(scope).casefold()
     news_hl, news_gl, news_ceid = (
         ("en-IN", "IN", "IN:en")
-        if scope_key == "india / asia"
+        if scope_key in {"india / asia", "niche sports"}
         else ("en-GB", "GB", "GB:en")
     )
 
@@ -949,11 +1002,12 @@ def _collect(scope="India / Asia"):
     # conditional so a slow Google transport cannot make every dashboard refresh
     # pay for ten simultaneous requests.
     primary_jobs = []
+    collection_genre = "sports" if scope_key == "niche sports" else "sports_stories_of_day"
     for query in google_queries[:GOOGLE_PRIMARY_QUERY_LIMIT]:
         primary_jobs.append((
             f"Google News:{query}",
             sr._google_news_search_items,
-            (query, "sports_stories_of_day", GOOGLE_RESULT_LIMIT),
+            (query, collection_genre, GOOGLE_RESULT_LIMIT),
             {
                 "timeout": GOOGLE_REQUEST_TIMEOUT,
                 "hl": news_hl,
@@ -962,31 +1016,45 @@ def _collect(scope="India / Asia"):
             },
         ))
 
-    # ICC exposes a public RSS feed; unlike the HTML listing parser this needs
-    # no JavaScript page rendering and provides an independent official signal.
-    primary_jobs.append((
-        "ICC RSS",
-        sr._rss_items,
-        (ICC_RSS_URL, "sports_stories_of_day", "official", 40),
-        {"timeout": SOURCE_TIMEOUT},
-    ))
-
-    # Keep official/specialist pages in the same first pass, but do not make
-    # Google alone the discovery dependency.
-    for name, url, _kind in DIRECT_CRICKET_SOURCES:
+    if scope_key == "niche sports":
         primary_jobs.append((
-            name,
-            _direct_listing_source,
-            (name, url),
-            {},
+            "Sports RSS",
+            sr._rss_items,
+            (SPORTS_RSS_URL, "sports", "rss", 40),
+            {"timeout": SOURCE_TIMEOUT},
+        ))
+    else:
+        # ICC exposes a public RSS feed; unlike the HTML listing parser this needs
+        # no JavaScript page rendering and provides an independent official signal.
+        primary_jobs.append((
+            "ICC RSS",
+            sr._rss_items,
+            (ICC_RSS_URL, "sports_stories_of_day", "official", 40),
+            {"timeout": SOURCE_TIMEOUT},
         ))
 
+        # Keep official/specialist pages in the same first pass, but do not make
+        # Google alone the discovery dependency.
+        for name, url, _kind in DIRECT_CRICKET_SOURCES:
+            primary_jobs.append((
+                name,
+                _direct_listing_source,
+                (name, url),
+                {},
+            ))
+
+    bluesky_query = (
+        NICHE_BLUESKY_QUERIES[0]
+        if scope_key == "niche sports"
+        else (BLUESKY_QUERIES[1] if scope_key == "india / asia" else "cricket")
+    )
     secondary_jobs = [
-        ("Bluesky", _bluesky, (
-            BLUESKY_QUERIES[1] if scope_key == "india / asia" else "cricket",
-        ), {}),
+        ("Bluesky", _bluesky, (bluesky_query,), {}),
     ]
-    trend_geos = ("IN",) if scope_key == "india / asia" else ("GB", "AU")
+    trend_geos = (
+        ("IN", "US") if scope_key == "niche sports"
+        else (("IN",) if scope_key == "india / asia" else ("GB", "AU"))
+    )
     for geo in trend_geos:
         secondary_jobs.append((
             f"Google Trends {geo}",
@@ -995,13 +1063,16 @@ def _collect(scope="India / Asia"):
             {"timeout": SECONDARY_REQUEST_TIMEOUT},
         ))
     if ENABLE_REDDIT_DISCOVERY:
-        for subreddit in REDDIT_SUBREDDITS:
-            secondary_jobs.append((
-                f"Reddit r/{subreddit}",
-                _reddit_search,
-                (subreddit, "cricket"),
-                {},
-            ))
+        if scope_key == "niche sports":
+            secondary_jobs.append(("Reddit r/sports", sr._reddit_items, ("sports", "sports", 35), {}))
+        else:
+            for subreddit in REDDIT_SUBREDDITS:
+                secondary_jobs.append((
+                    f"Reddit r/{subreddit}",
+                    _reddit_search,
+                    (subreddit, "cricket"),
+                    {},
+                ))
     if ENABLE_MASTODON_DISCOVERY:
         secondary_jobs.append((
             "Mastodon",
@@ -1094,9 +1165,13 @@ def _collect(scope="India / Asia"):
 
     if len(deduped_core) < 45:
         gdelt_query = (
-            "India cricket selection injury controversy records women domestic"
-            if scope_key == "india / asia"
-            else "international cricket selection injury controversy records women"
+            "India football tennis badminton hockey athletics basketball kabaddi motorsport women records upset comeback controversy"
+            if scope_key == "niche sports"
+            else (
+                "India cricket selection injury controversy records women domestic"
+                if scope_key == "india / asia"
+                else "international cricket selection injury controversy records women"
+            )
         )
         try:
             gdelt_rows = fetch_gdelt_articles(
@@ -1119,9 +1194,9 @@ def _collect(scope="India / Asia"):
     return rows
 
 
-def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=60, retained_candidates=None):
+def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=60, retained_candidates=None):
     raw = _collect(scope)
-    all_rows = _normalise_rows(raw)
+    all_rows = _normalise_rows(raw, scope=scope)
     trend_rows = [
         row for row in all_rows
         if _clean(row.get("collection_source")).casefold() == "google_trends"
@@ -1133,9 +1208,11 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
     ]
 
     events = cluster_news_events(rows)
-    for event in events:
-        event["cricket_event_family"] = sr._cricket_event_family(event)
-    events = _merge_same_matchup_events(events)
+    niche_scope = _clean(scope).casefold() == "niche sports"
+    if not niche_scope:
+        for event in events:
+            event["cricket_event_family"] = sr._cricket_event_family(event)
+        events = _merge_same_matchup_events(events)
     events = _enrich_events(events, rows)
 
     # Trend items are signals only; they never become independent factual events.
@@ -1151,15 +1228,12 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
                 best = max(best, float(trend.get("trend_bonus") or 0.0))
         event["trend_signal_score"] = round(min(6.0, best * 1.25), 2)
 
-    # Prevent already-uploaded events from ever returning to the dashboard.
-    # Unpublished selections are not consulted here; they are merged back by
-    # dashboard_runtime and remain visible until an upload is recorded.
     uploaded = sr._load_uploaded_story_identities(conn)
     events = [event for event in events if not sr._uploaded_story_match(event, uploaded)]
 
     for event in events:
-        event["recommended_category"] = "sports_stories_of_day"
-        event["primary_genre"] = "cricket"
+        event["recommended_category"] = "sports" if niche_scope else "sports_stories_of_day"
+        event["primary_genre"] = "sports" if niche_scope else "cricket"
 
     history_titles = []
     if conn is not None:
@@ -1191,35 +1265,33 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
     for event in events:
         if requested_topic and not sr._requested_topic_pass(event, requested_topic):
             continue
-        scored.append(_score(event, trends, history_titles, retained))
+        scored.append(_score(event, trends, history_titles, retained, scope=scope))
 
-    buckets = _bucketize(scored)
+    buckets = _bucketize(scored, scope=scope)
     output = []
     for item in buckets[:MAX_DASHBOARD_HEADLINES]:
         item = dict(item)
         item["dashboard_discovery_version"] = SPORTS_DESK_VERSION
         item["story_key"] = sr._story_key(item)
         item["story_url"] = item.get("url") or sr._story_url(item)
-        item["source_label"] = sr._source_label(item) or _clean(item.get("source")) or "Cricket source"
-        item["recommended_category"] = "sports_stories_of_day"
-        item["recommended_format"] = "cricket"
-        item["cricket_pipeline"] = True
-        item["primary_genre"] = "cricket"
+        item["source_label"] = sr._source_label(item) or _clean(item.get("source")) or ("Sports source" if niche_scope else "Cricket source")
+        item["recommended_category"] = "sports" if niche_scope else "sports_stories_of_day"
+        item["recommended_format"] = "regular" if niche_scope else "cricket"
+        item["cricket_pipeline"] = not niche_scope
+        item["primary_genre"] = "sports" if niche_scope else "cricket"
         item["verification_level"] = (
             "social lead" if int(item.get("social_post_count") or 0) and int(item.get("event_article_count") or 0) == 0
             else "corroborated" if int(item.get("event_source_count") or 0) >= 2
             else "single-source lead"
         )
         item["discovery_reason"] = (
-            f"{item.get('discovery_bucket', 'news').title()} lead: "
+            f"{'Sports' if niche_scope else 'Cricket'} {item.get('discovery_bucket', 'news').lower()} lead: "
             f"{int(item.get('event_source_count') or 0)} independent publisher(s), "
             f"{int(item.get('social_post_count') or 0)} social signal(s), "
             f"freshness {float(item.get('age_hours') or 0):.1f}h."
         )
         output.append(item)
 
-    # Final hard uniqueness assertion at the boundary; this is intentionally
-    # fail-safe and deterministic.
     unique = []
     seen = set()
     for item in output:
@@ -1235,10 +1307,13 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
         unique.append(item)
     return unique[:max(1, min(MAX_DASHBOARD_HEADLINES, int(max_candidates or MAX_DASHBOARD_HEADLINES)))]
 
-
-def render_cricket_topic_desk(candidates, ui_text, ui_html, remember_callback):
+def render_sports_topic_desk(candidates, ui_text, ui_html, remember_callback, scope="India / Asia"):
     import streamlit as st
 
+    niche_scope = _clean(scope).casefold() == "niche sports"
+    desk_label = "Sports" if niche_scope else "Cricket"
+    source_fallback = "Sports source" if niche_scope else "Cricket source"
+    button_prefix = "sports_desk" if niche_scope else "cricket_desk"
     specs = (
         ("news", "NEWS", "Concrete current developments."),
         ("viral", "VIRAL / EMERGING", "Undercovered stories with momentum, novelty or reaction."),
@@ -1250,7 +1325,7 @@ def render_cricket_topic_desk(candidates, ui_text, ui_html, remember_callback):
         grouped.get(bucket, grouped["news"]).append(candidate)
 
     st.markdown(
-        "<div class='live-bar'><div class='live-bar-copy'><b>Cricket story desk</b> · 60 deliberately different ideas.</div></div>",
+        f"<div class='live-bar'><div class='live-bar-copy'><b>{desk_label} story desk</b> · 60 deliberately different ideas.</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -1265,7 +1340,7 @@ def render_cricket_topic_desk(candidates, ui_text, ui_html, remember_callback):
                     index = start + offset
                     with cols[offset]:
                         title = ui_text(candidate.get("title"), "Untitled story")
-                        source = ui_text(candidate.get("source_label"), "Cricket source")
+                        source = ui_text(candidate.get("source_label"), source_fallback)
                         reason = ui_text(candidate.get("discovery_reason"))
                         verification = ui_text(candidate.get("verification_level"), "lead")
                         url = str(candidate.get("story_url") or "").strip()
@@ -1302,7 +1377,7 @@ def render_cricket_topic_desk(candidates, ui_text, ui_html, remember_callback):
                                 "Use story",
                                 type="primary",
                                 width="stretch",
-                                key=f"cricket_desk_{bucket}_{index}_{candidate.get('story_key', index)}",
+                                key=f"{button_prefix}_{bucket}_{index}_{candidate.get('story_key', index)}",
                             ):
                                 remember_callback(candidate)
                                 st.session_state.pending_candidate = dict(candidate)
