@@ -1113,36 +1113,61 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         raise RuntimeError("Groq script provider unavailable: GROQ_API_KEY is not configured.")
 
     try:
+        structured_payload = {
+            "model": "openai/gpt-oss-120b",
+            "messages": messages,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "viral_shorts_script",
+                    "strict": True,
+                    "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
+                },
+            },
+            "include_reasoning": False,
+            "reasoning_effort": "low",
+            "temperature": 0.5,
+            "max_completion_tokens": 900,
+        }
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {groq_api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": "openai/gpt-oss-120b",
-                "messages": messages,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "viral_shorts_script",
-                        "strict": True,
-                        "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
-                    },
-                },
-                "include_reasoning": False,
-                "reasoning_effort": "low",
-                "temperature": 0.5,
-                "max_completion_tokens": 900,
-            },
+            json=structured_payload,
             timeout=30,
         )
-        if response.status_code == 400:
+
+        data = None
+        retry_reason = ""
+        if response.status_code == 200:
+            try:
+                raw_content = response.json()["choices"][0]["message"]["content"]
+                data = parse_groq_json_response(raw_content)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                retry_reason = (
+                    "successful response was empty or not parseable JSON "
+                    f"({type(exc).__name__})"
+                )
+        elif response.status_code == 400:
             detail = _provider_http_error_detail(response)
+            retry_reason = "structured-output request returned HTTP 400" + (
+                f": {detail}" if detail else ""
+            )
+        else:
+            detail = _provider_http_error_detail(response)
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"Groq script provider HTTP {response.status_code}{suffix}; "
+                "falling through to the next provider."
+            )
+
+        if retry_reason:
             print(
-                "   [Script Writer] Groq structured-output request returned HTTP 400"
-                + (f": {detail}" if detail else ".")
-                + " Retrying once with a minimal OpenAI-compatible payload.",
+                "   [Script Writer] Groq primary attempt needs bounded compatibility retry: "
+                + retry_reason
+                + ". Retrying once with GPT-OSS 20B JSON mode.",
                 flush=True,
             )
             compatibility_messages = [
@@ -1166,22 +1191,33 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 json={
                     "model": "openai/gpt-oss-20b",
                     "messages": compatibility_messages,
+                    "response_format": {"type": "json_object"},
+                    "include_reasoning": False,
+                    "reasoning_effort": "low",
+                    "temperature": 0.2,
+                    "max_completion_tokens": 900,
                 },
                 timeout=30,
             )
+            if response.status_code != 200:
+                detail = _provider_http_error_detail(response)
+                suffix = f": {detail}" if detail else ""
+                raise RuntimeError(
+                    f"Groq script provider HTTP {response.status_code}{suffix}; "
+                    "falling through to the next provider."
+                )
+            try:
+                raw_content = response.json()["choices"][0]["message"]["content"]
+                data = parse_groq_json_response(raw_content)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    "Groq compatibility response was not parseable JSON."
+                ) from exc
 
-        if response.status_code != 200:
-            detail = _provider_http_error_detail(response)
-            suffix = f": {detail}" if detail else ""
-            raise RuntimeError(
-                f"Groq script provider HTTP {response.status_code}{suffix}; "
-                "falling through to the next provider."
-            )
-
-        raw_content = response.json()["choices"][0]["message"]["content"]
-        data = parse_groq_json_response(raw_content)
         if not isinstance(data, dict):
-            raise ValueError("Groq script provider returned invalid JSON; falling through to the next provider.")
+            raise ValueError(
+                "Groq script provider returned invalid JSON; falling through to the next provider."
+            )
 
         data["hook_type"] = classify_hook_style(data)
         data["hook_style_used"] = data["hook_type"]
