@@ -425,12 +425,41 @@ def test_groq_primary_writer_strict_schema_contains_closed_nested_objects(monkey
     assert result["script"]
     schema = calls[0]["response_format"]["json_schema"]["schema"]
     assert schema["additionalProperties"] is False
-    scene_schema = schema["properties"]["script"]["items"]
+    scene_schema = schema["properties"]["script"]
     assert scene_schema["additionalProperties"] is False
+    assert set(scene_schema["required"]) == {"scene_1", "scene_2", "scene_3", "scene_4"}
+    assert set(schema["properties"]["titles"]["required"]) == {"title_1", "title_2", "title_3"}
     assert set(scene_schema["required"]) == {
         "voiceover", "narrative_role", "primary_entity", "visual_intent",
         "specific_search_prompt", "sport_or_topic_category",
     }
+
+
+def test_groq_fixed_slot_response_normalises_to_canonical_arrays():
+    import ultimate_bot
+
+    fixed = {
+        "titles": {
+            "title_1": "A",
+            "title_2": "B",
+            "title_3": "C",
+        },
+        "recommended_title_index": 2,
+        "script": {
+            f"scene_{index}": {"voiceover": f"Scene {index}"}
+            for index in range(1, 5)
+        },
+    }
+
+    result = ultimate_bot._normalise_groq_script_result(fixed, "regular")
+
+    assert result["titles"] == ["A", "B", "C"]
+    assert result["recommended_title_index"] == 2
+    assert len(result["script"]) == 4
+    assert [scene["voiceover"] for scene in result["script"]] == [
+        "Scene 1", "Scene 2", "Scene 3", "Scene 4"
+    ]
+
 
 
 def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(monkeypatch):
@@ -542,9 +571,55 @@ def test_gemini_fallback_sends_provider_compatible_response_schema(monkeypatch):
     assert "responseFormat" not in payload["generationConfig"]
     schema = payload["generationConfig"]["responseSchema"]
     assert "additionalProperties" not in schema
-    assert "enum" not in schema["properties"]["recommended_title_index"]
-    assert schema["properties"]["recommended_title_index"]["type"] == "integer"
+    assert schema["properties"]["recommended_title_index"]["enum"] == ["1", "2", "3"]
+    assert schema["properties"]["recommended_title_index"]["type"] == "string"
+    assert set(schema["properties"]["script"]["required"]) == {"scene_1", "scene_2", "scene_3", "scene_4"}
+    assert set(schema["properties"]["titles"]["required"]) == {"title_1", "title_2", "title_3"}
     assert request.get_header("X-goog-api-key") == "test-key"
+
+
+def test_gemini_retries_one_transient_503(monkeypatch):
+    import io
+    import json
+    import urllib.error
+    import research_runtime
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                503,
+                "busy",
+                {"Retry-After": "1"},
+                io.BytesIO(b'{"error":{"message":"busy"}}'),
+            )
+        return _fake_urlopen_response({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": json.dumps(_valid_script())}]
+                }
+            }]
+        })
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+    result = research_runtime._gemini_script_fallback(
+        {"title": "India squad change", "research_evidence_text": (
+            "Officials confirmed a major squad change after the latest review. "
+            "The decision changes preparation for the next assignment."
+        )},
+        {"script_instruction": "English."},
+        "sports_stories_of_day",
+        "regular",
+    )
+
+    assert result["script"]
+    assert len(calls) == 2
+    assert all(timeout == 30 for _request, timeout in calls)
+
 
 
 def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypatch):
@@ -797,7 +872,7 @@ def test_fallback_prompt_uses_the_current_duration_contract():
     )
     assert "60–72 spoken words" in prompt
     assert "90-word safety ceiling" in prompt
-    assert "A regular Short normally uses 4 scenes" in prompt
+    assert "exactly 4 fixed scene slots" in prompt
     assert "55–65 spoken words" not in prompt
     assert "65–75 spoken words" not in prompt
 

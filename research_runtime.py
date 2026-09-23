@@ -6,6 +6,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+import time
 from typing import Any, Dict
 
 from evidence_runtime import DEFAULT_MAX_SOURCES, build_evidence_pack, discover_sources, format_evidence_pack_for_script
@@ -157,34 +158,111 @@ def _parse_provider_json(raw: Any) -> Dict[str, Any]:
     return parsed
 
 
-def _gemini_script_response_schema():
-    """Build the conservative schema accepted by the legacy Gemini REST boundary.
+def _provider_script_response_schema(format_mode="regular"):
+    """Build the fixed-slot provider contract used by Gemini and Ollama."""
+    format_key = str(format_mode or "").strip().lower()
+    scene_count = 6 if format_key == "top5" else 4
 
-    The canonical factory contract remains in script_runtime. This adapter removes
-    JSON-Schema constructs that the current generateContent protobuf serializer can
-    reject, while canonical QC enforces the exact semantic contract after parsing.
-    """
-    import copy
-    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA
+    scene_schema = {
+        "type": "object",
+        "properties": {
+            "voiceover": {"type": "string"},
+            "narrative_role": {
+                "type": "string",
+                "enum": ["hook", "development", "context", "consequence"],
+            },
+            "primary_entity": {"type": "string"},
+            "visual_intent": {"type": "string"},
+            "specific_search_prompt": {"type": "string"},
+            "sport_or_topic_category": {"type": "string"},
+        },
+        "required": [
+            "voiceover",
+            "narrative_role",
+            "primary_entity",
+            "visual_intent",
+            "specific_search_prompt",
+            "sport_or_topic_category",
+        ],
+    }
 
-    schema = copy.deepcopy(SCRIPT_OUTPUT_JSON_SCHEMA)
+    script_properties = {
+        f"scene_{index}": dict(scene_schema)
+        for index in range(1, scene_count + 1)
+    }
 
-    def simplify(node):
-        if not isinstance(node, dict):
-            return
-        node.pop("additionalProperties", None)
-        # Gemini's legacy response_schema represents enum values as strings at the
-        # wire level. recommended_title_index is still range-checked by canonical QC.
-        if node.get("type") == "integer":
-            node.pop("enum", None)
-        for value in node.get("properties", {}).values():
-            simplify(value)
-        simplify(node.get("items"))
+    return {
+        "type": "object",
+        "properties": {
+            "creator_insight": {"type": "string"},
+            "editorial_angle": {"type": "string"},
+            "titles": {
+                "type": "object",
+                "properties": {
+                    "title_1": {"type": "string"},
+                    "title_2": {"type": "string"},
+                    "title_3": {"type": "string"},
+                },
+                "required": ["title_1", "title_2", "title_3"],
+            },
+            "recommended_title_index": {
+                "type": "string",
+                "enum": ["1", "2", "3"],
+            },
+            "seo_description": {"type": "string"},
+            "pinned_comment": {"type": "string"},
+            "script": {
+                "type": "object",
+                "properties": script_properties,
+                "required": list(script_properties),
+            },
+        },
+        "required": [
+            "creator_insight",
+            "editorial_angle",
+            "titles",
+            "recommended_title_index",
+            "seo_description",
+            "pinned_comment",
+            "script",
+        ],
+    }
 
-    simplify(schema)
-    return schema
+
+def _normalise_provider_script_result(result, format_mode):
+    """Convert fixed provider slots back into the canonical array contract."""
+    if not isinstance(result, dict):
+        return result
+
+    normalized = dict(result)
+
+    titles = normalized.get("titles")
+    if isinstance(titles, dict):
+        normalized["titles"] = [
+            str(titles.get(f"title_{index}") or "").strip()
+            for index in range(1, 4)
+        ]
+
+    recommended_index = normalized.get("recommended_title_index")
+    if isinstance(recommended_index, str) and recommended_index.strip().isdigit():
+        normalized["recommended_title_index"] = int(recommended_index.strip())
+
+    scenes = normalized.get("script")
+    if isinstance(scenes, dict):
+        scene_count = 6 if str(format_mode or "").strip().lower() == "top5" else 4
+        normalized["script"] = [
+            dict(scene)
+            for index in range(1, scene_count + 1)
+            for scene in [scenes.get(f"scene_{index}")]
+            if isinstance(scene, dict)
+        ]
+
+    return normalized
 
 
+def _gemini_script_response_schema(format_mode="regular"):
+    """Return the fixed-slot schema accepted by the Gemini REST boundary."""
+    return _provider_script_response_schema(format_mode)
 def _gemini_script_fallback(
     story_data: Dict[str, Any],
     language_cfg: Dict[str, Any],
@@ -211,7 +289,7 @@ def _gemini_script_fallback(
         ],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "responseSchema": _gemini_script_response_schema(),
+            "responseSchema": _gemini_script_response_schema(format_mode),
             "maxOutputTokens": 900,
             "thinkingConfig": {"thinkingLevel": "low"},
         },
@@ -225,51 +303,59 @@ def _gemini_script_fallback(
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        candidates = body.get("candidates") or []
-        if not candidates:
-            raise ValueError("Gemini returned no candidates.")
-        parts = ((candidates[0].get("content") or {}).get("parts") or [])
-        raw = "".join(
-            str(part.get("text") or "")
-            for part in parts
-            if isinstance(part, dict)
-        ).strip()
-        result = _parse_provider_json(raw)
-        return _validate_provider_script(
-            result,
-            story_data,
-            format_mode,
-            "gemini-3.8-flash",
-        )
-    except urllib.error.HTTPError as exc:
+    retryable_statuses = {429, 500, 502, 503, 504}
+    for attempt in range(1, 3):
         try:
-            raw_error = exc.read().decode("utf-8", errors="replace")
-        except Exception:
-            raw_error = ""
-        detail = _http_error_detail(raw_error)
-        suffix = f": {detail}" if detail else ""
-        raise RuntimeError(
-            f"Gemini script provider HTTP {exc.code}{suffix}; falling through to the next provider."
-        ) from exc
-    except Exception as exc:
-        if isinstance(exc, RuntimeError):
-            raise
-        raise RuntimeError(
-            f"Gemini script provider failed: {type(exc).__name__}: {exc}"
-        ) from exc
-
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            candidates = body.get("candidates") or []
+            if not candidates:
+                raise ValueError("Gemini returned no candidates.")
+            parts = ((candidates[0].get("content") or {}).get("parts") or [])
+            raw = "".join(
+                str(part.get("text") or "")
+                for part in parts
+                if isinstance(part, dict)
+            ).strip()
+            result = _parse_provider_json(raw)
+            result = _normalise_provider_script_result(result, format_mode)
+            return _validate_provider_script(
+                result,
+                story_data,
+                format_mode,
+                "gemini-3.8-flash",
+            )
+        except urllib.error.HTTPError as exc:
+            try:
+                raw_error = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw_error = ""
+            detail = _http_error_detail(raw_error)
+            suffix = f": {detail}" if detail else ""
+            if exc.code in retryable_statuses and attempt < 2:
+                print(
+                    f"   [Gemini] HTTP {exc.code}; one bounded retry for transient provider demand.",
+                    flush=True,
+                )
+                time.sleep(1)
+                continue
+            raise RuntimeError(
+                f"Gemini script provider HTTP {exc.code}{suffix}; falling through to the next provider."
+            ) from exc
+        except Exception as exc:
+            if isinstance(exc, RuntimeError):
+                raise
+            raise RuntimeError(
+                f"Gemini script provider failed: {type(exc).__name__}: {exc}"
+            ) from exc
 
 def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data: Dict[str, Any] | None = None) -> str:
     language_instruction = _clean((language_cfg or {}).get("script_instruction"))
     top5 = str(format_mode or "").lower() == "top5"
+    scene_count = 6 if top5 else 4
     scene_contract = (
-        "- Top-5 mode MUST contain 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
-        "the fifth entry should deliver the final payoff.\n"
-        if top5
-        else "- A regular Short normally uses 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple.\n"
+        f"- The provider response MUST contain exactly {scene_count} fixed scene slots in the script object: "
+        f"scene_1 through scene_{scene_count}. Never add, remove, or omit a scene slot.\n"
     )
     word_contract = (
         "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
@@ -279,19 +365,18 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
     return (
         "You are the backup original-news Shorts writer. Use only the supplied evidence and never copy a complete "
         "source sentence verbatim. Do not invent facts, quotes, motives, numbers, or outcomes. "
-        "Return ONLY JSON matching this exact object shape; no Markdown or commentary. "
-        "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
-        "\"recommended_title_index\":1,\"seo_description\":\"...\",\"pinned_comment\":\"...\","
-        "\"script\":[{\"voiceover\":\"...\",\"narrative_role\":\"hook\","
-        "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
-        "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
+        "Return ONLY JSON matching the provider contract; no Markdown or commentary. "
+        "Titles are exactly three fixed fields: title_1, title_2, title_3. "
+        "The script is a fixed object containing exactly scene_1 through scene_"
+        + str(scene_count)
+        + ". "
         "Use narrative_role values hook, development, context, consequence.\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         + word_contract
         + "- Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14. It must be a factual headline and the most compact scene.\n"
         f"{scene_contract}"
         "- Scene 1 is the only headline-style beat. Every later scene must add new, story-specific information rather than restating the title.\n"
-        "- Normally use four scenes for a regular story; use three only when a fourth beat would be artificial.\n"
+        "- For regular Shorts, keep all four provider scene slots concise and substantive; do not omit a slot or pad it with generic filler.\n"
         "- Put the substance in the middle beats; do not let Scene 1 carry the detail.\n"
         "- The full narration must naturally fit below 30 seconds.\n"
         "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
@@ -327,6 +412,7 @@ def _call_chat_completion(
             result = raw
         else:
             result = _parse_provider_json(raw)
+        result = _normalise_provider_script_result(result, format_mode)
         return _validate_provider_script(result, story_data, format_mode, provider_name)
     except urllib.error.HTTPError as exc:
         try:
