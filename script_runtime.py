@@ -281,7 +281,7 @@ SCRIPT_OUTPUT_JSON_SCHEMA = {
                     "specific_search_prompt",
                     "sport_or_topic_category"
                 ],
-                "additionalProperties": false
+                "additionalProperties": False
             }
         }
     },
@@ -294,7 +294,7 @@ SCRIPT_OUTPUT_JSON_SCHEMA = {
         "pinned_comment",
         "script"
     ],
-    "additionalProperties": false
+    "additionalProperties": False
 }
 
 
