@@ -2720,6 +2720,8 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
             )
             st.write("")
             if st.button("Find today's ranked topics", type="primary", width="stretch"):
+                from dashboard_topic_discovery_runtime import clear_dashboard_discovery_cache
+                clear_dashboard_discovery_cache()
                 controller.reset()
                 try:
                     controller.update("discovery", 10, "Finding current stories and building the ranked topic list.")
