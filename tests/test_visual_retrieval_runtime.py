@@ -552,7 +552,7 @@ def test_openverse_manual_search_uses_separate_cache_namespace(monkeypatch):
     assert cache_providers == ["openverse-manual"]
 
 
-def test_manual_visual_search_fetches_all_sources_concurrently(monkeypatch):
+def test_manual_visual_search_fetches_bounded_sources_concurrently(monkeypatch):
     import threading
     import time
 
@@ -614,7 +614,7 @@ def test_manual_visual_search_fetches_all_sources_concurrently(monkeypatch):
     )
 
     assert peak >= 2
-    assert len(result["assets"]) == 4
+    assert len(result["assets"]) == 2
     assert result["rejection_counts"]["monetization"] == 0
 
 
@@ -1930,6 +1930,57 @@ def test_manual_pool_exposes_candidates_for_human_review_when_gemini_is_temporar
     assert len(result["assets"]) == 3
     assert all(item["status"] == "manual-review-unverified" for item in result["assets"])
     assert result["query_stats"][0]["qa_requests"] == 1
+
+def test_manual_pool_exposes_candidates_when_gemini_hits_quota(monkeypatch):
+    calls = []
+
+    def provider(*args):
+        calls.append(1)
+        return [
+            {
+                "bytes": _jpeg_bytes((1200, 1600), (80 + index * 10, 90, 110)),
+                "source_image_url": f"https://quota.example/image-{index}.jpg",
+                "search_title": "India cricket image",
+                "provenance": {"provider": "Commons", "license": "cc0"},
+            }
+            for index in range(4)
+        ]
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return provider(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [("Commons", provider), ("DDG", provider)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: (
+            setattr(visual_qa._qa_state(), "last_failure", "quota_or_rate_limit")
+            or {}
+        ),
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "India", "voiceover": "India cricket image"}],
+        ["India"],
+        "India cricket image",
+        pool_target=3,
+        pool_max=3,
+        allow_auto_backfill=False,
+    )
+
+    assert len(result["assets"]) == 3
+    assert all(item["status"] == "manual-review-unverified" for item in result["assets"])
 
 def test_gemini_transient_503_has_no_recursive_retry():
     from pathlib import Path

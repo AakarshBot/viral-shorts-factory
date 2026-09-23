@@ -854,7 +854,7 @@ def collect_manual_visual_pool(
     pool_max: int | None = None,
     allow_auto_backfill: bool = True,
 ) -> dict:
-    """Build the shared entity-verified pool from every available manual source."""
+    """Build the shared entity-verified pool from the first two preferred manual sources."""
     from visual_qa_runtime import (
         GEMINI_VISUAL_BATCH_SIZE,
         get_last_visual_qa_failure,
@@ -921,7 +921,7 @@ def collect_manual_visual_pool(
             qa_failure = get_last_visual_qa_failure()
             if qa_failure != "circuit_breaker":
                 qa_requests += 1
-            if qa_failure in {"transient_unavailable", "circuit_breaker"}:
+            if qa_failure in {"transient_unavailable", "quota_or_rate_limit", "circuit_breaker"}:
                 remaining = max(0, target - query_added)
                 for candidate in batch[:remaining]:
                     assets.append(
@@ -1030,7 +1030,7 @@ def collect_manual_visual_pool(
         verified_for_query = 0
 
         provider_jobs = []
-        for source_index, (source_name, fetcher) in enumerate(source_plan):
+        for source_index, (source_name, fetcher) in enumerate(source_plan[:2]):
             if not callable(fetcher):
                 continue
             source_key = str(source_name or "").strip().casefold()
@@ -1122,8 +1122,8 @@ def collect_manual_visual_pool(
                 if candidate is not None:
                     query_candidates.append(candidate)
 
-        # Search every available provider before QA so the strongest result can
-        # win globally instead of being pre-empted by the first provider.
+        # Search the bounded preferred provider set before QA so the strongest
+        # result can win globally without turning manual review into a provider fan-out.
         query_candidates.sort(
             key=lambda item: (
                 -float(item.get("priority") or 0.0),
@@ -1298,7 +1298,7 @@ def collect_manual_visual_search(
     used_source_image_urls: set[str] | None = None,
     search_round: int = 1,
 ) -> dict:
-    """Fetch up to ten new images from every available manual source with identity AI checks.
+    """Fetch up to ten new images from the first two preferred manual sources with identity AI checks.
 
     The dashboard search intentionally has no scene/context acceptance gate.
     The exact user query is preserved, licensing/provenance remains metadata,
@@ -1355,13 +1355,13 @@ def collect_manual_visual_search(
         except TypeError:
             source_plan = _source_plan(bot, visual_type)
 
-    # Search each available provider concurrently. Each worker owns its URL
-    # set and performs a bounded multi-page fallback. Repeated searches advance
+    # Search the bounded preferred provider set concurrently. Each worker owns its
+    # URL set and performs a bounded multi-page fallback. Repeated searches advance
     # to fresh provider pages rather than replaying the cached first pages.
     # Results are merged on the main thread in provider-plan order, preserving
     # deterministic ranking/deduplication while removing cumulative provider waits.
     provider_jobs = []
-    for source_index, (source_name, fetcher) in enumerate(source_plan):
+    for source_index, (source_name, fetcher) in enumerate(source_plan[:2]):
         if not callable(fetcher):
             continue
         source_key = str(source_name or "").strip().casefold()
