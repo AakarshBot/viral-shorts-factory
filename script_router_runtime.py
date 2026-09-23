@@ -13,11 +13,10 @@ Duration is the runtime contract. A draft that is otherwise valid but over 30 se
 gets one compression attempt before it is rejected or a fallback provider is tried.
 """
 
-import os
-
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict
 
