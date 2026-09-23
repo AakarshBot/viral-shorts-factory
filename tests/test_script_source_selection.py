@@ -114,7 +114,7 @@ def test_writer_contract_has_initial_duration_limits():
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
     assert "Voiceover total: 55–60 words." in source
-    assert "Scene 1: 8–14 words" in source
+    assert "Scene 1: 8–14 words, a factual headline, and the most compact scene." in source
     assert "naturally fit below 30 seconds" in source
     assert "Use as many scenes as the story genuinely needs" not in source
     assert "tighten_script_for_duration_once" not in source
