@@ -13,6 +13,8 @@ Duration is the runtime contract. A draft that is otherwise valid but over 30 se
 gets one compression attempt before it is rejected or a fallback provider is tried.
 """
 
+import os
+
 from __future__ import annotations
 
 import json
@@ -304,21 +306,21 @@ def install_script_pipeline(bot):
         prepared = rr._prepare_primary_writer_data(data, format_mode)
 
         attempts = []
-        if str(__import__("os").getenv("GROQ_API_KEY") or "").strip():
+        if str(os.getenv("GROQ_API_KEY") or "").strip():
             attempts.append(
                 ("primary writer", lambda: current(prepared, language_cfg, genre_key, conn, format_mode))
             )
-        if str(__import__("os").getenv("GEMINI_API_KEY") or "").strip():
+        if str(os.getenv("GEMINI_API_KEY") or "").strip():
             attempts.append(
                 ("Gemini", lambda: rr._gemini_script_fallback(data, language_cfg, genre_key, format_mode))
             )
-        if str(__import__("os").getenv("OPENROUTER_API_KEY") or "").strip():
+        if str(os.getenv("OPENROUTER_API_KEY") or "").strip():
             attempts.append(
                 ("OpenRouter free", lambda: rr._openrouter_script_fallback(data, language_cfg, genre_key, format_mode))
             )
         # Local Ollama is only useful when the process is actually able to reach it.
         # The fallback performs a /api/tags preflight and refuses an uninstalled model.
-        remote_mode = str(__import__("os").getenv("VSF_REMOTE_MODE") or "").strip().lower()
+        remote_mode = str(os.getenv("VSF_REMOTE_MODE") or "").strip().lower()
         if remote_mode not in {"1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"}:
             attempts.append(
                 ("local Ollama", lambda: rr._ollama_script_fallback(data, language_cfg, genre_key, format_mode))
