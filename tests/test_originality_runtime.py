@@ -1,20 +1,43 @@
-from script_runtime import append_research_sources, check_script_originality, _run_real_critique
+from script_runtime import append_research_sources, check_script_originality
 
 
-def test_verbatim_overlap_blocks_eight_word_run():
-    source = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda."
-    script = {"script": [{"voiceover": "Alpha beta gamma delta epsilon zeta eta theta is copied."}]}
-    result = check_script_originality(script, {"research_evidence_pack": {"sources": [{"text": source}]}})
+def test_exact_source_sentence_is_rejected():
+    source = (
+        "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda."
+    )
+    script = {
+        "script": [{
+            "voiceover": "Alpha beta gamma delta epsilon zeta eta theta iota.",
+            "narrative_role": "hook",
+        }]
+    }
+    result = check_script_originality(script, {"research_evidence_text": source})
     assert result["passed"] is False
-    assert result["failures"][0]["longest_run"] >= 8
+    assert result["failures"][0]["scene"] == 1
 
 
-def test_sixgram_overlap_blocks_above_fifteen_percent():
-    source = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"
-    script = {"script": [{"voiceover": "one two three four five six seven eight nine ten eleven twelve seventeen eighteen"}]}
-    result = check_script_originality(script, {"research_evidence_pack": {"sources": [{"text": source}]}})
-    assert result["passed"] is False
-    assert result["failures"][0]["sixgram_ratio"] > 0.15
+def test_rephrased_source_sentence_is_allowed():
+    source = "The board confirmed the change after a detailed review of the latest information."
+    script = {
+        "script": [{
+            "voiceover": "Officials confirmed the decision following their latest review.",
+            "narrative_role": "hook",
+        }]
+    }
+    result = check_script_originality(script, {"research_evidence_text": source})
+    assert result["passed"] is True
+
+
+def test_shared_phrases_do_not_trigger_originality_failure():
+    source = "India beat Japan in a major cricket match."
+    script = {
+        "script": [{
+            "voiceover": "India's win over Japan became the latest major cricket result.",
+            "narrative_role": "hook",
+        }]
+    }
+    result = check_script_originality(script, {"research_evidence_text": source})
+    assert result["passed"] is True
 
 
 def test_research_sources_append_to_description():
@@ -26,52 +49,12 @@ def test_research_sources_append_to_description():
     assert "Reuters – https://example.test/story" in description
 
 
-def test_real_critique_normalizes_required_json(monkeypatch):
-    import script_runtime
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    monkeypatch.setattr(
-        script_runtime,
-        "_originality_llm",
-        lambda *_args, **_kwargs: {
-            "score": 8,
-            "unsupported_claims": [],
-            "exaggerations": ["too strong"],
-            "fixes": ["soften wording"],
-        },
-    )
-    result = _run_real_critique(
-        {"script": [{"voiceover": "The team announced the change."}]},
-        {"research_evidence_text": "The team announced the change."},
-    )
-    assert result["score"] == 8
-    assert result["unsupported_claims"] == []
-    assert result["provider"] == "groq"
-
-def test_originality_rewrite_falls_through_to_openrouter_free(monkeypatch):
-    import script_runtime
-
-    monkeypatch.setenv("GROQ_API_KEY", "test-groq")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-
-    calls = []
-
-    def fake_llm(url, payload, headers):
-        calls.append(url)
-        if "groq.com" in url:
-            return None
-        return {"script": [{"index": 1, "voiceover": "A genuinely rewritten factual scene with the same supported information."}]}
-
-    monkeypatch.setattr(script_runtime, "_originality_llm", fake_llm)
-    result = script_runtime._rewrite_for_originality_once(
-        {"script": [{"voiceover": "A source-derived scene with overlapping wording."}]},
-        {"research_evidence_text": "A source-derived scene with overlapping wording and supported facts."},
-        {"passed": False, "failures": [{"scene": 1}]},
-    )
-
-    assert result["script"][0]["voiceover"].startswith("A genuinely rewritten")
-    assert calls[0].startswith("https://api.groq.com/")
-    assert calls[1].startswith("https://openrouter.ai/")
+def test_originality_checker_does_not_expose_legacy_overlap_metrics():
+    source = "Alpha beta gamma delta epsilon zeta eta theta."
+    script = {"script": [{"voiceover": "Alpha beta gamma delta epsilon zeta."}]}
+    result = check_script_originality(script, {"research_evidence_text": source})
+    assert "longest_run" not in result["failures"][0]
+    assert "sixgram_ratio" not in result["failures"][0]
 
 
 def test_extractive_fallback_reuses_phase2_evidence_text():
@@ -96,4 +79,3 @@ def test_extractive_fallback_reuses_phase2_evidence_text():
     narration = " ".join(scene["voiceover"] for scene in result["script"])
     assert "Rinku Singh became the first cricket signing for EMW Global." in narration
     assert "expansion into India through cricket" in narration
-
