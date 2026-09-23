@@ -303,11 +303,26 @@ def install_script_pipeline(bot):
         data = _prepare_story_data(data, pack, evidence_text, evidence_fallback_used)
         prepared = rr._prepare_primary_writer_data(data, format_mode)
 
-        attempts = [
-            ("primary writer", lambda: current(prepared, language_cfg, genre_key, conn, format_mode)),
-            ("OpenRouter free", lambda: rr._openrouter_script_fallback(data, language_cfg, genre_key, format_mode)),
-            ("local Ollama", lambda: rr._ollama_script_fallback(data, language_cfg, genre_key, format_mode)),
-        ]
+        attempts = []
+        if str(__import__("os").getenv("GROQ_API_KEY") or "").strip():
+            attempts.append(
+                ("primary writer", lambda: current(prepared, language_cfg, genre_key, conn, format_mode))
+            )
+        if str(__import__("os").getenv("GEMINI_API_KEY") or "").strip():
+            attempts.append(
+                ("Gemini", lambda: rr._gemini_script_fallback(data, language_cfg, genre_key, format_mode))
+            )
+        if str(__import__("os").getenv("OPENROUTER_API_KEY") or "").strip():
+            attempts.append(
+                ("OpenRouter free", lambda: rr._openrouter_script_fallback(data, language_cfg, genre_key, format_mode))
+            )
+        # Local Ollama is only useful when the process is actually able to reach it.
+        # The fallback performs a /api/tags preflight and refuses an uninstalled model.
+        remote_mode = str(__import__("os").getenv("VSF_REMOTE_MODE") or "").strip().lower()
+        if remote_mode not in {"1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"}:
+            attempts.append(
+                ("local Ollama", lambda: rr._ollama_script_fallback(data, language_cfg, genre_key, format_mode))
+            )
 
         accepted = None
         attempt_reasons = []
@@ -375,7 +390,7 @@ def install_script_pipeline(bot):
             print(f"   [Script Pipeline] {reason}", flush=True)
 
         if accepted is None:
-            details = " | ".join(dict.fromkeys(attempt_reasons)) or "No provider attempt completed."
+            details = " | ".join(dict.fromkeys(attempt_reasons)) or "No configured script provider is available."
             raise ValueError(
                 "Script acceptance gate failed after every original-writing provider: " + details
             )
