@@ -577,6 +577,28 @@ def _social_stats_by_url(rows):
     return result
 
 
+def _matchup_competition_context(event):
+    """Extract explicit match-format/tournament anchors used to avoid cross-event merges."""
+    text = _clean(
+        " ".join(
+            str(event.get(key) or "")
+            for key in ("title", "event_search_text", "event_entities")
+        )
+    ).casefold()
+    patterns = (
+        r"t20(?:i)?", r"odi", r"test",
+        r"world cup", r"asia cup", r"asian games",
+        r"champions trophy", r"world test championship",
+        r"ipl", r"wpl", r"psl", r"ranji", r"duleep",
+        r"the hundred", r"big bash", r"sa20",
+    )
+    return frozenset(
+        match.group(0)
+        for pattern in patterns
+        for match in re.finditer(pattern, text)
+    )
+
+
 def _merge_same_matchup_events(events):
     """Collapse alternate reports of the same direct matchup into one event."""
     direct_families = {
@@ -615,6 +637,10 @@ def _merge_same_matchup_events(events):
                 base.get("cricket_event_family") or sr._cricket_event_family(base)
             )
             if base_family != family:
+                continue
+            base_context = _matchup_competition_context(base)
+            current_context = _matchup_competition_context(event)
+            if base_context and current_context and base_context.isdisjoint(current_context):
                 continue
             base_raw = _clean(base.get("event_latest_published_at") or base.get("event_latest_seen_at"))
             try:
