@@ -150,6 +150,7 @@ def test_fallback_prompt_requires_explanatory_middle_beats():
         {},
     )
     assert "Target roughly 60–72 spoken words" in prompt
+    assert "Scene 1: target 10–12 words, with a hard maximum of 14" in prompt
     assert "Scene 1 is the only headline-style beat." in prompt
     assert "Every later scene must add new, story-specific information" in prompt
     assert "not a stack of headlines" in prompt
@@ -282,7 +283,7 @@ def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
 def test_primary_writer_uses_duration_first_contract():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
-    assert "Scene 1: 8–14 words" in source
+    assert "Scene 1: target 10–12 words, with a hard maximum of 14" in source
     assert "Scene 1 is the only headline-style beat." in source
     assert "Later scenes must add new, story-specific information" in source
     assert "Normally use four scenes for a regular story" in source
@@ -534,10 +535,10 @@ def test_gemini_fallback_sends_canonical_response_schema(monkeypatch):
     assert result["script"]
     request = calls[0][0]
     payload = json.loads(request.data.decode("utf-8"))
-    assert payload["generationConfig"]["responseFormat"]["text"]["mimeType"] == "application/json"
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
     assert payload["generationConfig"]["maxOutputTokens"] == 900
-    assert "responseSchema" not in payload["generationConfig"]
-    schema = payload["generationConfig"]["responseFormat"]["text"]["schema"]
+    assert "responseFormat" not in payload["generationConfig"]
+    schema = payload["generationConfig"]["responseSchema"]
     assert schema["additionalProperties"] is False
     assert schema["properties"]["recommended_title_index"]["enum"] == [1, 2, 3]
     assert request.get_header("X-goog-api-key") == "test-key"
@@ -588,7 +589,7 @@ def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypa
     calls = []
 
     def fake_urlopen(request, timeout):
-        calls.append(request)
+        calls.append((request, timeout))
         if request.full_url.endswith("/api/tags"):
             return _fake_urlopen_response({
                 "models": [{"name": "llama3.2:latest"}]
@@ -611,8 +612,13 @@ def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypa
     )
 
     assert result["script"]
-    generation = next(request for request in calls if request.full_url.endswith("/v1/chat/completions"))
-    payload = json.loads(generation.data.decode("utf-8"))
+    generation_request, generation_timeout = next(
+        (request, timeout)
+        for request, timeout in calls
+        if request.full_url.endswith("/v1/chat/completions")
+    )
+    payload = json.loads(generation_request.data.decode("utf-8"))
+    assert generation_timeout == 60
     assert payload["model"] == "llama3.2:latest"
     assert payload["max_tokens"] == 900
     assert payload["response_format"] == {"type": "json_object"}
@@ -649,12 +655,10 @@ def test_gemini_payload_uses_current_structured_output_field_names(monkeypatch):
 
     payload = json.loads(calls[0].data.decode("utf-8"))
     generation = payload["generationConfig"]
-    assert "responseSchema" not in generation
-    assert "responseMimeType" not in generation
-    assert "responseFormat" in generation
-    assert set(generation["responseFormat"]) == {"text"}
-    assert generation["responseFormat"]["text"]["mimeType"] == "application/json"
-    assert "schema" in generation["responseFormat"]["text"]
+    assert generation["responseMimeType"] == "application/json"
+    assert "responseSchema" in generation
+    assert "responseFormat" not in generation
+    assert generation["responseSchema"]["additionalProperties"] is False
 
 
 def test_gemini_rejects_the_old_response_schema_shape_before_network_use(monkeypatch):
@@ -676,9 +680,9 @@ def test_gemini_rejects_the_old_response_schema_shape_before_network_use(monkeyp
         calls.append(request)
         payload = json.loads(request.data.decode("utf-8"))
         generation = payload["generationConfig"]
-        assert "responseSchema" not in generation
-        assert "responseMimeType" not in generation
-        assert generation["responseFormat"]["text"]["mimeType"] == "application/json"
+        assert generation["responseMimeType"] == "application/json"
+        assert "responseSchema" in generation
+        assert "responseFormat" not in generation
         raise RuntimeError("shape_checked")
 
     monkeypatch.setattr(research_runtime.urllib.request, "urlopen", shape_checker)
