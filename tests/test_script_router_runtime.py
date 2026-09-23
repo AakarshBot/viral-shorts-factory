@@ -142,6 +142,52 @@ def test_router_rejects_incomplete_regular_narrative_before_dashboard_review():
     assert "middle beat" in reason.lower()
 
 
+def test_router_rejects_incomplete_title_set_before_dashboard_review():
+    script = _valid_script()
+    script["titles"] = ["Only one title"]
+
+    result, reason = _validate_script_result(
+        script,
+        {"title": "India squad change"},
+        "regular",
+    )
+
+    assert result is None
+    assert "exactly three usable title candidates" in reason.lower()
+
+
+def test_narrative_role_inference_defaults_by_scene_position():
+    from script_runtime import assess_narrative_completeness
+
+    assessment = assess_narrative_completeness(
+        {
+            "script": [
+                {"voiceover": "India confirms the squad change."},
+                {"voiceover": "Officials say the decision followed the latest review."},
+                {"voiceover": "The change affects preparation for the next assignment."},
+            ]
+        }
+    )
+
+    assert assessment["passed"] is True, assessment["reason"]
+    assert assessment["roles"]["hook"] == [1]
+    assert assessment["roles"]["development"] == [2]
+    assert assessment["roles"]["consequence"] == [3]
+
+
+def test_duration_estimate_prefers_actual_delivery_profile():
+    from script_router_runtime import _estimate_script_duration
+
+    script = {
+        "script": [{"voiceover": " ".join(["word"] * 50)}],
+        "persona_used": "HYPE COMMENTATOR",
+        "delivery_profile": "CYNICAL CRITIC",
+    }
+    estimate = _estimate_script_duration(script)
+
+    assert estimate["effective_wpm"] == 144.0
+
+
 def test_router_canonical_validation_allows_duration_repair_to_inspect_long_draft():
     script = _valid_script()
     script["script"][1]["voiceover"] = " ".join(["word"] * 65)
@@ -318,6 +364,18 @@ def test_fallback_prompt_uses_the_current_duration_contract():
     assert "90-word safety ceiling" in prompt
     assert "at least 3 scenes" in prompt
     assert "55–60 words" not in prompt
+
+
+def test_fallback_prompt_supports_top5_scene_contract():
+    import research_runtime
+
+    prompt = research_runtime._fallback_prompt(
+        {"script_instruction": "Write all narration in English."},
+        "top5",
+    )
+
+    assert "at least 5 substantive list-entry scenes" in prompt
+    assert "3 or 4 scenes" not in prompt
 
 
 def test_local_ollama_preflight_rejects_an_uninstalled_explicit_model(monkeypatch):
