@@ -6,14 +6,16 @@ The production path is deliberately single-owner:
 3) try bounded original-writing fallbacks,
 4) validate one canonical result,
 5) perform originality QC once,
-6) return one authoritative script.
+6) when necessary, run one bounded duration-tightening pass on the primary draft,
+7) return one authoritative script.
 
-There is no post-acceptance rewrite or duration-compression pass. Overlong or
-non-original provider output is rejected before manual review and TTS.
+Duration is the runtime contract. A draft that is otherwise valid but over 30 seconds
+gets one compression attempt before it is rejected or a fallback provider is tried.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict
 
@@ -120,6 +122,90 @@ def _validate_script_result(result, story_data, format_mode):
         return cleaned, ""
     except Exception as exc:
         return None, f"Canonical script validation failed: {type(exc).__name__}: {exc}"
+
+DURATION_REPAIR_TARGET_SECONDS = 27.0
+
+
+def _estimate_script_duration(script_data):
+    import script_runtime as sr
+
+    scenes = script_data.get("script") if isinstance(script_data, dict) else None
+    persona_key = str(script_data.get("persona_used") or "LISTICLE HOST").upper()
+    # Keep the estimate independent of ultimate_bot globals so this router remains
+    # testable and authoritative even when runtime bindings are active.
+    try:
+        from ultimate_bot import PERSONA_PROFILES
+        profile = PERSONA_PROFILES.get(
+            persona_key,
+            PERSONA_PROFILES.get("LISTICLE HOST", {}),
+        )
+    except Exception:
+        profile = {}
+    return sr.estimate_narration_duration(script_data, profile)
+
+
+def tighten_script_for_duration_once(
+    primary_writer,
+    prepared_story,
+    candidate,
+    language_cfg,
+    genre_key,
+    conn,
+    format_mode,
+):
+    """Give the primary writer exactly one chance to compress an overlong draft."""
+    if not callable(primary_writer):
+        return None, "Primary writer is unavailable for the bounded duration repair."
+
+    revision_payload = dict(prepared_story or {})
+    revision_payload["_duration_tighten_script"] = json.dumps(
+        candidate,
+        ensure_ascii=False,
+    )
+    revision_payload["_duration_tighten_target_seconds"] = DURATION_REPAIR_TARGET_SECONDS
+    revision_payload["_duration_tighten_instruction"] = (
+        "Rewrite the existing draft for spoken brevity. Preserve every factual claim, "
+        "person/team/entity, number, attribution and consequence that remains supported. "
+        "Do not add facts. Keep the same narrative roles. Target about "
+        f"{DURATION_REPAIR_TARGET_SECONDS:.0f} seconds and stay below 30 seconds."
+    )
+
+    try:
+        revised = primary_writer(
+            revision_payload,
+            language_cfg,
+            genre_key,
+            conn,
+            format_mode,
+        )
+    except Exception as exc:
+        return None, f"duration repair provider failed: {type(exc).__name__}: {exc}"
+
+    validated, reason = _validate_script_result(
+        revised,
+        prepared_story,
+        format_mode,
+    )
+    if validated is None:
+        return None, f"duration repair failed canonical QC: {reason}"
+
+    estimate = _estimate_script_duration(validated)
+    validated["duration_repair_attempted"] = True
+    validated["duration_repair_target_seconds"] = DURATION_REPAIR_TARGET_SECONDS
+    validated["estimated_duration_seconds"] = estimate["seconds"]
+    validated["estimated_duration_word_count"] = estimate["word_count"]
+    validated["estimated_duration_effective_wpm"] = estimate["effective_wpm"]
+    validated["duration_band"] = sr.classify_narration_duration(estimate["seconds"])
+
+    if estimate["seconds"] >= 30.0:
+        return None, (
+            f"duration repair still estimated at {estimate['seconds']:.1f}s "
+            f"(target <30s)"
+        )
+
+    validated["duration_repair_succeeded"] = True
+    return validated, ""
+
 
 def _prepare_story_data(data, pack, evidence_text, evidence_fallback_used):
     counts = pack.get("counts") or {}
@@ -239,7 +325,47 @@ def install_script_pipeline(bot):
                 continue
             validated, reason = _validate_script_result(candidate, data, format_mode)
             if validated is not None:
+                estimate = _estimate_script_duration(validated)
+                validated["estimated_duration_seconds"] = estimate["seconds"]
+                validated["estimated_duration_word_count"] = estimate["word_count"]
+                validated["estimated_duration_effective_wpm"] = estimate["effective_wpm"]
+                validated["duration_band"] = sr.classify_narration_duration(estimate["seconds"])
+
+                if estimate["seconds"] >= 30.0:
+                    # Only the canonical primary writer is eligible for the one
+                    # bounded repair. Fallback providers remain one-shot so the
+                    # fallback ladder cannot become a rewrite loop.
+                    if provider_name == "primary writer":
+                        repaired, repair_reason = tighten_script_for_duration_once(
+                            current,
+                            prepared,
+                            validated,
+                            language_cfg,
+                            genre_key,
+                            conn,
+                            format_mode,
+                        )
+                        if repaired is not None:
+                            repaired["provider_used"] = provider_name
+                            accepted = repaired
+                            break
+                        print(
+                            f"   [Script Pipeline] Primary draft was over 30s; "
+                            f"single duration repair did not clear it: {repair_reason}",
+                            flush=True,
+                        )
+                        attempt_reasons.append(
+                            f"primary writer duration repair rejected: {repair_reason}"
+                        )
+                    else:
+                        attempt_reasons.append(
+                            f"{provider_name} rejected by duration gate: "
+                            f"{estimate['seconds']:.1f}s >= 30s"
+                        )
+                    continue
+
                 validated["provider_used"] = provider_name
+                validated["duration_repair_attempted"] = False
                 accepted = validated
                 break
             reason = f"{provider_name} rejected by canonical script QC: {reason}"
@@ -255,8 +381,8 @@ def install_script_pipeline(bot):
         if evidence_fallback_used:
             accepted["public_publish_blocked"] = True
 
-        # Originality is part of provider acceptance. Never rewrite an already accepted script.
-
+        # Provider acceptance and the bounded duration pass are complete.
+        # Never rewrite again after this point; manual review sees exactly this script.
         sr.rank_title_candidates(accepted, data)
         bot._active_script_data = accepted
         return accepted
