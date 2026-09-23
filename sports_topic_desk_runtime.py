@@ -16,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import story_ranker as sr
-from event_discovery_runtime import cluster_news_events, fetch_gdelt_articles
+from event_discovery_runtime import cluster_news_events, event_identity_key, fetch_gdelt_articles
 
 SPORTS_DESK_VERSION = "cricket-desk-v7-2026-09-23"
 LOOKBACK_HOURS = 72
@@ -582,6 +582,146 @@ def _social_stats_by_url(rows):
     return result
 
 
+def _merge_same_matchup_events(events):
+    """Collapse alternate reports of the same direct matchup into one event."""
+    direct_families = {
+        "india_japan_matchup",
+        "india_sri_lanka_matchup",
+        "india_bangladesh_matchup",
+        "india_afghanistan_matchup",
+        "india_nepal_matchup",
+        "india_pakistan_rivalry",
+    }
+
+    groups = []
+    for event in events or []:
+        family = _clean(
+            event.get("cricket_event_family") or sr._cricket_event_family(event)
+        )
+        if family not in direct_families:
+            groups.append([event])
+            continue
+
+        latest_raw = _clean(event.get("event_latest_published_at") or event.get("event_latest_seen_at"))
+        latest = None
+        if latest_raw:
+            try:
+                latest = datetime.fromisoformat(latest_raw.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                latest = None
+        if latest is None:
+            groups.append([event])
+            continue
+
+        match = None
+        for candidate_group in groups:
+            if len(candidate_group) != 1:
+                continue
+            base = candidate_group[0]
+            base_family = _clean(
+                base.get("cricket_event_family") or sr._cricket_event_family(base)
+            )
+            if base_family != family:
+                continue
+            base_raw = _clean(base.get("event_latest_published_at") or base.get("event_latest_seen_at"))
+            try:
+                base_latest = datetime.fromisoformat(base_raw.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if abs((latest - base_latest).total_seconds()) <= 18 * 3600:
+                match = candidate_group
+                break
+
+        if match is None:
+            groups.append([event])
+        else:
+            match.append(event)
+
+    merged = []
+    for group in groups:
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+
+        # Keep the freshest representative, then fold every alternate report
+        # into its evidence so no factual angle is lost.
+        representative = max(
+            group,
+            key=lambda item: _age_hours(
+                item.get("event_latest_published_at") or item.get("publishedAt")
+            ) * -1,
+        )
+        combined = dict(representative)
+        evidence = []
+        seen_evidence = set()
+        publishers = set()
+        domains = set()
+        entities = set()
+        actions = set()
+        titles = []
+        article_count = 0
+        first_seen_values = []
+        latest_seen_values = []
+        for item in group:
+            article_count += int(item.get("event_article_count") or 1)
+            publishers.update(str(value).strip() for value in (item.get("event_publishers") or []) if str(value).strip())
+            domains.update(str(value).strip() for value in (item.get("event_source_domains") or []) if str(value).strip())
+            entities.update(str(value).strip() for value in (item.get("event_entities") or []) if str(value).strip())
+            actions.update(str(value).strip() for value in (item.get("event_actions") or []) if str(value).strip())
+            first_seen = _clean(item.get("event_first_seen_at"))
+            latest_seen = _clean(item.get("event_latest_published_at") or item.get("event_latest_seen_at"))
+            if first_seen:
+                first_seen_values.append(first_seen)
+            if latest_seen:
+                latest_seen_values.append(latest_seen)
+            title = _clean(item.get("title"))
+            if title:
+                titles.append(title)
+            for row in (item.get("event_evidence") or []):
+                key = (
+                    _clean(row.get("url"))
+                    or _clean(row.get("title"))
+                ).casefold()
+                if not key or key in seen_evidence:
+                    continue
+                seen_evidence.add(key)
+                evidence.append(dict(row))
+
+        combined.update({
+            "event_search_text": " ".join(dict.fromkeys(titles))[:12000],
+            "event_entities": sorted(entities),
+            "event_actions": sorted(actions),
+            "event_article_count": article_count,
+            "event_source_count": len(publishers or domains),
+            "event_total_publisher_count": len(publishers),
+            "event_publishers": sorted(publishers),
+            "event_source_domains": sorted(domains),
+            "event_evidence_publishers": sorted(publishers),
+            "event_evidence": evidence[:12],
+            "event_cluster_size": article_count,
+            "event_corroboration_score": min(10.0, len(publishers or domains) * 2.0),
+            "event_first_seen_at": min(first_seen_values) if first_seen_values else _clean(combined.get("event_first_seen_at")),
+            "event_latest_seen_at": max(latest_seen_values) if latest_seen_values else _clean(combined.get("event_latest_seen_at")),
+            "event_latest_published_at": max(latest_seen_values) if latest_seen_values else _clean(combined.get("event_latest_published_at")),
+            "event_development_state": "developing",
+        })
+        first = _clean(combined.get("event_first_seen_at"))
+        last = _clean(combined.get("event_latest_seen_at"))
+        try:
+            first_dt = datetime.fromisoformat(first.replace("Z", "+00:00"))
+            last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            combined["event_velocity_score"] = round(
+                min(10.0, article_count / max(0.25, (last_dt - first_dt).total_seconds() / 3600.0)),
+                3,
+            )
+        except (TypeError, ValueError, ZeroDivisionError):
+            combined["event_velocity_score"] = 0.0
+        combined["event_identity_key"] = event_identity_key(combined)
+        merged.append(combined)
+
+    return merged
+
+
 def _enrich_events(events, rows):
     social_by_url = _social_stats_by_url(rows)
     for event in events:
@@ -881,6 +1021,9 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
     ]
 
     events = cluster_news_events(rows)
+    for event in events:
+        event["cricket_event_family"] = sr._cricket_event_family(event)
+    events = _merge_same_matchup_events(events)
     events = _enrich_events(events, rows)
 
     # Trend items are signals only; they never become independent factual events.
