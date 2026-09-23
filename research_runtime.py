@@ -54,6 +54,13 @@ def _validate_provider_script(result: Any, story_data: Dict[str, Any], format_mo
             raise ValueError(f"{provider_name} script validation rejected the response: exactly three title candidates are required.")
         if any(not str(title or "").strip() for title in titles):
             raise ValueError(f"{provider_name} script validation rejected the response: an empty title candidate was returned.")
+        try:
+            recommended_index = int(cleaned.get("recommended_title_index", 1))
+        except (TypeError, ValueError):
+            raise ValueError(f"{provider_name} script validation rejected the response: recommended title index is invalid.")
+        if recommended_index not in (1, 2, 3):
+            raise ValueError(f"{provider_name} script validation rejected the response: recommended title index is invalid.")
+        cleaned["recommended_title_index"] = recommended_index
         cleaned["provider_used"] = provider_name
         cleaned["provider_fallback"] = True
         cleaned["provider_diagnostics"] = diagnostics
