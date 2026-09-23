@@ -224,3 +224,41 @@ def test_cricket_bucket_caps_one_event_family_in_the_top_window():
         1 for item in result
         if item.get("cricket_event_family") == "asian_games"
     ) <= 4
+
+
+
+def test_cricket_desk_treats_india_japan_headlines_as_one_event_family():
+    rows = [
+        _article("India survive Japan scare in dramatic T20 finish", "one.example"),
+        _article("India-Japan match sparks umpiring controversy", "two.example"),
+        _article("Japan umpiring call dominates India cricket debate", "three.example"),
+    ]
+    concepts = [
+        {
+            **item,
+            "news_score": 90 - index,
+            "viral_score": 80 - index,
+            "social_score": 70 - index,
+            "undercovered_score": 2,
+            "social_post_count": 0,
+        }
+        for index, item in enumerate(desk._cluster(rows))
+    ]
+
+    family = [
+        desk.sr._cricket_event_family(item)
+        for item in concepts
+    ]
+    assert all(value == "india_japan_matchup" for value in family)
+
+
+def test_cricket_desk_keeps_unusual_article_headlines_for_manual_qc(monkeypatch):
+    row = _article(
+        "Japan bowler's bizarre final-over call leaves India stunned",
+        "cricbuzz.example",
+    )
+    monkeypatch.setattr(desk.sr, "_source_page_pass", lambda item: True)
+    monkeypatch.setattr(desk.sr, "_safety_gate", lambda item: (True, []))
+    monkeypatch.setattr(desk.sr, "_cricket_service_title_pass", lambda item: True)
+    result = desk._normalise_rows([row])
+    assert len(result) == 1
