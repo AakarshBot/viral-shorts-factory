@@ -812,62 +812,6 @@ def _recent_topic_cooldown(conn, stories, hours=72):
     return stories
 
 
-    """Remove recently covered topics while allowing genuinely new developments."""
-    if conn is None:
-        return list(stories or [])
-    try:
-        rows = conn.execute(
-            "SELECT topic, COALESCE(date_used, created_at) FROM vault "
-            "WHERE topic IS NOT NULL AND topic != '' "
-            "AND video_id IS NOT NULL AND video_id NOT IN ('', 'PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED') "
-            "AND status NOT IN ('PENDING_QC', 'READY_FOR_UPLOAD', 'REJECTED', 'FAILED')"
-        ).fetchall()
-    except Exception:
-        return list(stories or [])
-    now = datetime.now(timezone.utc)
-    recent = []
-    for topic, raw_date in rows:
-        if not topic or not raw_date:
-            continue
-        try:
-            when = raw_date if isinstance(raw_date, datetime) else datetime.fromisoformat(
-                str(raw_date).replace("Z", "+00:00")
-            )
-        except (TypeError, ValueError):
-            try:
-                when = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d")
-            except ValueError:
-                continue
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        age = (now - when.astimezone(timezone.utc)).total_seconds() / 3600.0
-        if 0 <= age <= hours:
-            recent.append(str(topic))
-    if not recent:
-        return list(stories or [])
-    kept = []
-    for story in stories or []:
-        title = str(story.get("title") or "")
-        current_tokens = _tokens(title)
-        candidate_actions = set(story.get("event_actions") or _event_actions(title))
-        repeated = False
-        for old_topic in recent:
-            overlap = _topic_overlap(title, old_topic)
-            shared = len(current_tokens & _tokens(old_topic))
-            if overlap < 0.55 and not (shared >= 3 and overlap >= 0.32):
-                continue
-            old_actions = set(_event_actions(old_topic))
-            if candidate_actions and old_actions and candidate_actions - old_actions:
-                continue
-            repeated = True
-            break
-        if repeated:
-            story["discovery_rejection"] = "Recent topic cooldown"
-            continue
-        kept.append(story)
-    return kept
-
-
 def _eligible(row):
     status = _clean(row.get("status"))
     video_id = _clean(row.get("video_id"))
@@ -1020,18 +964,6 @@ def _cricket_story_worthiness_pass(story, minimum_score=5.0):
     story["cricket_service_article_pass"] = True
     return True
 
-
-    score = _cricket_story_worthiness_score(story)
-    story["cricket_story_worthiness_score"] = score
-    if not _cricket_service_title_pass(story):
-        story["cricket_service_article_pass"] = False
-        story["discovery_rejection"] = "Low-value cricket service article"
-        return False
-    story["cricket_service_article_pass"] = True
-    if score < float(minimum_score):
-        story["discovery_rejection"] = "Weak cricket editorial development"
-        return False
-    return True
 
 def _apply_sports_niche_bonus(story, target_category):
     if _clean(target_category) != "sports":
@@ -1714,50 +1646,6 @@ def _originality_stage(stories, used_topics, max_items=5):
     return selected
 
 
-    selected = []
-    for story in stories:
-        overlap = _same_topic(story, used_topics)
-
-        # Historical cooldown is deliberately conservative: high lexical
-        # overlap indicates the same covered topic, while moderate overlap can
-        # simply mean the same entity has a genuinely new development.
-        if overlap >= 0.72:
-            story["discovery_rejection"] = "Previously covered topic/angle"
-            continue
-
-        title_overlap = max(
-            (
-                _topic_overlap(story.get("title", ""), old.get("title", ""))
-                for old in selected
-            ),
-            default=0.0,
-        )
-        if title_overlap >= 0.58:
-            similar_old = [
-                old
-                for old in selected
-                if _topic_overlap(story.get("title", ""), old.get("title", "")) >= 0.58
-            ]
-            distinct_event = any(
-                story.get("event_id")
-                and old.get("event_id")
-                and str(story.get("event_id")) != str(old.get("event_id"))
-                for old in similar_old
-            )
-            if not distinct_event:
-                story["discovery_rejection"] = "Residual similar topic"
-                continue
-
-        story["originality_score"] = round(
-            max(0.0, 10.0 - overlap * 9.0 - title_overlap * 6.0),
-            2,
-        )
-        story["originality_pass"] = True
-        selected.append(story)
-        if len(selected) >= max_items:
-            break
-    return selected
-
 
 def _editorial_score(story, rows, target_category, target_format, target_language, social_titles, ai_cricket=False):
     velocity = _safe_float(story.get("velocity_score")) or 0.0
@@ -2093,51 +1981,6 @@ def _discovery_portfolio_pass(story):
             story["discovery_rejection"] = "Low-value cricket service article"
             return False
     story["discovery_quality_floor_bypassed"] = True
-    return True
-
-
-    """Keep the dashboard broad without weakening the production selection gate.
-
-    The dashboard is a human exploration surface, so niche but current,
-    source-supported stories should remain visible even when they are not
-    strong enough for automatic production selection.
-    """
-    dimensions = story.get("discovery_dimensions") or {}
-    freshness = _safe_float(dimensions.get("freshness")) or 0.0
-    momentum = _safe_float(dimensions.get("event_momentum")) or 0.0
-    score = _safe_float(story.get("candidate_score")) or 0.0
-    hook = _safe_float(dimensions.get("hook_potential")) or 0.0
-    scope = _safe_float(dimensions.get("shorts_scope")) or 0.0
-    actionability = _safe_float(story.get("topic_actionability_score")) or 0.0
-    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and not _cricket_story_worthiness_pass(story, minimum_score=5.0):
-        return False
-    if not _source_page_pass(story):
-        return False
-    if not _headline_noise_pass(story):
-        return False
-    if freshness < 1.0 and momentum < 1.0:
-        story["discovery_rejection"] = "Insufficient current-event signal"
-        return False
-    strong_hook = bool(story.get("freshfeed_channel_strong_hook")) or hook >= 5.0
-    if actionability < 3.0 and not strong_hook:
-        story["discovery_rejection"] = "Headline lacks enough story substance for a Short"
-        return False
-    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and hook < 2.75:
-        story["discovery_rejection"] = "Weak Shorts hook potential"
-        return False
-    if _clean(story.get("discovery_target_category")) == "sports_stories_of_day" and scope < 5.5:
-        story["discovery_rejection"] = "Poor fit for a focused 20–35s Short"
-        return False
-    if not _story_substance_pass(story):
-        story["discovery_rejection"] = "Headline lacks enough story substance behind the event"
-        return False
-    if score < 6.0:
-        story["discovery_rejection"] = "Below exploration quality floor"
-        return False
-
-    story["discovery_tier"] = (
-        "production-ready" if _candidate_quality_pass(story) else "exploratory"
-    )
     return True
 
 
