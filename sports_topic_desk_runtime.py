@@ -648,6 +648,7 @@ def _merge_same_matchup_events(events):
         evidence = []
         seen_evidence = set()
         publishers = set()
+        evidence_publishers = set()
         domains = set()
         entities = set()
         actions = set()
@@ -658,6 +659,11 @@ def _merge_same_matchup_events(events):
         for item in group:
             article_count += int(item.get("event_article_count") or 1)
             publishers.update(str(value).strip() for value in (item.get("event_publishers") or []) if str(value).strip())
+            evidence_publishers.update(
+                str(value).strip()
+                for value in (item.get("event_evidence_publishers") or [])
+                if str(value).strip()
+            )
             domains.update(str(value).strip() for value in (item.get("event_source_domains") or []) if str(value).strip())
             entities.update(str(value).strip() for value in (item.get("event_entities") or []) if str(value).strip())
             actions.update(str(value).strip() for value in (item.get("event_actions") or []) if str(value).strip())
@@ -685,11 +691,11 @@ def _merge_same_matchup_events(events):
             "event_entities": sorted(entities),
             "event_actions": sorted(actions),
             "event_article_count": article_count,
-            "event_source_count": len(publishers or domains),
+            "event_source_count": len(evidence_publishers or domains),
             "event_total_publisher_count": len(publishers),
             "event_publishers": sorted(publishers),
             "event_source_domains": sorted(domains),
-            "event_evidence_publishers": sorted(publishers),
+            "event_evidence_publishers": sorted(evidence_publishers or domains),
             "event_evidence": evidence[:12],
             "event_cluster_size": article_count,
             "event_corroboration_score": min(10.0, len(publishers or domains) * 2.0),
