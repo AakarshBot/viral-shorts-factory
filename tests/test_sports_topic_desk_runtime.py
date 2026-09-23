@@ -138,7 +138,6 @@ def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(mo
         ))
     monkeypatch.setattr(desk, "_collect", lambda scope="India / Asia": concepts)
     monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
-    monkeypatch.setattr(desk, "_trend_signal", lambda item, trends: 0.0)
 
     result = desk.discover_cricket_topics(
         bot=None,
