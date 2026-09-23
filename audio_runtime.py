@@ -200,7 +200,7 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
             return [], []
 
         success = False
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             try:
                 print(f"   [Audio] Scene {idx + 1}/{len(scenes)} attempt {attempt}...", flush=True)
                 timings = await _render_scene(
@@ -240,8 +240,8 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
                     flush=True,
                 )
                 break
-            if attempt < 3:
-                await asyncio.sleep(min(3 * attempt, 9))
+            if attempt < 2:
+                await asyncio.sleep(2)
 
         if not success:
             print(f"   [Audio] FATAL: Could not generate real narration for scene {idx + 1}.", flush=True)
