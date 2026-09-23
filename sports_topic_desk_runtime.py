@@ -15,7 +15,7 @@ import requests
 import story_ranker as sr
 from event_discovery_runtime import fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "cricket-desk-v3-2026-09-23"
+SPORTS_DESK_VERSION = "cricket-desk-v4-2026-09-23"
 LOOKBACK_HOURS = 72
 # Primary factual collection has its own bounded lane so social/trend work cannot
 # occupy the workers needed for the actual news sources.
@@ -459,7 +459,11 @@ def _collect(scope="India / Asia"):
             future = secondary_pool.submit(_bluesky, query)
             secondary_jobs[future] = "Bluesky"
 
-        mastodon_query = "cricket" if _clean(scope).casefold() == "global" else "India cricket"
+        mastodon_query = (
+            MASTODON_QUERIES[0]
+            if _clean(scope).casefold() == "global"
+            else MASTODON_QUERIES[1]
+        )
         future = secondary_pool.submit(_mastodon, mastodon_query)
         secondary_jobs[future] = "Mastodon"
 
@@ -575,7 +579,7 @@ def _normalise_rows(rows):
                 continue
             if not sr._cricket_service_title_pass(item):
                 continue
-            url = _clean(item.get("url") or item.get("link"))
+        url = _clean(item.get("url") or item.get("link"))
         canonical = sr._canonical_url(url)
         key = canonical or ("title:" + _clean(item.get("title")).casefold())
         if key in seen:
