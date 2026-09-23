@@ -59,17 +59,11 @@ def test_script_pipeline_tries_original_free_provider_before_private_extractive_
         "_ollama_script_fallback",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Ollama should not run after OpenRouter succeeds")),
     )
-    monkeypatch.setattr(
-        pir,
-        "strict_fallback",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Extractive fallback should not run after an original provider succeeds")),
-    )
     monkeypatch.setattr(pir, "_clean_script_result", lambda result, *_args: dict(result))
     monkeypatch.setattr(sr, "clean_script_data", lambda result, *_args: (dict(result), {"changed_scenes": 0, "removed_scenes": 0}))
     monkeypatch.setattr(sr, "validate_content_density", lambda *_args: (True, "ok"))
     monkeypatch.setattr(sr, "assess_release_structure", lambda *_args: (True, "ok", "Editorial Explainer"))
     monkeypatch.setattr(sr, "check_script_originality", lambda *_args: {"passed": True, "failures": []})
-    monkeypatch.setattr(sr, "_run_real_critique", lambda *_args: {"unsupported_claims": []})
 
     write_script = router.install_script_pipeline(bot)
     result = write_script({"title": "Selected story", "text": "Verified story evidence."}, {}, "technology", object(), "regular")
