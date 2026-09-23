@@ -365,7 +365,7 @@ def parse_groq_json_response(content_str):
                 parsed[key] = safe_text(parsed[key], "")
 
         if isinstance(parsed.get("titles"), list):
-            parsed["titles"] = [safe_text(t, "Untitled") for t in parsed["titles"]]
+            parsed["titles"] = [safe_text(t, "") for t in parsed["titles"]]
 
         if isinstance(parsed.get("script"), list):
             for scene in parsed["script"]:
