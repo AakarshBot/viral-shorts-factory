@@ -1890,6 +1890,7 @@ def test_gemini_transient_503_has_no_recursive_retry():
     block = source[start:end]
 
     assert "_allow_transient_retry" not in block
+    assert "GEMINI_VISUAL_RETRIES" not in block
     assert "retrying once as" not in block
     assert "strict_gemini_check_batch(" not in block.split(
         "except Exception as exc:", 1
@@ -1897,6 +1898,56 @@ def test_gemini_transient_503_has_no_recursive_retry():
         "install_visual_qa_bridge", 1
     )[0]
     assert "transient_unavailable" in block
+
+
+def test_dashboard_manual_search_uses_only_first_two_preferred_providers(monkeypatch):
+    calls = []
+
+    def make_provider(name):
+        def fetch(*args):
+            calls.append(name)
+            candidate = _licensed_candidate(
+                _jpeg_bytes((1200, 1600), color=(40 + len(calls) * 20, 70, 100)),
+                "cc0",
+            )
+            candidate["source_image_url"] = f"https://{name}.example/image-{len(calls)}.jpg"
+            candidate["search_title"] = f"{name} result"
+            return [candidate]
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", make_provider("Commons")),
+            ("DDG", make_provider("DDG")),
+            ("Openverse", make_provider("Openverse")),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "IPL logo",
+    )
+
+    assert calls == ["Commons", "DDG"]
+    assert len(result["assets"]) == 2
 
 
 def test_manual_source_plan_can_include_ddg_without_global_unlicensed_flag(monkeypatch):
