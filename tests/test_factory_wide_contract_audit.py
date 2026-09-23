@@ -96,3 +96,25 @@ def test_ultimate_bot_has_no_unused_legacy_top_level_constant_registries():
     assert '\nIMAGEMAGICK_BINARY_PATH =' not in source
     assert '\nUNSPLASH_ACCESS_KEY = os.getenv' not in source
     assert '\nPEXELS_API_KEY = os.getenv' not in source
+
+def test_runtime_bindings_do_not_restore_legacy_pipeline_fallbacks():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("runtime_bindings.py").read_text(encoding="utf-8")
+    assert "_wrap_editorial_provider_usage" not in source
+    assert 'return getattr(bot, "write_script", None)' not in source
+    assert 'return getattr(bot, "process_visuals_async", None)' not in source
+    assert 'return getattr(bot, "generate_voiceover_and_timestamps", None)' not in source
+    assert 'return getattr(bot, "generate_karaoke_clip", None)' not in source
+    assert "Final QC runtime unavailable" not in source
+
+
+def test_production_lifecycle_records_failures_and_completed_uploads():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert 'reason = "Script generation returned no usable script."' in source
+    assert 'reason = "Voiceover generation failed to produce audio files."' in source
+    assert 'reason = "Post-render validation failed: final video is missing."' in source
+    assert '"READY_FOR_UPLOAD"' in source
+    assert '"UPLOADED_PRIVATE" if str(pub_mode or "").strip().lower() == "private" else "UPLOADED"' in source
