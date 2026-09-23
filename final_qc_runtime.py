@@ -6,14 +6,29 @@ import re
 
 
 def _validate_final_artifact(path: str) -> tuple[bool, str]:
+    """Validate that the rendered video is a real, bounded final artifact."""
     if not path or not os.path.isfile(path):
         return False, "final video file is missing"
     try:
         from branding_runtime import _artifact_qc
-        return _artifact_qc(path)
+        artifact_ok, artifact_reason = _artifact_qc(path)
+        if not artifact_ok:
+            return False, artifact_reason
     except Exception as exc:
         return False, f"artifact QC unavailable: {type(exc).__name__}: {exc}"
 
+    try:
+        from moviepy import VideoFileClip
+        with VideoFileClip(path) as clip:
+            duration = float(clip.duration or 0.0)
+    except Exception as exc:
+        return False, f"final video duration could not be validated: {type(exc).__name__}: {exc}"
+
+    if duration <= 0.0:
+        return False, "final video duration is invalid"
+    if duration > 30.0:
+        return False, f"final video exceeds the 30.0s production limit ({duration:.2f}s)"
+    return True, f"final video artifact and duration validated ({duration:.2f}s)"
 
 def _validate_metadata(title: str, description: str, comment: str = "") -> tuple[bool, str]:
     title = str(title or "").strip()
