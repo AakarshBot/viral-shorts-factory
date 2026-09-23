@@ -145,15 +145,15 @@ def make_run_id():
     return uuid.uuid4().hex
 
 
-def create_run_record(conn, topic, genre, run_id=None):
+def create_run_record(conn, topic, genre, run_id=None, discovery_event_key=""):
     """Create the authoritative database row for one production run."""
     migrate_vault(conn)
     run_id = run_id or make_run_id()
     cur = conn.execute(
         """INSERT INTO vault
-        (run_id, topic, date_used, genre, video_id, status, reported)
-        VALUES (?, ?, ?, ?, 'PENDING_QC', 'PENDING_QC', 0)""",
-        (run_id, topic, datetime.now(), genre),
+        (run_id, topic, date_used, genre, video_id, status, reported, discovery_event_key)
+        VALUES (?, ?, ?, ?, 'PENDING_QC', 'PENDING_QC', 0, ?)""",
+        (run_id, topic, datetime.now(), genre, str(discovery_event_key or "").strip()),
     )
     conn.commit()
     return cur.lastrowid, run_id
