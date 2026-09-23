@@ -321,9 +321,15 @@ def install_script_pipeline(bot):
         # Local Ollama is only useful when the process is actually able to reach it.
         # The fallback performs a /api/tags preflight and refuses an uninstalled model.
         remote_mode = str(os.getenv("VSF_REMOTE_MODE") or "").strip().lower()
-        if remote_mode not in {"1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"}:
+        ollama_url = str(os.getenv("OLLAMA_BASE_URL") or "").strip()
+        # In remote mode, skip only the implicit localhost Ollama. An explicitly
+        # configured non-local endpoint remains a supported fallback.
+        if (
+            remote_mode not in {"1", "true", "yes", "remote", "cloud", "streamlit", "streamlit_cloud"}
+            or ollama_url
+        ):
             attempts.append(
-                ("local Ollama", lambda: rr._ollama_script_fallback(data, language_cfg, genre_key, format_mode))
+                ("Ollama", lambda: rr._ollama_script_fallback(data, language_cfg, genre_key, format_mode))
             )
 
         accepted = None
