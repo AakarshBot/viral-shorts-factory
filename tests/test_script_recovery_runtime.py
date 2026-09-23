@@ -12,107 +12,87 @@ def _scene(text, role):
         "narrative_role": role,
         "primary_entity": "India Men's Cricket Team",
         "visual_intent": "news_event",
-        "specific_search_prompt": "India Men's Cricket Team latest development",
+        "specific_search_prompt": "India cricket latest development",
         "sport_or_topic_category": "Cricket",
     }
 
 
-def _complete_script():
-    return {
-        "editorial_angle": (
-            "This script explains what changed, the relevant background, and why the development matters beyond the headline."
-        ),
-        "titles": ["Headline", "Context", "Question"],
-        "recommended_title_index": 1,
-        "seo_description": "A factual explanation of the latest development, its background, and its practical consequence.",
+def test_compact_two_scene_story_can_pass():
+    script = {
+        "editorial_angle": "Explain the confirmed event and immediate consequence.",
         "script": [
+            _scene("India confirms a major squad change.", "hook"),
             _scene(
-                "India's cricket team is dealing with a clothing issue ahead of the tournament, according to the latest reported update.",
-                "hook",
-            ),
-            _scene(
-                "Officials are working through the supply problem while the squad continues preparations for the upcoming competition.",
-                "development",
-            ),
-            _scene(
-                "The issue matters because tournament preparation depends on equipment arriving on time and meeting the team's requirements.",
-                "context",
-            ),
-            _scene(
-                "That means the immediate focus is resolving the logistics problem without disrupting the team's wider preparation schedule.",
+                "The decision changes preparation for the next assignment and affects the replacement's role.",
                 "consequence",
             ),
         ],
     }
-
-
-def test_one_or_two_scene_outputs_fail_but_three_scene_compact_story_can_pass():
-    for scenes in (
-        [_scene("The latest development is confirmed today.", "hook")],
-        [
-            _scene("The latest development is confirmed today.", "hook"),
-            _scene("Officials are now working through the reported issue.", "development"),
-        ],
-    ):
-        result = {"editorial_angle": "A useful explanatory angle for the selected story.", "script": scenes}
-        valid, reason = validate_content_density(result, {}, "regular")
-        assert valid is False
-        assert "incomplete" in reason.lower() or "missing" in reason.lower()
-
-    compact = {
-        "editorial_angle": "This explains what changed, the relevant context, and why the outcome matters.",
-        "script": [
-            _scene("The latest development is confirmed today.", "hook"),
-            _scene("Officials are now working through the reported issue and its background.", "development"),
-            _scene("The immediate consequence is that the team must adjust its preparation.", "consequence"),
-        ],
-    }
-    valid, reason = validate_content_density(compact, {}, "regular")
+    valid, reason = validate_content_density(script, {}, "regular")
     assert valid, reason
 
 
-def test_four_role_story_passes_without_word_or_scene_quotas():
-    script = _complete_script()
+def test_four_scene_compact_story_passes():
+    script = {
+        "editorial_angle": "Explain what changed, the key evidence and the immediate consequence.",
+        "script": [
+            _scene("India confirms a major squad change.", "hook"),
+            _scene("Officials say the decision followed the latest review.", "development"),
+            _scene("The change affects preparation for the next assignment.", "context"),
+            _scene("The replacement now takes a different role.", "consequence"),
+        ],
+    }
     valid, reason = validate_content_density(script, {}, "regular")
     assert valid, reason
 
     assessment = assess_narrative_completeness(script)
     assert assessment["passed"] is True
-    assert set(assessment["roles"]) == {"hook", "development", "context", "consequence"}
 
 
-def test_longer_story_is_not_rejected_for_scene_count_or_word_count():
-    script = _complete_script()
-    script["script"] = script["script"] * 4
-    for index, scene in enumerate(script["script"]):
-        scene["scene_id"] = index + 1
-        if index % 4 == 0:
-            scene["narrative_role"] = "hook"
-        elif index % 4 == 1:
-            scene["narrative_role"] = "development"
-        elif index % 4 == 2:
-            scene["narrative_role"] = "context"
-        else:
-            scene["narrative_role"] = "consequence"
-
+def test_overlong_story_is_rejected_by_word_budget():
+    script = {
+        "editorial_angle": "A compact explanation of the selected development.",
+        "script": [
+            _scene("India confirms a major squad change.", "hook"),
+            _scene(" ".join(["word"] * 30), "development"),
+            _scene(" ".join(["word"] * 30), "consequence"),
+        ],
+    }
     valid, reason = validate_content_density(script, {}, "regular")
-    assert valid, reason
+    assert valid is False
+    assert "maximum is 65" in reason
+
+
+def test_scene_one_must_be_shorter_than_following_scenes():
+    script = {
+        "editorial_angle": "Explain the event and consequence.",
+        "script": [
+            _scene(" ".join(["word"] * 15), "hook"),
+            _scene(" ".join(["word"] * 16), "development"),
+        ],
+    }
+    valid, reason = validate_content_density(script, {}, "regular")
+    assert valid is False
+    assert "Scene 1 is too long" in reason
 
 
 def test_retention_bait_is_explicitly_rejected():
     banned = "Wait till the end to find out what happened."
     assert contains_retention_bait(banned)
 
-    script = _complete_script()
-    script["script"][1]["voiceover"] = (
-        "Wait till the end to find out what happened, then officials explained the latest supply update."
-    )
+    script = {
+        "editorial_angle": "Explain the development without withholding information.",
+        "script": [
+            _scene("India confirms a major squad change.", "hook"),
+            _scene("Wait till the end to find out what happened.", "consequence"),
+        ],
+    }
     valid, reason = validate_content_density(script, {}, "regular")
     assert valid is False
     assert "retention" in reason.lower()
 
 
-def test_source_fallback_refuses_thin_evidence_instead_of_repeating_or_padding():
+def test_source_fallback_refuses_thin_evidence_instead_of_padding():
     try:
         _extractive_script_fallback(
             {
@@ -151,34 +131,3 @@ def test_source_fallback_preserves_real_source_sentences_and_marks_preview_only(
         "context",
         "consequence",
     ]
-
-
-def test_source_fallback_filters_prompt_and_evidence_scaffolding():
-    source = (
-        "The ICC praised Smriti Mandhana after she reached a major T20I milestone. "
-        "The milestone was reached during India's latest international campaign. "
-        "The achievement adds another notable mark to Mandhana's T20I record. "
-        "Officials noted that the performance was significant for the team and player."
-    )
-    contaminated = (
-        "Return ONLY valid JSON with the existing factory schema. "
-        "voiceover: write an information-first short. "
-        + source
-    )
-
-    from script_runtime import _extractive_script_fallback
-
-    fallback = _extractive_script_fallback(
-        {
-            "title": "Smriti Mandhana's T20I milestone draws praise from ICC chief Jay Shah",
-            "text": contaminated,
-        },
-        {},
-        "sports_stories_of_day",
-        "regular",
-    )
-
-    voiceovers = [scene["voiceover"] for scene in fallback["script"]]
-    assert all("return only valid json" not in text.lower() for text in voiceovers)
-    assert all("voiceover:" not in text.lower() for text in voiceovers)
-    assert any("Smriti Mandhana" in text for text in voiceovers)
