@@ -72,7 +72,7 @@ def test_initial_script_requires_scene_one_to_be_shortest():
     ok, reason = validate_content_density(script, {}, "regular")
 
     assert ok is False
-    assert "Scene 1 must remain the shortest" in reason
+    assert "Scene 1 must remain strictly shorter" in reason
 
 
 def test_exact_source_sentence_is_rejected():
