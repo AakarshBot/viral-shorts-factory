@@ -45,7 +45,7 @@ from dashboard_runtime import (
 )
 
 
-MAX_DASHBOARD_DISCOVERY_HEADLINES = 30
+MAX_DASHBOARD_DISCOVERY_HEADLINES = 60
 
 _UI_ARTIFACT_RE = re.compile(
     r"(?i)(?<![a-z0-9])_arrow(?:_(?:right|left|up|down))?(?![a-z0-9])"
