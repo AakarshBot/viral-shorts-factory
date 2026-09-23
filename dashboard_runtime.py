@@ -380,7 +380,7 @@ def discover_ranked_topics(
             conn=conn,
             scope=cricket_name,
             requested_topic=requested_topic,
-            max_candidates=60,
+            max_candidates=max_candidates,
             retained_candidates=retained_candidates,
         )
     else:
