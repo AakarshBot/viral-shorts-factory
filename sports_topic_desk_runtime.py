@@ -246,7 +246,7 @@ def _source_local_date(text, now=None):
     candidates = []
 
     for raw in re.findall(
-        r"(?:datetime|datePublished|dateModified|data-date|data-published|data-published-at)\s*[:=]\s*["']([^"']+)["']",
+        r"""(?:datetime|datePublished|dateModified|data-date|data-published|data-published-at)\s*[:=]\s*["']([^"']+)["']""",
         value,
         re.IGNORECASE,
     ):
