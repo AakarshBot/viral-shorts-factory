@@ -250,7 +250,7 @@ def install_script_pipeline(bot):
             validated, reason = _validate_script_result(fallback, data, format_mode)
             if validated is None:
                 raise ValueError(
-                    "Script completeness gate failed after every recovery path: "
+                    "Script acceptance gate failed after every provider/recovery path: "
                     + (reason or last_reason or "unknown failure")
                 )
             accepted = validated
