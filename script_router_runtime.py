@@ -112,7 +112,7 @@ def _validate_script_result(result, story_data, format_mode):
             return None, reason
 
         from quality_runtime import validate_deterministic_script_quality
-        quality_ok, quality_reason = validate_deterministic_script_quality(cleaned, format_mode)
+        quality_ok, quality_reason = validate_deterministic_script_quality(cleaned, format_mode, story_data)
         if not quality_ok:
             return None, quality_reason
 
