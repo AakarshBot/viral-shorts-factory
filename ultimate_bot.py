@@ -874,6 +874,7 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         "matching the input order one-to-one."
     )
     
+    groq_api_key = str(os.getenv("GROQ_API_KEY") or globals().get("GROQ_API_KEY") or "").strip()
     for attempt in range(1, 4):
         try:
             groq_url = "https://api.groq.com/openai/v1/chat/completions"
