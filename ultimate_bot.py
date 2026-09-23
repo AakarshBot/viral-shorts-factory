@@ -397,9 +397,9 @@ def _provider_http_error_detail(response, max_chars=900):
         detail = ""
     if not detail:
         detail = str(getattr(response, "text", "") or "").strip()
-    detail = re.sub(r"(?i)Bearer\\s+[A-Za-z0-9._-]+", "Bearer [redacted]", detail)
+    detail = re.sub(r"(?i)Bearer\s+[A-Za-z0-9._-]+", "Bearer [redacted]", detail)
     detail = re.sub(r"(?i)(?:gsk_|sk-or-v1-|AIza)[A-Za-z0-9._-]+", "[redacted]", detail)
-    detail = re.sub(r"\\s+", " ", detail).strip()
+    detail = re.sub(r"\s+", " ", detail).strip()
     return detail[:max_chars]
 
 
