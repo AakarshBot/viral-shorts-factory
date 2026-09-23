@@ -382,6 +382,27 @@ def parse_groq_json_response(content_str):
     return parsed
 
 
+def _provider_http_error_detail(response, max_chars=900):
+    """Extract a safe, useful provider error message instead of hiding HTTP 4xx/5xx details."""
+    detail = ""
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                detail = str(error.get("message") or error.get("detail") or error.get("type") or "").strip()
+            if not detail:
+                detail = str(payload.get("message") or payload.get("detail") or "").strip()
+    except Exception:
+        detail = ""
+    if not detail:
+        detail = str(getattr(response, "text", "") or "").strip()
+    detail = re.sub(r"(?i)Bearer\\s+[A-Za-z0-9._-]+", "Bearer [redacted]", detail)
+    detail = re.sub(r"(?i)(?:gsk_|sk-or-v1-|AIza)[A-Za-z0-9._-]+", "[redacted]", detail)
+    detail = re.sub(r"\\s+", " ", detail).strip()
+    return detail[:max_chars]
+
+
 def init_db(conn):
     """Ensure the canonical run-identity schema is present.
 
@@ -1045,7 +1066,13 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Scene 1 = the concrete event/person and strongest supported hook. "
         "Later scenes = the most important evidence and context, then the immediate consequence or final useful fact. "
         "Every sentence must earn its speaking time.\n\n"
-        "Return ONLY valid JSON using the requested factory schema. "
+        "Return ONLY JSON matching this exact object shape; do not wrap it in Markdown or add commentary. "
+        "{\\"editorial_angle\\":\\"...\\",\\"titles\\":[\\"...\\",\\"...\\",\\"...\\"],"
+        "\\"recommended_title_index\\":1,\\"seo_description\\":\\"...\\",\\"pinned_comment\\":\\"...\\","
+        "\\"script\\":[{\\"voiceover\\":\\"...\\",\\"narrative_role\\":\\"hook\\","
+        "\\"primary_entity\\":\\"...\\",\\"visual_intent\\":\\"news_event\\","
+        "\\"specific_search_prompt\\":\\"...\\",\\"sport_or_topic_category\\":\\"...\\"}]}. "
+        "Use narrative_role values hook, development, context, consequence. "
         f"Language: {language_cfg['script_instruction']}\n"
     )
 
@@ -1085,13 +1112,54 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 "model": "openai/gpt-oss-120b",
                 "messages": messages,
                 "response_format": {"type": "json_object"},
-                "temperature": 0.2,
-                "max_tokens": 450,
+                "include_reasoning": False,
+                "reasoning_effort": "low",
+                "temperature": 0.5,
+                "max_completion_tokens": 900,
             },
             timeout=30,
         )
+        if response.status_code == 400:
+            detail = _provider_http_error_detail(response)
+            print(
+                "   [Script Writer] Groq structured-output request returned HTTP 400"
+                + (f": {detail}" if detail else ".")
+                + " Retrying once with the minimal OpenAI-compatible payload.",
+                flush=True,
+            )
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "openai/gpt-oss-120b",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                system_prompt
+                                + "\n\n"
+                                + user_content
+                                + "\n\nReturn ONLY a valid JSON object matching the factory schema. "
+                                  "Do not output Markdown or any commentary."
+                            ),
+                        }
+                    ],
+                    "temperature": 0.5,
+                    "max_completion_tokens": 900,
+                },
+                timeout=30,
+            )
+
         if response.status_code != 200:
-            raise RuntimeError(f"Groq script provider HTTP {response.status_code}; falling through to the next provider.")
+            detail = _provider_http_error_detail(response)
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"Groq script provider HTTP {response.status_code}{suffix}; "
+                "falling through to the next provider."
+            )
 
         raw_content = response.json()["choices"][0]["message"]["content"]
         data = parse_groq_json_response(raw_content)
