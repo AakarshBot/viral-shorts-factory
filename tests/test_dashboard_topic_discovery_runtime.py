@@ -222,3 +222,52 @@ def test_ai_topic_path_uses_dashboard_discovery_v2(monkeypatch):
     assert len(result) == 1
     assert calls
     assert calls[0]["target_category"] == "sports"
+
+
+def test_dashboard_discovery_short_cache_avoids_duplicate_provider_sweep(monkeypatch):
+    discovery._DASHBOARD_DISCOVERY_CACHE.clear()
+    calls = {"collect": 0}
+    story = _fresh_story(
+        "India cricket board announces major selection change",
+        event_id="cache-event",
+        event_source_count=2,
+        event_article_count=2,
+    )
+
+    def fake_collect(*args, **kwargs):
+        calls["collect"] += 1
+        return [dict(story)], []
+
+    monkeypatch.setattr(discovery, "_collect_articles", fake_collect)
+    monkeypatch.setattr(
+        discovery,
+        "cluster_news_events",
+        lambda rows: [dict(rows[0])],
+    )
+    monkeypatch.setattr(
+        discovery,
+        "_hard_dashboard_pass",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        discovery,
+        "_rank_dashboard_events",
+        lambda events, **kwargs: [dict(events[0])],
+    )
+
+    kwargs = {
+        "bot": type("Bot", (), {})(),
+        "genre_key": "sports_stories_of_day",
+        "genre_cfg": {},
+        "target_category": "sports_stories_of_day",
+        "cricket_scope": "India / Asia",
+        "max_candidates": 1,
+    }
+
+    first = discovery.discover_dashboard_topics(**kwargs)
+    second = discovery.discover_dashboard_topics(**kwargs)
+
+    assert calls["collect"] == 1
+    assert first == second
+
+    discovery._DASHBOARD_DISCOVERY_CACHE.clear()
