@@ -714,12 +714,23 @@ def _collect(scope="India / Asia"):
     # Core factual intake: every Google lens and every direct cricket newsroom
     # runs once. This is deliberately bounded but broad enough to avoid a single
     # provider determining the entire dashboard.
+    scope_key = _clean(scope).casefold()
+    news_hl, news_gl, news_ceid = (
+        ("en-IN", "IN", "IN:en")
+        if scope_key == "india / asia"
+        else ("en-GB", "GB", "GB:en")
+    )
     for query in google_queries:
         primary_jobs.append((
             f"Google News:{query}",
             sr._google_news_search_items,
             (query, "sports_stories_of_day", GOOGLE_RESULT_LIMIT),
-            {"timeout": GOOGLE_REQUEST_TIMEOUT},
+            {
+                "timeout": GOOGLE_REQUEST_TIMEOUT,
+                "hl": news_hl,
+                "gl": news_gl,
+                "ceid": news_ceid,
+            },
         ))
     for name, url, _kind in DIRECT_CRICKET_SOURCES:
         primary_jobs.append((
