@@ -19,8 +19,6 @@ def _article(title, domain, hours=3):
 
 
 
-
-
 def test_cricket_desk_request_timeouts_fit_their_lane_budgets():
     assert desk.GOOGLE_REQUEST_TIMEOUT < desk.PRIMARY_DESK_TIMEOUT
     assert desk.SOURCE_TIMEOUT < desk.PRIMARY_DESK_TIMEOUT
