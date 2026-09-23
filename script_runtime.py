@@ -222,9 +222,10 @@ NARRATION_IDEAL_MIN_SECONDS = 20.0
 NARRATION_IDEAL_MAX_SECONDS = 28.0
 NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 
-# The initial writer uses a deliberately conservative spoken-word ceiling.
-# 60 words leaves margin below 30s even at the slowest configured narrator profile.
-INITIAL_SCRIPT_MAX_WORDS = 60
+# Word count is a safety ceiling, not the duration contract.
+# The real acceptance constraint is spoken duration; modestly longer drafts can
+# be tightened once before manual review instead of being discarded prematurely.
+INITIAL_SCRIPT_MAX_WORDS = 90
 SCENE_1_MAX_WORDS = 14
 
 
@@ -1040,7 +1041,7 @@ def assess_release_structure(script_data, format_mode="regular"):
     return True, "Narrative structure is production-ready.", assessment
 
 def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
-    """Minimal production narration gate: valid scenes plus a conservative initial word ceiling."""
+    """Minimal narration gate; duration is authoritative and word count is only a safety ceiling."""
     if not isinstance(script_data, dict):
         return False, "Script is missing."
     scenes = script_data.get("script")
@@ -1067,7 +1068,7 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
     total_words = sum(word_counts)
     if total_words > INITIAL_SCRIPT_MAX_WORDS:
         return False, (
-            f"Initial narration is too long: {total_words} words; "
+            f"Narration exceeds the safety ceiling: {total_words} words; "
             f"maximum is {INITIAL_SCRIPT_MAX_WORDS}."
         )
 
@@ -1075,7 +1076,7 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
         first_words = word_counts[0]
         if first_words > SCENE_1_MAX_WORDS:
             return False, (
-                f"Scene 1 is too long: {first_words} words; "
+                f"Scene 1 exceeds the compact-opening ceiling: {first_words} words; "
                 f"maximum is {SCENE_1_MAX_WORDS}."
             )
     hook_diagnostics = _hook_quality_score(script_data, story_data)
