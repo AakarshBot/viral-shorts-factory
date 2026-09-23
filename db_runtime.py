@@ -11,8 +11,9 @@ from db_architecture import migrate_vault, make_run_id, update_run_record
 
 
 class _IdentityState:
-    def __init__(self, run_id=None):
+    def __init__(self, run_id=None, discovery_event_key=""):
         self.run_id = run_id or make_run_id()
+        self.discovery_event_key = str(discovery_event_key or "").strip()
         self.row_id = None
         self.inserted = False
 
@@ -60,12 +61,12 @@ class _CursorProxy:
                 raise ValueError("Refusing to rewrite an unexpected run-record INSERT statement.")
             sql_text = re.sub(
                 pattern,
-                "INSERT INTO vault (topic, date_used, genre, video_id, run_id, status) VALUES (?, ?, ?, ?, ?, 'PENDING_QC')",
+                "INSERT INTO vault (topic, date_used, genre, video_id, run_id, status, discovery_event_key) VALUES (?, ?, ?, ?, ?, 'PENDING_QC', ?)",
                 sql_text,
                 count=1,
                 flags=re.IGNORECASE,
             )
-            params = tuple(parameters) + (self._state.run_id,)
+            params = tuple(parameters) + (self._state.run_id, self._state.discovery_event_key)
             result = self._cursor.execute(sql_text, params)
             self._state.row_id = self._cursor.lastrowid
             self._state.inserted = self._state.row_id is not None
@@ -159,9 +160,20 @@ class _SqliteModuleProxy:
 def run_robot_with_exact_identity(bot, web_config=None):
     """Run the factory and guarantee that a created run cannot remain pending."""
     requested_run_id = None
+    discovery_event_key = ""
     if isinstance(web_config, dict):
         requested_run_id = str(web_config.get("run_id") or "").strip() or None
-    state = _IdentityState(run_id=requested_run_id)
+        selected_story = web_config.get("selected_story")
+        if isinstance(selected_story, dict):
+            discovery_event_key = str(
+                selected_story.get("event_identity_key")
+                or selected_story.get("event_id")
+                or ""
+            ).strip()
+    state = _IdentityState(
+        run_id=requested_run_id,
+        discovery_event_key=discovery_event_key,
+    )
     bot._last_run_identity = state
     bot._last_run_row_id = None
     bot._last_run_run_id = state.run_id
