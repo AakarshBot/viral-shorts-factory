@@ -15,7 +15,9 @@ def _overlap(a, b):
 
 
 def _normalise(text):
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
+    # Keep non-Latin scripts intact so multilingual narration is not
+    # collapsed to an empty string and falsely marked as duplicate.
+    return re.sub(r"\s+", " ", re.sub(r"[^\w ]", " ", str(text or "").casefold(), flags=re.UNICODE)).strip()
 
 
 
