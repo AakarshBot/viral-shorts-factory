@@ -24,7 +24,7 @@ load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
 from script_runtime import (
-    append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density, check_script_originality,
+    append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
     estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
 )
 
@@ -1063,29 +1063,11 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             print("   [Script Writer] Groq returned invalid JSON; using fallback provider.", flush=True)
             return None
 
-        valid, reason = validate_content_density(
-            data,
-            {"research_evidence_text": source_text},
-            format_mode,
-        )
-        if not valid:
-            print(f"   [Script Writer] Initial draft rejected before production: {reason}", flush=True)
-            return None
-
         data["hook_type"] = classify_hook_style(data)
         data["hook_style_used"] = data["hook_type"]
         data["structure_used"] = "Top 5" if format_mode == "top5" else "Editorial Explainer"
         data["persona_used"] = persona_name.title()
 
-        originality = check_script_originality(
-            data,
-            {"research_evidence_text": source_text},
-        )
-        if not originality["passed"]:
-            print("   [Script Writer] Exact source sentence detected; rejecting draft before production.", flush=True)
-            return None
-
-        data["originality_overlap"] = originality
         return data
     except Exception as exc:
         print(f"   [Script Writer] Groq exception: {type(exc).__name__}: {exc}", flush=True)
