@@ -823,7 +823,7 @@ def _enrich_events(events, rows):
     return events
 
 
-def _score(item, trends, history_titles=None, retained=None, scope="India / Asia")
+def _score(item, trends, history_titles=None, retained=None, scope="India / Asia"):
     text = _clean(" ".join(
         str(item.get(k) or "")
         for k in ("title", "text", "description", "event_search_text")
