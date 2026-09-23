@@ -1199,6 +1199,38 @@ class DashboardWorkflowController(WorkflowController):
             if not valid:
                 return False, f"Script edits need attention: {reason}"
 
+            try:
+                from audio_direction_runtime import choose_delivery_profile
+                from script_runtime import classify_narration_duration, estimate_narration_duration
+
+                delivery_profile = str(
+                    cleaned.get("delivery_profile")
+                    or choose_delivery_profile(self.bot, cleaned)
+                    or cleaned.get("persona_used")
+                    or "LISTICLE HOST"
+                ).strip()
+                profile = getattr(self.bot, "PERSONA_PROFILES", {}).get(
+                    delivery_profile.upper(),
+                    getattr(self.bot, "PERSONA_PROFILES", {}).get("LISTICLE HOST", {}),
+                )
+                duration_estimate = estimate_narration_duration(cleaned, profile)
+                cleaned["delivery_profile"] = delivery_profile
+                cleaned["estimated_duration_seconds"] = duration_estimate["seconds"]
+                cleaned["estimated_duration_word_count"] = duration_estimate["word_count"]
+                cleaned["estimated_duration_effective_wpm"] = duration_estimate["effective_wpm"]
+                cleaned["duration_band"] = classify_narration_duration(
+                    duration_estimate["seconds"]
+                )
+            except Exception as exc:
+                return False, f"Script edits need attention: duration check failed: {type(exc).__name__}: {exc}"
+
+            if float(cleaned.get("estimated_duration_seconds") or 0.0) >= 30.0:
+                return False, (
+                    "Script edits need attention: edited narration exceeds the 30-second limit "
+                    f"({float(cleaned.get('estimated_duration_seconds')):.1f}s). "
+                    "Shorten the edited narration before approving."
+                )
+
             rank_title_candidates(cleaned, story_data)
             cleaned_titles = cleaned.get("titles") or []
             if not isinstance(cleaned_titles, list) or len(cleaned_titles) != 3:
