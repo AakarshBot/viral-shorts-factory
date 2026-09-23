@@ -282,6 +282,28 @@ def test_cricket_desk_treats_india_japan_headlines_as_one_event_family():
     assert all(value == "india_japan_matchup" for value in family)
 
 
+def test_matchup_merge_does_not_count_social_publishers_as_factual_sources():
+    rows = [
+        _article("India-Japan match sparks controversy", "factual.example"),
+        {
+            "title": "India-Japan match sparks controversy",
+            "text": "Social reaction",
+            "description": "Social reaction",
+            "source": "Reddit r/Cricket",
+            "source_name": "Reddit r/Cricket",
+            "publisher": "Reddit r/Cricket",
+            "url": "https://reddit.com/r/Cricket/example-merge",
+            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "collection_source": "reddit",
+            "social_post": True,
+        },
+    ]
+    event = desk.cluster_news_events(rows)[0]
+    merged = desk._merge_same_matchup_events([event])[0]
+    assert merged["event_source_count"] == 1
+    assert merged["event_evidence_publishers"] == ["factual.example"]
+
+
 def test_cricket_desk_keeps_unusual_article_headlines_for_manual_qc(monkeypatch):
     row = _article(
         "Japan bowler's bizarre final-over call leaves India stunned",
