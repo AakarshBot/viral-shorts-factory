@@ -45,12 +45,19 @@ def test_tts_duration_qc_stops_on_material_mismatch():
     assert result["delta_seconds"] == 6.0
 
 
-def test_initial_script_rejects_more_than_60_voiceover_words():
-    script = _script(["Hook words only."] + [" ".join(["word"] * 64)])
+def test_initial_script_uses_a_safety_ceiling_above_the_normal_duration_target():
+    script = _script(["Hook words only."] + [" ".join(["word"] * 75)])
+    ok, reason = validate_content_density(script, {}, "regular")
+
+    assert ok is True, reason
+
+
+def test_initial_script_rejects_only_beyond_the_safety_ceiling():
+    script = _script(["Hook words only."] + [" ".join(["word"] * 90)])
     ok, reason = validate_content_density(script, {}, "regular")
 
     assert ok is False
-    assert "maximum is 60" in reason
+    assert "maximum is 90" in reason
 
 
 def test_initial_script_rejects_a_long_first_scene():
