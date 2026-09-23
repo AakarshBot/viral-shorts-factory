@@ -1093,7 +1093,7 @@ def _trend_traffic_score(value, rank=0):
     return max(1.0, min(3.0, 3.0 - max(0, int(rank) - 1) * 0.2))
 
 
-def _google_trends_root(geo="IN"):
+def _google_trends_root(geo="IN", timeout=8.0):
     geo = str(geo or "").strip().upper()
     if not geo:
         return None
@@ -1102,7 +1102,7 @@ def _google_trends_root(geo="IN"):
             "https://trends.google.com/trending/rss",
             params={"geo": geo},
             headers={"User-Agent": "ViralShortsFactory/2026 discovery/1.0"},
-            timeout=8,
+            timeout=max(1.0, float(timeout)),
         )
         response.raise_for_status()
         return ET.fromstring(response.content)
@@ -1111,9 +1111,9 @@ def _google_trends_root(geo="IN"):
         return None
 
 
-def _google_trends_items(geo="IN", max_items=10):
+def _google_trends_items(geo="IN", max_items=10, timeout=8.0):
     geo = str(geo or "").strip().upper()
-    root = _google_trends_root(geo)
+    root = _google_trends_root(geo, timeout=timeout)
     if root is None:
         return []
 
@@ -1169,7 +1169,7 @@ def fetch_google_trending_topics(geos=("IN",), max_terms=15):
     return terms
 
 
-def _google_news_search_items(query, genre_key="", max_items=60):
+def _google_news_search_items(query, genre_key="", max_items=60, timeout=8.0):
     query = str(query or "").strip()
     if not query:
         return []
@@ -1177,7 +1177,13 @@ def _google_news_search_items(query, genre_key="", max_items=60):
         "https://news.google.com/rss/search"
         f"?q={quote_plus(query)}&hl=en-IN&gl=IN&ceid=IN:en"
     )
-    return _rss_items(url, genre_key, collection_source="google_news_rss", max_items=max_items)
+    return _rss_items(
+        url,
+        genre_key,
+        collection_source="google_news_rss",
+        max_items=max_items,
+        timeout=timeout,
+    )
 
 
 def _infer_discovery_category(story):
@@ -1249,14 +1255,14 @@ def _clean_source_headline(title, publisher=""):
     return stripped or clean_title
 
 
-def _rss_items(url, genre_key, collection_source="rss", max_items=60):
+def _rss_items(url, genre_key, collection_source="rss", max_items=60, timeout=8.0):
     if not url:
         return []
     try:
         response = requests.get(
             url,
             headers={"User-Agent": "Mozilla/5.0 ViralShortsFactory/2026"},
-            timeout=8,
+            timeout=max(1.0, float(timeout)),
         )
         if response.status_code != 200:
             return []
