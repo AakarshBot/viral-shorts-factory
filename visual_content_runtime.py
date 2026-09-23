@@ -519,6 +519,10 @@ def patch_content_first_visuals(bot):
                     # Rights-review images remain available to the human QC pool,
                     # but must never enter the verified automatic cache.
                     continue
+                if str(asset.get("status") or "").strip() == "manual-review-unverified":
+                    # Gemini outage candidates are human-reviewable, but are not
+                    # eligible for the verified automatic cache.
+                    continue
                 try:
                     visual_runtime.save_to_cache(
                         bot,
@@ -575,7 +579,9 @@ def patch_content_first_visuals(bot):
                 used_ai = False
                 source_type = str(manual_selected.get("source") or "manual-pool")
                 source_credit = source_credit_for_type(source_type)
-                seg["visual_verified"] = True
+                selected_status = str(manual_selected.get("status") or "").strip()
+                selected_is_verified = selected_status in {"entity-verified", "factory-rejected-resolution", "new-search-ai-verified"}
+                seg["visual_verified"] = selected_is_verified
                 seg["visual_type"] = str(manual_selected.get("visual_type") or "GENERAL_CONTEXT").upper()
                 seg["visual_genre"] = str(manual_selected.get("visual_genre") or "GENERAL_CONTEXT").upper()
                 seg["visual_selected_hash"] = selected_hash
@@ -599,6 +605,9 @@ def patch_content_first_visuals(bot):
                 if manual_selected.get("status") == "factory-rejected-resolution":
                     seg["visual_qc_blocked"] = True
                     seg["visual_qc_block_reason"] = "Entity verified, but this image is below the normal resolution threshold and requires manual visual QC."
+                elif selected_status == "manual-review-unverified":
+                    seg["visual_qc_blocked"] = True
+                    seg["visual_qc_block_reason"] = "Gemini identity verification was unavailable; this image requires human visual QC before rendering."
                 else:
                     seg["visual_qc_blocked"] = False
                     seg["visual_qc_block_reason"] = ""
