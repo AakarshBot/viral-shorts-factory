@@ -1082,7 +1082,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "For Top-5 mode, output 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
         "the fifth entry should deliver the final payoff. "
         if format_mode_key == "top5"
-        else "For a regular Short, normally use 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple; use 5 when one additional distinct factual beat materially improves the explanation. "
+        else "For a regular Short, normally use 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple. "
     )
     word_contract = (
         "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
