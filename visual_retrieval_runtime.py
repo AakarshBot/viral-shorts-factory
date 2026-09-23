@@ -994,7 +994,7 @@ def collect_manual_visual_pool(
         verified_for_query = 0
 
         provider_jobs = []
-        for source_index, (source_name, fetcher) in enumerate(source_plan):
+        for source_index, (source_name, fetcher) in enumerate(source_plan[:2]):
             if not callable(fetcher):
                 continue
             source_key = str(source_name or "").strip().casefold()
