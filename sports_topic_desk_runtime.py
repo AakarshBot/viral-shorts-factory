@@ -254,7 +254,7 @@ def _scope_pass(item, scope):
         for k in ("title", "text", "description", "summary", "snippet", "event_search_text")
     ))
     entity_anchors = tuple(dict.fromkeys(
-        (*INDIA_ASIA_ANCHORS, *tuple(getattr(sr, "CRICKET_MARQUEE_NAMES", ()))),
+        (*INDIA_ASIA_ANCHORS, *INDIA_ASIA_PLAYER_ALIASES),
     ))
     anchors = [term for term in entity_anchors if _word_match(text, term)]
     if anchors:
@@ -268,11 +268,6 @@ def _scope_pass(item, scope):
         "india", "indian", "bcci", "india a", "ranji", "duleep", "wpl", "ipl",
         "pakistan", "pcb", "sri lanka", "bangladesh", "afghanistan",
         "nepal", "uae", "hong kong", "japan", "asian games", "asia cup", "acc",
-        *{
-            str(name).strip().casefold()
-            for name in getattr(sr, "CRICKET_MARQUEE_NAMES", ())
-            if str(name).strip()
-        },
         *{
             str(alias).strip().casefold()
             for alias in INDIA_ASIA_PLAYER_ALIASES
