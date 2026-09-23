@@ -73,7 +73,7 @@ def test_scene_one_must_be_shorter_than_following_scenes():
     }
     valid, reason = validate_content_density(script, {}, "regular")
     assert valid is False
-    assert "Scene 1 must remain the shortest" in reason
+    assert "Scene 1 must remain strictly shorter" in reason
 
 
 def test_retention_bait_is_explicitly_rejected():
