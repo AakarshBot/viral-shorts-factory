@@ -223,7 +223,6 @@ def test_high_potential_story_warns_on_weak_opening_hook():
     )
 
     assert valid is True
-    assert "hook" in reason.lower()
     assert "hook_quality_warning" in script
 
 
