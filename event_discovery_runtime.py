@@ -271,11 +271,14 @@ def _cluster_compatible(left: dict, right: dict) -> bool:
     right_actions = set(right.get("identity_actions") or _action_context(right))
     shared_actions = left_actions & right_actions
 
-    # Conflicting event actions are a hard stop. Similar wording alone
-    # must not collapse a launch, delay, cancellation, appointment, etc.
-    # into the same event.
+    # Different action words do not always mean different events. Sports
+    # coverage of one match, for example, can alternate between outcome, reaction,
+    # controversy, and record angles while retaining the same two participants.
+    # When two strong entity anchors and substantial title overlap agree, keep the
+    # reports together unless the wording is clearly unrelated.
     if left_actions and right_actions and not shared_actions:
-        return False
+        if len(shared_entities) < 2 or overlap < 0.45:
+            return False
 
     # Keep clustering deliberately small and evidence-based:
     # 1) very similar headlines can merge when there is no action conflict;
@@ -316,6 +319,46 @@ def _event_id(articles: list[dict]) -> str:
         tokens.update(_tokens(article.get("title")))
     fingerprint = " ".join(sorted(tokens))
     return hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:16]
+
+
+def event_identity_key(event: dict) -> str:
+    """Return a stable identity for one discovered real-world event."""
+    if not isinstance(event, dict):
+        return ""
+    entities = sorted({
+        str(value).strip().casefold()
+        for value in (event.get("event_entities") or [])
+        if str(value).strip()
+    })
+    actions = sorted({
+        str(value).strip().casefold()
+        for value in (event.get("event_actions") or [])
+        if str(value).strip()
+    })
+    generic = STOPWORDS | GENERIC_ENTITY_TOKENS | GENERIC_EVENT_TOPIC_TOKENS | ENTITY_NOISE | {
+        "cricket", "match", "matches", "series", "tournament", "team", "teams",
+        "player", "players", "latest", "india", "indian",
+    }
+    topical = sorted({
+        token
+        for token in _tokens(
+            event.get("event_search_text")
+            or event.get("title")
+            or ""
+        )
+        if token not in generic
+    })[:10]
+    first_seen = _clean(event.get("event_first_seen_at"))
+    day = first_seen[:10]
+    payload = "|".join([
+        ",".join(entities),
+        ",".join(actions),
+        ",".join(topical),
+        day,
+    ])
+    if not payload.strip("|"):
+        return ""
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:20]
 
 
 def cluster_news_events(
@@ -510,6 +553,7 @@ def cluster_news_events(
             "trend_queries": trend_queries,
             "trend_bonus": round(min(4.0, trend_bonus), 3),
         })
+        representative["event_identity_key"] = event_identity_key(representative)
         events.append(representative)
 
     events.sort(
@@ -652,6 +696,7 @@ def discover_event_pool(
 
 __all__ = [
     "cluster_news_events",
+    "event_identity_key",
     "discover_event_pool",
     "fetch_gdelt_articles",
     "normalize_publisher",
