@@ -97,7 +97,7 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
         max_candidates=5,
     )
     assert captured[-1]["scope"] == "India / Asia"
-    assert captured[-1]["max_candidates"] == 30
+    assert captured[-1]["max_candidates"] == 60
 
     dashboard_runtime.discover_ranked_topics(
         bot,
