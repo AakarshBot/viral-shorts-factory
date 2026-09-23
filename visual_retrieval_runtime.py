@@ -855,7 +855,12 @@ def collect_manual_visual_pool(
     allow_auto_backfill: bool = True,
 ) -> dict:
     """Build the shared entity-verified pool from every available manual source."""
-    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
+    from visual_qa_runtime import (
+        GEMINI_VISUAL_BATCH_SIZE,
+        get_last_visual_qa_failure,
+        start_visual_qa_scene,
+        strict_gemini_check_batch,
+    )
     from visual_search_intent_runtime import canonical_manual_entity_anchor, resolve_visual_search_intent
 
     parsed_queries = [str(item or "").strip() for item in (manual_queries or []) if str(item or "").strip()]
