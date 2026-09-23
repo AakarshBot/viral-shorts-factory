@@ -1076,8 +1076,8 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
         first_words = word_counts[0]
         if first_words > SCENE_1_MAX_WORDS:
             return False, (
-                f"Scene 1 exceeds the compact-opening ceiling: {first_words} words; "
-                f"maximum is {SCENE_1_MAX_WORDS}."
+                f"Scene 1 is too long: {first_words} words; "
+                f"compact-opening maximum is {SCENE_1_MAX_WORDS}."
             )
     hook_diagnostics = _hook_quality_score(script_data, story_data)
     script_data["hook_quality_score"] = hook_diagnostics["score"]
