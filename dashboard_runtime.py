@@ -234,7 +234,7 @@ def discover_ai_topics(
     bot,
     web_config: dict[str, Any],
     conn,
-    max_candidates: int = 28,
+    max_candidates: int = 60,
     retained_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the AI dashboard portfolio through the same broad-recall topic desk."""
