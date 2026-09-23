@@ -128,17 +128,30 @@ def _parse_provider_json(raw: Any) -> Dict[str, Any]:
         parsed = json.loads(text)
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
-        parsed = None
+        candidates = []
         for match in re.finditer(r"\{", text):
             try:
                 candidate, _end = decoder.raw_decode(text[match.start():])
             except json.JSONDecodeError:
                 continue
             if isinstance(candidate, dict):
-                parsed = candidate
-                break
-        if parsed is None:
+                contract_score = sum(
+                    1
+                    for key in (
+                        "script",
+                        "titles",
+                        "creator_insight",
+                        "editorial_angle",
+                        "seo_description",
+                        "recommended_title_index",
+                        "results",
+                    )
+                    if key in candidate
+                )
+                candidates.append((contract_score, len(json.dumps(candidate, ensure_ascii=False)), candidate))
+        if not candidates:
             raise ValueError("Provider returned no parseable JSON object.")
+        parsed = max(candidates, key=lambda item: (item[0], item[1]))[2]
     if not isinstance(parsed, dict):
         raise ValueError("Provider returned JSON that is not an object.")
     return parsed
