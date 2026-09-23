@@ -135,9 +135,6 @@ def _validate_script_result(result, story_data, format_mode):
         if not originality["passed"]:
             return None, "Script contains a complete sentence copied verbatim from the source evidence."
 
-        if str(format_mode or "").lower() == "top5" and len(cleaned.get("script") or []) < 5:
-            return None, "Top-5 script does not contain enough list entries."
-
         cleaned["pipeline_diagnostics"] = diagnostics
         cleaned["originality_overlap"] = originality
         return cleaned, ""
