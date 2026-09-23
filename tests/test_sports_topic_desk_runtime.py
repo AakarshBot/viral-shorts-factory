@@ -282,6 +282,27 @@ def test_cricket_desk_treats_india_japan_headlines_as_one_event_family():
     assert all(value == "india_japan_matchup" for value in family)
 
 
+def test_matchup_merge_keeps_separate_competitions_distinct():
+    rows = [
+        _article("India beat Japan in the Asian Games", "one.example"),
+        _article("India-Japan World Cup match draws controversy", "two.example"),
+    ]
+    events = desk.cluster_news_events(rows)
+    # Force distinct competition anchors into the two pre-clustered events while
+    # keeping the same direct matchup family and a close publication window.
+    events[0]["title"] = "India beat Japan in the Asian Games"
+    events[0]["event_search_text"] = "India beat Japan in the Asian Games"
+    events[0]["event_latest_published_at"] = datetime.now(timezone.utc).isoformat()
+    events[0]["event_latest_seen_at"] = events[0]["event_latest_published_at"]
+    events[1]["title"] = "India-Japan World Cup match draws controversy"
+    events[1]["event_search_text"] = "India-Japan World Cup match draws controversy"
+    events[1]["event_latest_published_at"] = datetime.now(timezone.utc).isoformat()
+    events[1]["event_latest_seen_at"] = events[1]["event_latest_published_at"]
+
+    merged = desk._merge_same_matchup_events(events)
+    assert len(merged) == 2
+
+
 def test_matchup_merge_does_not_count_social_publishers_as_factual_sources():
     rows = [
         _article("India-Japan match sparks controversy", "factual.example"),
