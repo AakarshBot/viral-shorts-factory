@@ -228,6 +228,8 @@ def test_primary_writer_uses_duration_first_contract():
     assert "Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words" in source
     assert "Spoken duration is authoritative" in source
+    assert 'For Top-5 mode, output at least 5 substantive list-entry scenes' in source
+    assert "For a regular Short, output 3 or 4 scenes" in source
 
 
 def test_router_error_contract_contains_provider_reasons():
