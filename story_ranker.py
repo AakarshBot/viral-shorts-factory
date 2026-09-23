@@ -2031,6 +2031,91 @@ def _story_key(story):
     return re.sub(r"[^a-z0-9]+", " ", f"{title} {url}").strip()
 
 
+def _load_uploaded_story_identities(conn, limit=2000):
+    """Load identities for completed uploads only; failed/rejected runs never hide a story."""
+    identities = {"event_keys": set(), "urls": set(), "titles": set()}
+    if conn is None:
+        return identities
+    try:
+        rows = conn.execute(
+            """
+            SELECT discovery_event_key, topic, title_used, trend_keyword
+            FROM vault
+            WHERE status IN ('UPLOADED', 'UPLOADED_PRIVATE', 'COMPLETED')
+              AND video_id IS NOT NULL
+              AND TRIM(video_id) <> ''
+              AND video_id NOT IN ('PENDING_QC', 'REJECTED', 'READY_FOR_UPLOAD')
+            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    except Exception:
+        try:
+            rows = conn.execute(
+                """
+                SELECT topic, title_used, trend_keyword
+                FROM vault
+                WHERE status IN ('UPLOADED', 'UPLOADED_PRIVATE', 'COMPLETED')
+                  AND video_id IS NOT NULL
+                  AND TRIM(video_id) <> ''
+                  AND video_id NOT IN ('PENDING_QC', 'REJECTED', 'READY_FOR_UPLOAD')
+                ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            rows = [(None, row[0] if len(row) > 0 else "", row[1] if len(row) > 1 else "", "") for row in rows]
+        except Exception:
+            rows = []
+
+    for row in rows:
+        event_key = row[0] if len(row) > 0 else ""
+        topic = row[1] if len(row) > 1 else ""
+        title_used = row[2] if len(row) > 2 else ""
+        for value in (event_key,):
+            cleaned = str(value or "").strip().casefold()
+            if cleaned:
+                identities["event_keys"].add(cleaned)
+        for value in (topic, title_used):
+            cleaned = str(value or "").strip()
+            if not cleaned:
+                continue
+            identities["titles"].add(cleaned.casefold())
+            token_key = " ".join(sorted(_tokens(cleaned)))
+            if token_key:
+                identities["titles"].add("__tokens__:" + token_key)
+    return identities
+
+
+def _uploaded_story_match(story, identities):
+    """Return True only when a discovered event is already represented by an uploaded Short."""
+    if not isinstance(story, dict):
+        return False
+    identities = identities if isinstance(identities, dict) else {}
+    event_key = str(story.get("event_identity_key") or "").strip().casefold()
+    if event_key and event_key in identities.get("event_keys", set()):
+        return True
+
+    url = _canonical_url(_source_url_from_item(story))
+    uploaded_urls = identities.get("urls", set())
+    if url and url in uploaded_urls:
+        return True
+
+    for value in (
+        story.get("title"),
+        story.get("source_headline"),
+        story.get("topic"),
+    ):
+        cleaned = str(value or "").strip().casefold()
+        if cleaned and cleaned in identities.get("titles", set()):
+            return True
+        token_key = " ".join(sorted(_tokens(cleaned)))
+        if token_key and "__tokens__:" + token_key in identities.get("titles", set()):
+            return True
+    return False
+
+
 def _candidate_reason(story):
     dimensions = story.get("discovery_dimensions") or {}
     parts = []
@@ -2145,6 +2230,25 @@ def diversity_rerank(stories, max_items=28):
         ),
         reverse=True,
     )
+
+    # One real-world event may appear through several query/source combinations.
+    # Treat the canonical event identity as a hard uniqueness key before portfolio
+    # diversification so the same story cannot occupy multiple dashboard slots.
+    unique_candidates = []
+    seen_event_keys = set()
+    for item in candidates:
+        key = str(
+            item.get("event_identity_key")
+            or item.get("event_id")
+            or _canonical_url(item.get("url") or item.get("link"))
+            or _story_key(item)
+        ).strip().casefold()
+        if key and key in seen_event_keys:
+            continue
+        if key:
+            seen_event_keys.add(key)
+        unique_candidates.append(item)
+    candidates = unique_candidates
 
     selected = []
     remaining = list(candidates)
