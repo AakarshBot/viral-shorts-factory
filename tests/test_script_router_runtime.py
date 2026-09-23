@@ -342,3 +342,28 @@ def test_local_ollama_preflight_rejects_an_uninstalled_explicit_model(monkeypatc
         assert "llama3.2:latest" in message
     else:
         raise AssertionError("An explicitly configured missing Ollama model must fail clearly.")
+
+
+def test_provider_error_detail_redacts_tokens_and_normalizes_whitespace():
+    import ultimate_bot
+
+    detail = ultimate_bot._provider_http_error_detail(
+        type(
+            "Response",
+            (),
+            {
+                "json": staticmethod(
+                    lambda: {
+                        "error": {
+                            "message": "Bearer gsk_supersecret token\\nunsupported parameter"
+                        }
+                    }
+                ),
+                "text": "",
+            },
+        )()
+    )
+
+    assert "gsk_supersecret" not in detail
+    assert "Bearer [redacted]" in detail
+    assert "\\n" in detail or "unsupported parameter" in detail
