@@ -304,7 +304,14 @@ def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[s
             {"role": "system", "content": _fallback_prompt(language_cfg, format_mode, story_data)},
             {"role": "user", "content": "PHASE 2 EVIDENCE PACK:\n" + source_text},
         ],
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "viral_shorts_script",
+                "strict": True,
+                "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
+            },
+        },
         "temperature": 0.2,
         "max_tokens": 900,
     }
