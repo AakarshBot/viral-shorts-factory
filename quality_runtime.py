@@ -60,6 +60,18 @@ def validate_deterministic_script_quality(script_data, format_mode="regular", st
                     + ", ".join(unsupported[:6])
                 )
 
+        # Creator insight, editorial angle and SEO copy are still factual output;
+        # keep numbers in those fields grounded in the same evidence. Titles and
+        # pinned comments remain looser because they may use packaging language.
+        for field in ("creator_insight", "editorial_angle", "seo_description"):
+            field_numbers = _numeric_tokens(script_data.get(field, ""))
+            unsupported = sorted(field_numbers - evidence_numbers)
+            if unsupported:
+                return False, (
+                    f"{field.replace('_', ' ').title()} contains unsupported numeric detail(s): "
+                    + ", ".join(unsupported[:6])
+                )
+
     mode = str(format_mode or "").strip().lower()
     expected = 6 if mode == "top5" else None
     if expected is not None and len(scenes) != expected:
