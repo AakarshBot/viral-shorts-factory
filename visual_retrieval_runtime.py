@@ -1305,7 +1305,12 @@ def collect_manual_visual_search(
     and the same identity AI gate used by the production visual pool decides
     which candidates are shown.
     """
-    from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, start_visual_qa_scene, strict_gemini_check_batch
+    from visual_qa_runtime import (
+        GEMINI_VISUAL_BATCH_SIZE,
+        get_last_visual_qa_failure,
+        start_visual_qa_scene,
+        strict_gemini_check_batch,
+    )
     from visual_search_intent_runtime import canonical_manual_entity_anchor
 
     exact_query = str(query or "").strip()
