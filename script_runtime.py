@@ -1147,6 +1147,8 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
         if not voiceover:
             return False, f"Scene {index} is empty."
         word_counts.append(len(_originality_words(voiceover)))
+        if contains_retention_bait(voiceover):
+            return False, f"Scene {index} contains prohibited retention-bait phrasing."
 
         if require_visual_metadata:
             if not str(scene.get("primary_entity") or "").strip():
