@@ -64,15 +64,14 @@ def test_initial_script_rejects_a_long_first_scene():
     assert "Scene 1 is too long" in reason
 
 
-def test_initial_script_requires_scene_one_to_be_shortest():
+def test_initial_script_scene_one_cap_is_independent_of_later_length():
     script = _script([
         "one two three four five six seven eight nine ten eleven twelve",
         "one two three four five six seven eight nine ten",
     ])
     ok, reason = validate_content_density(script, {}, "regular")
 
-    assert ok is False
-    assert "Scene 1 must remain strictly shorter" in reason
+    assert ok is True, reason
 
 
 def test_exact_source_sentence_is_rejected():
