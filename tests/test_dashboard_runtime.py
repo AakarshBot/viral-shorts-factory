@@ -374,6 +374,8 @@ def test_dashboard_controller_pauses_after_visuals_until_approval(monkeypatch, t
     assert snapshot["visual_review_required"] is True
     assert snapshot["visual_packages"]
 
+    assert controller.approve_visual(1)[0] is True
+    assert controller.snapshot()["visual_manual_approved"] == [1]
     assert controller.approve_visuals() is True
     thread.join(timeout=2)
 
@@ -922,7 +924,7 @@ def test_build_discovery_evidence_summarises_event_support_and_signals():
 def test_dashboard_visual_review_keeps_missing_slots_visible_and_blocked():
     source = Path("app.py").read_text(encoding="utf-8")
     assert '"missing": missing' in source
-    assert '"qc_passed": verified and not missing and not bool(layer.get("visual_qc_blocked", False))' in source
+    assert '"qc_passed": not missing' in source
     assert 'if item.get("missing"):' in source
 
 def test_dashboard_primary_menu_and_generated_outputs_contract():
@@ -939,8 +941,9 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'def render_script_visual_query_review(' in app_source
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
-    assert '"qc_passed": verified and not missing' in app_source
-    assert 'disabled=bool(sum(1 for item in items if not item.get("qc_passed")))' in app_source
+    assert '"qc_passed": not missing' in app_source
+    assert '"Approve this image"' in app_source
+    assert '"Continue after reviewing all slides"' in app_source
     assert 'Choose from the visual pool' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
@@ -969,7 +972,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     assert "Choose from the visual pool" in source
-    assert "Available verified images" in source
+    assert "Available manual-search images" in source
     assert "Search up to 10 new images" in source
     assert '@st.dialog("Crop / reframe selected image", width="large")' in source
     assert 'st.session_state["visual_crop_target"]' in source
