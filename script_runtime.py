@@ -225,8 +225,8 @@ NARRATION_IDEAL_MAX_SECONDS = 28.0
 NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 
 # The initial writer uses a deliberately conservative spoken-word ceiling.
-# 62 words leaves margin below 30s even at the slowest configured narrator profile.
-INITIAL_SCRIPT_MAX_WORDS = 62
+# 60 words leaves margin below 30s even at the slowest configured narrator profile.
+INITIAL_SCRIPT_MAX_WORDS = 60
 SCENE_1_MAX_WORDS = 14
 
 
