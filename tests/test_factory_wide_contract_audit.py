@@ -118,3 +118,11 @@ def test_production_lifecycle_records_failures_and_completed_uploads():
     assert 'reason = "Post-render validation failed: final video is missing."' in source
     assert '"READY_FOR_UPLOAD"' in source
     assert '"UPLOADED_PRIVATE" if str(pub_mode or "").strip().lower() == "private" else "UPLOADED"' in source
+
+def test_ultimate_bot_function_coverage_is_complete():
+    from factory_function_coverage import collect_factory_function_coverage
+
+    report = collect_factory_function_coverage()
+    assert report["complete"], report
+    assert report["unmapped"] == []
+    assert report["stale_map"] == []
