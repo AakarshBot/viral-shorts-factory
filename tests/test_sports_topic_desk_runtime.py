@@ -55,6 +55,72 @@ def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
     assert all(item[2]["timeout"] == desk.SECONDARY_REQUEST_TIMEOUT for item in trends)
 
 
+def test_cricket_desk_fans_out_google_queries_only_after_sparse_first_wave(monkeypatch):
+    calls = []
+    empty = []
+
+    def fake_google(query, *args, **kwargs):
+        calls.append(query)
+        return []
+
+    monkeypatch.setattr(desk.sr, "_google_news_search_items", fake_google)
+    monkeypatch.setattr(
+        desk.sr,
+        "_rss_items",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        desk,
+        "_direct_listing_source",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        desk,
+        "_bluesky",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        desk.sr,
+        "_google_trends_items",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        desk,
+        "fetch_gdelt_articles",
+        lambda *args, **kwargs: [],
+    )
+
+    desk._collect("India / Asia")
+
+    assert len(calls) == desk.GOOGLE_QUERY_LIMIT
+
+
+def test_cricket_desk_primary_google_burst_is_bounded(monkeypatch):
+    calls = []
+
+    def fake_google(query, *args, **kwargs):
+        calls.append(query)
+        return [{
+            "title": f"Distinct cricket event {len(calls)}",
+            "url": f"https://example.com/event/{len(calls)}",
+            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "source": "Example",
+            "source_name": "Example",
+            "collection_source": "google_news_rss",
+        } for _ in range(2)]
+
+    monkeypatch.setattr(desk.sr, "_google_news_search_items", fake_google)
+    monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_direct_listing_source", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
+
+    desk._collect("India / Asia")
+
+    assert len(calls) == desk.GOOGLE_PRIMARY_QUERY_LIMIT
+
+
 def test_cricket_desk_duplicate_headlines_form_one_concept():
     rows = [
         _article("India survive Japan scare in dramatic T20 finish", "one.example"),
