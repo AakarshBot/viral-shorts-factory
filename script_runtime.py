@@ -61,6 +61,40 @@ def _originality_words(text):
     return re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", str(text or "").casefold())
 
 
+def _originality_sources(story_data):
+    story = story_data if isinstance(story_data, dict) else {}
+    values = []
+
+    def collect(value):
+        if isinstance(value, str):
+            if value.strip():
+                values.append(value)
+        elif isinstance(value, dict):
+            for key in (
+                "text", "content", "extracted_text", "body", "summary", "snippet",
+                "title", "claim", "claims", "evidence", "source_text", "sources",
+                "articles", "items",
+            ):
+                if key in value:
+                    collect(value[key])
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    pack = story.get("research_evidence_pack")
+    collect(pack.get("sources") if isinstance(pack, dict) else pack)
+    for key in ("research_evidence_text", "research_bundle", "text", "summary", "description"):
+        collect(story.get(key))
+
+    seen, unique = set(), []
+    for value in values:
+        clean = re.sub(r"\s+", " ", value).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            unique.append(clean)
+    return unique
+
+
 def _normalise_originality_sentence(text):
     return re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold()).strip()
 
