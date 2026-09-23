@@ -250,7 +250,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
     word_contract = (
         "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
         if top5
-        else "- Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling.\n
+        else "- Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling.\n"
     )
     return (
         "You are the backup original-news Shorts writer. Use only the supplied evidence and never copy a complete "
@@ -265,7 +265,8 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         + word_contract
         + "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
-        f"{scene_contract}"        "- Scene 1 is the only headline-style beat. Every later scene must add new, story-specific information rather than restating the title.\n"
+        f"{scene_contract}"
+        "- Scene 1 is the only headline-style beat. Every later scene must add new, story-specific information rather than restating the title.\n"
         "- Normally use four scenes for a regular story; use three only when a fourth beat would be artificial.\n"
         "- Put the substance in the middle beats; do not let Scene 1 carry the detail.\n"
         "- The full narration must naturally fit below 30 seconds.\n"
