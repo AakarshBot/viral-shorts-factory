@@ -9,6 +9,7 @@ import urllib.request
 from typing import Any, Dict
 
 from evidence_runtime import DEFAULT_MAX_SOURCES, build_evidence_pack, discover_sources, format_evidence_pack_for_script
+from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
 
 
 def _clean(value: Any) -> str:
@@ -159,6 +160,7 @@ def _gemini_script_fallback(
         ],
         "generationConfig": {
             "responseMimeType": "application/json",
+            "responseSchema": SCRIPT_OUTPUT_JSON_SCHEMA,
             "maxOutputTokens": 900,
             "thinkingConfig": {"thinkingLevel": "low"},
         },
@@ -227,7 +229,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "You are the backup original-news Shorts writer. Use only the supplied evidence and never copy a complete "
         "source sentence verbatim. Do not invent facts, quotes, motives, numbers, or outcomes. "
         "Return ONLY JSON matching this exact object shape; no Markdown or commentary. "
-        "{\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
+        "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
         "\"recommended_title_index\":1,\"seo_description\":\"...\",\"pinned_comment\":\"...\","
         "\"script\":[{\"voiceover\":\"...\",\"narrative_role\":\"hook\","
         "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
@@ -242,6 +244,8 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
         "STORY SHAPE: Scene 1 states the concrete event/person immediately. Later scenes carry the key evidence, "
         "context, and consequence. Curiosity must come from a real supported fact.\n"
+        f"EDITORIAL ANGLE: {choose_editorial_angle(story_data or {}, format_mode)['instruction']}\n"
+        "CREATOR INSIGHT: Give one concise evidence-grounded synthesis of why the event matters; do not invent facts or predictions.\n"
         f"Language: {language_instruction}"
     )
 
