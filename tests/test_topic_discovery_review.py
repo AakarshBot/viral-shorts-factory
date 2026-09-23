@@ -48,6 +48,7 @@ def test_script_pipeline_tries_original_free_provider_before_private_extractive_
 
     original_script = {
         "title": "Recovered original script",
+        "creator_insight": "The documented development matters because it changes the next stage.",
         "editorial_angle": "Why the development matters",
         "titles": [
             "Recovered original script",
@@ -59,17 +60,23 @@ def test_script_pipeline_tries_original_free_provider_before_private_extractive_
             "voiceover": "A substantive development changes the situation today.",
             "narrative_role": "hook",
             "primary_entity": "Subject",
+            "visual_intent": "news_event",
             "specific_search_prompt": "Subject latest development",
+            "sport_or_topic_category": "technology",
         }, {
             "voiceover": "Officials provided additional context for the development.",
             "narrative_role": "development",
             "primary_entity": "Subject",
+            "visual_intent": "news_event",
             "specific_search_prompt": "Subject latest context",
+            "sport_or_topic_category": "technology",
         }, {
             "voiceover": "The immediate consequence now affects the next stage.",
             "narrative_role": "consequence",
             "primary_entity": "Subject",
+            "visual_intent": "news_event",
             "specific_search_prompt": "Subject latest consequence",
+            "sport_or_topic_category": "technology",
         }],
     }
 
