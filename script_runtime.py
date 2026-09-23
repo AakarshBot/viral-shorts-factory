@@ -1038,8 +1038,8 @@ def assess_release_structure(script_data, format_mode="regular"):
         return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
     if str(format_mode or "").strip().lower() == "top5":
         scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
-        if len(scenes) < 6:
-            return False, "Top-5 script must contain an opening beat plus five ranked entries.", assessment
+        if len(scenes) != 6:
+            return False, "Top-5 script must contain exactly one opening beat plus five ranked entries.", assessment
     return True, "Narrative structure is production-ready.", assessment
 
 def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
@@ -1174,7 +1174,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         source_fragments.extend(_fallback_source_fragments(research_text))
     raw_source = " ".join(source_fragments)
 
-    if str(format_mode or "").lower() == "top5" and story_data.get("text"):
+    if str(format_mode or "").strip().lower() == "top5" and story_data.get("text"):
         try:
             items = json.loads(str(story_data.get("text")))
             if isinstance(items, list):
@@ -1185,11 +1185,16 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
                             str(item.get(key) or "").strip()
                             for key in ("title", "text", "summary")
                         )
+                parsed_fragments = _fallback_source_fragments(*parts)
+                if parsed_fragments:
+                    source_fragments = parsed_fragments
                 raw_source = " ".join(part for part in parts if part).strip() or raw_source
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
     sentences = source_fragments
+    if str(format_mode or "").strip().lower() == "top5" and len(sentences) > 6:
+        sentences = sentences[:5] + [sentences[-1]]
     entity = title.split(":", 1)[0].strip()[:80] or "Selected story"
     category = str(genre_key or "news").replace("_", " ").title()
     scenes = []
@@ -1217,11 +1222,11 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
             "scene_id": index,
         })
 
-    if str(format_mode or "").lower() == "top5":
-        if len(scenes) < 5:
+    if str(format_mode or "").strip().lower() == "top5":
+        if len(scenes) != 6:
             raise ValueError(
-                "Source-grounded fallback refused to invent narration: not enough distinct source beats "
-                "for a five-entry Top-5 script."
+                "Source-grounded fallback refused to invent narration: the source does not provide exactly "
+                "one opening beat plus five ranked entries for Top-5."
             )
     elif len(scenes) < 3:
         raise ValueError(
