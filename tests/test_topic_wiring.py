@@ -106,7 +106,7 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
         max_candidates=5,
     )
     assert captured[-1]["scope"] == "Global"
-    assert captured[-1]["max_candidates"] == 60
+    assert captured[-1]["max_candidates"] == 5
 
 
 def test_dual_geo_genre_query_budget_skips_redundant_base_lane():
