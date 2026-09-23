@@ -41,11 +41,19 @@ def _validate_provider_script(result: Any, story_data: Dict[str, Any], format_mo
     if not isinstance(result, dict) or not isinstance(result.get("script"), list):
         raise ValueError(f"{provider_name} returned no usable script array.")
     try:
-        from script_runtime import clean_script_data, validate_content_density
+        from script_runtime import assess_release_structure, clean_script_data, validate_content_density
         cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
         valid, reason = validate_content_density(cleaned, story_data, format_mode)
         if not valid:
             raise ValueError(f"{provider_name} script validation rejected the response: {reason}")
+        release_valid, release_reason, _assessment = assess_release_structure(cleaned, format_mode)
+        if not release_valid:
+            raise ValueError(f"{provider_name} script validation rejected the response: {release_reason}")
+        titles = cleaned.get("titles")
+        if not isinstance(titles, list) or len(titles) != 3:
+            raise ValueError(f"{provider_name} script validation rejected the response: exactly three title candidates are required.")
+        if any(not str(title or "").strip() for title in titles):
+            raise ValueError(f"{provider_name} script validation rejected the response: an empty title candidate was returned.")
         cleaned["provider_used"] = provider_name
         cleaned["provider_fallback"] = True
         cleaned["provider_diagnostics"] = diagnostics
@@ -196,6 +204,13 @@ def _gemini_script_fallback(
 
 def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data: Dict[str, Any] | None = None) -> str:
     language_instruction = _clean((language_cfg or {}).get("script_instruction"))
+    top5 = str(format_mode or "").lower() == "top5"
+    scene_contract = (
+        "- Top-5 mode MUST contain at least 5 substantive list-entry scenes; use a clear opening hook, "
+        "three or more substantive entries, and a final consequence/payoff.\n"
+        if top5
+        else "- A regular Short MUST contain 3 or 4 scenes: hook, development/context, and consequence/payoff.\n"
+    )
     return (
         "You are the backup original-news Shorts writer. Use only the supplied evidence and never copy a complete "
         "source sentence verbatim. Do not invent facts, quotes, motives, numbers, or outcomes. "
@@ -209,7 +224,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
         "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
-        "- A regular Short MUST contain 3 or 4 scenes: hook, development/context, and consequence/payoff.\n"
+        f"{scene_contract}"
         "- Put the substance in the middle beats; do not let Scene 1 carry the detail.\n"
         "- The full narration must naturally fit below 30 seconds.\n"
         "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
