@@ -111,6 +111,20 @@ SATURATION_TERMS = (
     "india vs", "india v", "championship", "major final",
 )
 
+# Unambiguous cricket-player aliases let genuinely relevant player-only
+# headlines survive headline discovery without turning generic words such as
+# "coach" or "test" into cricket signals.
+CRICKET_PLAYER_ALIASES = (
+    "virat kohli", "kohli", "rohit sharma", "jasprit bumrah", "bumrah",
+    "shubman gill", "gill", "rishabh pant", "pant", "hardik pandya", "hardik",
+    "ravindra jadeja", "jadeja", "suryakumar yadav", "suryakumar", "surya",
+    "yashasvi jaiswal", "jaiswal", "kl rahul", "sanju samson", "samson",
+    "smriti mandhana", "mandhana", "harmanpreet kaur", "harmanpreet",
+    "rashid khan", "rashid", "babar azam", "babar", "shaheen afridi",
+    "pat cummins", "cummins", "travis head", "ben stokes", "joe root",
+    "steve smith", "mohammed siraj", "siraj", "kane williamson",
+)
+
 
 def _clean(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -194,34 +208,23 @@ def _is_cricket(item):
         str(item.get(k) or "")
         for k in ("source", "source_name", "publisher", "url")
     )).casefold()
-    cricket_term_hits = sum(1 for term in CRICKET_TERMS if _word_match(text, term))
-    if cricket_term_hits >= 1:
-        # Generic words such as "coach", "captain", "pace" and "test" are not
-        # enough on their own. Require an unambiguous cricket anchor.
-        specific_hits = sum(
-            1 for term in (
-                "cricket", "icc", "bcci", "pcb", "wpl", "ipl", "psl",
-                "t20", "odi", "wicket", "wickets", "innings", "batter",
-                "bowler", "batting", "bowling",
-            )
-            if _word_match(text, term)
+    # Generic words such as "coach", "captain", "pace" and "test" are not
+    # enough on their own. Either an explicit cricket anchor or an unambiguous
+    # player alias is sufficient.
+    specific_hits = sum(
+        1 for term in (
+            "cricket", "icc", "bcci", "pcb", "wpl", "ipl", "psl",
+            "t20", "odi", "wicket", "wickets", "innings", "batter",
+            "bowler", "batting", "bowling",
         )
-        entity_hits = sum(
-            1 for term in (
-                "virat kohli", "kohli", "rohit sharma", "rohit",
-                "jasprit bumrah", "bumrah", "shubman gill", "gill",
-                "rishabh pant", "pant", "hardik pandya", "hardik",
-                "ravindra jadeja", "jadeja", "suryakumar yadav", "surya",
-                "yashasvi jaiswal", "jaiswal", "kl rahul", "rahul",
-                "sanju samson", "samson", "smriti mandhana", "mandhana",
-                "harmapreet kaur", "harmanpreet kaur", "rashid khan", "rashid",
-                "babar azam", "babar", "pat cummins", "cummins", "travis head",
-                "ben stokes", "joe root", "steve smith",
-            )
-            if _word_match(text, term)
-        )
-        if specific_hits or entity_hits:
-            return True
+        if _word_match(text, term)
+    )
+    entity_hits = sum(
+        1 for term in CRICKET_PLAYER_ALIASES
+        if _word_match(text, term)
+    )
+    if specific_hits or entity_hits:
+        return True
     if any(marker in source_hint for marker in (
         "icc-cricket.com", "bcci.tv", "cricbuzz", "wisden", "espncricinfo", "cricinfo.com",
     )):
@@ -259,6 +262,11 @@ def _scope_pass(item, scope):
             str(name).strip().casefold()
             for name in getattr(sr, "CRICKET_MARQUEE_NAMES", ())
             if str(name).strip()
+        },
+        *{
+            str(alias).strip().casefold()
+            for alias in CRICKET_PLAYER_ALIASES
+            if str(alias).strip()
         },
     }
     return bool(entities & entity_scope_anchors)
@@ -667,6 +675,16 @@ def _bucketize(concepts):
 
     result = []
     chosen = set()
+    bucket_names = ("news", "viral", "social")
+
+    # Spread a sparse portfolio across the three editorial views instead of
+    # filling News first and starving the later buckets. With 35 candidates this
+    # yields 12/12/11; with 60 it yields 20/20/20.
+    base, remainder = divmod(len(candidates), len(bucket_names))
+    target_counts = {
+        bucket: min(PER_BUCKET, base + (1 if index < remainder else 0))
+        for index, bucket in enumerate(bucket_names)
+    }
 
     def choose_bucket(bucket, score_name, count):
         remaining = [item for item in candidates if id(item) not in chosen]
@@ -700,35 +718,9 @@ def _bucketize(concepts):
         ("viral", "viral_score"),
         ("social", "social_score"),
     ):
-        choose_bucket(bucket, score_name, PER_BUCKET)
-
-    # Sparse-source backfill: never invent stories, and never re-use an event.
-    for bucket, score_name in (
-        ("news", "news_score"),
-        ("viral", "viral_score"),
-        ("social", "social_score"),
-    ):
-        need = PER_BUCKET - sum(1 for item in result if item.get("discovery_bucket") == bucket)
-        while need:
-            remaining = [item for item in candidates if id(item) not in chosen]
-            if not remaining:
-                break
-            winner = max(
-                remaining,
-                key=lambda item: float(item.get(score_name) or 0.0)
-                - max((sr._story_theme_similarity(item, old) for old in result), default=0.0) * 8.0,
-            )
-            chosen.add(id(winner))
-            row = dict(winner)
-            row["discovery_bucket"] = bucket
-            row["cross_bucket_backfill"] = True
-            row["bucket_score"] = float(row.get(score_name) or 0.0)
-            row["cricket_event_family"] = sr._cricket_event_family(winner)
-            result.append(row)
-            need -= 1
+        choose_bucket(bucket, score_name, target_counts[bucket])
 
     return result
-
 
 def _collect(scope="India / Asia"):
     google_queries = _google_queries_for_scope(scope)
