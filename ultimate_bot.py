@@ -1073,6 +1073,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
         "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
         "Use narrative_role values hook, development, context, consequence. "
+         "For a regular Short, output at least 3 scenes: hook, development/context, and consequence/payoff. "
         f"Language: {language_cfg['script_instruction']}\n"
     )
 
