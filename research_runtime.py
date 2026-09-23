@@ -206,8 +206,8 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
     language_instruction = _clean((language_cfg or {}).get("script_instruction"))
     top5 = str(format_mode or "").lower() == "top5"
     scene_contract = (
-        "- Top-5 mode MUST contain at least 5 substantive list-entry scenes; use a clear opening hook, "
-        "three or more substantive entries, and a final consequence/payoff.\n"
+        "- Top-5 mode MUST contain 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
+        "the fifth entry should deliver the final payoff.\n"
         if top5
         else "- A regular Short MUST contain 3 or 4 scenes: hook, development/context, and consequence/payoff.\n"
     )
