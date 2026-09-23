@@ -25,8 +25,9 @@ The dashboard is a newsroom-style production system. Discovery and production ar
 ## Stage 4 — Research + script
 - Research multiple sources on the chosen topic.
 - Build a fact-grounded synthesis.
-- Script style: compact news article, high information density, no performative filler, no forced CTA, no forced `#shorts`, no arbitrary short duration.
-- Duration is determined by story completeness.
+- Script style: compact news article, high information density, no performative filler, no forced CTA, no forced `#shorts`.
+- Target spoken runtime is 20–30 seconds. Duration is measured from the selected narrator profile; a single bounded pre-review compression pass may tighten an otherwise valid overlong draft.
+- Final synthesized narration is a hard 30-second ceiling; no post-approval rewrite loop is allowed.
 - Self-critique checks factual support, compression, opening clarity, repetition, originality and tone.
 - Display script on dashboard while production continues.
 
