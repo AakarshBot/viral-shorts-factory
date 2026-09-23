@@ -79,7 +79,7 @@ def test_cricket_discovery_forwards_requested_candidate_cap(monkeypatch):
     import sports_topic_desk_runtime
     monkeypatch.setattr(
         sports_topic_desk_runtime,
-        "discover_cricket_topics",
+        "discover_sports_topics",
         lambda **kwargs: calls.update(kwargs) or [],
     )
 
