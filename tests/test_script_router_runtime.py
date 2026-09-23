@@ -128,6 +128,20 @@ def test_initial_script_rejects_overlong_first_scene():
     assert "Scene 1 is too long" in reason
 
 
+def test_router_rejects_incomplete_regular_narrative_before_dashboard_review():
+    script = _valid_script()
+    script["script"] = script["script"][:2]
+
+    result, reason = _validate_script_result(
+        script,
+        {"title": "India squad change"},
+        "regular",
+    )
+
+    assert result is None
+    assert "middle beat" in reason.lower()
+
+
 def test_router_canonical_validation_allows_duration_repair_to_inspect_long_draft():
     script = _valid_script()
     script["script"][1]["voiceover"] = " ".join(["word"] * 65)
@@ -302,6 +316,7 @@ def test_fallback_prompt_uses_the_current_duration_contract():
     )
     assert "55–65 spoken words" in prompt
     assert "90-word safety ceiling" in prompt
+    assert "at least 3 scenes" in prompt
     assert "55–60 words" not in prompt
 
 
