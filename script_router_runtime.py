@@ -104,22 +104,22 @@ def _validate_script_result(result, story_data, format_mode):
     try:
         cleaned_result = pir._clean_script_result(result, story_data, format_mode)
         cleaned, diagnostics = sr.clean_script_data(cleaned_result, story_data, format_mode)
-        valid, reason = sr.validate_content_density(
-            cleaned,
-            story_data,
-            format_mode,
-        )
-        assessment = {}
-        if valid:
-            valid, reason, assessment = sr.assess_release_structure(cleaned, format_mode)
+        valid, reason = sr.validate_content_density(cleaned, story_data, format_mode)
         if not valid:
             return None, reason
+
+        originality = sr.check_script_originality(cleaned, story_data)
+        if not originality["passed"]:
+            return None, "Script contains a complete sentence copied verbatim from the source evidence."
+
+        if str(format_mode or "").lower() == "top5" and len(cleaned.get("script") or []) < 5:
+            return None, "Top-5 script does not contain enough list entries."
+
         cleaned["pipeline_diagnostics"] = diagnostics
-        cleaned["narrative_assessment"] = assessment
+        cleaned["originality_overlap"] = originality
         return cleaned, ""
     except Exception as exc:
         return None, f"Canonical script validation failed: {type(exc).__name__}: {exc}"
-
 
 def _prepare_story_data(data, pack, evidence_text, evidence_fallback_used):
     counts = pack.get("counts") or {}
@@ -260,35 +260,7 @@ def install_script_pipeline(bot):
         if evidence_fallback_used:
             accepted["public_publish_blocked"] = True
 
-        originality = sr.check_script_originality(accepted, data)
-        if not originality["passed"]:
-            print(
-                "   [Script Originality] Meaningful source overlap detected; requesting one rewrite.",
-                flush=True,
-            )
-            rewritten = sr._rewrite_for_originality_once(accepted, data, originality)
-            if rewritten is not None:
-                validated, reason = _validate_script_result(rewritten, data, format_mode)
-                if validated is not None:
-                    originality = sr.check_script_originality(validated, data)
-                    if originality["passed"]:
-                        accepted = validated
-                        accepted["originality_rewrite_attempted"] = True
-                    else:
-                        accepted["public_publish_blocked"] = True
-                        accepted["originality_overlap"] = originality
-                else:
-                    accepted["public_publish_blocked"] = True
-                    accepted["originality_rewrite_diagnostics"] = {"reason": reason}
-            else:
-                accepted["public_publish_blocked"] = True
-                accepted["originality_overlap"] = originality
-
-        accepted["originality_overlap"] = originality
-        critique = sr._run_real_critique(accepted, data)
-        accepted["originality_critique"] = critique
-        if critique.get("unsupported_claims"):
-            accepted["public_publish_blocked"] = True
+        # Originality is part of provider acceptance. Never rewrite an already accepted script.
 
         sr.rank_title_candidates(accepted, data)
         bot._active_script_data = accepted
