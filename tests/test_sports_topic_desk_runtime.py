@@ -20,10 +20,10 @@ def _article(title, domain, hours=3):
 
 
 def test_cricket_desk_request_timeouts_fit_their_lane_budgets():
-    assert desk.GOOGLE_REQUEST_TIMEOUT < desk.PRIMARY_DESK_TIMEOUT
-    assert desk.SOURCE_TIMEOUT < desk.PRIMARY_DESK_TIMEOUT
-    assert desk.REQUEST_TIMEOUT < desk.SECONDARY_DESK_TIMEOUT
-    assert desk.TREND_REQUEST_TIMEOUT < desk.SECONDARY_DESK_TIMEOUT
+    assert desk.GOOGLE_REQUEST_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
+    assert desk.SOURCE_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
+    assert desk.SECONDARY_REQUEST_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
+    assert desk.GDELT_REQUEST_TIMEOUT < desk.CORE_DISCOVERY_TIMEOUT
 
 
 def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
@@ -51,8 +51,8 @@ def test_cricket_desk_google_and_trend_timeout_kwargs_are_explicit(monkeypatch):
     trends = [item for item in calls if item[0] == "trends"]
     assert google
     assert all(item[2]["timeout"] == desk.GOOGLE_REQUEST_TIMEOUT for item in google)
-    assert len(trends) == len(desk.TREND_GEOS)
-    assert all(item[2]["timeout"] == desk.TREND_REQUEST_TIMEOUT for item in trends)
+    assert len(trends) == 1
+    assert all(item[2]["timeout"] == desk.SECONDARY_REQUEST_TIMEOUT for item in trends)
 
 
 def test_cricket_desk_duplicate_headlines_form_one_concept():
@@ -62,11 +62,11 @@ def test_cricket_desk_duplicate_headlines_form_one_concept():
         _article("India survive Japan scare in dramatic T20 finish", "three.example"),
         _article("Pakistan recall uncapped fast bowler for Zimbabwe tour", "four.example"),
     ]
-    concepts = desk._cluster(rows)
+    concepts = desk.cluster_news_events(rows)
     assert len(concepts) == 2
     india = next(item for item in concepts if "Japan" in item["title"])
-    assert india["article_count"] == 3
-    assert india["independent_source_count"] == 3
+    assert india["event_article_count"] == 3
+    assert india["event_source_count"] == 3
 
 
 def test_cricket_desk_keeps_social_leads_separate():
@@ -92,7 +92,7 @@ def test_cricket_desk_keeps_social_leads_separate():
 
 
 
-def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
+def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(monkeypatch):
     concepts = []
     unique_story_phrases = [
         "uncapped spinner takes five wickets",
@@ -147,10 +147,14 @@ def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
         max_candidates=30,
         retained_candidates=[],
     )
-    assert len(result) >= 30
+    assert len(result) == 36
     buckets = {key: [x for x in result if x.get("discovery_bucket") == key] for key in ("news", "viral", "social")}
-    assert all(len(items) == 10 for items in buckets.values())
-    assert len({item["cluster_id"] for item in result[:30]}) == 30
+    assert sum(len(items) for items in buckets.values()) == 36
+    assert all(len(items) > 0 for items in buckets.values())
+    assert len({
+        item.get("event_identity_key") or item.get("event_id")
+        for item in result
+    }) == 36
 
 
 def test_cricket_desk_exposes_undercoverage_and_signal_dimensions():
@@ -231,36 +235,25 @@ def test_google_news_snippets_survive_until_event_clustering(monkeypatch):
     assert len(result) == 1
 
 
-def test_cricket_bucket_caps_one_event_family_in_the_top_window():
+def test_cricket_bucket_does_not_suppress_distinct_events_in_one_competition():
     concepts = []
     for index in range(8):
         concepts.append({
-            "title": f"India win Asian Games cricket story {index}",
+            "title": f"India Asian Games cricket event {index}",
+            "event_id": f"event-{index}",
+            "event_identity_key": f"identity-{index}",
             "news_score": 100 - index,
             "viral_score": 80 - index,
             "social_score": 60 - index,
-            "undercovered_score": 2,
-            "social_post_count": 0,
-        })
-    for index in range(30):
-        concepts.append({
-            "title": f"Distinct cricket development {index} in player {index}",
-            "news_score": 70 - index * 0.1,
-            "viral_score": 65 - index * 0.1,
-            "social_score": 60 - index * 0.1,
-            "undercovered_score": 8,
+            "undercovered_score": 4,
             "social_post_count": 0,
         })
     result = desk._bucketize(concepts)
-    assert len(result) == 30
-    assert sum(
-        1 for item in result[:6]
-        if item.get("cricket_event_family") == "asian_games"
-    ) <= 2
-    assert sum(
-        1 for item in result
-        if item.get("cricket_event_family") == "asian_games"
-    ) <= 4
+    assert len(result) == 8
+    assert len({
+        item.get("event_identity_key") or item.get("event_id")
+        for item in result
+    }) == 8
 
 
 
@@ -299,3 +292,21 @@ def test_cricket_desk_keeps_unusual_article_headlines_for_manual_qc(monkeypatch)
     monkeypatch.setattr(desk.sr, "_cricket_service_title_pass", lambda item: True)
     result = desk._normalise_rows([row])
     assert len(result) == 1
+
+
+
+def test_cricket_detection_does_not_confuse_substrings_with_cricket():
+    assert desk._is_cricket({"title": "Latest space test opens new frontier"}) is False
+    assert desk._is_cricket({"title": "Coach announces new football plan"}) is False
+    assert desk._is_cricket({"title": "India batter breaks a batting record"}) is True
+
+
+def test_india_asia_scope_accepts_player_only_india_story_and_rejects_unrelated_cricket():
+    assert desk._scope_pass(
+        {"title": "Bumrah returns to training after injury", "event_entities": ["Bumrah"]},
+        "India / Asia",
+    ) is True
+    assert desk._scope_pass(
+        {"title": "England opener breaks record in county cricket", "event_entities": ["England"]},
+        "India / Asia",
+    ) is False
