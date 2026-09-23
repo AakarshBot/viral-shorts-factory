@@ -152,7 +152,7 @@ def test_router_rejects_incomplete_regular_narrative_before_dashboard_review():
     )
 
     assert result is None
-    assert "middle beat" in reason.lower()
+    assert "3 or 4 scenes" in reason.lower()
 
 
 def test_groq_parser_preserves_empty_title_for_canonical_rejection():
@@ -179,7 +179,7 @@ def test_router_rejects_incomplete_title_set_before_dashboard_review():
     )
 
     assert result is None
-    assert "exactly three usable title candidates" in reason.lower()
+    assert "exactly three titles are required" in reason.lower()
 
 
 def test_narrative_role_inference_defaults_by_scene_position():
