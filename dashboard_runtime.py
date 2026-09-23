@@ -1346,16 +1346,23 @@ class DashboardWorkflowController(WorkflowController):
                 unresolved.append(index)
                 continue
             image_path = str(layer.get("image") or "").strip()
-            if (
-                not image_path
-                or not os.path.isfile(image_path)
-                or not bool(layer.get("visual_verified"))
-                or bool(layer.get("visual_qc_blocked"))
-            ):
+            if not image_path or not os.path.isfile(image_path):
                 unresolved.append(index)
 
         if unresolved:
             return False
+
+        # This is a human-QC checkpoint. A present image is approvable even when
+        # AI identity verification was unavailable or a soft QA flag was raised.
+        # Preserve those diagnostics instead of relabelling human approval as AI verification.
+        with self._lock:
+            for package in packages:
+                layer = package[0] if isinstance(package, list) and package else package
+                if isinstance(layer, dict):
+                    layer["human_visual_approved"] = True
+                    layer["human_visual_qc_override"] = bool(
+                        not layer.get("visual_verified") or layer.get("visual_qc_blocked")
+                    )
 
         self._visual_approved = True
         gate = self._manual_gate_state
