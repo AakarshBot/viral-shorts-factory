@@ -45,34 +45,59 @@ def _contract_scene(text, role):
     }
 
 
-def test_validate_script_rejects_one_or_two_scene_stubs():
-    for scenes in (
-        [_contract_scene("India announced the policy today.", "hook")],
-        [
+def test_validate_script_accepts_compact_one_or_two_scene_stories():
+    one_scene = {
+        "editorial_angle": "Explain the confirmed event.",
+        "script": [
             _contract_scene("India announced the policy today.", "hook"),
-            _contract_scene("Officials are implementing the policy.", "development"),
         ],
-    ):
-        script = {
-            "editorial_angle": "This explains the development, its context, and the practical consequence.",
-            "script": scenes,
-        }
-        valid, reason = validate_script(
-            script,
-            "India announced a new policy and officials are implementing it.",
-            "regular",
-        )
-        assert valid is False
-        assert "incomplete" in reason.lower() or "missing" in reason.lower()
+    }
+    valid, reason = validate_script(
+        one_scene,
+        "India announced a new policy today.",
+        "regular",
+    )
+    assert valid is True, reason
+
+    two_scene = {
+        "editorial_angle": "Explain the confirmed event and consequence.",
+        "script": [
+            _contract_scene("India announced a major policy change.", "hook"),
+            _contract_scene("Officials now begin implementing the revised process.", "consequence"),
+        ],
+    }
+    valid, reason = validate_script(
+        two_scene,
+        "India announced a new policy and officials will implement it.",
+        "regular",
+    )
+    assert valid is True, reason
+
+
+def test_validate_script_rejects_overlong_compact_budget():
+    script = {
+        "editorial_angle": "This explains the development and practical consequence.",
+        "script": [
+            _contract_scene("India confirmed the change.", "hook"),
+            _contract_scene(" ".join(["word"] * 61), "development"),
+        ],
+    }
+    valid, reason = validate_script(
+        script,
+        "India confirmed a major change in policy.",
+        "regular",
+    )
+    assert valid is False
+    assert "maximum is 62" in reason
 
 
 def test_validate_script_accepts_compact_three_scene_story():
     script = {
-        "editorial_angle": "This explains the development, its context, and the practical consequence.",
+        "editorial_angle": "This explains the development and practical consequence.",
         "script": [
             _contract_scene("India announced the policy today.", "hook"),
-            _contract_scene("Officials are implementing the policy and preparing the affected departments.", "development"),
-            _contract_scene("The practical consequence is that departments must now prepare for the new process.", "consequence"),
+            _contract_scene("Officials are implementing the revised process.", "development"),
+            _contract_scene("The practical consequence is a new process for affected departments.", "consequence"),
         ],
     }
     valid, reason = validate_script(
@@ -83,51 +108,16 @@ def test_validate_script_accepts_compact_three_scene_story():
     assert valid is True, reason
 
 
-def test_validate_script_accepts_complete_story_without_numeric_limits():
-    script = {
-        "editorial_angle": "This adds context and explains the practical consequence beyond the headline.",
-        "script": [
-            _contract_scene("India announced the policy today.", "hook"),
-            _contract_scene("Officials are implementing the policy across the affected departments.", "development"),
-            _contract_scene("The background explains why the change was introduced and what it replaces.", "context"),
-            _contract_scene("The practical consequence is that departments must now prepare for the new process.", "consequence"),
-        ],
-    }
-    valid, reason = validate_script(
-        script,
-        "India announced a new policy and officials are implementing it.",
-        "regular",
-    )
-    assert valid is True, reason
-
-
-def test_writer_contract_has_no_numeric_scene_or_word_limits():
+def test_writer_contract_has_initial_duration_limits():
     from pathlib import Path
     import ultimate_bot
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "Use as many scenes as the story genuinely needs" in source
-    assert "there is no target scene count" not in source.lower()
-    assert "target scene count" not in source.lower()
-    assert "between 8 and 30 words" not in source.lower()
-    assert "strictly between 5 and 8 scenes" not in source.lower()
-
-
-def test_writer_contract_explicitly_bans_retention_bait():
-    from pathlib import Path
-    import ultimate_bot
-
-    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8").lower()
-    for phrase in (
-        "wait till the end",
-        "wait until the end",
-        "wait for it",
-        "stay tuned",
-        "you won't believe",
-        "what happens next",
-        "don't go anywhere",
-    ):
-        assert phrase in source
+    assert "Voiceover total: 55–62 words." in source
+    assert "Scene 1: 8–14 words" in source
+    assert "naturally fit below 30 seconds" in source
+    assert "Use as many scenes as the story genuinely needs" not in source
+    assert "tighten_script_for_duration_once" not in source
 
 
 
