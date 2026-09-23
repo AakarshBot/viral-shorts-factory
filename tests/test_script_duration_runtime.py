@@ -196,3 +196,65 @@ def test_rephrased_source_sentence_is_allowed():
     result = check_script_originality(script, source)
 
     assert result["passed"] is True
+
+
+def test_final_video_qc_fails_closed_when_duration_cannot_be_read(monkeypatch, tmp_path):
+    import moviepy
+    import branding_runtime
+    import final_qc_runtime
+
+    path = tmp_path / "final_video.mp4"
+    path.write_bytes(b"synthetic-video")
+
+    monkeypatch.setattr(branding_runtime, "_artifact_qc", lambda _path: (True, "artifact ok"))
+
+    class BrokenClip:
+        def __enter__(self):
+            raise RuntimeError("decode failure")
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(moviepy, "VideoFileClip", lambda _path: BrokenClip())
+
+    with __import__("pytest").raises(RuntimeError, match="duration could not be validated"):
+        final_qc_runtime.validate_final_video(str(path))
+
+
+def test_final_video_qc_rejects_rendered_video_over_production_limit(monkeypatch, tmp_path):
+    import moviepy
+    import branding_runtime
+    import final_qc_runtime
+
+    path = tmp_path / "final_video.mp4"
+    path.write_bytes(b"synthetic-video")
+
+    monkeypatch.setattr(branding_runtime, "_artifact_qc", lambda _path: (True, "artifact ok"))
+
+    class Clip:
+        duration = 30.01
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(moviepy, "VideoFileClip", lambda _path: Clip())
+
+    with __import__("pytest").raises(RuntimeError, match="exceeds the 30.0s production limit"):
+        final_qc_runtime.validate_final_video(str(path))
+
+
+def test_production_post_render_validation_is_fail_closed():
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index("        video_size = os.path.getsize(video_path)")
+    end = source.index("        post_render_hook =", start)
+    block = source[start:end]
+
+    assert "from final_qc_runtime import validate_final_video" in block
+    assert "validate_final_video(video_path)" in block
+    assert "Could not validate video duration" not in block
+    assert '_mark_run_status("FAILED", reason)' in block
