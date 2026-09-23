@@ -230,6 +230,73 @@ NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 INITIAL_SCRIPT_MAX_WORDS = 90
 SCENE_1_MAX_WORDS = 14
 
+# Provider-facing schema shared by the primary and fallback writers.
+# Keep every field required: Groq strict Structured Outputs requires required
+# properties and closed objects (additionalProperties=false).
+SCRIPT_OUTPUT_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "creator_insight": {
+            "type": "string",
+            "description": "One concise, evidence-grounded synthesis of why the documented event matters. No speculation."
+        },
+        "editorial_angle": {
+            "type": "string",
+            "description": "The factual editorial lens used to frame the story."
+        },
+        "titles": {
+            "type": "array",
+            "items": {"type": "string"}
+        },
+        "recommended_title_index": {
+            "type": "integer",
+            "enum": [1, 2, 3]
+        },
+        "seo_description": {
+            "type": "string"
+        },
+        "pinned_comment": {
+            "type": "string"
+        },
+        "script": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "voiceover": {"type": "string"},
+                    "narrative_role": {
+                        "type": "string",
+                        "enum": ["hook", "development", "context", "consequence"]
+                    },
+                    "primary_entity": {"type": "string"},
+                    "visual_intent": {"type": "string"},
+                    "specific_search_prompt": {"type": "string"},
+                    "sport_or_topic_category": {"type": "string"}
+                },
+                "required": [
+                    "voiceover",
+                    "narrative_role",
+                    "primary_entity",
+                    "visual_intent",
+                    "specific_search_prompt",
+                    "sport_or_topic_category"
+                ],
+                "additionalProperties": false
+            }
+        }
+    },
+    "required": [
+        "creator_insight",
+        "editorial_angle",
+        "titles",
+        "recommended_title_index",
+        "seo_description",
+        "pinned_comment",
+        "script"
+    ],
+    "additionalProperties": false
+}
+
 
 def estimate_narration_duration(script_data, persona_profile=None, base_wpm=NARRATION_BASE_WPM):
     """Estimate spoken duration before TTS using the selected persona's Edge-TTS rate."""
@@ -1034,10 +1101,13 @@ def clean_script_data(script_data, story_data, format_mode):
 
 def assess_release_structure(script_data, format_mode="regular"):
     """Check production-ready narrative structure and the renderer contract for each format."""
-    if str(format_mode or "").strip().lower() == "top5":
-        scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
+    mode = str(format_mode or "").strip().lower()
+    if mode == "top5":
         if len(scenes) != 6:
             return False, "Top-5 script must contain exactly one opening beat plus five ranked entries.", {}
+    elif len(scenes) not in (3, 4):
+        return False, "Regular Short must contain exactly 3 or 4 scenes.", {}
     assessment = assess_narrative_completeness(script_data)
     if not assessment.get("passed"):
         return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
