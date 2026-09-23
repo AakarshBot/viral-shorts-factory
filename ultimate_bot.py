@@ -2104,6 +2104,19 @@ def run_robot(web_config=None):
             )
         conn.commit()
 
+        def _mark_run_status(status, reason=""):
+            assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+            values = [str(status)]
+            if reason:
+                assignments.append("rejected_reason = ?")
+                values.append(str(reason)[:1000])
+            values.append(run_row_id)
+            conn.execute(
+                f"UPDATE vault SET {', '.join(assignments)} WHERE rowid=?",
+                values,
+            )
+            conn.commit()
+
         # PENDING_QC is reserved for an actual QC decision, not an active
         # production. Active human-review stages can last up to 24 hours, so
         # they must not look like stale runs to the startup sweeper.
@@ -2127,7 +2140,9 @@ def run_robot(web_config=None):
             story_payload, lang_cfg, cat_choice, conn, format_mode
         )
         if not script_data:
-            print("   [!] Error: Script generation returned None.")
+            reason = "Script generation returned no usable script."
+            _mark_run_status("FAILED", reason)
+            print(f"   [!] Error: {reason}")
             return
 
         # The script router owns the one bounded pre-review duration repair.
@@ -2222,7 +2237,9 @@ def run_robot(web_config=None):
                 generate_voiceover_and_timestamps(script_data, lang_cfg)
             )
             if not audio_paths:
-                print("   [!] Error: Voiceover generation failed to produce audio files.")
+                reason = "Voiceover generation failed to produce audio files."
+                _mark_run_status("FAILED", reason)
+                print(f"   [!] Error: {reason}")
                 return
 
             # The audio runtime already measures every generated scene. Reuse that
@@ -2312,12 +2329,16 @@ def run_robot(web_config=None):
 
         print("\n🛑 POST-RENDER VALIDATION GATE...")
         if not video_path or not os.path.exists(video_path):
-            print("   [!] Post-Render Validation Failed: Video missing.")
+            reason = "Post-render validation failed: final video is missing."
+            _mark_run_status("FAILED", reason)
+            print(f"   [!] {reason}")
             return
 
         video_size = os.path.getsize(video_path)
         if video_size < 500_000:
-            print("   [!] Post-Render Validation Failed: Video is under 500KB.")
+            reason = "Post-render validation failed: final video is under 500KB."
+            _mark_run_status("FAILED", reason)
+            print(f"   [!] {reason}")
             return
 
         try:
@@ -2376,6 +2397,10 @@ def run_robot(web_config=None):
             trend_keyword=trend_keyword,
         )
         if not vid_id:
+            _mark_run_status(
+                "READY_FOR_UPLOAD",
+                "Rendered video is valid but the YouTube upload did not complete.",
+            )
             print("   [!] Upload failed; keeping the rendered video for review.")
             return
 
@@ -2385,7 +2410,7 @@ def run_robot(web_config=None):
             narrative_completeness=?, audience_fit=?, monetization_risk=?,
             shelf_life=?, composite_score=?, asset_credits_json=?, ai_image_ratio=?, voice_gender=?,
             format_used=?, language_used=?, combo_key=?, hook_style_used=?,
-            trend_keyword=? WHERE rowid=?""",
+            trend_keyword=?, status=? WHERE rowid=?""",
             (
                 vid_id,
                 script_data["title"],
@@ -2406,6 +2431,7 @@ def run_robot(web_config=None):
                 combo_key,
                 script_data.get("hook_style_used", ""),
                 trend_keyword,
+                "UPLOADED_PRIVATE" if str(pub_mode or "").strip().lower() == "private" else "UPLOADED",
                 run_row_id,
             ),
         )
