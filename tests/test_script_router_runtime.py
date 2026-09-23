@@ -221,6 +221,22 @@ def test_router_canonical_validation_allows_duration_repair_to_inspect_long_draf
     assert result is not None, reason
 
 
+def test_near_verbatim_source_sentence_is_rejected():
+    source = {
+        "research_evidence_text": (
+            "Officials confirmed the major squad change after the latest review. "
+            "The decision affects preparation for the next assignment."
+        )
+    }
+    script = _valid_script()
+    script["script"][0]["voiceover"] = (
+        "Officials confirmed the major squad change after the latest review."
+    )
+    result = check_script_originality(script, source)
+    assert result["passed"] is False
+    assert result["failures"][0]["match_type"] == "near_verbatim"
+
+
 def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
     story = {
         "research_evidence_text": (
@@ -348,6 +364,7 @@ def test_groq_primary_writer_uses_current_gpt_oss_request_contract(monkeypatch):
     assert payload["model"] == "openai/gpt-oss-120b"
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
+    assert payload["provider"] == {"require_parameters": True}
     assert payload["include_reasoning"] is False
     assert payload["reasoning_effort"] == "low"
     assert payload["max_completion_tokens"] == 900
@@ -447,7 +464,8 @@ def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(mo
     assert result["script"]
     assert len(calls) == 2
     assert "response_format" in calls[0]
-    assert "response_format" not in calls[1]
+    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert calls[1]["model"] == "openai/gpt-oss-20b"
     assert calls[1]["messages"][0]["role"] == "user"
 
 
@@ -499,9 +517,12 @@ def test_gemini_fallback_sends_canonical_response_schema(monkeypatch):
     assert result["script"]
     request = calls[0][0]
     payload = json.loads(request.data.decode("utf-8"))
-    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+    assert payload["generationConfig"]["responseFormat"]["text"]["mimeType"] == "application/json"
     assert payload["generationConfig"]["maxOutputTokens"] == 900
-    assert payload["generationConfig"]["responseSchema"]["additionalProperties"] is False
+    assert "responseSchema" not in payload["generationConfig"]
+    schema = payload["generationConfig"]["responseFormat"]["text"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["recommended_title_index"]["enum"] == [1, 2, 3]
     assert request.get_header("X-goog-api-key") == "test-key"
 
 
@@ -578,6 +599,142 @@ def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypa
     assert payload["max_tokens"] == 900
     assert payload["response_format"] == {"type": "json_object"}
 
+
+
+def test_gemini_payload_uses_current_structured_output_field_names(monkeypatch):
+    import json
+    import research_runtime
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        return _fake_urlopen_response({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": json.dumps(_valid_script())}]
+                }
+            }]
+        })
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+    research_runtime._gemini_script_fallback(
+        {"title": "India squad change", "research_evidence_text": (
+            "Officials confirmed a major squad change after the latest review. "
+            "The decision changes preparation for the next assignment."
+        )},
+        {"script_instruction": "English."},
+        "sports_stories_of_day",
+        "regular",
+    )
+
+    payload = json.loads(calls[0].data.decode("utf-8"))
+    generation = payload["generationConfig"]
+    assert "responseSchema" not in generation
+    assert "responseMimeType" not in generation
+    assert "responseFormat" in generation
+    assert set(generation["responseFormat"]) == {"text"}
+    assert generation["responseFormat"]["text"]["mimeType"] == "application/json"
+    assert "schema" in generation["responseFormat"]["text"]
+
+
+def test_gemini_rejects_the_old_response_schema_shape_before_network_use(monkeypatch):
+    import json
+    import research_runtime
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        raise AssertionError("The test must inspect the request shape, not emulate the deprecated Gemini schema.")
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+
+    # Build the real payload through the provider and intercept it by replacing
+    # urlopen with a shape checker that never reaches an external service.
+    def shape_checker(request, timeout):
+        calls.append(request)
+        payload = json.loads(request.data.decode("utf-8"))
+        generation = payload["generationConfig"]
+        assert "responseSchema" not in generation
+        assert "responseMimeType" not in generation
+        assert generation["responseFormat"]["text"]["mimeType"] == "application/json"
+        raise RuntimeError("shape_checked")
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", shape_checker)
+    try:
+        research_runtime._gemini_script_fallback(
+            {"title": "India squad change", "research_evidence_text": (
+                "Officials confirmed a major squad change after the latest review. "
+                "The decision changes preparation for the next assignment."
+            )},
+            {"script_instruction": "English."},
+            "sports_stories_of_day",
+            "regular",
+        )
+    except RuntimeError as exc:
+        assert "shape_checked" in str(exc)
+    else:
+        raise AssertionError("The shape-checking transport should have stopped the fake request.")
+
+
+def test_groq_primary_retries_once_after_successful_empty_json_response(monkeypatch):
+    import json
+    import ultimate_bot
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, content):
+            self.status_code = 200
+            self._content = content
+            self.text = ""
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {"content": self._content}
+                }]
+            }
+
+    def fake_post(_url, **kwargs):
+        calls.append(kwargs["json"])
+        if len(calls) == 1:
+            return FakeResponse("")
+        return FakeResponse(json.dumps(_valid_script()))
+
+    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
+    result = ultimate_bot.write_script(
+        {
+            "title": "India squad change",
+            "research_evidence_text": (
+                "Officials confirmed a major squad change after the latest review. "
+                "The decision changes preparation for the next assignment."
+            ),
+        },
+        {"script_instruction": "Write all narration in English."},
+        "sports_stories_of_day",
+        None,
+        "regular",
+    )
+
+    assert result["script"]
+    assert len(calls) == 2
+    assert calls[0]["model"] == "openai/gpt-oss-120b"
+    assert calls[1]["model"] == "openai/gpt-oss-20b"
+    assert calls[1]["response_format"] == {"type": "json_object"}
+
+
+def test_provider_json_parser_handles_multiple_json_objects_without_greedy_capture():
+    import research_runtime
+
+    result = research_runtime._parse_provider_json(
+        'preface {"creator_insight":"valid","script":[]} trailing {"wrong":true}'
+    )
+    assert result == {"creator_insight": "valid", "script": []}
 
 def test_repeated_groq_400_stops_at_two_provider_calls(monkeypatch):
     import ultimate_bot
