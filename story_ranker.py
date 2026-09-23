@@ -1203,7 +1203,20 @@ def _infer_discovery_category(story):
         for key in ("title", "text", "description", "event_search_text", "trend_query")
     ))
     weighted = {
-        "sports": {"cricket": 5, "icc": 5, "ipl": 5, "football": 4, "soccer": 4, "tennis": 4, "match": 2, "tournament": 3, "athlete": 3, "olympic": 4},
+        "sports": {
+            "cricket": 5, "icc": 5, "ipl": 5,
+            "football": 4, "soccer": 4, "uefa": 4, "fifa": 4, "premier league": 4,
+            "tennis": 4, "atp": 4, "wta": 4, "grand slam": 4,
+            "badminton": 4, "bwf": 4, "hockey": 4, "fih": 4,
+            "athletics": 4, "track and field": 4, "table tennis": 4,
+            "squash": 4, "kabaddi": 4, "boxing": 4, "wrestling": 4,
+            "basketball": 4, "volleyball": 4, "golf": 4,
+            "motorsport": 4, "formula 1": 4, "f1": 4, "motogp": 4,
+            "rugby": 4, "cycling": 4, "marathon": 4, "olympic": 4,
+            "paralympic": 4, "commonwealth games": 4, "asian games": 4,
+            "match": 2, "tournament": 3, "athlete": 3, "championship": 3,
+            "final": 2, "racing": 3, "race": 2, "sport": 2, "sports": 2,
+        },
         "technology": {"artificial intelligence": 5, "ai": 4, "chip": 3, "software": 3, "robot": 3, "smartphone": 4, "gadget": 3, "startup": 3, "nvidia": 3},
         "business_finance": {"stock": 4, "market": 3, "economy": 4, "earnings": 4, "funding": 3, "acquisition": 4, "ipo": 4, "bank": 2, "finance": 3},
         "entertainment": {"movie": 4, "film": 4, "bollywood": 5, "tollywood": 5, "celebrity": 4, "trailer": 3, "actor": 3, "music": 3, "album": 3},
