@@ -134,6 +134,50 @@ def test_duration_compression_has_a_provider_free_fallback(monkeypatch):
     assert estimate_narration_duration(result, persona)["seconds"] < estimate_narration_duration(script, persona)["seconds"]
 
 
+
+def test_duration_compression_has_sentence_level_fallback_without_phrase_matches(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    script = {
+        "editorial_angle": "A new cricket development changes the team's immediate plans.",
+        "script": [
+            {
+                "voiceover": (
+                    "The board confirmed the change after a late meeting. "
+                    "The decision affects the team's next assignment."
+                ),
+                "narrative_role": "hook",
+            },
+            {
+                "voiceover": (
+                    "The player was informed before the announcement. "
+                    "Officials said the change was based on the latest assessment."
+                ),
+                "narrative_role": "development",
+            },
+            {
+                "voiceover": (
+                    "The immediate consequence is that the squad now has to adjust. "
+                    "The wider impact will become clearer in the next few days."
+                ),
+                "narrative_role": "consequence",
+            },
+        ],
+    }
+    story = {"title": "Cricket board confirms late squad change"}
+
+    result = tighten_script_for_duration_once(
+        script,
+        story,
+        {},
+        "regular",
+        target_seconds=30.0,
+        persona_profile={"rate": 0},
+    )
+
+    assert result is not None
+    assert result["duration_compression_provider"] == "deterministic_sentence_trim"
+    assert estimate_narration_duration(result, {"rate": 0})["seconds"] <= 35.0
+
 def test_duration_compression_falls_back_when_groq_http_fails(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
 

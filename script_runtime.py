@@ -966,6 +966,87 @@ def _compact_unquoted_voiceover(text):
     return "".join(parts).strip()
 
 
+
+def _split_voiceover_sentences(text):
+    parts = re.split(r"(?<=[.!?])\s+", str(text or "").strip())
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _sentence_level_duration_fallback(script_data, story_data, format_mode, persona_profile, max_seconds=35.0):
+    """Provider-free hard fallback for near-limit scripts with no safe phrase contractions."""
+    working = {
+        **script_data,
+        "script": [
+            dict(scene)
+            for scene in (script_data.get("script") or [])
+            if isinstance(scene, dict)
+        ],
+    }
+    attempts = 0
+    while attempts < 6:
+        estimate = estimate_narration_duration(working, persona_profile)
+        if estimate["seconds"] <= float(max_seconds):
+            valid, _ = validate_content_density(working, story_data, format_mode)
+            if valid:
+                working["duration_compression_only"] = True
+                working["duration_compression_provider"] = "deterministic_sentence_trim"
+                return working
+            return None
+
+        candidates = []
+        scenes = working.get("script") or []
+        for scene_index, scene in enumerate(scenes):
+            role = str(scene.get("narrative_role") or "").strip().casefold()
+            if role == "hook":
+                # Keep the opening promise intact unless it is the only place where
+                # a removable sentence exists and the semantic gate explicitly allows it.
+                continue
+
+            sentences = _split_voiceover_sentences(scene.get("voiceover"))
+            if len(sentences) <= 1:
+                continue
+
+            for sentence_index, sentence in enumerate(sentences):
+                if len(re.findall(r"\b\w+\b", sentence)) < 6:
+                    continue
+                if any(marker in sentence for marker in ('"', "“", "”")):
+                    continue
+                candidate_script = {
+                    **working,
+                    "script": [
+                        dict(item)
+                        for item in scenes
+                    ],
+                }
+                remaining = sentences[:sentence_index] + sentences[sentence_index + 1:]
+                if not remaining:
+                    continue
+                candidate_script["script"][scene_index]["voiceover"] = " ".join(remaining)
+                valid, _ = validate_content_density(
+                    candidate_script,
+                    story_data,
+                    format_mode,
+                )
+                if not valid:
+                    continue
+                candidate_estimate = estimate_narration_duration(candidate_script, persona_profile)
+                candidates.append((candidate_estimate["seconds"], candidate_script))
+
+        if not candidates:
+            break
+
+        # Choose the smallest valid duration still closest to the hard limit.
+        below = [item for item in candidates if item[0] <= float(max_seconds)]
+        chosen = min(
+            below or candidates,
+            key=lambda item: abs(float(max_seconds) - float(item[0])),
+        )
+        working = chosen[1]
+        attempts += 1
+
+    return None
+
+
 def _local_duration_compression(script_data, story_data, format_mode, persona_profile, target_seconds):
     """Provider-free micro-compression used when an LLM rewrite is unavailable."""
     rewritten = dict(script_data)
@@ -979,11 +1060,19 @@ def _local_duration_compression(script_data, story_data, format_mode, persona_pr
     if local_estimate["seconds"] >= original_estimate["seconds"]:
         return None
     valid, _ = validate_content_density(rewritten, story_data, format_mode)
-    if not valid or local_estimate["seconds"] > 35.0:
-        return None
-    rewritten["duration_compression_only"] = True
-    rewritten["duration_compression_provider"] = "deterministic_local"
-    return rewritten
+    if valid and local_estimate["seconds"] <= 35.0:
+        rewritten["duration_compression_only"] = True
+        rewritten["duration_compression_provider"] = "deterministic_local"
+        return rewritten
+
+    fallback = _sentence_level_duration_fallback(
+        script_data,
+        story_data,
+        format_mode,
+        persona_profile,
+        max_seconds=35.0,
+    )
+    return fallback
 
 
 def tighten_script_for_duration_once(
