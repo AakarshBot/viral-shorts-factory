@@ -2090,12 +2090,11 @@ def _load_uploaded_story_identities(conn, limit=2000):
                 identities["event_keys"].add(cleaned)
         for value in (topic, title_used):
             cleaned = str(value or "").strip()
-            if not cleaned:
-                continue
-            identities["titles"].add(cleaned.casefold())
-            token_key = " ".join(sorted(_tokens(cleaned)))
-            if token_key:
-                identities["titles"].add("__tokens__:" + token_key)
+            if cleaned:
+                # Legacy rows without an event identity are matched by exact
+                # title/topic only; token-set matching can hide a new recurring
+                # matchup that happens to reuse the same vocabulary.
+                identities["titles"].add(cleaned.casefold())
     return identities
 
 
@@ -2120,9 +2119,6 @@ def _uploaded_story_match(story, identities):
     ):
         cleaned = str(value or "").strip().casefold()
         if cleaned and cleaned in identities.get("titles", set()):
-            return True
-        token_key = " ".join(sorted(_tokens(cleaned)))
-        if token_key and "__tokens__:" + token_key in identities.get("titles", set()):
             return True
     return False
 
