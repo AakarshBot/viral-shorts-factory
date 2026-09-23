@@ -336,6 +336,6 @@ def test_locked_dashboard_story_skips_redundant_editorial_llm_gate():
     block_end = source.index('insert_cursor = conn.execute(', block_start)
     block = source[block_start:block_end]
     skip_pos = block.index("Editorial LLM scoring skipped: dashboard story is already locked.")
-    gate_pos = block.index("editorial_gate_batch(")
+    gate_pos = block.index("editorial_gate_batch(", skip_pos)
     assert "story_payload = dict(selected_story)" in block
     assert skip_pos < gate_pos
