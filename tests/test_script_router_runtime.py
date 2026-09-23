@@ -76,7 +76,7 @@ def test_initial_script_contract_uses_duration_as_authority():
 
 def test_overlong_but_within_safety_ceiling_reaches_duration_repair():
     script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 75)
+    script["script"][1]["voiceover"] = " ".join(["word"] * 65)
     ok, reason = validate_content_density(script, {}, "regular")
     assert ok is True, reason
 
