@@ -1059,8 +1059,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             or ""
         )[:8000]
 
+    format_mode_key = str(format_mode or "").strip().lower()
     persona_name = (
-        "LISTICLE HOST" if format_mode == "top5"
+        "LISTICLE HOST" if format_mode_key == "top5"
         else "TECH REVIEWER" if genre_key == "tech_reviews"
         else "HYPE COMMENTATOR" if genre_key in ["sports", "sports_stories_of_day"]
         else "ANALYTICAL INSIDER" if genre_key in ["national_global_affairs", "business_finance", "technology"]
@@ -1068,9 +1069,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     )
 
     scene_contract = (
-        "For Top-5 mode, output at least 5 substantive list-entry scenes with a clear opening hook "
-        "and a final consequence/payoff. "
-        if format_mode == "top5"
+        "For Top-5 mode, output 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
+        "the fifth entry should deliver the final payoff. "
+        if format_mode_key == "top5"
         else "For a regular Short, output 3 or 4 scenes: hook, development/context, and consequence/payoff. "
     )
 
@@ -1082,7 +1083,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
         "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
         "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
-        "- Prefer 3 or 4 scenes. Put the substance in later scenes; do not let Scene 1 carry the detail.\n"
+        "- Keep the scene count exactly aligned with the selected format contract below; do not pad with filler.\n"
         "- Spoken duration is authoritative: keep the narration below 30 seconds at the factory's configured voice rate.\n"
         "- No intro, greeting, CTA, retention bait, generic filler, or production instructions.\n"
         "- Curiosity must come from a real fact or tension, not withheld information.\n\n"
@@ -1212,7 +1213,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
 
         data["hook_type"] = classify_hook_style(data)
         data["hook_style_used"] = data["hook_type"]
-        data["structure_used"] = "Top 5" if format_mode == "top5" else "Editorial Explainer"
+        data["structure_used"] = "Top 5" if format_mode_key == "top5" else "Editorial Explainer"
         data["persona_used"] = persona_name.title()
 
         return data
