@@ -1,5 +1,6 @@
 import os
 import io
+import copy
 import json
 import sqlite3
 import requests
@@ -333,55 +334,48 @@ def enforce_cache_ttl_hygiene():
         pass
 
 def parse_groq_json_response(content_str):
-    """Safely parse a JSON response, including common Markdown/code-fence wrappers."""
-    if not isinstance(content_str, str):
-        raise ValueError("Expected a string JSON response.")
-
-    cleaned = content_str.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned).strip()
-
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-        if not match:
-            raise ValueError(
-                f"Failed to parse JSON response safely. Raw text: {content_str[:500]}"
-            )
+    """Safely parse provider JSON, accepting raw text or an already-decoded object."""
+    if isinstance(content_str, dict):
+        parsed = copy.deepcopy(content_str)
+    elif isinstance(content_str, str):
+        cleaned = content_str.strip()
+        cleaned = re.sub(r"^\x60\x60\x60(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*\x60\x60\x60$", "", cleaned).strip()
         try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"Failed to parse JSON response safely. Raw text: {content_str[:500]}"
-            ) from exc
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            decoder = json.JSONDecoder()
+            try:
+                start = next(index for index, char in enumerate(cleaned) if char == "{")
+                parsed, _end = decoder.raw_decode(cleaned[start:])
+            except (StopIteration, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"Failed to parse JSON response safely. Raw text: {content_str[:500]}"
+                ) from exc
+    else:
+        raise ValueError("Expected a string or decoded JSON object response.")
 
-    if isinstance(parsed, dict):
-        if isinstance(parsed.get("data"), dict):
-            parsed = parsed["data"]
+    if not isinstance(parsed, dict):
+        raise ValueError("Groq JSON response must be an object.")
+    if isinstance(parsed.get("data"), dict):
+        parsed = parsed["data"]
 
-        for key in ("seo_description", "pinned_comment"):
-            if key in parsed:
-                parsed[key] = safe_text(parsed[key], "")
-
-        if isinstance(parsed.get("titles"), list):
-            parsed["titles"] = [safe_text(t, "") for t in parsed["titles"]]
-
-        if isinstance(parsed.get("script"), list):
-            for scene in parsed["script"]:
-                if not isinstance(scene, dict):
-                    continue
-                scene["voiceover"] = safe_text(scene.get("voiceover"), "")
-                scene["primary_entity"] = safe_text(scene.get("primary_entity"), "none")
-                scene["visual_intent"] = safe_text(scene.get("visual_intent"), "conceptual")
-                scene["specific_search_prompt"] = safe_text(scene.get("specific_search_prompt"), "")
-                scene["sport_or_topic_category"] = safe_text(
-                    scene.get("sport_or_topic_category"), ""
-                )
-
+    for key in ("seo_description", "pinned_comment", "creator_insight", "editorial_angle"):
+        if key in parsed:
+            parsed[key] = safe_text(parsed[key], "")
+    if isinstance(parsed.get("titles"), list):
+        parsed["titles"] = [safe_text(t, "") for t in parsed["titles"]]
+    if isinstance(parsed.get("script"), list):
+        parsed["script"] = [dict(scene) if isinstance(scene, dict) else scene for scene in parsed["script"]]
+        for scene in parsed["script"]:
+            if not isinstance(scene, dict):
+                continue
+            scene["voiceover"] = safe_text(scene.get("voiceover"), "")
+            scene["primary_entity"] = safe_text(scene.get("primary_entity"), "none")
+            scene["visual_intent"] = safe_text(scene.get("visual_intent"), "conceptual")
+            scene["specific_search_prompt"] = safe_text(scene.get("specific_search_prompt"), "")
+            scene["sport_or_topic_category"] = safe_text(scene.get("sport_or_topic_category"), "")
     return parsed
-
-
 def _provider_http_error_detail(response, max_chars=900):
     """Extract a safe, useful provider error message instead of hiding HTTP 4xx/5xx details."""
     detail = ""
@@ -1030,7 +1024,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
 
     research_evidence_text = str(story_data.get("research_evidence_text", "") or "").strip()
     if research_evidence_text:
-        source_text = research_evidence_text[:10000]
+        source_text = research_evidence_text[:20000]
     else:
         source_text = str(
             story_data.get("text")
@@ -1060,6 +1054,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         if format_mode_key == "top5"
         else "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
     )
+    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
+    editorial_angle = choose_editorial_angle(story_data, format_mode)
 
     system_prompt = (
         "You are the original-news Shorts writer for a human-reviewed video factory. "
@@ -1078,13 +1074,16 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Later scenes = the most important evidence and context, then the immediate consequence or final useful fact. "
         "Every sentence must earn its speaking time.\n\n"
         "Return ONLY JSON matching this exact object shape; do not wrap it in Markdown or add commentary. "
-        "{\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
+        "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
         "\"recommended_title_index\":1,\"seo_description\":\"...\",\"pinned_comment\":\"...\","
         "\"script\":[{\"voiceover\":\"...\",\"narrative_role\":\"hook\","
         "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
         "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
         "Use narrative_role values hook, development, context, consequence. "
         + scene_contract
+        + f"EDITORIAL ANGLE — {editorial_angle['instruction']}\n"
+        "CREATOR INSIGHT: Provide one concise evidence-grounded synthesis of why the documented event matters. "
+        "This is analysis of the supplied facts, not a new fact, opinion, motive, or prediction.\n"
         + f"Language: {language_cfg['script_instruction']}\n"
     )
 
@@ -1123,7 +1122,14 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             json={
                 "model": "openai/gpt-oss-120b",
                 "messages": messages,
-                "response_format": {"type": "json_object"},
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "viral_shorts_script",
+                        "strict": True,
+                        "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
+                    },
+                },
                 "include_reasoning": False,
                 "reasoning_effort": "low",
                 "temperature": 0.5,
@@ -1158,31 +1164,11 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "openai/gpt-oss-120b",
+                    "model": "openai/gpt-oss-20b",
                     "messages": compatibility_messages,
                 },
                 timeout=30,
             )
-            if response.status_code == 400:
-                first_compat_detail = _provider_http_error_detail(response)
-                print(
-                    "   [Script Writer] Groq GPT-OSS 120B compatibility request returned HTTP 400"
-                    + (f": {first_compat_detail}" if first_compat_detail else ".")
-                    + " Trying GPT-OSS 20B with the same minimal request.",
-                    flush=True,
-                )
-                response = requests.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {groq_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "openai/gpt-oss-20b",
-                        "messages": compatibility_messages,
-                    },
-                    timeout=30,
-                )
 
         if response.status_code != 200:
             detail = _provider_http_error_detail(response)
