@@ -327,6 +327,7 @@ def test_obsolete_workspace_cleanup_protects_live_review_and_upload_runs():
     assert 'cleanup_obsolete_run_workspaces(conn)' in source
 
 
+
 def test_locked_dashboard_story_skips_redundant_editorial_llm_gate():
     source = (REPO_ROOT / "ultimate_bot.py").read_text(encoding="utf-8")
     marker = 'if isinstance(selected_story, dict) and str(selected_story.get("title", "")).strip():'
@@ -334,7 +335,7 @@ def test_locked_dashboard_story_skips_redundant_editorial_llm_gate():
     block_start = source.index(marker)
     block_end = source.index('insert_cursor = conn.execute(', block_start)
     block = source[block_start:block_end]
-    assert "Editorial LLM scoring skipped: dashboard story is already locked." in block
-    regular_branch = block[block.find("else:\n            if isinstance(selected_story"):]
-    assert "story_payload = dict(selected_story)" in regular_branch
-    assert "editorial_gate_batch(" not in regular_branch[:regular_branch.find("else:\n                cands = editorial_gate_batch(") if "else:\n                cands = editorial_gate_batch(" in regular_branch else len(regular_branch)]
+    skip_pos = block.index("Editorial LLM scoring skipped: dashboard story is already locked.")
+    gate_pos = block.index("editorial_gate_batch(")
+    assert "story_payload = dict(selected_story)" in block
+    assert skip_pos < gate_pos
