@@ -483,6 +483,7 @@ class DashboardWorkflowController(WorkflowController):
         self._script_visual_queries: list[str] = []
         self._visual_approved = False
         self._visual_rejected = False
+        self._visual_manual_approved: set[int] = set()
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
         self._visual_search_options: dict[int, list[dict[str, Any]]] = {}
@@ -510,6 +511,7 @@ class DashboardWorkflowController(WorkflowController):
         self._script_visual_queries = []
         self._visual_approved = False
         self._visual_rejected = False
+        self._visual_manual_approved = set()
         self._visual_packages = []
         self._visual_replacement_history = {}
         self._visual_search_options = {}
@@ -721,6 +723,7 @@ class DashboardWorkflowController(WorkflowController):
         gate["visual_rejected"] = False
         self._visual_approved = False
         self._visual_rejected = False
+        self._visual_manual_approved = set()
 
         self.update(
             "visual_approval",
@@ -1052,6 +1055,7 @@ class DashboardWorkflowController(WorkflowController):
 
             self._visual_approved = False
             self._visual_rejected = False
+            self._visual_manual_approved.discard(index)
 
         self.update(
             "visual_approval",
@@ -1333,36 +1337,54 @@ class DashboardWorkflowController(WorkflowController):
             gate["script_event"].set()
         return True
 
+    def approve_visual(self, visual_index: int) -> tuple[bool, str]:
+        """Record explicit human approval for one present visual during manual QC."""
+        snapshot = self.snapshot()
+        if snapshot.get("stage") != "visual_approval":
+            return False, "Visual review is no longer active."
+        try:
+            index = int(visual_index)
+        except (TypeError, ValueError):
+            return False, "Invalid visual number."
+
+        packages = snapshot.get("visual_packages") or []
+        if index < 1 or index > len(packages):
+            return False, "That visual is no longer available."
+        layer = packages[index - 1][0] if isinstance(packages[index - 1], list) and packages[index - 1] else packages[index - 1]
+        if not isinstance(layer, dict):
+            return False, "The selected visual package is invalid."
+        image_path = str(layer.get("image") or "").strip()
+        if not image_path or not os.path.isfile(image_path):
+            return False, "That slide does not currently have a usable image file."
+
+        with self._lock:
+            self._visual_manual_approved.add(index)
+            layer["human_visual_approved"] = True
+            layer["human_visual_qc_override"] = bool(
+                not layer.get("visual_verified") or layer.get("visual_qc_blocked")
+            )
+            total = len(packages)
+            approved = len(self._visual_manual_approved.intersection(range(1, total + 1)))
+        return True, f"Slide {index} manually approved ({approved}/{total})."
+
+
     def approve_visuals(self) -> bool:
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False
 
         packages = snapshot.get("visual_packages") or []
+        with self._lock:
+            approved = set(self._visual_manual_approved)
         unresolved = []
         for index, package in enumerate(packages, 1):
             layer = package[0] if isinstance(package, list) and package else package
-            if not isinstance(layer, dict):
-                unresolved.append(index)
-                continue
-            image_path = str(layer.get("image") or "").strip()
-            if not image_path or not os.path.isfile(image_path):
+            image_path = str(layer.get("image") or "").strip() if isinstance(layer, dict) else ""
+            if not image_path or not os.path.isfile(image_path) or index not in approved:
                 unresolved.append(index)
 
         if unresolved:
             return False
-
-        # This is a human-QC checkpoint. A present image is approvable even when
-        # AI identity verification was unavailable or a soft QA flag was raised.
-        # Preserve those diagnostics instead of relabelling human approval as AI verification.
-        with self._lock:
-            for package in packages:
-                layer = package[0] if isinstance(package, list) and package else package
-                if isinstance(layer, dict):
-                    layer["human_visual_approved"] = True
-                    layer["human_visual_qc_override"] = bool(
-                        not layer.get("visual_verified") or layer.get("visual_qc_blocked")
-                    )
 
         self._visual_approved = True
         gate = self._manual_gate_state
@@ -1776,6 +1798,7 @@ class DashboardWorkflowController(WorkflowController):
                 )
                 self._visual_approved = False
                 self._visual_rejected = False
+                self._visual_manual_approved.discard(index)
 
             self.update(
                 "visual_approval",
@@ -1978,6 +2001,7 @@ class DashboardWorkflowController(WorkflowController):
                 )
                 self._visual_approved = False
                 self._visual_rejected = False
+                self._visual_manual_approved.discard(index)
 
             self.update(
                 "visual_approval",
@@ -2171,6 +2195,7 @@ class DashboardWorkflowController(WorkflowController):
                 "visual_packages": list(self._visual_packages),
                 "visual_review_required": data.get("stage") == "visual_approval",
                 "visual_review_approved": self._visual_approved,
+                "visual_manual_approved": sorted(self._visual_manual_approved),
                 "visual_search_options": {
                         key: [dict(item) for item in value]
                         for key, value in self._visual_search_options.items()
