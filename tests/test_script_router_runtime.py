@@ -313,7 +313,8 @@ def test_groq_primary_writer_uses_current_gpt_oss_request_contract(monkeypatch):
     assert len(calls) == 1
     payload = calls[0][1]["json"]
     assert payload["model"] == "openai/gpt-oss-120b"
-    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["include_reasoning"] is False
     assert payload["reasoning_effort"] == "low"
     assert payload["max_completion_tokens"] == 900
