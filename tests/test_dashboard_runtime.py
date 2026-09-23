@@ -942,8 +942,8 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert 'visual_search_queries' in app_source
     assert 'assign_manual_queries' not in app_source
     assert '"qc_passed": not missing' in app_source
-    assert '"Approve this image"' in app_source
-    assert '"Continue after reviewing all slides"' in app_source
+    assert "Approve this image" in app_source
+    assert "Continue after reviewing all slides" in app_source
     assert 'Choose from the visual pool' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
