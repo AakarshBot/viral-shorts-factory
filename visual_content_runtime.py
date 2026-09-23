@@ -395,8 +395,9 @@ def patch_content_first_visuals(bot):
         )
         from visual_entity_grounding_runtime import apply_grounding
     except Exception as exc:
-        print(f"   [Visual Content] Could not load visual runtime: {exc}", flush=True)
-        return bot
+        raise RuntimeError(
+            f"Content-first visual runtime could not be installed: {type(exc).__name__}: {exc}"
+        ) from exc
 
     install_visual_quality(visual_runtime)
 
