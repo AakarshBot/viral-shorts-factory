@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse, urlencode
 
 import requests
 
@@ -1169,14 +1169,25 @@ def fetch_google_trending_topics(geos=("IN",), max_terms=15):
     return terms
 
 
-def _google_news_search_items(query, genre_key="", max_items=60, timeout=8.0):
+def _google_news_search_items(
+    query,
+    genre_key="",
+    max_items=60,
+    timeout=8.0,
+    *,
+    hl="en-IN",
+    gl="IN",
+    ceid="IN:en",
+):
     query = str(query or "").strip()
     if not query:
         return []
-    url = (
-        "https://news.google.com/rss/search"
-        f"?q={quote_plus(query)}&hl=en-IN&gl=IN&ceid=IN:en"
-    )
+    url = "https://news.google.com/rss/search?" + urlencode({
+        "q": query,
+        "hl": str(hl or "en-IN"),
+        "gl": str(gl or "IN").upper(),
+        "ceid": str(ceid or "IN:en"),
+    })
     return _rss_items(
         url,
         genre_key,
