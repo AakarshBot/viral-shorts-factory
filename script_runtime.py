@@ -743,7 +743,7 @@ def rank_title_candidates(script_data, story_data=None):
             if headline_terms else 0.0
         )
         if headline_overlap >= 0.85 and intensity_hits < 2:
-            score -= 1.25
+            score -= 2.50
             reasons.append("plain headline restatement")
 
         char_count = len(title)
@@ -1094,14 +1094,15 @@ def _local_duration_compression(script_data, story_data, format_mode, persona_pr
     ]
     original_estimate = estimate_narration_duration(script_data, persona_profile)
     local_estimate = estimate_narration_duration(rewritten, persona_profile)
-    if local_estimate["seconds"] >= original_estimate["seconds"]:
-        return None
-    valid, _ = validate_content_density(rewritten, story_data, format_mode)
-    if valid and local_estimate["seconds"] <= 35.0:
-        rewritten["duration_compression_only"] = True
-        rewritten["duration_compression_provider"] = "deterministic_local"
-        return rewritten
+    if local_estimate["seconds"] < original_estimate["seconds"]:
+        valid, _ = validate_content_density(rewritten, story_data, format_mode)
+        if valid and local_estimate["seconds"] <= 35.0:
+            rewritten["duration_compression_only"] = True
+            rewritten["duration_compression_provider"] = "deterministic_local"
+            return rewritten
 
+    # Phrase contraction may produce no change at all. Do not stop here:
+    # the sentence-level deterministic fallback is specifically for that case.
     fallback = _sentence_level_duration_fallback(
         script_data,
         story_data,
