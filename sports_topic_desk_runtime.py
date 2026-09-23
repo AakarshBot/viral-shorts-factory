@@ -1011,20 +1011,29 @@ def _collect(scope="India / Asia"):
 
     rows, source_counts, failures = _run_jobs(primary_jobs, CORE_DISCOVERY_TIMEOUT)
 
-    def _unique_core_count(values):
-        seen = set()
-        for item in values:
-            if not isinstance(item, dict) or item.get("social_post"):
-                continue
-            key = sr._canonical_url(item.get("url") or item.get("link"))
-            if key:
-                seen.add(key)
-        return len(seen)
+    def _unique_core_event_count(values):
+        factual = [
+            dict(item)
+            for item in values
+            if isinstance(item, dict) and not item.get("social_post")
+        ]
+        if not factual:
+            return 0
+        try:
+            return len(cluster_news_events(factual))
+        except Exception:
+            # Transport fallback: if clustering itself is unavailable, count
+            # canonical articles rather than suppressing discovery entirely.
+            seen = {
+                sr._canonical_url(item.get("url") or item.get("link"))
+                for item in factual
+            }
+            return len({key for key in seen if key})
 
     # Only spend the second Google wave when the first wave is genuinely sparse.
     # This preserves the ten editorial lenses while sharply reducing the normal
     # same-host request burst.
-    if _unique_core_count(rows) < CRICKET_PRIMARY_EVENT_FLOOR:
+    if _unique_core_event_count(rows) < CRICKET_PRIMARY_EVENT_FLOOR:
         secondary_google_jobs = []
         for query in google_queries[GOOGLE_PRIMARY_QUERY_LIMIT:]:
             secondary_google_jobs.append((
