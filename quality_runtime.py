@@ -18,26 +18,44 @@ def _normalise(text):
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
 
 
-def _quality_validate(original_validate, script_data, source_text, format_mode):
-    """Run the existing validator plus deterministic non-numeric script QC."""
-    ok, message = original_validate(script_data, source_text, format_mode)
-    if not ok:
-        return ok, message
+def validate_deterministic_script_quality(script_data, format_mode="regular"):
+    """Validate deterministic writer-output quality without making another model/API call."""
+    if not isinstance(script_data, dict):
+        return False, "Script payload is not an object."
 
     scenes = script_data.get("script", [])
     if not isinstance(scenes, list) or not scenes:
         return False, "Script contains no scenes."
 
+    mode = str(format_mode or "").strip().lower()
+    expected = 6 if mode == "top5" else None
+    if expected is not None and len(scenes) != expected:
+        return False, "Top-5 script must contain exactly 6 scenes."
+    if expected is None and len(scenes) not in (3, 4):
+        return False, "Regular Short must contain exactly 3 or 4 scenes."
+
+    allowed_roles = {"hook", "development", "context", "consequence"}
     for i, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict):
+            return False, f"Scene {i} is malformed."
         voice = str(scene.get("voiceover", "")).strip()
         entity = str(scene.get("primary_entity", "")).strip()
         prompt = str(scene.get("specific_search_prompt", "")).strip()
+        intent = str(scene.get("visual_intent", "")).strip()
+        category = str(scene.get("sport_or_topic_category", "")).strip()
+        role = str(scene.get("narrative_role", "")).strip().lower()
         if not voice:
             return False, f"Scene {i} has empty narration."
         if not entity or entity.lower() == "none":
             return False, f"Scene {i} has no primary visual entity."
         if len(_words(prompt)) < 2:
             return False, f"Scene {i} has an unusable visual search prompt."
+        if not intent:
+            return False, f"Scene {i} has no visual intent."
+        if not category:
+            return False, f"Scene {i} has no topic category."
+        if role not in allowed_roles:
+            return False, f"Scene {i} has an invalid narrative role."
 
     for i in range(len(scenes)):
         for j in range(i + 1, len(scenes)):
@@ -66,7 +84,6 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
 
     recommended = script_data.get("recommended_title_index")
     if recommended == 0:
-        # Legacy model responses used zero-based indexing; normalize them once.
         recommended = 1
         script_data["recommended_title_index"] = recommended
     if recommended not in (1, 2, 3):
@@ -76,8 +93,23 @@ def _quality_validate(original_validate, script_data, source_text, format_mode):
     if len(_words(description)) < 10:
         return False, "SEO description is too short."
 
+    creator_insight = str(script_data.get("creator_insight", "")).strip()
+    if len(_words(creator_insight)) < 6:
+        return False, "Creator insight is missing or too short."
+
+    editorial_angle = str(script_data.get("editorial_angle", "")).strip()
+    if not editorial_angle:
+        return False, "Editorial angle is missing."
+
     return True, "Passed deterministic Shorts QC"
 
+
+def _quality_validate(original_validate, script_data, source_text, format_mode):
+    """Run the existing validator plus deterministic non-numeric script QC."""
+    ok, message = original_validate(script_data, source_text, format_mode)
+    if not ok:
+        return ok, message
+    return validate_deterministic_script_quality(script_data, format_mode)
 
 def _self_critique(script_data, format_mode):
     """Score useful storytelling properties without rewarding CTAs, filler or scene count."""
