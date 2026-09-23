@@ -182,25 +182,23 @@ def test_duration_compression_has_sentence_level_fallback_without_phrase_matches
         "script": [
             {
                 "voiceover": (
-                    "The board confirmed a late squad change after a meeting on Tuesday, and the decision affects "
-                    "the team's next assignment. Officials said the change followed the latest assessment. "
-                    "The player was informed before the public announcement."
+                    "The board confirmed a late squad change after a meeting on Tuesday. "
+                    "The decision affects the team's next assignment."
                 ),
                 "narrative_role": "hook",
             },
             {
                 "voiceover": (
-                    "The player had completed the earlier preparation and remained part of the original group. "
-                    "Officials reviewed the latest medical and selection information before making the decision. "
-                    "The board then approved the change later that day and informed the wider squad."
+                    "Officials reviewed the latest information before informing the player. "
+                    "The board approved the change later that day."
                 ),
                 "narrative_role": "development",
             },
             {
                 "voiceover": (
-                    "The immediate consequence is that the squad must adjust its plans for the next match. "
+                    "The squad must adjust its plans for the next match. "
                     "The replacement will take a different role in the group. "
-                    "The wider impact should become clearer once the next assignment begins."
+                    "The wider impact will become clearer in the next assignment."
                 ),
                 "narrative_role": "consequence",
             },

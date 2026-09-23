@@ -708,6 +708,7 @@ def rank_title_candidates(script_data, story_data=None):
         "surprise": (
             "stuns", "shocks", "unexpected", "surprise", "dramatic",
             "huge", "snubbed", "dropped", "benched", "breaks silence",
+            "major", "shock",
         ),
         "consequence": (
             "ruled out", "banned", "suspended", "set to miss", "forced out",
@@ -728,10 +729,22 @@ def rank_title_candidates(script_data, story_data=None):
         intensity_hits = 0
         for family, terms in grounded_title_intensity.items():
             matched = [term for term in terms if term in title_lower]
-            if matched and any(term in combined_source for term in terms):
-                intensity_hits += len(matched)
+            grounded = [term for term in matched if term in combined_source]
+            if grounded:
+                intensity_hits += len(grounded)
                 reasons.append(f"{family} tension packaging")
-        score += min(2.0, intensity_hits * 0.7)
+        if intensity_hits:
+            score += min(2.8, intensity_hits * 1.0)
+
+        # A title that merely restates the source headline is useful for search,
+        # but should lose to a genuinely stronger truthful package.
+        headline_overlap = (
+            len(title_set & headline_terms) / max(1, len(title_set))
+            if headline_terms else 0.0
+        )
+        if headline_overlap >= 0.85 and intensity_hits < 2:
+            score -= 1.25
+            reasons.append("plain headline restatement")
 
         char_count = len(title)
         if 20 <= char_count <= 55:
