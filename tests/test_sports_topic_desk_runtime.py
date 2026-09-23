@@ -271,8 +271,9 @@ def test_cricket_desk_treats_india_japan_headlines_as_one_event_family():
             "undercovered_score": 2,
             "social_post_count": 0,
         }
-        for index, item in enumerate(desk.cluster_news_events(rows))
+        for index, item in enumerate(desk._merge_same_matchup_events(desk.cluster_news_events(rows)))
     ]
+    assert len(concepts) == 1
 
     family = [
         desk.sr._cricket_event_family(item)
