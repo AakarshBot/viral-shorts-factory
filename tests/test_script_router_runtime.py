@@ -138,32 +138,38 @@ def test_duration_compression_has_a_provider_free_fallback(monkeypatch):
 def test_duration_compression_has_sentence_level_fallback_without_phrase_matches(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     script = {
-        "editorial_angle": "A new cricket development changes the team's immediate plans.",
+        "editorial_angle": "A late cricket decision changes the team's immediate plans.",
         "script": [
             {
                 "voiceover": (
-                    "The board confirmed the change after a late meeting. "
-                    "The decision affects the team's next assignment."
+                    "The board confirmed a late squad change after a meeting on Tuesday. "
+                    "The decision came after the team's latest assessment before the upcoming assignment. "
+                    "Officials said the change was final and the player was informed before the announcement."
                 ),
                 "narrative_role": "hook",
             },
             {
                 "voiceover": (
-                    "The player was informed before the announcement. "
-                    "Officials said the change was based on the latest assessment."
+                    "The player had been part of the original group and had completed the earlier preparation. "
+                    "The board then reviewed the situation after receiving the latest medical and selection information. "
+                    "That process led to the decision announced later in the day."
                 ),
                 "narrative_role": "development",
             },
             {
                 "voiceover": (
-                    "The immediate consequence is that the squad now has to adjust. "
-                    "The wider impact will become clearer in the next few days."
+                    "The immediate consequence is that the squad now has to adjust its plans for the next match. "
+                    "The replacement will take a different role and the balance of the group will change. "
+                    "The wider impact should become clearer once the next assignment begins."
                 ),
                 "narrative_role": "consequence",
             },
         ],
     }
     story = {"title": "Cricket board confirms late squad change"}
+
+    original = estimate_narration_duration(script, {"rate": 0})
+    assert original["seconds"] > 35.0
 
     result = tighten_script_for_duration_once(
         script,
@@ -177,6 +183,7 @@ def test_duration_compression_has_sentence_level_fallback_without_phrase_matches
     assert result is not None
     assert result["duration_compression_provider"] == "deterministic_sentence_trim"
     assert estimate_narration_duration(result, {"rate": 0})["seconds"] <= 35.0
+
 
 def test_duration_compression_falls_back_when_groq_http_fails(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
