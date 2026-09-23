@@ -80,7 +80,7 @@ def test_cricket_scope_routing_uses_selected_scope_lane(monkeypatch):
 
     monkeypatch.setattr(
         sports_topic_desk_runtime,
-        "discover_cricket_topics",
+        "discover_sports_topics",
         fake_desk,
     )
 
@@ -273,21 +273,20 @@ def test_each_dashboard_category_can_enter_ranked_discovery(monkeypatch, categor
 
 
 
-def test_niche_sports_discovery_routes_through_sports_category(monkeypatch):
+def test_niche_sports_discovery_routes_through_shared_sports_desk(monkeypatch):
     import dashboard_runtime
-    import dashboard_topic_discovery_runtime
+    import sports_topic_desk_runtime
     captured = {}
 
-    def fake_discovery(bot, genre_key, genre_cfg, **kwargs):
-        captured["genre_key"] = genre_key
-        captured["genre_cfg"] = dict(genre_cfg)
-        captured["broad_discovery"] = True
+    def fake_desk(bot, conn=None, scope="", requested_topic="", max_candidates=30, retained_candidates=None):
+        captured["scope"] = scope
+        captured["max_candidates"] = max_candidates
         return []
 
     monkeypatch.setattr(
-        dashboard_topic_discovery_runtime,
-        "discover_dashboard_topics",
-        fake_discovery,
+        sports_topic_desk_runtime,
+        "discover_sports_topics",
+        fake_desk,
     )
 
     bot = type(
@@ -311,6 +310,15 @@ def test_niche_sports_discovery_routes_through_sports_category(monkeypatch):
         max_candidates=5,
     )
 
-    assert captured["genre_key"] == "sports"
-    assert captured["genre_cfg"] == ultimate_bot.CONTENT_CATEGORIES["sports"]
-    assert captured["broad_discovery"] is True
+    assert captured["scope"] == "Niche Sports"
+    assert captured["max_candidates"] == 5
+
+
+def test_shared_sports_dashboard_renderer_covers_cricket_and_niche(monkeypatch):
+    import app
+    source = Path(app.__file__).read_text(encoding="utf-8")
+
+    assert "render_sports_topic_desk" in source
+    assert "render_cricket_topic_desk" not in source
+    assert "Niche Sports" in source
+    assert app.MAX_DASHBOARD_DISCOVERY_HEADLINES >= 60
