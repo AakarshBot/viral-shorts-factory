@@ -1060,7 +1060,6 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
             or ""
         )[:8000]
 
-    format_mode_key = str(format_mode or "").strip().lower()
     persona_name = (
         "LISTICLE HOST" if format_mode_key == "top5"
         else "TECH REVIEWER" if genre_key == "tech_reviews"
