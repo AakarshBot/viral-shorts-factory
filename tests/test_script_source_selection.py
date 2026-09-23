@@ -74,12 +74,12 @@ def test_validate_script_accepts_compact_one_or_two_scene_stories():
     assert valid is True, reason
 
 
-def test_validate_script_rejects_overlong_compact_budget():
+def test_validate_script_rejects_beyond_safety_ceiling():
     script = {
         "editorial_angle": "This explains the development and practical consequence.",
         "script": [
             _contract_scene("India confirmed the change.", "hook"),
-            _contract_scene(" ".join(["word"] * 61), "development"),
+            _contract_scene(" ".join(["word"] * 90), "development"),
         ],
     }
     valid, reason = validate_script(
@@ -88,7 +88,7 @@ def test_validate_script_rejects_overlong_compact_budget():
         "regular",
     )
     assert valid is False
-    assert "maximum is 60" in reason
+    assert "maximum is 90" in reason
 
 
 def test_validate_script_accepts_compact_three_scene_story():
@@ -113,11 +113,11 @@ def test_writer_contract_has_initial_duration_limits():
     import ultimate_bot
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "Voiceover total: 55–60 words." in source
+    assert "Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words, a factual headline, and the most compact scene." in source
-    assert "naturally fit below 30 seconds" in source
+    assert "Spoken duration is authoritative" in source
     assert "Use as many scenes as the story genuinely needs" not in source
-    assert "tighten_script_for_duration_once" not in source
+    assert "tighten_script_for_duration_once" in source
 
 
 
