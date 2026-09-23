@@ -1,6 +1,7 @@
 from script_runtime import (
     classify_narration_duration,
     estimate_narration_duration,
+    tighten_script_for_duration_once,
     validate_tts_duration,
 )
 
@@ -36,3 +37,98 @@ def test_tts_duration_qc_stops_on_material_mismatch():
     result = validate_tts_duration(25.0, 31.0)
     assert result["passed"] is False
     assert result["delta_seconds"] == 6.0
+
+
+
+def _long_valid_script():
+    return {
+        "editorial_angle": "Explain the concrete change, the supporting development, and the immediate consequence.",
+        "script": [
+            {
+                "voiceover": (
+                    "India confirmed a major squad change before the next assignment, with the latest decision affecting the team immediately."
+                ),
+                "narrative_role": "hook",
+            },
+            {
+                "voiceover": (
+                    "Officials reviewed the latest information, which followed a detailed assessment, and the board confirmed the decision after the meeting."
+                ),
+                "narrative_role": "development",
+            },
+            {
+                "voiceover": (
+                    "The change matters because the original plan had already been communicated, while the new decision alters preparation and the role of the replacement."
+                ),
+                "narrative_role": "context",
+            },
+            {
+                "voiceover": (
+                    "The immediate consequence is that the squad must adjust its plans, which affects preparation for the next match and leaves the replacement with a different role."
+                ),
+                "narrative_role": "consequence",
+            },
+        ],
+    }
+
+
+def test_over_35_second_script_has_a_provider_free_hard_ceiling(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    script = _long_valid_script()
+    before = estimate_narration_duration(script, {"rate": "0%"})
+
+    assert before["seconds"] > 35.0
+
+    result = tighten_script_for_duration_once(
+        script,
+        {"title": "India confirms major squad change"},
+        {},
+        "regular",
+        target_seconds=30.0,
+        persona_profile={"rate": "0%"},
+    )
+
+    assert result is not None
+    after = estimate_narration_duration(result, {"rate": "0%"})
+    assert after["seconds"] <= 35.0
+    assert after["seconds"] < before["seconds"]
+    assert result["duration_compression_only"] is True
+
+
+def test_groq_overlong_rewrite_finishes_with_deterministic_ceiling(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    script = _long_valid_script()
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": __import__("json").dumps({
+                            "script": [
+                                {"index": 1, "voiceover": script["script"][0]["voiceover"]},
+                                {"index": 2, "voiceover": script["script"][1]["voiceover"]},
+                                {"index": 3, "voiceover": script["script"][2]["voiceover"]},
+                                {"index": 4, "voiceover": script["script"][3]["voiceover"]},
+                            ]
+                        })
+                    }
+                }]
+            }
+
+    monkeypatch.setattr("script_runtime.requests.post", lambda *args, **kwargs: _Response())
+
+    result = tighten_script_for_duration_once(
+        script,
+        {"title": "India confirms major squad change"},
+        {},
+        "regular",
+        target_seconds=30.0,
+        persona_profile={"rate": "0%"},
+    )
+
+    assert result is not None
+    assert estimate_narration_duration(result, {"rate": "0%"})["seconds"] <= 35.0
+    assert result["duration_compression_provider"] == "groq_then_deterministic"
