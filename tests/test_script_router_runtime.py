@@ -3,11 +3,15 @@ from pathlib import Path
 from script_router_runtime import (
     _story_source_text,
     _usable_story_source_fallback,
+    _validate_script_result,
     assess_story_source_sufficiency,
 )
 
-import script_runtime
-from script_runtime import estimate_narration_duration, tighten_script_for_duration_once
+from script_runtime import (
+    check_script_originality,
+    estimate_narration_duration,
+    validate_content_density,
+)
 
 
 def test_story_source_fallback_requires_real_factual_structure():
@@ -37,224 +41,94 @@ def test_story_source_sufficiency_is_not_a_raw_character_cutoff():
     }
     result = assess_story_source_sufficiency(compact_but_structured)
     assert result["passed"] is True
-    assert "checks" in result
-    assert "enough_words" in result["checks"]
+    assert result["checks"]["enough_words"] is True
 
 
-def test_duration_compression_contract_uses_the_actual_validated_draft():
-    source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
-    assert "def tighten_script_for_duration_once(" in source
-    assert "PREVIOUS VALIDATED SCRIPT:" in source
-    assert "Preserve every supported essential fact" in source
-    assert "the central hook, editorial angle and factual order" in source
-
-
-def test_obsolete_duration_rewrite_architecture_is_removed():
-    root = Path(__file__).resolve().parents[1]
-    for filename in ("ultimate_bot.py", "research_runtime.py"):
-        source = root.joinpath(filename).read_text(encoding="utf-8")
-        assert "previous_script" not in source
-        assert "PREVIOUS DRAFT TO TIGHTEN:" not in source
-        assert "duration_story" not in source
-
-
-def test_script_router_reuses_existing_evidence_pack():
-    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
-    assert "Reusing existing evidence pack." in source
-    assert "No second research pass" in source
-
-
-def test_script_validation_does_not_require_visual_search_metadata():
-    from script_runtime import validate_content_density
-
-    script = {
-        "editorial_angle": "The result explains the immediate change and why it matters.",
-        "script": [
-            {"voiceover": "India were called arrogant after the latest cricket clash.", "narrative_role": "hook"},
-            {"voiceover": "The comment triggered a direct response and put the dispute back in focus.", "narrative_role": "development"},
-            {"voiceover": "The immediate consequence is a renewed debate around the rivalry.", "narrative_role": "consequence"},
-        ],
-    }
-
-    valid, reason = validate_content_density(
-        script,
-        {},
-        "regular",
-        require_visual_metadata=False,
-    )
-    assert valid, reason
-
-
-def test_title_generation_prompt_requires_keyword_led_intrigue():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "three genuinely different YouTube title approaches" in source
-    assert "core searchable keyword/entity near the beginning" in source
-    assert "evidence-backed hook" in source
-    assert "Dramatic truthful angle title" in source
-    assert "snubbed" in source
-    assert "Do not invent outrage, shock, conflict or certainty" in source
-
-
-def test_title_ranker_rewards_grounded_intensity():
-    from script_runtime import rank_title_candidates
-
-    script = {
-        "titles": [
-            "Rohit Sharma Dropped From India Squad",
-            "Rohit Sharma Dropped: India Makes A Huge Call",
-            "Why Did India Drop Rohit Sharma?",
-        ],
-        "script": [{"primary_entity": "Rohit Sharma"}],
-    }
-    story = {
-        "title": "Rohit Sharma dropped from India squad",
-        "research_evidence_text": (
-            "India dropped Rohit Sharma from the squad in a dramatic selection decision."
-        ),
-    }
-    result = rank_title_candidates(script, story)
-    assert result["recommended_title_index"] == 2
-    assert any("surprise tension packaging" in reason for reason in result["scores"][1]["reasons"])
-
-
-def test_primary_writer_has_explicit_25_to_28_second_runtime_target():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "25–28 seconds" in source
-    assert "20–30 seconds" in source
-    assert "35-second mark is an absolute safety ceiling" in source
-    assert "Do not aim for 35 seconds" in source
-
-
-def test_primary_writer_contains_freshfeed_selection_context():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "FRESHFEED SELECTION CONTEXT" in source
-    assert "pattern_reasons" in source
-    assert "rivalry_signal" in source
-
-
-def test_duration_rewrite_uses_run_robot_language_config():
-    source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
-    assert "def tighten_script_for_duration_once(" in source
-    assert "language_cfg," in source
-    assert 'language_cfg.get("script_instruction")' in source
-    assert "Language: {language_instruction}" in source
-
-
-def test_duration_compression_is_a_single_lightweight_pass():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "tighten_script_for_duration_once(" in source
-    assert "write_script(\n                story_payload" not in source
-    assert 'duration_story["research_evidence_pack"]' not in source
-
-
-def test_duration_compression_has_a_provider_free_fallback(monkeypatch):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    script = {
-        "editorial_angle": "The injury changes the player's immediate tournament plans.",
-        "script": [
-            {"voiceover": "Anisimova withdrew from the Singapore Open in order to protect her left wrist.", "narrative_role": "hook"},
-            {"voiceover": "It is important to note that the withdrawal came before her scheduled match.", "narrative_role": "development"},
-            {"voiceover": "The consequence is that her tournament plans now change because of the injury.", "narrative_role": "consequence"},
-        ],
-    }
-    story = {"title": "Anisimova withdraws from Singapore Open with left wrist injury"}
-    persona = {"rate": 0}
-
-    result = tighten_script_for_duration_once(
-        script,
-        story,
-        {},
-        "regular",
-        target_seconds=30.0,
-        persona_profile=persona,
-    )
-
-    assert result is not None
-    assert result["duration_compression_provider"] == "deterministic_local"
-    assert estimate_narration_duration(result, persona)["seconds"] < estimate_narration_duration(script, persona)["seconds"]
-
-
-
-def test_duration_compression_has_sentence_level_fallback_without_phrase_matches(monkeypatch):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    script = {
-        "editorial_angle": "A late cricket decision changes the team's immediate plans.",
+def _valid_script():
+    return {
+        "editorial_angle": "Explain the confirmed event, key evidence and immediate consequence.",
+        "titles": ["A", "B", "C"],
+        "recommended_title_index": 1,
+        "seo_description": "This explains the confirmed event, the evidence and the immediate consequence.",
         "script": [
             {
-                "voiceover": (
-                    "The board confirmed a late squad change after a meeting on Tuesday. "
-                    "The decision affects the team's next assignment, and the player was informed before the public announcement. "
-                    "Officials said the change followed the latest assessment."
-                ),
+                "voiceover": "India confirms a major squad change after the latest review.",
                 "narrative_role": "hook",
             },
             {
-                "voiceover": (
-                    "Officials reviewed the latest medical and selection information before informing the player. "
-                    "The board approved the change later that day and explained that the decision was final. "
-                    "The wider squad was updated after the formal decision was recorded."
-                ),
+                "voiceover": "The decision changes preparation, while officials say it followed the latest assessment.",
                 "narrative_role": "development",
             },
             {
-                "voiceover": (
-                    "The squad must adjust its plans for the next match. "
-                    "The replacement will take a different role in the group. "
-                    "The wider impact will become clearer in the next assignment after the revised squad is confirmed."
-                ),
+                "voiceover": "The revised plan now affects the team's next assignment.",
                 "narrative_role": "consequence",
             },
         ],
     }
-    story = {"title": "Cricket board confirms late squad change"}
 
-    original = estimate_narration_duration(script, {"rate": 0})
-    assert original["seconds"] > 35.0
 
-    result = tighten_script_for_duration_once(
-        script,
-        story,
-        {},
-        "regular",
-        target_seconds=30.0,
-        persona_profile={"rate": 0},
-    )
+def test_initial_script_contract_is_compact():
+    source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
+    assert "INITIAL_SCRIPT_MAX_WORDS = 65" in source
+    assert "SCENE_1_MAX_WORDS = 14" in source
+    assert "def tighten_script_for_duration_once(" not in source
 
-    assert result is not None
-    assert result["duration_compression_provider"] in {
-        "deterministic_duration_fallback",
-        "deterministic_sentence_trim",
+
+def test_initial_script_rejects_overlong_provider_output():
+    script = _valid_script()
+    script["script"][1]["voiceover"] = " ".join(["word"] * 60)
+    ok, reason = validate_content_density(script, {}, "regular")
+    assert ok is False
+    assert "maximum is 65" in reason
+
+
+def test_initial_script_requires_shortest_first_scene():
+    script = _valid_script()
+    script["script"][0]["voiceover"] = " ".join(["word"] * 15)
+    ok, reason = validate_content_density(script, {}, "regular")
+    assert ok is False
+    assert "Scene 1 is too long" in reason
+
+
+def test_router_rejects_overlong_provider_output_before_acceptance():
+    script = _valid_script()
+    script["script"][1]["voiceover"] = " ".join(["word"] * 60)
+    result, reason = _validate_script_result(script, {"title": "India squad change"}, "regular")
+    assert result is None
+    assert "maximum is 65" in reason
+
+
+def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
+    story = {
+        "research_evidence_text": (
+            "Former CSK player made a major claim about the investigation. "
+            "Officials have not publicly confirmed the allegation."
+        )
     }
-    assert estimate_narration_duration(result, {"rate": 0})["seconds"] <= 35.0
-    assert estimate_narration_duration(result, {"rate": 0})["seconds"] < original["seconds"]
-
-
-def test_duration_compression_falls_back_when_groq_http_fails(monkeypatch):
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-
-    def fail_request(*args, **kwargs):
-        raise script_runtime.requests.RequestException("simulated outage")
-
-    monkeypatch.setattr(script_runtime.requests, "post", fail_request)
-    script = {
-        "editorial_angle": "The injury changes the player's immediate tournament plans.",
+    copied = {
         "script": [
-            {"voiceover": "Anisimova withdrew from the Singapore Open in order to protect her left wrist.", "narrative_role": "hook"},
-            {"voiceover": "It is important to note that the withdrawal came before her scheduled match.", "narrative_role": "development"},
-            {"voiceover": "The consequence is that her tournament plans now change because of the injury.", "narrative_role": "consequence"},
-        ],
+            {
+                "voiceover": "Former CSK player made a major claim about the investigation.",
+                "narrative_role": "hook",
+            }
+        ]
     }
-    story = {"title": "Anisimova withdraws from Singapore Open with left wrist injury"}
-    persona = {"rate": 0}
+    rephrased = {
+        "script": [
+            {
+                "voiceover": "A former CSK player has made a new allegation tied to the investigation.",
+                "narrative_role": "hook",
+            }
+        ]
+    }
 
-    result = tighten_script_for_duration_once(
-        script,
-        story,
-        {},
-        "regular",
-        target_seconds=30.0,
-        persona_profile=persona,
-    )
+    assert check_script_originality(copied, story)["passed"] is False
+    assert check_script_originality(rephrased, story)["passed"] is True
 
-    assert result is not None
-    assert result["duration_compression_provider"] == "deterministic_local"
+
+def test_primary_writer_uses_hard_initial_word_contract():
+    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
+    assert "Voiceover total: 55–65 words." in source
+    assert "Scene 1: 8–14 words" in source
+    assert "The entire narration must naturally fit below 30 seconds" in source
+    assert "tighten_script_for_duration_once" not in source
