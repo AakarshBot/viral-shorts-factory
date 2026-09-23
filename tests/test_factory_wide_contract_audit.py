@@ -44,7 +44,7 @@ def test_multilingual_script_grounding_and_metadata():
             "title": "భారతదేశం కొత్త ఇంధన విధానాన్ని ప్రకటించింది",
             "summary": "భారత ప్రభుత్వం కొత్త ఇంధన విధానాన్ని ప్రకటించింది. ఈ విధానంలో సౌర విద్యుత్, నిల్వ వ్యవస్థలు మరియు గ్రిడ్ పెట్టుబడులకు కొత్త లక్ష్యాలు ఉన్నాయి. రాష్ట్రాల కోసం కూడా కొత్త అమలు ప్రణాళికలను విడుదల చేశారు.",
             "script": [
-                {"voiceover": "భారత ప్రభుత్వం కొత్త ఇంధన విధానంలో సౌర లక్ష్యాలను ప్రకటించింది.", "narrative_role": "hook", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం"},
+                {"voiceover": "భారతదేశం కొత్త సౌర లక్ష్యాలను ప్రకటించింది.", "narrative_role": "hook", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం"},
                 {"voiceover": "కొత్త విధానంలో నిల్వ, గ్రిడ్ పెట్టుబడుల ప్రణాళికలు ఉన్నాయి.", "narrative_role": "development", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం నిల్వ గ్రిడ్ పెట్టుబడులు"},
                 {"voiceover": "రాష్ట్రాల కోసం కొత్త అమలు లక్ష్యాలను వివరించారు.", "narrative_role": "context", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం రాష్ట్ర ఇంధన ప్రణాళిక"},
                 {"voiceover": "ఈ విధానం గ్రిడ్ సామర్థ్యం, నిల్వ సిద్ధతపై ప్రభావం చూపవచ్చు.", "narrative_role": "consequence", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం ఇంధన విధానం ప్రభావం"},
