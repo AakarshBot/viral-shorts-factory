@@ -396,25 +396,34 @@ def measure_audio_duration(audio_paths):
     }
 
 
-def validate_tts_duration(estimated_seconds, actual_seconds, tolerance_ratio=0.15, minimum_tolerance=2.0):
-    """Fail closed only when synthesized audio materially disagrees with the estimate."""
+def validate_tts_duration(estimated_seconds, actual_seconds, tolerance_ratio=0.15, minimum_tolerance=2.0, maximum_seconds=30.0):
+    """Validate the real production duration; report estimate variance as telemetry."""
     try:
         estimated = float(estimated_seconds)
         actual = float(actual_seconds)
+        maximum = float(maximum_seconds)
     except (TypeError, ValueError):
         return {"passed": False, "reason": "TTS duration values are unavailable."}
+    if actual < 0 or maximum <= 0:
+        return {"passed": False, "reason": "TTS duration values are invalid."}
     tolerance = max(float(minimum_tolerance), abs(estimated) * float(tolerance_ratio))
     delta = actual - estimated
+    materially_different = abs(delta) > tolerance
+    within_production_limit = actual <= maximum
     return {
-        "passed": abs(delta) <= tolerance,
+        "passed": within_production_limit,
+        "material_variance": materially_different,
         "estimated_seconds": round(estimated, 2),
         "actual_seconds": round(actual, 2),
         "delta_seconds": round(delta, 2),
         "tolerance_seconds": round(tolerance, 2),
+        "maximum_seconds": round(maximum, 2),
         "reason": (
-            "Synthesized duration is within the expected variance."
-            if abs(delta) <= tolerance
-            else "Synthesized duration materially differs from the pre-TTS estimate."
+            "Synthesized duration is within the production limit."
+            if within_production_limit and not materially_different
+            else "Synthesized duration is within the production limit, but the pre-TTS estimate was materially inaccurate."
+            if within_production_limit
+            else f"Synthesized duration exceeds the production limit ({maximum:.1f}s)."
         ),
     }
 
