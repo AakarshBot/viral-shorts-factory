@@ -154,6 +154,8 @@ def tighten_script_for_duration_once(
     format_mode,
 ):
     """Give the primary writer exactly one chance to compress an overlong draft."""
+    import script_runtime as sr
+
     if not callable(primary_writer):
         return None, "Primary writer is unavailable for the bounded duration repair."
 
