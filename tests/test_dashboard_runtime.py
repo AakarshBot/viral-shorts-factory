@@ -579,6 +579,19 @@ def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
 
 
 
+def test_top5_research_payload_preserves_each_selected_story_evidence():
+    source = (Path(__file__).resolve().parents[1] / "ultimate_bot.py").read_text(encoding="utf-8")
+    start = source.index('if format_mode == "top5":')
+    end = source.index('        insert_cursor = conn.execute(', start)
+    block = source[start:end]
+
+    assert "top5_stories = [dict(item) for item in cands[:5]" in block
+    assert "aggregated_event_evidence" in block
+    assert '"event_evidence": aggregated_event_evidence' in block
+    assert '"event_entities": event_entities' in block
+    assert '"event_actions": event_actions' in block
+
+
 def test_dashboard_top5_handoff_keeps_selected_story_in_full_intake(monkeypatch):
     import workflow_runtime
 
