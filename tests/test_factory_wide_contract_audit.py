@@ -34,20 +34,20 @@ def test_multilingual_script_grounding_and_metadata():
             "title": "भारत ने नई ऊर्जा नीति की घोषणा की",
             "summary": "भारत सरकार ने नई ऊर्जा नीति की घोषणा की है। नीति में सौर ऊर्जा, भंडारण और ग्रिड निवेश के लिए नए लक्ष्य शामिल हैं। राज्यों के लिए भी नई योजनाएं जारी की गई हैं।",
             "script": [
-                {"voiceover": "नई ऊर्जा नीति में सौर लक्ष्य घोषित हुए।", "narrative_role": "hook", "primary_entity": "भारत", "specific_search_prompt": "भारत नई ऊर्जा नीति"},
-                {"voiceover": "नीति में भंडारण और ग्रिड निवेश की योजनाएं हैं।", "narrative_role": "development", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा भंडारण ग्रिड"},
-                {"voiceover": "राज्यों के लिए भी नए क्रियान्वयन लक्ष्य तय हुए।", "narrative_role": "context", "primary_entity": "भारत", "specific_search_prompt": "भारत राज्य ऊर्जा योजना"},
-                {"voiceover": "इससे ग्रिड क्षमता और राज्य ऊर्जा योजनाओं पर असर पड़ेगा।", "narrative_role": "consequence", "primary_entity": "भारत", "specific_search_prompt": "भारत ऊर्जा नीति प्रभाव"},
+                {"voiceover": "नई ऊर्जा नीति में सौर लक्ष्य घोषित हुए।", "narrative_role": "hook", "primary_entity": "भारत", "visual_intent": "news_event", "specific_search_prompt": "भारत नई ऊर्जा नीति", "sport_or_topic_category": "Energy policy"},
+                {"voiceover": "नीति में भंडारण और ग्रिड निवेश की योजनाएं हैं।", "narrative_role": "development", "primary_entity": "भारत", "visual_intent": "news_event", "specific_search_prompt": "भारत ऊर्जा भंडारण ग्रिड", "sport_or_topic_category": "Energy policy"},
+                {"voiceover": "राज्यों के लिए भी नए क्रियान्वयन लक्ष्य तय हुए।", "narrative_role": "context", "primary_entity": "भारत", "visual_intent": "news_event", "specific_search_prompt": "भारत राज्य ऊर्जा योजना", "sport_or_topic_category": "Energy policy"},
+                {"voiceover": "इससे ग्रिड क्षमता और राज्य ऊर्जा योजनाओं पर असर पड़ेगा।", "narrative_role": "consequence", "primary_entity": "भारत", "visual_intent": "news_event", "specific_search_prompt": "भारत ऊर्जा नीति प्रभाव", "sport_or_topic_category": "Energy policy"},
             ],
         },
         "telugu": {
             "title": "భారతదేశం కొత్త ఇంధన విధానాన్ని ప్రకటించింది",
             "summary": "భారత ప్రభుత్వం కొత్త ఇంధన విధానాన్ని ప్రకటించింది. ఈ విధానంలో సౌర విద్యుత్, నిల్వ వ్యవస్థలు మరియు గ్రిడ్ పెట్టుబడులకు కొత్త లక్ష్యాలు ఉన్నాయి. రాష్ట్రాల కోసం కూడా కొత్త అమలు ప్రణాళికలను విడుదల చేశారు.",
             "script": [
-                {"voiceover": "భారతదేశం సౌర లక్ష్యాలు ప్రకటించింది.", "narrative_role": "hook", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం"},
-                {"voiceover": "కొత్త విధానంలో నిల్వ, గ్రిడ్ పెట్టుబడుల ప్రణాళికలు ఉన్నాయి.", "narrative_role": "development", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం నిల్వ గ్రిడ్ పెట్టుబడులు"},
-                {"voiceover": "రాష్ట్రాల కోసం కొత్త అమలు లక్ష్యాలను వివరించారు.", "narrative_role": "context", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం రాష్ట్ర ఇంధన ప్రణాళిక"},
-                {"voiceover": "ఈ విధానం గ్రిడ్ సామర్థ్యం, నిల్వ సిద్ధతపై ప్రభావం చూపవచ్చు.", "narrative_role": "consequence", "primary_entity": "భారతదేశం", "specific_search_prompt": "భారతదేశం ఇంధన విధానం ప్రభావం"},
+                {"voiceover": "భారతదేశం సౌర లక్ష్యాలు ప్రకటించింది.", "narrative_role": "hook", "primary_entity": "భారతదేశం", "visual_intent": "news_event", "specific_search_prompt": "భారతదేశం కొత్త ఇంధన విధానం", "sport_or_topic_category": "Energy policy"},
+                {"voiceover": "కొత్త విధానంలో నిల్వ, గ్రిడ్ పెట్టుబడుల ప్రణాళికలు ఉన్నాయి.", "narrative_role": "development", "primary_entity": "భారతదేశం", "visual_intent": "news_event", "specific_search_prompt": "భారతదేశం నిల్వ గ్రిడ్ పెట్టుబడులు", "sport_or_topic_category": "Energy policy"},
+                {"voiceover": "రాష్ట్రాల కోసం కొత్త అమలు లక్ష్యాలను వివరించారు.", "narrative_role": "context", "primary_entity": "భారతదేశం", "visual_intent": "news_event", "specific_search_prompt": "భారతదేశం రాష్ట్ర ఇంధన ప్రణాళిక", "sport_or_topic_category": "Energy policy"},
+                {"voiceover": "ఈ విధానం గ్రిడ్ సామర్థ్యం, నిల్వ సిద్ధతపై ప్రభావం చూపవచ్చు.", "narrative_role": "consequence", "primary_entity": "భారతదేశం", "visual_intent": "news_event", "specific_search_prompt": "భారతదేశం ఇంధన విధానం ప్రభావం", "sport_or_topic_category": "Energy policy"},
             ],
         },
     }
@@ -55,6 +55,7 @@ def test_multilingual_script_grounding_and_metadata():
     for sample in samples.values():
         script = {
             "script": sample["script"],
+            "creator_insight": "The documented policy change matters because it alters implementation plans and resource priorities.",
             "editorial_angle": "This script adds implementation context and practical consequences beyond the headline itself.",
             "titles": [sample["title"], sample["title"] + " تفاصيل", sample["title"] + " తాజా సమాచారం"],
             "recommended_title_index": 1,
