@@ -208,12 +208,15 @@ def _is_cricket(item):
         )
         entity_hits = sum(
             1 for term in (
-                "virat kohli", "rohit sharma", "jasprit bumrah", "shubman gill",
-                "rishabh pant", "hardik pandya", "ravindra jadeja",
-                "suryakumar yadav", "yashasvi jaiswal", "kl rahul",
-                "sanju samson", "smriti mandhana", "harmapreet kaur",
-                "harmanpreet kaur", "rashid khan", "babar azam", "pat cummins",
-                "travis head", "ben stokes", "joe root", "steve smith",
+                "virat kohli", "kohli", "rohit sharma", "rohit",
+                "jasprit bumrah", "bumrah", "shubman gill", "gill",
+                "rishabh pant", "pant", "hardik pandya", "hardik",
+                "ravindra jadeja", "jadeja", "suryakumar yadav", "surya",
+                "yashasvi jaiswal", "jaiswal", "kl rahul", "rahul",
+                "sanju samson", "samson", "smriti mandhana", "mandhana",
+                "harmapreet kaur", "harmanpreet kaur", "rashid khan", "rashid",
+                "babar azam", "babar", "pat cummins", "cummins", "travis head",
+                "ben stokes", "joe root", "steve smith",
             )
             if _word_match(text, term)
         )
