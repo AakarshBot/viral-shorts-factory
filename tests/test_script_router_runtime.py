@@ -728,6 +728,17 @@ def test_groq_primary_retries_once_after_successful_empty_json_response(monkeypa
     assert calls[1]["response_format"] == {"type": "json_object"}
 
 
+def test_provider_json_parser_prefers_factory_object_over_example_json():
+    import research_runtime
+
+    result = research_runtime._parse_provider_json(
+        'Example shape: {"foo":"bar"} Actual answer: '
+        '{"creator_insight":"valid","script":[]}'
+    )
+    assert result["script"] == []
+    assert result["creator_insight"] == "valid"
+
+
 def test_provider_json_parser_handles_multiple_json_objects_without_greedy_capture():
     import research_runtime
 
