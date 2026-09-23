@@ -999,8 +999,8 @@ def self_critique_pass(script_data, format_mode):
         from script_runtime import assess_narrative_completeness
         assessment = assess_narrative_completeness(script_data)
         return (8, "Passed") if assessment["passed"] else (5, assessment["reason"])
-    except Exception:
-        return 8, "Passed"
+    except Exception as exc:
+        return 5, f"Critique unavailable: {type(exc).__name__}: {exc}"
 
 
 
@@ -1120,7 +1120,7 @@ async def generate_voiceover_and_timestamps(script_data, language_cfg):
         path = os.path.join(ASSETS_DIR, f"voiceover_{idx+1}.mp3")
         text = re.sub(r'[*_#`\[\]()~^"“”‘’]', '', seg.get("voiceover", "")).strip() or f"Point number {idx+1}."
         success, scene_timings = False, []
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             try:
                 communicate = edge_tts.Communicate(text, language_cfg["voices"][profile["gender"]], rate=profile["rate"], pitch=profile["pitch"])
                 with open(path, "wb") as f:
