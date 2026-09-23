@@ -319,7 +319,7 @@ def discover_sources(story: Dict[str, Any], max_sources: int = DEFAULT_MAX_SOURC
     else:
         candidates.extend(_ddg_sources(query))
 
-    return _distinct_sources(candidates)[:limit]class _ReadableHTMLParser(HTMLParser):
+    return _distinct_sources(candidates)[:limit]\n\n\nclass _ReadableHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: List[str] = []
