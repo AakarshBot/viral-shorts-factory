@@ -148,12 +148,12 @@ def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(mo
     )
     assert len(result) == 35
     buckets = {key: [x for x in result if x.get("discovery_bucket") == key] for key in ("news", "viral", "social")}
-    assert sum(len(items) for items in buckets.values()) == 36
+    assert sum(len(items) for items in buckets.values()) == 35
     assert all(len(items) > 0 for items in buckets.values())
     assert len({
         item.get("event_identity_key") or item.get("event_id")
         for item in result
-    }) == 36
+    }) == 35
 
 
 def test_cricket_desk_exposes_undercoverage_and_signal_dimensions():
