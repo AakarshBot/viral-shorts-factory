@@ -68,8 +68,8 @@ def _normalise_originality_sentence(text):
 def _source_sentences(story_data):
     sentences = set()
     for source in _originality_sources(story_data):
-        for sentence in re.split(r"(?<=[.!?])\\s+|\\n+", str(source or "")):
-            sentence = re.sub(r"\\s+", " ", sentence).strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(source or "")):
+            sentence = re.sub(r"\s+", " ", sentence).strip()
             normalised = _normalise_originality_sentence(sentence)
             if len(_originality_words(normalised)) >= 6:
                 sentences.add(normalised)
@@ -85,7 +85,7 @@ def check_script_originality(script_data, story_data):
         if not isinstance(scene, dict) or scene.get("human_contributed"):
             continue
         voiceover = str(scene.get("voiceover") or "")
-        for sentence in re.split(r"(?<=[.!?])\\s+|\\n+", voiceover):
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", voiceover):
             normalised = _normalise_originality_sentence(sentence)
             if normalised and normalised in source_sentences:
                 failures.append({
