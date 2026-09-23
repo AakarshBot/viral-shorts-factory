@@ -111,6 +111,13 @@ def _validate_script_result(result, story_data, format_mode):
         if not valid:
             return None, reason
 
+        release_valid, release_reason, _release_assessment = sr.assess_release_structure(
+            cleaned,
+            format_mode,
+        )
+        if not release_valid:
+            return None, release_reason
+
         originality = sr.check_script_originality(cleaned, story_data)
         if not originality["passed"]:
             return None, "Script contains a complete sentence copied verbatim from the source evidence."
