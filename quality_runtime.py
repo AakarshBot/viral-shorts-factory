@@ -98,8 +98,9 @@ def _self_critique(script_data, format_mode):
         if not completeness["passed"]:
             score -= 3
             reasons.append("incomplete narrative")
-    except Exception:
-        pass
+    except Exception as exc:
+        score -= 1
+        reasons.append(f"narrative critique unavailable: {type(exc).__name__}")
 
     for i in range(len(scenes)):
         for j in range(i + 1, len(scenes)):
