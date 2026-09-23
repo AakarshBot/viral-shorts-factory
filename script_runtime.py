@@ -167,10 +167,13 @@ def assess_narrative_completeness(script_data):
             return {"passed": False, "reason": f"Scene {index + 1} is empty.", "roles": roles}
         role = str(scene.get("narrative_role") or "").strip().lower().replace("-", "_").replace(" ", "_")
         role = _NARRATIVE_ROLE_ALIASES.get(role, role)
-        if index == 0 and not role:
-            role = "hook"
-        if index == len(scenes) - 1 and not role:
-            role = "consequence"
+        if not role:
+            if index == 0:
+                role = "hook"
+            elif index == len(scenes) - 1:
+                role = "consequence"
+            else:
+                role = "development"
         if role in {"hook", "development", "context", "consequence"}:
             roles.setdefault(role, []).append(index + 1)
 
