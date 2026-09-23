@@ -3,7 +3,6 @@ from pathlib import Path
 import ultimate_bot
 from final_qc_runtime import _validate_metadata, validate_final_upload_metadata
 from script_runtime import _extractive_script_fallback, contains_retention_bait, validate_content_density
-from script_runtime import _extractive_script_fallback, contains_retention_bait, validate_content_density
 from subtitle_runtime import generate_readable_karaoke_clip
 from youtube_comment_runtime import build_description_hashtags, ensure_shorts_title
 from factory_function_coverage import collect_factory_function_coverage
@@ -167,7 +166,7 @@ def test_hook_quality_prefers_immediate_conflict_over_generic_setup():
     }
     weak = {
         "script": [{
-            "voiceover": "India cricket has a fresh development today.",
+            "voiceover": "Here is the latest update on India cricket and what happened today.",
             "narrative_role": "hook",
         }]
     }
