@@ -82,7 +82,7 @@ def test_initial_script_rejects_overlong_provider_output():
     assert "maximum is 60" in reason
 
 
-def test_initial_script_requires_shortest_first_scene():
+def test_initial_script_rejects_overlong_first_scene():
     script = _valid_script()
     script["script"][0]["voiceover"] = " ".join(["word"] * 15)
     ok, reason = validate_content_density(script, {}, "regular")
