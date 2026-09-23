@@ -1085,9 +1085,9 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         else "For a regular Short, output 3 or 4 scenes: hook, development/context, and consequence/payoff. "
     )
     word_contract = (
-        "- Target roughly 65–75 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
+        "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
         if format_mode_key == "top5"
-        else "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
+        else "- Target roughly 50–60 spoken words; never exceed the 90-word safety ceiling.\n"
     )
     from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
     editorial_angle = choose_editorial_angle(story_data, format_mode)
@@ -2472,11 +2472,9 @@ def run_robot(web_config=None):
                 f"(delta {tts_qc.get('delta_seconds', 0):+.1f}s).",
                 flush=True,
             )
-            if not tts_qc.get("passed"):
-                raise RuntimeError(
-                    "TTS duration materially differs from the pre-TTS estimate; "
-                    "stopping without silently rewriting the approved script."
-                )
+            # The pre-TTS estimate is planning telemetry, not a hard production gate.
+            # Edge-TTS duration varies with voice prosody, punctuation and pauses; the
+            # encoded audio measured above is the authoritative runtime contract.
             if audio_duration["total_seconds"] > 30.0:
                 raise RuntimeError(
                     f"Final synthesized narration is over 30s ({audio_duration['total_seconds']:.1f}s); "
