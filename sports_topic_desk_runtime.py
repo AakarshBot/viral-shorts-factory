@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events, event_identity_key, fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "sports-desk-v9-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v10-2026-09-24"
 LOOKBACK_HOURS = 72
 MAX_DASHBOARD_HEADLINES = 60
 
