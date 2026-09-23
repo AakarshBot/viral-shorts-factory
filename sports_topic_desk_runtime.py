@@ -339,7 +339,57 @@ def _trend_signal(item, trend_rows):
     return min(6.0, best * 1.25)
 
 
-def _score(item, trends, retained):
+
+def _history_titles(conn, limit=500) -> list[str]:
+    """Read previously used cricket topics/titles so novelty includes factory history."""
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT topic, title_used
+            FROM vault
+            WHERE status NOT IN ('FAILED', 'REJECTED', 'PENDING_QC', 'RUNNING',
+                                 'WAITING_SCRIPT_REVIEW', 'WAITING_VISUAL_REVIEW', 'READY_FOR_UPLOAD')
+            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    except Exception:
+        return []
+    titles = []
+    for topic, title in rows:
+        for value in (title, topic):
+            clean = _clean(value)
+            if clean and clean.casefold() not in {x.casefold() for x in titles}:
+                titles.append(clean)
+    return titles
+
+
+def _history_penalty(item, history_titles, retained_candidates):
+    current = _clean(item.get("title")).casefold()
+    if not current:
+        return 0.0
+    comparisons = []
+    comparisons.extend(history_titles or [])
+    comparisons.extend(
+        _clean(row.get("title"))
+        for row in (retained_candidates or [])
+        if isinstance(row, dict)
+    )
+    best = max(
+        (
+            SequenceMatcher(None, current, value.casefold()).ratio()
+            for value in comparisons
+            if value
+        ),
+        default=0.0,
+    )
+    return min(6.0, best * 6.0)
+
+
+def _score(item, trends, history_titles=None, retained=None):
     text = _clean(" ".join(str(item.get(k) or "") for k in ("title", "text", "description"))).casefold()
     reaction_hits = sum(1 for term in REACTION_TERMS if term in text)
     hook_hits = sum(1 for term in HOOK_TERMS if term in text)
@@ -350,7 +400,7 @@ def _score(item, trends, retained):
     undercovered = max(0.0, min(10.0, 10.0 - coverage + social * 0.5 + (3.0 if int(item.get("independent_source_count") or 0) <= 2 else 0)))
     freshness = max(0.0, min(10.0, 10.0 - float(item.get("age_hours") or 72) / 7.2))
     saturation = min(8.0, major_hits + max(0, int(item.get("independent_source_count") or 0) - 3) * 0.8)
-    history_penalty = max((SequenceMatcher(None, _clean(item.get("title")).casefold(), _clean(x.get("title")).casefold()).ratio() for x in retained or [] if _clean(x.get("title"))), default=0.0) * 4.0)
+    history_penalty = _history_penalty(item, history_titles or [], retained or [])
     news = freshness * 0.35 + coverage * 1.0 + hook_hits * 0.6 + reaction_hits * 0.2 - saturation * 0.6 - history_penalty
     viral = trend * 1.6 + social * 1.3 + undercovered * 1.35 + hook_hits * 0.6 + freshness * 0.5 - saturation * 0.9 - history_penalty
     social_score = social * 1.8 + reaction_hits * 1.4 + trend * 0.8 + undercovered * 1.2 + freshness * 0.4 - saturation * 0.5 - history_penalty
@@ -438,7 +488,8 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
             social.append(item)
         else:
             articles.append(item)
-    scored = [_score(dict(x), trend_rows, retained_candidates or []) for x in concepts]
+    history_titles = _history_titles(conn)
+    scored = [_score(dict(x), trend_rows, history_titles, retained_candidates or []) for x in concepts]
     if requested_topic:
         terms = _tokens(requested_topic)
         scored = [x for x in scored if len(terms & _tokens(x.get("title"))) >= 1]
