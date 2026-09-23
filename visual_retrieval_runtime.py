@@ -913,7 +913,38 @@ def collect_manual_visual_pool(
                 visual_type=str(batch[0].get("visual_type") or "GENERAL_CONTEXT"),
                 visual_genre=str(batch[0].get("visual_genre") or "GENERAL_CONTEXT"),
             )
-            qa_requests += 1
+            qa_failure = get_last_visual_qa_failure()
+            if qa_failure != "circuit_breaker":
+                qa_requests += 1
+            if qa_failure in {"transient_unavailable", "circuit_breaker"}:
+                remaining = max(0, target - query_added)
+                for candidate in batch[:remaining]:
+                    assets.append(
+                        {
+                            "subject": entity_anchor,
+                            "bytes": candidate["bytes"],
+                            "hash": candidate["hash"],
+                            "source": candidate["source"],
+                            "query": candidate["query"],
+                            "visual_type": candidate["visual_type"],
+                            "visual_genre": candidate["visual_genre"],
+                            "provenance": dict(candidate["provenance"]),
+                            "provenance_status": str(
+                                candidate.get("provenance_status") or "commercial-verified"
+                            ),
+                            "priority": float(candidate["priority"]),
+                            "search_text": _candidate_search_text(candidate["data"]),
+                            "source_page_url": str(candidate.get("source_page_url") or "").strip(),
+                            "source_image_url": str(candidate.get("source_image_url") or "").strip(),
+                            "status": "manual-review-unverified",
+                            "manual_query_index": int(query_index or 0),
+                            "pool_origin": str(source_label or "manual"),
+                            "used": False,
+                        }
+                    )
+                    query_added += 1
+                    added += 1
+                break
             for local_index, verdict in result_map.items():
                 if not (0 <= int(local_index) < len(batch)):
                     continue
@@ -1467,6 +1498,33 @@ def collect_manual_visual_search(
                 visual_type=visual_type,
                 visual_genre=visual_genre,
             )
+            qa_failure = get_last_visual_qa_failure()
+            if qa_failure in {"transient_unavailable", "circuit_breaker"}:
+                remaining = max(0, 10 - len(accepted))
+                accepted.extend(
+                    {
+                        "subject": entity_anchor,
+                        "bytes": candidate["bytes"],
+                        "hash": candidate["hash"],
+                        "source": candidate["source"],
+                        "query": exact_query,
+                        "visual_type": candidate["visual_type"],
+                        "visual_genre": candidate["visual_genre"],
+                        "provenance": dict(candidate["provenance"]),
+                        "provenance_status": str(
+                            candidate.get("provenance_status")
+                            or "commercial-verified"
+                        ),
+                        "priority": float(candidate["priority"]),
+                        "search_text": _candidate_search_text(candidate["data"]),
+                        "source_page_url": str(candidate.get("source_page_url") or "").strip(),
+                        "source_image_url": str(candidate.get("source_image_url") or "").strip(),
+                        "status": "manual-review-unverified",
+                        "used": False,
+                    }
+                    for candidate in batch[:remaining]
+                )
+                break
             for local_index, verdict in result_map.items():
                 if not (0 <= int(local_index) < len(batch)):
                     continue
