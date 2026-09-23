@@ -74,7 +74,7 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         "source sentence verbatim. Do not invent facts, quotes, motives, numbers, or outcomes. "
         "Return ONLY valid JSON using the factory schema.\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
-        "- Voiceover total: 55–65 words. Never exceed 65 words.\n"
+        "- Voiceover total: 55–62 words. Never exceed 62 words.\n"
         "- Scene 1: 8–14 words, a factual headline, and the shortest scene.\n"
         "- Prefer 3 or 4 scenes. Put the substance in the later scenes.\n"
         "- The full narration must naturally fit below 30 seconds.\n"
