@@ -132,3 +132,10 @@ def test_primary_writer_uses_hard_initial_word_contract():
     assert "Scene 1: 8–14 words" in source
     assert "The entire narration must naturally fit below 30 seconds" in source
     assert "tighten_script_for_duration_once" not in source
+
+
+def test_router_error_contract_contains_provider_reasons():
+    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
+    assert 'attempt_reasons = []' in source
+    assert 'unknown failure' not in source
+    assert 'returned no script candidate.' in source
