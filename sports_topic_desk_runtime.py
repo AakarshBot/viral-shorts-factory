@@ -761,7 +761,7 @@ def _collect(scope="India / Asia"):
     failures = []
 
     pool = ThreadPoolExecutor(
-        max_workers=min(16, max(1, len(primary_jobs) + len(secondary_jobs))),
+        max_workers=max(1, len(primary_jobs) + len(secondary_jobs)),
         thread_name_prefix="cricket-discovery",
     )
     futures = {}
