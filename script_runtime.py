@@ -227,7 +227,7 @@ def classify_narration_duration(seconds):
         value = float(seconds)
     except (TypeError, ValueError):
         return "unknown"
-    if value > NARRATION_ACCEPTABLE_MAX_SECONDS:
+    if value >= NARRATION_ACCEPTABLE_MAX_SECONDS:
         return "too_long"
     if value >= NARRATION_IDEAL_MIN_SECONDS:
         return "ideal_or_acceptable"
