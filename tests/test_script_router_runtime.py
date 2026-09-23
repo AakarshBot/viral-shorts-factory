@@ -618,7 +618,7 @@ def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypa
         if request.full_url.endswith("/v1/chat/completions")
     )
     payload = json.loads(generation_request.data.decode("utf-8"))
-    assert generation_timeout == 60
+    assert generation_timeout == 90
     assert payload["model"] == "llama3.2:latest"
     assert payload["max_tokens"] == 900
     assert payload["response_format"] == {"type": "json_object"}
