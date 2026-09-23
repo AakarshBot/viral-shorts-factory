@@ -312,10 +312,19 @@ def discover_sources(story: Dict[str, Any], max_sources: int = DEFAULT_MAX_SOURC
         has_primary = any(item.get("tier") == "A" for item in base)
         first_provider = _ddg_sources if has_primary else _openalex_sources
         second_provider = _openalex_sources if has_primary else _ddg_sources
-        first_result = first_provider(story if first_provider is _openalex_sources else query)
-        candidates.extend(first_result)
-        if len(_distinct_sources(candidates)) < limit:
-            candidates.extend(second_provider(story if second_provider is _openalex_sources else query))
+        # Once the selected-story evidence is insufficient, both independent
+        # science discovery backends are useful. Run them together so the second
+        # source adds recall without adding serial wall-clock time.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence-discovery") as pool:
+            futures = [
+                pool.submit(first_provider, story if first_provider is _openalex_sources else query),
+                pool.submit(second_provider, story if second_provider is _openalex_sources else query),
+            ]
+            for future in as_completed(futures):
+                try:
+                    candidates.extend(future.result())
+                except Exception as exc:
+                    print(f"   [Research] Independent discovery backend failed: {type(exc).__name__}", flush=True)
     else:
         candidates.extend(_ddg_sources(query))
 
