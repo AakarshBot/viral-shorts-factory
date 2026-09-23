@@ -48,11 +48,11 @@ CRICKET_INDIA_QUERIES = (
     f'India cricket ({CRICKET_MARQUEE_QUERY})',
     'India cricket (record OR first OR fastest OR highest OR historic OR upset OR comeback OR thriller OR scare OR shock)',
     'India cricket (selection OR selected OR dropped OR recalled OR injury OR injured OR captain OR coach OR retirement OR retired OR banned OR suspended)',
-    'India women cricket',
-    '(Ranji OR Duleep OR "India A" OR U19 OR U23 OR domestic cricket) India',
-    'India Pakistan cricket',
-    'Asian Games cricket India',
-    'Asia Cup cricket India',
+    'India women cricket (record OR controversy OR selection OR debut OR upset OR comeback OR milestone)',
+    '(Ranji OR Duleep OR "India A" OR U19 OR U23 OR domestic cricket OR state league) India (record OR debut OR selection OR controversy OR upset)',
+    'Asia cricket (Japan OR Afghanistan OR Nepal OR UAE OR Hong Kong OR Sri Lanka OR Bangladesh) (record OR upset OR controversy OR debut OR milestone)',
+    'India cricket (umpire OR law OR ruling OR bizarre OR unusual OR bizarre call OR controversy OR investigation)',
+    'cricket (uncapped OR emerging OR grassroots OR club OR academy) India (debut OR record OR milestone OR controversy OR upset)',
 )
 
 CRICKET_GLOBAL_QUERIES = (
