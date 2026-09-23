@@ -945,12 +945,21 @@ def editorial_gate_batch(stories, bonuses, last_genre, format_mode):
         print("   [!] Groq editorial gate exhausted. Falling back to Gemini API...")
         for g_attempt in range(1, 3):
             try:
-                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
+                gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
                 gemini_payload = {
                     "contents": [{"role": "user", "parts": [{"text": sys_prompt + "\n\nCANDIDATES:\n" + json.dumps([{"title": s['title'], "text": s['text'][:200]} for s in batch_stories])}]}],
-                    "generationConfig": {"responseMimeType": "application/json"}
+                    "generationConfig": {
+                        "responseFormat": {
+                            "text": {"mimeType": "application/json"}
+                        }
+                    }
                 }
-                g_resp = requests.post(gemini_url, json=gemini_payload, timeout=25)
+                g_resp = requests.post(
+                    gemini_url,
+                    headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
+                    json=gemini_payload,
+                    timeout=25,
+                )
                 if g_resp.status_code != 200:
                     print(f"   [!] Gemini editorial error {g_resp.status_code} on attempt {g_attempt}.")
                     time.sleep(2)
@@ -2226,13 +2235,24 @@ def run_robot(web_config=None):
             }
             main_topic = story_payload["title"]
         else:
-            cands = editorial_gate_batch(
-                pool, bonuses, last_genre, format_mode
-            )
-            if not cands:
-                print("   [!] No viable stories found.")
-                return
-            story_payload, main_topic = cands[0], cands[0]["title"]
+            if isinstance(selected_story, dict) and str(selected_story.get("title", "")).strip():
+                # The dashboard already made the editorial selection. Re-scoring that
+                # single locked story adds an avoidable LLM call and can introduce a
+                # second provider failure without changing the user’s selection.
+                story_payload = dict(selected_story)
+                from editorial_runtime import _fallback_editorial_scores
+                for key, value in _fallback_editorial_scores(story_payload).items():
+                    story_payload.setdefault(key, value)
+                print("   [Workflow] Editorial LLM scoring skipped: dashboard story is already locked.", flush=True)
+            else:
+                cands = editorial_gate_batch(
+                    pool, bonuses, last_genre, format_mode
+                )
+                if not cands:
+                    print("   [!] No viable stories found.")
+                    return
+                story_payload = cands[0]
+            main_topic = story_payload["title"]
 
         insert_cursor = conn.execute(
             "INSERT OR IGNORE INTO vault "
