@@ -52,6 +52,70 @@ def test_tts_duration_qc_allows_material_estimate_error_when_actual_audio_is_val
     assert result["material_variance"] is True
     assert result["actual_seconds"] == 23.14
 
+
+def test_local_tts_duration_repair_scales_audio_and_word_timings(monkeypatch, tmp_path):
+    import audio_runtime
+
+    source_paths = []
+    for index in range(2):
+        path = tmp_path / f"scene_{index + 1}.mp3"
+        path.write_bytes(b"source-audio")
+        source_paths.append(str(path))
+
+    commands = []
+    durations = {}
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        output_path = command[-1]
+        Path(output_path).write_bytes(b"compressed-audio")
+        return type("Completed", (), {"stderr": "", "stdout": ""})()
+
+    def fake_duration(path):
+        if "tts_compressed_" in str(path):
+            return 14.0
+        return 16.0
+
+    monkeypatch.setattr(audio_runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio_runtime, "get_audio_duration", fake_duration)
+
+    timings = [
+        [{"word": "One", "start": 0.0, "end": 0.5}],
+        [{"word": "Two", "start": 0.0, "end": 0.5}],
+    ]
+    repaired_timings, repaired_durations, total, factor = audio_runtime._repair_total_audio_duration(
+        source_paths,
+        timings,
+        [16.0, 16.0],
+    )
+
+    assert factor > 1.0
+    assert factor <= audio_runtime.TTS_MAX_COMPRESSION_FACTOR
+    assert total <= audio_runtime.TTS_MAX_DURATION_SECONDS
+    assert repaired_durations == [14.15, 14.15]
+    assert repaired_timings[0][0]["end"] < 0.5
+    assert all(command[command.index("-filter:a") + 2].startswith("atempo=") for command in commands)
+    assert all(Path(path).read_bytes() == b"compressed-audio" for path in source_paths)
+
+
+def test_local_tts_duration_repair_refuses_excessive_speed_change(monkeypatch, tmp_path):
+    import audio_runtime
+
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"scene_{index + 1}.mp3"
+        path.write_bytes(b"audio")
+        paths.append(str(path))
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="above the 1.10x safety limit"):
+        audio_runtime._repair_total_audio_duration(
+            paths,
+            [[], []],
+            [20.0, 14.0],
+        )
+
 def test_production_does_not_fail_only_on_estimate_variance():
     from pathlib import Path
 

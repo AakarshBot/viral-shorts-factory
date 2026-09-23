@@ -147,6 +147,160 @@ async def _render_scene(bot, text, voice, rate, pitch, final_path, timeout_secon
     return timings
 
 
+TTS_MAX_DURATION_SECONDS = 30.0
+TTS_COMPRESSION_TARGET_SECONDS = 29.25
+TTS_MAX_COMPRESSION_FACTOR = 1.10
+
+
+def _scale_word_timings(timings: list[dict[str, Any]], speed_factor: float) -> list[dict[str, Any]]:
+    """Scale word-boundary timings by the same factor used to time-compress audio."""
+    factor = max(1.0, float(speed_factor or 1.0))
+    return [
+        {
+            "word": str(item.get("word") or ""),
+            "start": round(max(0.0, float(item.get("start", 0.0))) / factor, 6),
+            "end": round(max(
+                max(0.0, float(item.get("start", 0.0))) / factor,
+                float(item.get("end", item.get("start", 0.0))) / factor,
+            ), 6),
+        }
+        for item in normalise_word_timings(timings)
+    ]
+
+
+def _repair_total_audio_duration(
+    audio_paths: list[str],
+    word_timings: list[list[dict[str, Any]]],
+    scene_durations: list[float],
+    *,
+    maximum_seconds: float = TTS_MAX_DURATION_SECONDS,
+    target_seconds: float = TTS_COMPRESSION_TARGET_SECONDS,
+) -> tuple[list[list[dict[str, Any]]], list[float], float, float]:
+    """Time-compress already-generated audio once instead of regenerating TTS.
+
+    This is a deterministic post-TTS repair. It costs no provider call, applies
+    one common speed factor to every scene, and scales the existing Edge-TTS
+    word timings by the same factor so karaoke captions remain aligned.
+    """
+    original_total = sum(float(value) for value in (scene_durations or []))
+    if original_total <= float(maximum_seconds):
+        return word_timings, scene_durations, round(original_total, 3), 1.0
+
+    safe_target = min(
+        float(target_seconds),
+        max(0.1, float(maximum_seconds) - 0.75),
+    )
+    required_factor = original_total / safe_target
+    if required_factor <= 1.0:
+        return word_timings, scene_durations, round(original_total, 3), 1.0
+    if required_factor > TTS_MAX_COMPRESSION_FACTOR:
+        raise RuntimeError(
+            f"Post-TTS duration repair would require {required_factor:.3f}x speed, "
+            f"above the {TTS_MAX_COMPRESSION_FACTOR:.2f}x safety limit."
+        )
+
+    speed_factor = min(TTS_MAX_COMPRESSION_FACTOR, required_factor)
+    if original_total / speed_factor > float(maximum_seconds) - 0.25:
+        raise RuntimeError(
+            f"Post-TTS duration repair could not reach the safe target: "
+            f"{original_total / speed_factor:.2f}s remains before the {maximum_seconds:.1f}s limit."
+        )
+
+    temp_paths: list[str] = []
+    compressed_timings: list[list[dict[str, Any]]] = []
+    compressed_scene_durations: list[float] = []
+
+    try:
+        for index, path in enumerate(audio_paths):
+            source_path = os.fspath(path)
+            fd, temp_path = tempfile.mkstemp(
+                prefix=f"tts_compressed_{index + 1}_",
+                suffix=".mp3",
+                dir=os.path.dirname(source_path) or None,
+            )
+            os.close(fd)
+            temp_paths.append(temp_path)
+
+            ffmpeg_bin = os.getenv("IMAGEIO_FFMPEG_EXE", "ffmpeg").strip() or "ffmpeg"
+            command = [
+                ffmpeg_bin,
+                "-y",
+                "-i",
+                source_path,
+                "-filter:a",
+                f"atempo={speed_factor:.6f}",
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                temp_path,
+            ]
+            try:
+                subprocess.run(
+                    command,
+                    capture_output=True,
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    text=True,
+                    timeout=30,
+                    check=True,
+                )
+            except (OSError, subprocess.CalledProcessError, subprocess.SubprocessError) as exc:
+                detail = getattr(exc, "stderr", "") or str(exc)
+                raise RuntimeError(
+                    f"Local TTS duration compression failed for scene {index + 1}: "
+                    + str(detail)[-1200:]
+                ) from exc
+
+            compressed_duration = get_audio_duration(temp_path)
+            if compressed_duration <= 0.0:
+                raise RuntimeError(
+                    f"Local TTS duration compression produced an unreadable scene {index + 1} audio file."
+                )
+
+            original_timings = (
+                word_timings[index]
+                if index < len(word_timings) and isinstance(word_timings[index], list)
+                else []
+            )
+            scaled = _scale_word_timings(original_timings, speed_factor)
+            valid, reason = validate_timing_against_duration(scaled, compressed_duration)
+            if not valid:
+                raise RuntimeError(
+                    f"Local TTS duration compression broke scene {index + 1} word timing alignment: {reason}"
+                )
+
+            timing_duration = (scaled[-1]["end"] + 0.15) if scaled else 0.0
+            compressed_timings.append(scaled)
+            compressed_scene_durations.append(
+                max(compressed_duration, timing_duration)
+            )
+
+        compressed_total = round(sum(compressed_scene_durations), 3)
+        if compressed_total > float(maximum_seconds):
+            raise RuntimeError(
+                f"Local TTS duration compression still produced {compressed_total:.2f}s; "
+                f"the {maximum_seconds:.1f}s production limit remains unmet."
+            )
+
+        for source_path, temp_path in zip(audio_paths, temp_paths):
+            os.replace(temp_path, source_path)
+        temp_paths.clear()
+
+        return (
+            compressed_timings,
+            compressed_scene_durations,
+            compressed_total,
+            speed_factor,
+        )
+    finally:
+        for temp_path in temp_paths:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
 def _is_retryable_audio_error(exc: BaseException) -> bool:
     """Retry only failures that may succeed on a fresh TTS request."""
     if isinstance(exc, asyncio.TimeoutError):
@@ -247,15 +401,47 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
             print(f"   [Audio] FATAL: Could not generate real narration for scene {idx + 1}.", flush=True)
             return [], []
 
+    pre_compression_total = round(sum(scene_durations), 3)
+    script_data["audio_pre_compression_duration"] = pre_compression_total
+    compression_factor = 1.0
+    if pre_compression_total > TTS_MAX_DURATION_SECONDS:
+        print(
+            f"   [TTS Duration Repair] Synthesized audio is {pre_compression_total:.2f}s. "
+            "Applying one local time-compression pass; no TTS regeneration or writing API call.",
+            flush=True,
+        )
+        (
+            word_timings,
+            scene_durations,
+            final_audio_duration,
+            compression_factor,
+        ) = _repair_total_audio_duration(
+            audio_paths,
+            word_timings,
+            scene_durations,
+        )
+        print(
+            f"   [TTS Duration Repair] Local compression {compression_factor:.3f}x: "
+            f"{pre_compression_total:.2f}s -> {final_audio_duration:.2f}s; "
+            "word timings rescaled.",
+            flush=True,
+        )
+        script_data["audio_duration_compression_applied"] = True
+        script_data["audio_duration_compression_factor"] = round(compression_factor, 5)
+    else:
+        final_audio_duration = pre_compression_total
+        script_data["audio_duration_compression_applied"] = False
+        script_data["audio_duration_compression_factor"] = 1.0
+
     script_data["audio_scene_durations"] = scene_durations
-    script_data["audio_total_duration"] = round(sum(scene_durations), 3)
-    script_data["word_timing_version"] = 3
+    script_data["audio_total_duration"] = round(final_audio_duration, 3)
+    script_data["word_timing_version"] = 4 if compression_factor != 1.0 else 3
     script_data["word_timing_counts"] = [len(items) for items in word_timings]
 
     gc.collect()
     print(
         f"   [+] Audio generation complete: {len(audio_paths)}/{len(scenes)} scenes. "
-        f"Actual audio duration: {script_data['audio_total_duration']:.2f}s. "
+        f"Final audio duration: {script_data['audio_total_duration']:.2f}s. "
         "Transitioning to visual sourcing...",
         flush=True,
     )
