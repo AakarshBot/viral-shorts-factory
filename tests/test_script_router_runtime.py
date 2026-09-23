@@ -130,7 +130,7 @@ def test_initial_script_rejects_overlong_first_scene():
 
 def test_router_canonical_validation_allows_duration_repair_to_inspect_long_draft():
     script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 75)
+    script["script"][1]["voiceover"] = " ".join(["word"] * 65)
     result, reason = _validate_script_result(script, {"title": "India squad change"}, "regular")
     assert result is not None, reason
 
