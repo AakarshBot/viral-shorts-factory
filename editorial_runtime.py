@@ -92,8 +92,60 @@ def _load_prior_topics(db_path):
         return []
 
 
+def _coerce_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off", ""}:
+        return False
+    return default
+
+
+def _fallback_editorial_scores(story):
+    text_len = len(str((story or {}).get("text", "") or "").split())
+    narrative = 6.5 if text_len >= 45 else 6.0 if text_len >= 20 else 5.5
+    velocity = _num((story or {}).get("velocity_score"), 0.0)
+    hook = min(8.0, 5.5 + velocity * 0.35)
+    shelf_life = min(7.0, 5.0 + _num((story or {}).get("trend_bonus"), 0.0) * 0.25)
+    return {
+        "hook_strength": hook,
+        "narrative_completeness": narrative,
+        "audience_fit": 6.0,
+        "monetization_risk": 5.0,
+        "shelf_life": shelf_life,
+        "hard_reject": False,
+    }
+
+
+def _normalise_editorial_records(scored_data, batch_stories):
+    records = list(scored_data) if isinstance(scored_data, list) else []
+    normalised = []
+    for index, story in enumerate(batch_stories or []):
+        raw = records[index] if index < len(records) and isinstance(records[index], dict) else None
+        clean = dict(raw) if raw is not None else _fallback_editorial_scores(story)
+        clean["hard_reject"] = _coerce_bool(clean.get("hard_reject"), False)
+        for field, default in (
+            ("hook_strength", 5.0),
+            ("narrative_completeness", 5.0),
+            ("audience_fit", 5.0),
+            ("monetization_risk", 5.0),
+            ("shelf_life", 5.0),
+        ):
+            clean[field] = _num(clean.get(field), default)
+        normalised.append(clean)
+    return normalised
+
+
 def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mode, prior_topics=None):
     """Authoritative editorial scoring. Risk is a penalty, not a hard reject."""
+    batch_stories = list(batch_stories or [])
+    scored_data = _normalise_editorial_records(scored_data, batch_stories)
     scored_candidates = []
     prior_topics = prior_topics or []
     for idx, scores in enumerate(scored_data or []):
@@ -103,7 +155,7 @@ def score_candidates(scored_data, batch_stories, bonuses, last_genre, format_mod
         if not isinstance(story, dict):
             continue
 
-        model_hard_reject = _bool(scores.get("hard_reject"), False)
+        model_hard_reject = _coerce_bool(scores.get("hard_reject"), False)
         hs = max(0.0, min(10.0, _num(scores.get("hook_strength"), 5.0)))
         nc = max(0.0, min(10.0, _num(scores.get("narrative_completeness"), 5.0)))
         af = max(0.0, min(10.0, _num(scores.get("audience_fit"), 5.0)))
