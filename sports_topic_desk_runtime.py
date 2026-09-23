@@ -313,6 +313,9 @@ def _cluster(rows):
             **representative,
             "cluster_id": f"cricket-{n}",
             "article_count": len(articles),
+            "social_items": social,
+            "article_items": articles,
+            "article_count": len(articles),
             "social_post_count": len(social),
             "independent_source_count": len(domains),
             "social_engagement_total": round(sum(float(x.get("social_engagement") or 0) for x in social), 3),
@@ -387,6 +390,18 @@ def _bucketize(concepts):
         for item in picked:
             remaining.remove(item)
             row = dict(item)
+            if bucket == "social" and row.get("social_post_count"):
+                social_titles = [
+                    _clean(part.get("title"))
+                    for part in row.get("social_items", [])
+                    if isinstance(part, dict) and _clean(part.get("title"))
+                ]
+                if social_titles:
+                    row["event_anchor_title"] = row.get("title")
+                    row["title"] = max(
+                        social_titles,
+                        key=lambda value: len(value),
+                    )
             row["discovery_bucket"] = bucket
             row["bucket_score"] = float(row.get(score_name) or 0)
             result.append(row)
@@ -406,7 +421,8 @@ def _bucketize(concepts):
 
 def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=30, retained_candidates=None):
     raw = _collect()
-    rows = _normalise_rows(raw)
+    trend_rows = [row for row in raw if isinstance(row, dict) and row.get("collection_source") == "google_trends"]
+    rows = _normalise_rows([row for row in raw if not (isinstance(row, dict) and row.get("collection_source") == "google_trends")])
     scope_key = _clean(scope).casefold()
     if scope_key == "india / asia":
         rows = [
@@ -415,7 +431,6 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
             or any(term in _clean(" ".join(str(x.get(k) or "") for k in ("title","text","description"))).casefold() for term in ("india","bcci","pakistan","sri lanka","bangladesh","asia"))
         ]
     concepts = _cluster(rows)
-    trend_rows = [x for x in rows if x.get("collection_source") == "google_trends"]
     articles = []
     social = []
     for item in concepts:
