@@ -39,21 +39,20 @@ def _prepare_primary_writer_data(story_data: Dict[str, Any], format_mode: str) -
 
 def _validate_provider_script(result: Any, story_data: Dict[str, Any], format_mode: str, provider_name: str):
     if not isinstance(result, dict) or not isinstance(result.get("script"), list):
-        return None
+        raise ValueError(f"{provider_name} returned no usable script array.")
     try:
         from script_runtime import clean_script_data, validate_content_density
         cleaned, diagnostics = clean_script_data(result, story_data, format_mode)
         valid, reason = validate_content_density(cleaned, story_data, format_mode)
         if not valid:
-            print(f"   [{provider_name}] Script validation rejected response: {reason}", flush=True)
-            return None
+            raise ValueError(f"{provider_name} script validation rejected the response: {reason}")
         cleaned["provider_used"] = provider_name
         cleaned["provider_fallback"] = True
         cleaned["provider_diagnostics"] = diagnostics
         return cleaned
     except Exception as exc:
-        print(f"   [{provider_name}] Canonical validation unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return None
+        print(f"   [{provider_name}] Canonical validation failed: {type(exc).__name__}: {exc}", flush=True)
+        raise
 
 
 def _script_evidence_text(story_data: Dict[str, Any]) -> str:
@@ -116,20 +115,21 @@ def _call_chat_completion(
             result = json.loads(text)
         return _validate_provider_script(result, story_data, format_mode, provider_name)
     except urllib.error.HTTPError as exc:
-        print(f"   [{provider_name}] HTTP {exc.code}; falling through.", flush=True)
+        raise RuntimeError(f"{provider_name} HTTP {exc.code}; falling through to the next provider.") from exc
     except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        print(f"   [{provider_name}] Request failed: {type(exc).__name__}; falling through.", flush=True)
+        raise RuntimeError(f"{provider_name} request failed: {type(exc).__name__}; falling through to the next provider.") from exc
     except Exception as exc:
-        print(f"   [{provider_name}] Unexpected failure: {type(exc).__name__}; falling through.", flush=True)
-    return None
+        raise RuntimeError(f"{provider_name} failed: {type(exc).__name__}: {exc}") from exc
 
 
 def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, Any], genre_key: str, format_mode: str):
 
     api_key = _clean(os.getenv("OPENROUTER_API_KEY"))
     source_text = _script_evidence_text(story_data)
-    if not api_key or not source_text:
-        return None
+    if not api_key:
+        raise RuntimeError("OpenRouter free unavailable: OPENROUTER_API_KEY is not configured.")
+    if not source_text:
+        raise RuntimeError("OpenRouter free unavailable: script evidence text is empty.")
     payload = {
         "model": "openrouter/free",
         "messages": [
@@ -159,7 +159,7 @@ def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[s
 def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, Any], genre_key: str, format_mode: str):
     source_text = _script_evidence_text(story_data)
     if not source_text:
-        return None
+        raise RuntimeError("Local Ollama unavailable: script evidence text is empty.")
 
     base_url = _clean(os.getenv("OLLAMA_BASE_URL")) or "http://localhost:11434"
     base_host = ""
@@ -174,12 +174,9 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
     }
     local_hosts = {"localhost", "127.0.0.1", "::1"}
     if remote_mode and base_host in local_hosts:
-        print(
-            "   [Script Pipeline] Local Ollama unavailable in remote mode; "
-            "skipping local-only fallback.",
-            flush=True,
+        raise RuntimeError(
+            "Local Ollama skipped in remote mode: localhost Ollama is not reachable from the remote runtime."
         )
-        return None
 
     model = _clean(os.getenv("OLLAMA_SCRIPT_MODEL")) or "gpt-oss:20b"
     payload = {
