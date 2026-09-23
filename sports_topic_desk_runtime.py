@@ -832,12 +832,32 @@ def _collect(scope="India / Asia"):
 
 def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=60, retained_candidates=None):
     raw = _collect(scope)
-    rows = _normalise_rows(raw)
+    all_rows = _normalise_rows(raw)
+    trend_rows = [
+        row for row in all_rows
+        if _clean(row.get("collection_source")).casefold() == "google_trends"
+    ]
+    rows = [
+        row for row in all_rows
+        if _clean(row.get("collection_source")).casefold() != "google_trends"
+        and _scope_pass(row, scope)
+    ]
 
-    scope_key = _clean(scope).casefold()
-    rows = [row for row in rows if _scope_pass(row, scope)]
     events = cluster_news_events(rows)
     events = _enrich_events(events, rows)
+
+    # Trend items are signals only; they never become independent factual events.
+    for event in events:
+        title_tokens = _tokens(event.get("title"))
+        best = 0.0
+        for trend in trend_rows:
+            trend_tokens = _tokens(f"{trend.get('trend_query', '')} {trend.get('title', '')}")
+            if not title_tokens or not trend_tokens:
+                continue
+            overlap = len(title_tokens & trend_tokens) / max(1, len(title_tokens | trend_tokens))
+            if overlap >= 0.30:
+                best = max(best, float(trend.get("trend_bonus") or 0.0))
+        event["trend_signal_score"] = round(min(6.0, best * 1.25), 2)
 
     # Prevent already-uploaded events from ever returning to the dashboard.
     # Unpublished selections are not consulted here; they are merged back by
@@ -873,7 +893,7 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
         except Exception:
             history_titles = []
 
-    trends = [row for row in rows if _clean(row.get("collection_source")).casefold() == "google_trends"]
+    trends = trend_rows
     retained = retained_candidates or []
     scored = []
     for event in events:
