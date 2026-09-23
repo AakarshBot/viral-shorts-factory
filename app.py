@@ -1826,6 +1826,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         if not bool(item.get("used"))
     ]
     ready_count = sum(1 for item in items if item.get("qc_passed"))
+    manual_approved = set(
+        int(x) for x in (snapshot.get("visual_manual_approved") or []) if str(x).isdigit()
+    )
     active_search_count = sum(
         1 for group in search_groups
         for item in (group.get("items") or [])
@@ -1873,6 +1876,20 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         st.caption(caption)
                     if not item.get("qc_passed"):
                         st.caption(item.get("qc_reason") or "This slide still needs a usable image.")
+                    if item["index"] in manual_approved:
+                        st.success("✓ Manually approved", icon="✅")
+                    else:
+                        if st.button(
+                            "✅ Approve this image",
+                            type="primary",
+                            width="stretch",
+                            disabled=bool(item.get("missing")),
+                            key=f"approve_visual_{run_id}_{item['index']}",
+                        ):
+                            ok, message = controller.approve_visual(item["index"])
+                            if ok:
+                                st.rerun()
+                            st.error(message)
 
                     with st.popover("Replace image", width="stretch"):
                         with st.form(key=f"replace_visual_form_{run_id}_{item['index']}"):
@@ -2096,24 +2113,31 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                     st.rerun()
 
     st.markdown("---")
+    total_slides = len(items)
+    approved_count = len(manual_approved.intersection(set(range(1, total_slides + 1))))
     approve_col, reject_col = st.columns([1.35, 1], gap="medium")
     with approve_col:
         if st.button(
-            "✅ Approve visuals & continue",
+            "✅ Continue after reviewing all slides",
             type="primary",
             width="stretch",
             key="approve_visuals",
-            disabled=bool(sum(1 for item in items if not item.get("qc_passed"))),
+            disabled=approved_count != total_slides,
         ):
             ok = controller.approve_visuals()
             if ok:
                 st.rerun()
-            st.error("Visual approval is not complete. Every slide must have a verified, available image.")
+            st.error("Review and individually approve every slide before continuing.")
         unresolved = sum(1 for item in items if not item.get("qc_passed"))
         if unresolved:
             st.caption(f"{unresolved} slide(s) still need a usable image.")
+        elif approved_count < total_slides:
+            st.caption(
+                f"{approved_count}/{total_slides} slides manually approved. "
+                "Approve each image above to continue."
+            )
         else:
-            st.caption("All slides have an image. Continue to final rendering when ready.")
+            st.caption("All slides have been individually approved. Continue to final rendering.")
     with reject_col:
         if st.button("Stop production", width="stretch", key="reject_visuals"):
             controller.reject_visuals()
