@@ -5,6 +5,7 @@ from script_router_runtime import (
     _usable_story_source_fallback,
     _validate_script_result,
     assess_story_source_sufficiency,
+    tighten_script_for_duration_once,
 )
 
 from script_runtime import (
@@ -67,19 +68,56 @@ def _valid_script():
     }
 
 
-def test_initial_script_contract_is_compact():
+def test_initial_script_contract_uses_duration_as_authority():
     source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
-    assert "INITIAL_SCRIPT_MAX_WORDS = 60" in source
+    assert "INITIAL_SCRIPT_MAX_WORDS = 90" in source
     assert "SCENE_1_MAX_WORDS = 14" in source
-    assert "def tighten_script_for_duration_once(" not in source
 
 
-def test_initial_script_rejects_overlong_provider_output():
+def test_overlong_but_within_safety_ceiling_reaches_duration_repair():
     script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 60)
+    script["script"][1]["voiceover"] = " ".join(["word"] * 75)
+    ok, reason = validate_content_density(script, {}, "regular")
+    assert ok is True, reason
+
+
+def test_duration_repair_is_single_bounded_attempt():
+    calls = []
+
+    def fake_primary(story_data, *_args):
+        calls.append(story_data)
+        repaired = _valid_script()
+        repaired["script"][0]["voiceover"] = "India confirms the squad change after review."
+        repaired["script"][1]["voiceover"] = "Officials say preparation now changes for the next assignment."
+        repaired["script"][2]["voiceover"] = "The revised plan affects India's upcoming tournament."
+        return repaired
+
+    candidate = _valid_script()
+    candidate["script"][1]["voiceover"] = " ".join(["word"] * 75)
+
+    repaired, reason = tighten_script_for_duration_once(
+        fake_primary,
+        {"title": "India squad change"},
+        candidate,
+        {},
+        "sports_stories_of_day",
+        None,
+        "regular",
+    )
+
+    assert repaired is not None, reason
+    assert repaired["duration_repair_attempted"] is True
+    assert repaired["duration_repair_succeeded"] is True
+    assert len(calls) == 1
+    assert calls[0]["_duration_tighten_target_seconds"] == 27.0
+
+
+def test_initial_script_rejects_only_over_the_safety_ceiling():
+    script = _valid_script()
+    script["script"][1]["voiceover"] = " ".join(["word"] * 91)
     ok, reason = validate_content_density(script, {}, "regular")
     assert ok is False
-    assert "maximum is 60" in reason
+    assert "maximum is 90" in reason
 
 
 def test_initial_script_rejects_overlong_first_scene():
@@ -90,12 +128,11 @@ def test_initial_script_rejects_overlong_first_scene():
     assert "Scene 1 is too long" in reason
 
 
-def test_router_rejects_overlong_provider_output_before_acceptance():
+def test_router_canonical_validation_allows_duration_repair_to_inspect_long_draft():
     script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 60)
+    script["script"][1]["voiceover"] = " ".join(["word"] * 75)
     result, reason = _validate_script_result(script, {"title": "India squad change"}, "regular")
-    assert result is None
-    assert "maximum is 60" in reason
+    assert result is not None, reason
 
 
 def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
@@ -126,12 +163,11 @@ def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
     assert check_script_originality(rephrased, story)["passed"] is True
 
 
-def test_primary_writer_uses_hard_initial_word_contract():
+def test_primary_writer_uses_duration_first_contract():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Voiceover total: 55–60 words." in source
+    assert "Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words" in source
-    assert "The entire narration must naturally fit below 30 seconds" in source
-    assert "tighten_script_for_duration_once" not in source
+    assert "Spoken duration is authoritative" in source
 
 
 def test_router_error_contract_contains_provider_reasons():
