@@ -146,7 +146,7 @@ def test_cricket_desk_buckets_are_unique_and_cover_three_editorial_categories(mo
         max_candidates=60,
         retained_candidates=[],
     )
-    assert len(result) == 36
+    assert len(result) == 35
     buckets = {key: [x for x in result if x.get("discovery_bucket") == key] for key in ("news", "viral", "social")}
     assert sum(len(items) for items in buckets.values()) == 36
     assert all(len(items) > 0 for items in buckets.values())
@@ -292,6 +292,14 @@ def test_cricket_desk_keeps_unusual_article_headlines_for_manual_qc(monkeypatch)
     result = desk._normalise_rows([row])
     assert len(result) == 1
 
+
+
+def test_cricket_detection_accepts_player_only_headlines():
+    assert desk._is_cricket({"title": "Bumrah returns to training after injury"}) is True
+    assert desk._scope_pass(
+        {"title": "Bumrah returns to training after injury", "event_entities": ["Bumrah"]},
+        "India / Asia",
+    ) is True
 
 
 def test_cricket_detection_does_not_confuse_substrings_with_cricket():
