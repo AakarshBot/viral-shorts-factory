@@ -47,6 +47,7 @@ def test_story_source_sufficiency_is_not_a_raw_character_cutoff():
 
 def _valid_script():
     return {
+        "creator_insight": "This matters because the documented change directly affects the next assignment.",
         "editorial_angle": "Explain the confirmed event, key evidence and immediate consequence.",
         "titles": ["A", "B", "C"],
         "recommended_title_index": 1,
@@ -55,14 +56,26 @@ def _valid_script():
             {
                 "voiceover": "India confirms a major squad change after the latest review.",
                 "narrative_role": "hook",
+                "primary_entity": "India cricket team",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India cricket team squad change",
+                "sport_or_topic_category": "Cricket",
             },
             {
                 "voiceover": "The decision changes preparation, while officials say it followed the latest assessment.",
                 "narrative_role": "development",
+                "primary_entity": "India cricket team",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India cricket team preparation",
+                "sport_or_topic_category": "Cricket",
             },
             {
                 "voiceover": "The revised plan now affects the team's next assignment.",
                 "narrative_role": "consequence",
+                "primary_entity": "India cricket team",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India cricket team next assignment",
+                "sport_or_topic_category": "Cricket",
             },
         ],
     }
@@ -305,6 +318,50 @@ def test_groq_primary_writer_uses_current_gpt_oss_request_contract(monkeypatch):
     assert payload["reasoning_effort"] == "low"
     assert payload["max_completion_tokens"] == 900
     assert "max_tokens" not in payload
+
+
+def test_groq_primary_writer_strict_schema_contains_closed_nested_objects(monkeypatch):
+    import json
+    import ultimate_bot
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps(_valid_script()),
+                    }
+                }]
+            }
+
+    def fake_post(url, **kwargs):
+        calls.append(kwargs["json"])
+        return FakeResponse()
+
+    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
+    result = ultimate_bot.write_script(
+        {"title": "India squad change", "research_evidence_text": "Officials confirmed a major squad change."},
+        {"script_instruction": "English."},
+        "sports_stories_of_day",
+        None,
+        "regular",
+    )
+
+    assert result["script"]
+    schema = calls[0]["response_format"]["json_schema"]["schema"]
+    assert schema["additionalProperties"] is False
+    scene_schema = schema["properties"]["script"]["items"]
+    assert scene_schema["additionalProperties"] is False
+    assert set(scene_schema["required"]) == {
+        "voiceover", "narrative_role", "primary_entity", "visual_intent",
+        "specific_search_prompt", "sport_or_topic_category",
+    }
 
 
 def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(monkeypatch):
