@@ -452,3 +452,80 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
         )
         output.append(item)
     return output[:30]
+
+
+def render_cricket_topic_desk(candidates, ui_text, ui_html, remember_callback):
+    import streamlit as st
+
+    specs = (
+        ("news", "NEWS", "Concrete current developments."),
+        ("viral", "VIRAL / EMERGING", "Undercovered stories with momentum, novelty or reaction."),
+        ("social", "SOCIAL & REACTIONS", "Player comments, fan debate and social-first leads."),
+    )
+    grouped = {key: [] for key, _, _ in specs}
+    for candidate in candidates or []:
+        bucket = str(candidate.get("discovery_bucket") or "news").strip().lower()
+        grouped.get(bucket, grouped["news"]).append(candidate)
+
+    st.markdown(
+        "<div class='live-bar'><div class='live-bar-copy'><b>Cricket story desk</b> · 30 deliberately different ideas.</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    for bucket, label, description in specs:
+        stories = grouped[bucket][:10]
+        with st.expander(f"{label} · {len(stories)}", expanded=(bucket == "news")):
+            st.caption(description)
+            for start in range(0, len(stories), 2):
+                row = stories[start:start + 2]
+                cols = st.columns(len(row), gap="medium")
+                for offset, candidate in enumerate(row):
+                    index = start + offset
+                    with cols[offset]:
+                        title = ui_text(candidate.get("title"), "Untitled story")
+                        source = ui_text(candidate.get("source_label"), "Cricket source")
+                        reason = ui_text(candidate.get("discovery_reason"))
+                        verification = ui_text(candidate.get("verification_level"), "lead")
+                        url = str(candidate.get("story_url") or "").strip()
+
+                        chips = (
+                            f"<span class='topic-chip strong'>Novel {float(candidate.get('undercovered_score') or 0):.1f}</span>"
+                            f"<span class='topic-chip'>Coverage {float(candidate.get('coverage_score') or 0):.1f}</span>"
+                            f"<span class='topic-chip'>Viral {float(candidate.get('viral_signal_score') or 0):.1f}</span>"
+                        )
+                        if float(candidate.get("trend_signal_score") or 0) > 0:
+                            chips += f"<span class='topic-chip'>Trend {float(candidate.get('trend_signal_score') or 0):.1f}</span>"
+                        if int(candidate.get("social_post_count") or 0):
+                            chips += f"<span class='topic-chip'>{int(candidate.get('social_post_count') or 0)} social lead(s)</span>"
+                        if int(candidate.get("independent_source_count") or 0):
+                            chips += f"<span class='topic-chip'>{int(candidate.get('independent_source_count') or 0)} publisher(s)</span>"
+
+                        st.markdown(
+                            "<div class='topic-card'>"
+                            f"<div class='topic-kicker'><span>{ui_html(bucket.upper())} · {index + 1:02d}</span>"
+                            f"<span>{ui_html(verification.upper())}</span></div>"
+                            f"<div class='topic-title'>{ui_html(title)}</div>"
+                            f"<div class='topic-subtitle'>{ui_html(source)}</div>"
+                            f"<div class='topic-chips'>{chips}</div></div>",
+                            unsafe_allow_html=True,
+                        )
+                        if reason:
+                            st.caption(reason)
+                        action_cols = st.columns(2)
+                        with action_cols[0]:
+                            if url.startswith(("http://", "https://")):
+                                st.link_button("Open", url, width="stretch")
+                        with action_cols[1]:
+                            if st.button(
+                                "Use story",
+                                type="primary",
+                                width="stretch",
+                                key=f"cricket_desk_{bucket}_{index}_{candidate.get('story_key', index)}",
+                            ):
+                                remember_callback(candidate)
+                                st.session_state.pending_candidate = dict(candidate)
+                                st.session_state.visual_search_queries = ""
+                                st.session_state.visual_query_story_key = ""
+                                st.session_state.visual_query_suggestions = []
+                                st.session_state.visual_query_field_count = 0
+                                st.rerun()
