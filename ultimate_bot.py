@@ -2259,8 +2259,16 @@ def run_robot(web_config=None):
 
         # The script router owns the one bounded pre-review duration repair.
         # This remains a fail-closed assertion in case an alternate binding bypasses it.
-        persona_key = str(script_data.get("persona_used") or "LISTICLE HOST").upper()
-        persona_profile = PERSONA_PROFILES.get(persona_key, PERSONA_PROFILES["LISTICLE HOST"])
+        delivery_profile = str(
+            script_data.get("delivery_profile")
+            or script_data.get("persona_used")
+            or "LISTICLE HOST"
+        ).strip().upper()
+        persona_profile = PERSONA_PROFILES.get(
+            delivery_profile,
+            PERSONA_PROFILES["LISTICLE HOST"],
+        )
+        script_data["delivery_profile"] = delivery_profile
         duration_estimate = estimate_narration_duration(script_data, persona_profile)
         script_data["estimated_duration_seconds"] = duration_estimate["seconds"]
         script_data["estimated_duration_word_count"] = duration_estimate["word_count"]
