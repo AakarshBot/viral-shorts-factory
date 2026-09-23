@@ -1049,7 +1049,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 "messages": messages,
                 "response_format": {"type": "json_object"},
                 "temperature": 0.2,
-                "max_tokens": 700,
+                "max_tokens": 450,
             },
             timeout=30,
         )
