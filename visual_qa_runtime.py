@@ -10,7 +10,6 @@ import hashlib
 import io
 import os
 import threading
-import time
 
 from PIL import Image
 
@@ -212,7 +211,6 @@ def strict_gemini_check_batch(
     tier="IDENTITY",
     visual_type="",
     visual_genre="",
-    _allow_transient_retry=True,
 ):
     """Verify several candidates for the same subject in one entity-only Gemini call."""
     state = _qa_state()
@@ -308,35 +306,16 @@ def strict_gemini_check_batch(
         return results
     except Exception as exc:
         msg = str(exc).lower()
-        transient_503 = any(
+        if any(
             token in msg
             for token in ("503", "unavailable", "deadline expired", "deadline exceeded")
-        )
-        if transient_503 and _allow_transient_retry and len(uncached) >= 4:
-            midpoint = max(1, len(uncached) // 2)
-            retry_groups = (uncached[:midpoint], uncached[midpoint:])
+        ):
+            state.last_failure = "transient_unavailable"
             print(
-                f"   [Visual QA] ENTITY-BATCH transient 503/deadline; "
-                f"retrying once as {len(retry_groups[0])}+{len(retry_groups[1])} smaller batch(es).",
+                f"   [Visual QA] ENTITY-BATCH transient failure: {type(exc).__name__}: {exc}; "
+                "candidate verification left uncertain; no retry fan-out.",
                 flush=True,
             )
-            time.sleep(2)
-            for retry_group in retry_groups:
-                if not retry_group:
-                    continue
-                retry_results = strict_gemini_check_batch(
-                    [data for _index, data, _key in retry_group],
-                    entity,
-                    api_key,
-                    tier=tier,
-                    visual_type=visual_type,
-                    visual_genre=visual_genre,
-                    _allow_transient_retry=False,
-                )
-                for local_index, verdict in retry_results.items():
-                    original_index = retry_group[int(local_index)][0]
-                    results[original_index] = verdict
-            state.last_failure = ""
             return results
 
         if any(x in msg for x in ("429", "quota", "resource exhausted", "rate limit")):
