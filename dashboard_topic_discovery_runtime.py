@@ -580,7 +580,7 @@ def discover_dashboard_topics(
     max_candidates: int = 60,
 ) -> list[dict]:
     """Collect and rank the dashboard portfolio without production gates."""
-    max_candidates = max(1, min(28, int(max_candidates or 28)))
+    max_candidates = max(1, min(60, int(max_candidates or 60)))
     cache_key = _dashboard_discovery_cache_key(
         genre_key,
         requested_topic,
@@ -644,7 +644,7 @@ def discover_dashboard_topics(
         target_language=target_language,
         social_titles=social_titles,
         ai_cricket=ai_cricket,
-        max_candidates=max(1, min(28, int(max_candidates or 28))),
+        max_candidates=max_candidates,
     )
     print(
         f"   [Dashboard Discovery v2] final dashboard topics={len(selected)}",
