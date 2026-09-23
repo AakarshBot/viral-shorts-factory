@@ -80,24 +80,6 @@ def _install_visual_cache_safety():
 
 
 
-def _wrap_editorial_provider_usage(bot):
-    current = getattr(bot, "editorial_gate_batch", None)
-    if current is None or getattr(current, "_gemini_editorial_guarded", False):
-        return current
-
-    def guarded(stories, bonuses, last_genre, format_mode):
-        original_key = getattr(bot, "GEMINI_API_KEY", None)
-        bot.GEMINI_API_KEY = None
-        try:
-            return current(stories, bonuses, last_genre, format_mode)
-        finally:
-            bot.GEMINI_API_KEY = original_key
-
-    guarded._gemini_editorial_guarded = True
-    bot.editorial_gate_batch = guarded
-    return guarded
-
-
 def _wrap_content_first_visuals(bot):
     try:
         from visual_content_runtime import patch_content_first_visuals
@@ -163,7 +145,6 @@ def bind_dashboard_patches(bot):
         patch_editorial_scoring(bot)
     except Exception as exc:
         print(f"   [Bindings] Corrected editorial scoring unavailable: {exc}", flush=True)
-    _wrap_editorial_provider_usage(bot)
     _install_script_pipeline(bot)
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
