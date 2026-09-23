@@ -132,3 +132,41 @@ def test_groq_overlong_rewrite_finishes_with_deterministic_ceiling(monkeypatch):
     assert result is not None
     assert estimate_narration_duration(result, {"rate": "0%"})["seconds"] <= 35.0
     assert result["duration_compression_provider"] == "groq_then_deterministic"
+
+
+def test_extremely_long_valid_script_has_last_resort_hard_ceiling(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    script = {
+        "editorial_angle": "Explain the confirmed development and its immediate consequence.",
+        "script": [
+            {
+                "voiceover": "India confirmed the squad change before the next assignment, and officials explained the decision during the latest review.",
+                "narrative_role": "hook",
+            },
+            {
+                "voiceover": "Officials reviewed medical information, selection reports, preparation data, player availability, training requirements, replacement options, travel plans, scheduling details, and the wider tournament context before confirming the change.",
+                "narrative_role": "development",
+            },
+            {
+                "voiceover": "The decision matters because the original squad plan had already been communicated, the preparation schedule had been built around it, the replacement has a different role, and the coaching staff now has to adjust several parts of the plan.",
+                "narrative_role": "context",
+            },
+            {
+                "voiceover": "The immediate consequence is that the squad must change its preparation, the replacement must adapt quickly, and the team's next assignment now begins with a different combination of players and responsibilities.",
+                "narrative_role": "consequence",
+            },
+        ],
+    }
+
+    result = tighten_script_for_duration_once(
+        script,
+        {"title": "India confirms squad change"},
+        {},
+        "regular",
+        target_seconds=30.0,
+        persona_profile={"rate": "0%"},
+    )
+
+    assert result is not None
+    assert result.get("duration_compression_emergency") is True
+    assert estimate_narration_duration(result, {"rate": "0%"})["seconds"] <= 35.0
