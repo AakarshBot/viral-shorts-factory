@@ -1320,7 +1320,7 @@ def collect_manual_visual_search(
     # Results are merged on the main thread in provider-plan order, preserving
     # deterministic ranking/deduplication while removing cumulative provider waits.
     provider_jobs = []
-    for source_index, (source_name, fetcher) in enumerate(source_plan):
+    for source_index, (source_name, fetcher) in enumerate(source_plan[:2]):
         if not callable(fetcher):
             continue
         source_key = str(source_name or "").strip().casefold()
