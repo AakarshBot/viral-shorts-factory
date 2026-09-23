@@ -3,8 +3,6 @@
 import json
 import os
 import re
-import urllib.request
-import requests
 from difflib import SequenceMatcher
 
 _RETENTION_BAIT_RE = tuple(
@@ -958,100 +956,6 @@ def _ground_visual_scene_entities(script_data, story_data):
             scene["visual_entity_grounded"] = True
 
     return changed
-
-
-def _originality_json(raw):
-    text = str(raw or "").strip()
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else None
-    except Exception:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        try:
-            value = json.loads(match.group(0)) if match else None
-            return value if isinstance(value, dict) else None
-        except Exception:
-            return None
-
-
-def _originality_llm(url, payload, headers):
-    try:
-        request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=30) as response:
-            body = json.loads(response.read().decode())
-        return _originality_json(body.get("choices", [{}])[0].get("message", {}).get("content", ""))
-    except Exception:
-        return None
-
-
-def _normalise_critique(value, provider):
-    unsupported = value.get("unsupported_claims") if isinstance(value.get("unsupported_claims"), list) else []
-    exaggerations = value.get("exaggerations") if isinstance(value.get("exaggerations"), list) else []
-    fixes = value.get("fixes") if isinstance(value.get("fixes"), list) else []
-    try: score = float(value.get("score"))
-    except (TypeError, ValueError): score = None
-    return {"score": score, "unsupported_claims": [str(x).strip() for x in unsupported if str(x).strip()], "exaggerations": [str(x).strip() for x in exaggerations if str(x).strip()], "fixes": [str(x).strip() for x in fixes if str(x).strip()], "provider": provider}
-
-
-def _run_real_critique(script_data, story_data):
-    script_text = "\n".join(
-        str(s.get("voiceover") or "").strip()
-        for s in script_data.get("script") or []
-        if isinstance(s, dict) and not s.get("human_contributed")
-    )
-    evidence = "\n\n".join(_originality_sources(story_data)[:12])
-    instructions = (
-        "Return ONLY JSON with keys score, unsupported_claims, exaggerations, fixes. "
-        "unsupported_claims are claims not supported by evidence; exaggerations are overstated wording; "
-        "fixes are concrete corrections. Do not invent criticism."
-    )
-    user_content = "SCRIPT:\n" + script_text + "\n\nEVIDENCE:\n" + evidence[:18000]
-
-    groq = str(os.getenv("GROQ_API_KEY") or "").strip()
-    if groq:
-        result = _originality_llm(
-            "https://api.groq.com/openai/v1/chat/completions",
-            {
-                "model": "openai/gpt-oss-120b",
-                "messages": [
-                    {"role": "system", "content": instructions},
-                    {"role": "user", "content": user_content},
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0,
-            },
-            {"Authorization": "Bearer " + groq, "Content-Type": "application/json"},
-        )
-        if result is not None:
-            return _normalise_critique(result, "groq")
-
-    gemini = str(os.getenv("GEMINI_API_KEY") or "").strip()
-    if gemini:
-        result = _originality_llm(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
-            {
-                "contents": [{
-                    "parts": [{
-                        "text": instructions + "\n\n" + user_content
-                    }]
-                }],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "temperature": 0,
-                },
-            },
-            {"x-goog-api-key": gemini, "Content-Type": "application/json"},
-        )
-        if result is not None:
-            return _normalise_critique(result, "gemini")
-
-    return {
-        "score": None,
-        "unsupported_claims": ["Critique provider unavailable."],
-        "exaggerations": [],
-        "fixes": ["Run critique with Groq or Gemini."],
-        "provider": "unavailable",
-    }
 
 
 def append_research_sources(description, research_sources, max_chars=5000):
