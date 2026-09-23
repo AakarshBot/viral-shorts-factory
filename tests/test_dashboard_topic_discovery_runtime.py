@@ -225,6 +225,39 @@ def test_ai_topic_path_uses_dashboard_discovery_v2(monkeypatch):
     assert calls[0]["target_category"] == "sports"
 
 
+def test_dashboard_discovery_can_request_full_sixty_topic_portfolio(monkeypatch):
+    discovery._DASHBOARD_DISCOVERY_CACHE.clear()
+    calls = {}
+
+    monkeypatch.setattr(
+        discovery,
+        "_collect_articles",
+        lambda *args, **kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        discovery,
+        "cluster_news_events",
+        lambda rows: [],
+    )
+
+    def fake_rank(events, **kwargs):
+        calls["max_candidates"] = kwargs["max_candidates"]
+        return []
+
+    monkeypatch.setattr(discovery, "_rank_dashboard_events", fake_rank)
+
+    discovery.discover_dashboard_topics(
+        bot=type("Bot", (), {})(),
+        genre_key="sports",
+        genre_cfg={},
+        target_category="sports",
+        max_candidates=60,
+    )
+
+    assert calls["max_candidates"] == 60
+    discovery._DASHBOARD_DISCOVERY_CACHE.clear()
+
+
 def test_dashboard_discovery_short_cache_avoids_duplicate_provider_sweep(monkeypatch):
     discovery._DASHBOARD_DISCOVERY_CACHE.clear()
     calls = {"collect": 0}
