@@ -175,3 +175,170 @@ def test_router_error_contract_contains_provider_reasons():
     assert 'attempt_reasons = []' in source
     assert 'unknown failure' not in source
     assert 'returned no script candidate.' in source
+
+
+def test_groq_primary_writer_uses_current_gpt_oss_request_contract(monkeypatch):
+    import json
+    import ultimate_bot
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+
+    result_payload = _valid_script()
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(result_payload),
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
+
+    result = ultimate_bot.write_script(
+        {
+            "title": "India squad change",
+            "research_evidence_text": (
+                "Officials confirmed a major squad change after the latest review. "
+                "The decision changes preparation for the next assignment."
+            ),
+        },
+        {"script_instruction": "Write all narration in English."},
+        "sports_stories_of_day",
+        None,
+        "regular",
+    )
+
+    assert result["script"]
+    assert len(calls) == 1
+    payload = calls[0][1]["json"]
+    assert payload["model"] == "openai/gpt-oss-120b"
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["include_reasoning"] is False
+    assert payload["reasoning_effort"] == "low"
+    assert payload["max_completion_tokens"] == 900
+    assert "max_tokens" not in payload
+
+
+def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(monkeypatch):
+    import json
+    import ultimate_bot
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+    result_payload = _valid_script()
+
+    class FakeResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+            self.text = '{"error":{"message":"unsupported parameter"}}'
+
+        def json(self):
+            if self.status_code == 400:
+                return {"error": {"message": "unsupported parameter"}}
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(result_payload),
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, **kwargs):
+        calls.append(kwargs["json"])
+        return FakeResponse(400 if len(calls) == 1 else 200)
+
+    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
+
+    result = ultimate_bot.write_script(
+        {
+            "title": "India squad change",
+            "research_evidence_text": (
+                "Officials confirmed a major squad change after the latest review. "
+                "The decision changes preparation for the next assignment."
+            ),
+        },
+        {"script_instruction": "Write all narration in English."},
+        "sports_stories_of_day",
+        None,
+        "regular",
+    )
+
+    assert result["script"]
+    assert len(calls) == 2
+    assert "response_format" in calls[0]
+    assert "response_format" not in calls[1]
+    assert calls[1]["messages"][0]["role"] == "user"
+
+
+def test_router_includes_gemini_as_a_configured_script_fallback():
+    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"Gemini", lambda: rr._gemini_script_fallback' in source
+
+
+def test_fallback_prompt_uses_the_current_duration_contract():
+    import research_runtime
+
+    prompt = research_runtime._fallback_prompt(
+        {"script_instruction": "Write all narration in English."},
+        "regular",
+        {},
+    )
+    assert "55–65 spoken words" in prompt
+    assert "90-word safety ceiling" in prompt
+    assert "55–60 words" not in prompt
+
+
+def test_local_ollama_preflight_rejects_an_uninstalled_explicit_model(monkeypatch):
+    import json
+    import research_runtime
+
+    monkeypatch.delenv("VSF_REMOTE_MODE", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("OLLAMA_SCRIPT_MODEL", "missing-model")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"models": [{"name": "llama3.2:latest"}]}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url.endswith("/api/tags")
+        return FakeResponse()
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+
+    try:
+        research_runtime._ollama_script_fallback(
+            {"research_evidence_text": "Enough evidence for a test."},
+            {"script_instruction": "English."},
+            "technology",
+            "regular",
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "missing-model" in message
+        assert "llama3.2:latest" in message
+    else:
+        raise AssertionError("An explicitly configured missing Ollama model must fail clearly.")
