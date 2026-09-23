@@ -75,47 +75,32 @@ def _install_visual_cache_safety():
         print("   [Bindings] Visual cache safety guard installed.", flush=True)
         return True
     except Exception as exc:
-        print(f"   [Bindings] Visual cache safety guard unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return False
+        raise RuntimeError(
+            f"Visual cache safety guard could not be installed: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 
 def _wrap_content_first_visuals(bot):
-    try:
-        from visual_content_runtime import patch_content_first_visuals
-        return patch_content_first_visuals(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Content-first visual runtime unavailable: {exc}", flush=True)
-        return getattr(bot, "process_visuals_async", None)
+    from visual_content_runtime import patch_content_first_visuals
+    return patch_content_first_visuals(bot)
 
 
 def _patch_audio_direction(bot):
-    try:
-        from audio_direction_runtime import patch_audio_direction
-        return patch_audio_direction(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Audio direction patch unavailable: {exc}", flush=True)
-        return getattr(bot, "generate_voiceover_and_timestamps", None)
+    from audio_direction_runtime import patch_audio_direction
+    return patch_audio_direction(bot)
 
 
 def _patch_subtitles(bot):
-    try:
-        from subtitle_runtime import patch_subtitle_pipeline
-        return patch_subtitle_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Subtitle runtime unavailable: {exc}", flush=True)
-        return getattr(bot, "generate_karaoke_clip", None)
+    from subtitle_runtime import patch_subtitle_pipeline
+    return patch_subtitle_pipeline(bot)
 
 
 
 
 def _install_script_pipeline(bot):
-    try:
-        from script_router_runtime import install_script_pipeline
-        return install_script_pipeline(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Canonical script pipeline unavailable: {exc}", flush=True)
-        return getattr(bot, "write_script", None)
+    from script_router_runtime import install_script_pipeline
+    return install_script_pipeline(bot)
 
 
 def bind_dashboard_patches(bot):
@@ -148,21 +133,15 @@ def bind_dashboard_patches(bot):
     _install_script_pipeline(bot)
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
-    try:
-        from final_qc_runtime import patch_workflow_qc
-        patch_workflow_qc(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Final QC runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
+    from final_qc_runtime import patch_workflow_qc
+    patch_workflow_qc(bot)
     try:
         from channel_intelligence_runtime import install_channel_intelligence_dialog
         install_channel_intelligence_dialog()
     except Exception as exc:
         print(f"   [Bindings] Channel intelligence runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-    try:
-        from production_hardening_runtime import install_production_hardening
-        install_production_hardening(bot)
-    except Exception as exc:
-        print(f"   [Bindings] Production hardening unavailable: {type(exc).__name__}: {exc}", flush=True)
+    from production_hardening_runtime import install_production_hardening
+    install_production_hardening(bot)
     _patch_subtitles(bot)
 
     # Keep run_robot's production globals aligned with the live bot bindings.
