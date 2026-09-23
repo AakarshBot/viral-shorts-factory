@@ -50,7 +50,7 @@ def test_initial_script_rejects_more_than_65_voiceover_words():
     ok, reason = validate_content_density(script, {}, "regular")
 
     assert ok is False
-    assert "maximum is 65" in reason
+    assert "maximum is 62" in reason
 
 
 def test_initial_script_rejects_a_long_first_scene():
