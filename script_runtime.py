@@ -1286,7 +1286,10 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         # distinct ranked beats instead of flattening them into arbitrary prose.
         fallback_sentences = [title] + list(sentences[:5]) if title else list(sentences[:5])
     else:
-        fallback_sentences = list(sentences)
+        # Regular Shorts have a hard 3/4-scene release contract. Keep the
+        # strongest four source-grounded beats at most; never create extra scenes
+        # just because extraction found more sentences.
+        fallback_sentences = list(sentences[:4])
         # The emergency path should still open with the concrete story headline,
         # not with source boilerplate or a generic setup sentence. Replace the
         # first source beat rather than adding a new scene.
@@ -1326,6 +1329,7 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         "step_2_data_points": raw_source,
         "step_3_critique": "Deterministic source-grounded emergency fallback.",
         "step_4_metadata": entity,
+        "creator_insight": f"The documented development centers on {title}.",
         "editorial_angle": "Emergency source-only mode; original editorial analysis was not generated.",
         "titles": [title, f"{title} | What We Know", f"{title} | Latest Facts"],
         "recommended_title_index": 1,
