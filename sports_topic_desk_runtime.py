@@ -136,6 +136,18 @@ def _is_cricket(item):
         for marker in ("r/cricket", "r/indiacricket", "cricketshitpost", "cricket", "bsky")
     ):
         return True
+    if any(
+        marker in source_hint
+        for marker in (
+            "icc-cricket.com",
+            "bcci.tv",
+            "cricbuzz",
+            "wisden",
+            "espncricinfo",
+            "cricinfo.com",
+        )
+    ):
+        return True
     return False
 
 
@@ -602,7 +614,7 @@ def _normalise_rows(rows):
         if not safe:
             continue
         if not item.get("social_post"):
-            if not sr._source_page_pass(item) or not sr._headline_noise_pass(item):
+            if not sr._source_page_pass(item):
                 continue
             if not sr._cricket_service_title_pass(item):
                 continue
@@ -873,7 +885,10 @@ def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topi
         rows = [
             x for x in rows
             if x.get("social_post")
-            or any(term in _clean(" ".join(str(x.get(k) or "") for k in ("title","text","description"))).casefold() for term in ("india","bcci","pakistan","sri lanka","bangladesh","asia"))
+            or any(term in _clean(" ".join(str(x.get(k) or "") for k in ("title","text","description"))).casefold() for term in (
+                "india", "bcci", "pakistan", "sri lanka", "bangladesh",
+                "japan", "afghanistan", "nepal", "uae", "asia",
+            ))
         ]
     concepts = _cluster(rows)
     articles = []
