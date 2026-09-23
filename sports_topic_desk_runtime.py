@@ -615,9 +615,7 @@ def _merge_same_matchup_events(events):
 
         match = None
         for candidate_group in groups:
-            if len(candidate_group) != 1:
-                continue
-            base = candidate_group[0]
+            base = candidate_group[-1]
             base_family = _clean(
                 base.get("cricket_event_family") or sr._cricket_event_family(base)
             )
