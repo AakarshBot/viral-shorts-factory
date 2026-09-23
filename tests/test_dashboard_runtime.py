@@ -1734,13 +1734,6 @@ def test_script_review_accepts_unchanged_or_human_edited_script(monkeypatch):
         lambda data, *_args: {"recommended_title_index": data.get("recommended_title_index", 1), "scores": []},
     )
     monkeypatch.setattr(script_runtime, "check_script_originality", lambda *_args: {"passed": True, "failures": []})
-    monkeypatch.setattr(script_runtime, "_run_real_critique", lambda *_args: {
-        "score": 9,
-        "unsupported_claims": [],
-        "exaggerations": [],
-        "fixes": [],
-        "provider": "test",
-    })
 
     reviewed = controller.snapshot()["script_data"]
     reviewed = dict(reviewed)
