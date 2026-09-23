@@ -535,16 +535,15 @@ def _collect(scope="India / Asia"):
             )
             secondary_jobs[future] = label
 
-        # Both pools are running concurrently. The effective desk latency is the
-        # slower primary/secondary bound, not their sum.
-        primary_done, primary_pending = wait(
-            list(primary_jobs),
-            timeout=PRIMARY_DESK_TIMEOUT,
-        )
-        secondary_done, secondary_pending = wait(
-            list(secondary_jobs),
-            timeout=SECONDARY_DESK_TIMEOUT,
-        )
+        # Both pools are already running concurrently. Use one combined deadline
+        # equal to the slower lane rather than waiting one timeout after the other.
+        all_jobs = tuple(primary_jobs) + tuple(secondary_jobs)
+        deadline = max(PRIMARY_DESK_TIMEOUT, SECONDARY_DESK_TIMEOUT)
+        done, pending = wait(all_jobs, timeout=deadline)
+        primary_done = {future for future in done if future in primary_jobs}
+        secondary_done = {future for future in done if future in secondary_jobs}
+        primary_pending = {future for future in pending if future in primary_jobs}
+        secondary_pending = {future for future in pending if future in secondary_jobs}
 
         rows = []
         counts = {label: 0 for label in {
@@ -575,7 +574,7 @@ def _collect(scope="India / Asia"):
             except Exception as exc:
                 failures.append(f"{label}:{type(exc).__name__}")
 
-        for future in (*primary_pending, *secondary_pending):
+        for future in pending:
             label = primary_jobs.get(future) or secondary_jobs.get(future) or "unknown"
             future.cancel()
             failures.append(f"{label}:timeout")
