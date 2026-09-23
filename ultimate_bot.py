@@ -1008,7 +1008,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Never copy any complete sentence verbatim from the evidence. "
         "Do not invent facts, quotes, motives, numbers, or outcomes.\n\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
-        "- Voiceover total: 55–65 words. Never exceed 65 words.\n"
+        "- Voiceover total: 55–62 words. Never exceed 62 words.\n"
         "- Scene 1: 8–14 words, a factual headline, and the shortest scene.\n"
         "- Prefer 3 or 4 scenes. Each later scene should carry the substance; do not pad scene 1.\n"
         "- The entire narration must naturally fit below 30 seconds at the factory's configured voice rate.\n"
