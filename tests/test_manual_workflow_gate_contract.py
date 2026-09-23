@@ -85,6 +85,7 @@ def test_dashboard_manual_visual_gate_is_core_and_blocks_render_until_approved(t
 
     assert thread.is_alive()
     assert controller.snapshot()["visual_review_required"] is True
+    assert controller.approve_visual(1)[0] is True
     assert controller.approve_visuals() is True
 
     thread.join(timeout=2)
