@@ -1044,7 +1044,8 @@ def self_critique_pass(script_data, format_mode):
 
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     """Generate one compact original script; the router may request one bounded duration repair."""
-    print(f"\n✍️ Generating Original Editorial Script ({str(format_mode).upper()} MODE)...")
+    format_mode_key = str(format_mode or "").strip().lower()
+    print(f"\n✍️ Generating Original Editorial Script ({format_mode_key.upper()} MODE)...")
 
     research_evidence_text = str(story_data.get("research_evidence_text", "") or "").strip()
     if research_evidence_text:
