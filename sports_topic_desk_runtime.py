@@ -8,6 +8,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
+from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -15,7 +16,7 @@ import requests
 import story_ranker as sr
 from event_discovery_runtime import fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "cricket-desk-v5-2026-09-23"
+SPORTS_DESK_VERSION = "cricket-desk-v6-2026-09-23"
 LOOKBACK_HOURS = 72
 # Primary factual collection has its own bounded lane so social/trend work cannot
 # occupy the workers needed for the actual news sources.
@@ -87,13 +88,39 @@ def _clean(value):
 
 
 def _age_hours(value):
-    try:
-        parsed = sr._parse_dt(value)
-        if parsed is None:
-            return 9999.0
-        return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0)
-    except Exception:
+    """Parse RSS/ISO publication timestamps without depending on a missing shared helper."""
+    raw = _clean(value)
+    if not raw:
         return 9999.0
+
+    parsed = None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        pass
+
+    if parsed is None:
+        try:
+            parsed = parsedate_to_datetime(raw)
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    if parsed is None:
+        for fmt in ("%Y%m%d%H%M%S", "%Y%m%dT%H%M%S", "%Y%m%dT%H%M%SZ"):
+            try:
+                parsed = datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                continue
+
+    if parsed is None:
+        return 9999.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(
+        0.0,
+        (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() / 3600.0,
+    )
 
 
 def _is_cricket(item):
