@@ -248,9 +248,9 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
         else "- A regular Short MUST contain 3 or 4 scenes: hook, development/context, and consequence/payoff.\n"
     )
     word_contract = (
-        "- Target roughly 65–75 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
+        "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
         if top5
-        else "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
+        else "- Target roughly 50–60 spoken words; never exceed the 90-word safety ceiling.\n"
     )
     return (
         "You are the backup original-news Shorts writer. Use only the supplied evidence and never copy a complete "
