@@ -8,8 +8,8 @@ The production path is deliberately single-owner:
 5) perform originality QC once,
 6) return one authoritative script.
 
-Duration control lives in run_robot(), where the already validated script is
-compressed in one lightweight pass. No second research pass is allowed for that rewrite.
+There is no post-acceptance rewrite or duration-compression pass. Overlong or
+non-original provider output is rejected before manual review and TTS.
 """
 
 from __future__ import annotations
@@ -242,20 +242,10 @@ def install_script_pipeline(bot):
             print(f"   [Script Pipeline] {last_reason}", flush=True)
 
         if accepted is None:
-            print(
-                "   [Script Pipeline] Provider chain exhausted; using source-grounded emergency fallback.",
-                flush=True,
+            raise ValueError(
+                "Script acceptance gate failed after every original-writing provider: "
+                + (last_reason or "unknown failure")
             )
-            fallback = pir.strict_fallback(data, language_cfg, genre_key, format_mode)
-            validated, reason = _validate_script_result(fallback, data, format_mode)
-            if validated is None:
-                raise ValueError(
-                    "Script acceptance gate failed after every provider/recovery path: "
-                    + (reason or last_reason or "unknown failure")
-                )
-            accepted = validated
-            accepted["provider_used"] = "strict_source_fallback"
-            accepted["public_publish_blocked"] = True
 
         if evidence_fallback_used:
             accepted["public_publish_blocked"] = True
