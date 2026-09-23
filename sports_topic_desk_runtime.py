@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor, wait
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
@@ -14,37 +14,38 @@ import requests
 import story_ranker as sr
 from event_discovery_runtime import fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "cricket-desk-v1-2026-09-23"
+SPORTS_DESK_VERSION = "cricket-desk-v2-2026-09-23"
 LOOKBACK_HOURS = 72
-DESK_TIMEOUT = 8.0
-REQUEST_TIMEOUT = 4.0
+DESK_TIMEOUT = 7.0
+REQUEST_TIMEOUT = 2.5
 PER_BUCKET = 10
+SOURCE_TIMEOUT = 2.2
+
+DIRECT_CRICKET_SOURCES = (
+    ("ICC", "https://www.icc-cricket.com/index?feed=rss2", "rss"),
+    ("BCCI", "https://www.bcci.tv/news", "listing"),
+    ("Cricbuzz", "https://www.cricbuzz.com/cricket-news/latest-news", "listing"),
+    ("Wisden", "https://www.wisden.com/cricket-news", "listing"),
+    ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news", "listing"),
+)
 
 NEWS_QUERIES = (
     'cricket (India OR BCCI OR ICC) (selection OR injury OR retirement OR appointment OR ban OR investigation OR contract OR debut)',
-    'cricket (India OR Pakistan OR Sri Lanka OR Bangladesh) (record OR milestone OR comeback OR upset OR breakthrough OR title)',
+    'cricket (India OR Pakistan OR Sri Lanka OR Bangladesh) (record OR milestone OR comeback OR upset OR breakthrough OR controversy)',
     'cricket (Australia OR England OR South Africa OR New Zealand OR West Indies) (record OR selection OR injury OR statement OR controversy)',
     'cricket (women OR "India Women" OR WPL OR U19 OR U23 OR domestic) (record OR debut OR selection OR upset OR comeback OR milestone)',
     'cricket (umpire OR law OR rule OR decision OR sanction OR fine OR controversy OR investigation)',
     'cricket (coach OR captain OR selector OR board) (said OR says OR warned OR responds OR reveals OR comments)',
-    'cricket (uncapped OR youngster OR debutant OR domestic OR associate OR Nepal OR USA OR Scotland OR Netherlands OR Zimbabwe) (record OR breakthrough OR upset)',
-    'site:icc-cricket.com/news cricket',
-    'site:bcci.tv/news cricket',
-    'site:cricbuzz.com/cricket-news cricket',
-    'site:wisden.com/cricket-news cricket',
-    'site:espncricinfo.com cricket',
 )
 
 VIRAL_QUERIES = (
-    'cricket (viral OR trending OR bizarre OR funny OR unusual OR shocking)',
+    'cricket (viral OR trending OR bizarre OR unusual OR shocking OR unexpected)',
     'cricket (fans react OR reaction OR backlash OR debate OR praise)',
     'cricket (social media OR meme OR celebration OR moment)',
     'cricket (controversy OR row OR feud OR argument OR clash)',
-    'cricket (quote OR said OR called OR responds OR comments)',
-    'cricket (unexpected OR surprise OR comeback OR scare OR thriller)',
 )
 
-SOCIAL_QUERIES = ("cricket reaction", "cricket fans", "cricket debate", "cricket quote", "cricket meme", "cricket controversy")
+SOCIAL_QUERIES = ("cricket reaction", "cricket fans", "cricket debate")
 REDDIT_SUBREDDITS = ("Cricket", "IndiaCricket", "CricketShitpost")
 BLUESKY_QUERIES = ("cricket", '"India cricket"', '"Team India"', "cricket reaction", "cricket controversy", "cricket fans")
 MASTODON_QUERIES = ("cricket", "India cricket")
@@ -227,32 +228,180 @@ def _mastodon(query):
     return out
 
 
+def _relative_age_hours(text):
+    value = _clean(text).casefold()
+    match = re.search(r"(?<!\d)(\d{1,3})\s*(minute|minutes|min|hour|hours|hr|hrs|day|days|d|h)\s+ago\b", value)
+    if not match:
+        return None
+    amount = float(match.group(1))
+    unit = match.group(2)
+    if unit.startswith("min"):
+        return amount / 60.0
+    if unit.startswith("h"):
+        return amount
+    return amount * 24.0
+
+
+def _direct_listing_source(name, url):
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 ViralShortsFactory/2026 cricket-desk"},
+            timeout=SOURCE_TIMEOUT,
+        )
+        if response.status_code != 200:
+            return []
+        page = response.text or ""
+    except Exception:
+        return []
+
+    allowed_hosts = {
+        "ICC": ("icc-cricket.com",),
+        "BCCI": ("bcci.tv",),
+        "Cricbuzz": ("cricbuzz.com",),
+        "Wisden": ("wisden.com",),
+        "ESPNcricinfo": ("espncricinfo.com",),
+    }.get(name, ())
+    out = []
+    seen = set()
+
+    for match in re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', page, re.IGNORECASE | re.DOTALL):
+        href = _clean(match.group(1))
+        anchor = _clean(re.sub(r"<[^>]+>", " ", match.group(2)))
+        if not href or not anchor or len(anchor) < 12:
+            continue
+        if href.startswith("/"):
+            href = f"https://www.{allowed_hosts[0]}{href}" if allowed_hosts else href
+        if not href.startswith(("http://", "https://")):
+            continue
+
+        parsed = urlparse(href)
+        host = parsed.netloc.lower().removeprefix("www.")
+        if allowed_hosts and not any(host == allowed or host.endswith("." + allowed) for allowed in allowed_hosts):
+            continue
+
+        path = parsed.path.casefold()
+        if name == "BCCI" and "/news/article/" not in path:
+            continue
+        if name in {"Cricbuzz", "Wisden", "ESPNcricinfo"} and "/cricket-news/" not in path:
+            continue
+        if name == "ICC" and "/news/" not in path:
+            continue
+
+        key = sr._canonical_url(href)
+        if not key or key in seen:
+            continue
+
+        nearby = _clean(re.sub(
+            r"<[^>]+>",
+            " ",
+            page[max(0, match.start() - 1400):min(len(page), match.end() + 1800)],
+        ))
+        age = _relative_age_hours(nearby)
+        if age is None:
+            iso = re.search(r"20\d{2}-\d{2}-\d{2}(?:T[0-9:.+\-Z]+)?", nearby)
+            if iso:
+                age = _age_hours(iso.group(0))
+        if age is None or age > LOOKBACK_HOURS:
+            continue
+
+        seen.add(key)
+        published = datetime.now(timezone.utc) - timedelta(hours=age)
+        out.append({
+            "title": anchor[:220],
+            "text": nearby[:1000],
+            "description": nearby[:1000],
+            "source": name,
+            "source_name": name,
+            "publisher": name,
+            "url": href,
+            "publishedAt": published.isoformat(),
+            "collection_source": "official" if name in {"ICC", "BCCI"} else "specialist_direct",
+            "direct_source": name,
+        })
+        if len(out) >= 35:
+            break
+    return out
+
+
 def _collect():
-    jobs = []
-    pool = ThreadPoolExecutor(max_workers=24, thread_name_prefix="cricket-topic-desk")
+    jobs = {}
+    pool = ThreadPoolExecutor(max_workers=20, thread_name_prefix="cricket-topic-desk")
     try:
         for query in NEWS_QUERIES + VIRAL_QUERIES + SOCIAL_QUERIES:
-            jobs.append(pool.submit(sr._google_news_search_items, query, "sports_stories_of_day", 25))
-        for query in SOCIAL_QUERIES:
-            for subreddit in REDDIT_SUBREDDITS:
-                jobs.append(pool.submit(_reddit_search, subreddit, query))
-        for query in BLUESKY_QUERIES:
-            jobs.append(pool.submit(_bluesky, query))
+            future = pool.submit(sr._google_news_search_items, query, "sports_stories_of_day", 25)
+            jobs[future] = "Google News"
+
+        for name, url, kind in DIRECT_CRICKET_SOURCES:
+            if kind == "rss":
+                future = pool.submit(sr._rss_items, url, "sports_stories_of_day", "official", 35)
+            else:
+                future = pool.submit(_direct_listing_source, name, url)
+            jobs[future] = name
+
+        for subreddit in REDDIT_SUBREDDITS:
+            future = pool.submit(_reddit_search, subreddit, "cricket")
+            jobs[future] = f"Reddit r/{subreddit}"
+
+        for query in BLUESKY_QUERIES[:4]:
+            future = pool.submit(_bluesky, query)
+            jobs[future] = "Bluesky"
+
         for query in MASTODON_QUERIES:
-            jobs.append(pool.submit(_mastodon, query))
+            future = pool.submit(_mastodon, query)
+            jobs[future] = "Mastodon"
+
         for geo in TREND_GEOS:
-            jobs.append(pool.submit(sr._google_trends_items, geo, 20))
-        jobs.extend([
-            pool.submit(fetch_gdelt_articles, "cricket India selection injury record controversy quotes", timespan="72h", max_records=60, timeout=2.5),
-            pool.submit(fetch_gdelt_articles, "cricket women domestic associate social reaction", timespan="72h", max_records=60, timeout=2.5),
-        ])
-        done, _ = wait(jobs, timeout=DESK_TIMEOUT)
+            future = pool.submit(sr._google_trends_items, geo, 20)
+            jobs[future] = f"Google Trends {geo}"
+
+        jobs[pool.submit(
+            fetch_gdelt_articles,
+            "cricket India selection injury record controversy quotes",
+            timespan="72h",
+            max_records=60,
+            timeout=1.5,
+        )] = "GDELT India"
+        jobs[pool.submit(
+            fetch_gdelt_articles,
+            "cricket women domestic associate social reaction",
+            timespan="72h",
+            max_records=60,
+            timeout=1.5,
+        )] = "GDELT wider"
+
+        done, pending = wait(list(jobs), timeout=DESK_TIMEOUT)
         rows = []
+        counts = {}
+        failures = []
+
         for future in done:
+            label = jobs[future]
             try:
-                rows.extend(future.result() or [])
-            except Exception:
-                pass
+                values = future.result() or []
+                rows.extend(values)
+                counts[label] = counts.get(label, 0) + len(values)
+            except Exception as exc:
+                failures.append(f"{label}:{type(exc).__name__}")
+
+        for future in pending:
+            label = jobs[future]
+            future.cancel()
+            failures.append(f"{label}:timeout")
+            counts.setdefault(label, 0)
+
+        compact_counts = ", ".join(
+            f"{label}={count}" for label, count in sorted(counts.items())
+        )
+        print(
+            f"   [Cricket Desk] Raw source intake: {compact_counts or 'none'}",
+            flush=True,
+        )
+        if failures:
+            print(
+                f"   [Cricket Desk] Source issues: {', '.join(failures[:12])}",
+                flush=True,
+            )
         return rows
     finally:
         for future in jobs:
@@ -277,8 +426,9 @@ def _normalise_rows(rows):
                 continue
             if not sr._cricket_service_title_pass(item):
                 continue
-            if not sr._story_substance_pass(item, minimum_body_chars=90):
-                continue
+            if item.get("collection_source") not in {"official", "specialist_direct"}:
+                if not sr._story_substance_pass(item, minimum_body_chars=90):
+                    continue
         url = _clean(item.get("url") or item.get("link"))
         canonical = sr._canonical_url(url)
         key = canonical or ("title:" + _clean(item.get("title")).casefold())
@@ -482,6 +632,8 @@ def _bucketize(concepts):
 
 def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=30, retained_candidates=None):
     raw = _collect()
+    if isinstance(raw, dict):
+        raw = raw.get("rows") or []
     trend_rows = [row for row in raw if isinstance(row, dict) and row.get("collection_source") == "google_trends"]
     rows = _normalise_rows([row for row in raw if not (isinstance(row, dict) and row.get("collection_source") == "google_trends")])
     scope_key = _clean(scope).casefold()
