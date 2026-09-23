@@ -276,13 +276,19 @@ def _openalex_sources(story: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def discover_sources(story: Dict[str, Any], max_sources: int = DEFAULT_MAX_SOURCES) -> List[Dict[str, Any]]:
-    """Find real source URLs. Discovery snippets never become script evidence."""
+    """Find real source URLs while avoiding redundant discovery when event evidence already fills the source budget."""
+    try:
+        limit = max(1, int(max_sources or DEFAULT_MAX_SOURCES))
+    except (TypeError, ValueError):
+        limit = DEFAULT_MAX_SOURCES
+
     candidates = []
     for item in story.get("event_evidence") or []:
         if isinstance(item, dict):
             copy = dict(item)
             copy.setdefault("discovery_provider", "event")
             candidates.append(make_source(copy, "event_source"))
+
     original = clean(story.get("url") or story.get("link"))
     if original:
         candidates.append(make_source({
@@ -293,25 +299,27 @@ def discover_sources(story: Dict[str, Any], max_sources: int = DEFAULT_MAX_SOURC
             "discovery_provider": "event",
             "published_at": story.get("publishedAt") or story.get("published_at"),
         }, "event_source"))
+
+    base = _distinct_sources(candidates)
+    if len(base) >= limit:
+        return base[:limit]
+
     query = event_query(story)
+    if not query:
+        return base[:limit]
+
     if science_story(story):
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence-discovery") as pool:
-            ddg_future = pool.submit(_ddg_sources, query)
-            openalex_future = pool.submit(_openalex_sources, story)
-            ddg_sources = ddg_future.result()
-            openalex_sources = openalex_future.result()
+        has_primary = any(item.get("tier") == "A" for item in base)
+        first_provider = _ddg_sources if has_primary else _openalex_sources
+        second_provider = _openalex_sources if has_primary else _ddg_sources
+        first_result = first_provider(story if first_provider is _openalex_sources else query)
+        candidates.extend(first_result)
+        if len(_distinct_sources(candidates)) < limit:
+            candidates.extend(second_provider(story if second_provider is _openalex_sources else query))
     else:
-        ddg_sources = _ddg_sources(query)
-        openalex_sources = []
+        candidates.extend(_ddg_sources(query))
 
-    candidates.extend(ddg_sources)
-    candidates.extend(openalex_sources)
-    return _distinct_sources(candidates)[:max(1, int(max_sources or DEFAULT_MAX_SOURCES))]
-
-
-class _ReadableHTMLParser(HTMLParser):
+    return _distinct_sources(candidates)[:limit]class _ReadableHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: List[str] = []
