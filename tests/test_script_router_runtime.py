@@ -583,6 +583,7 @@ def test_repeated_groq_400_stops_at_two_provider_calls(monkeypatch):
     import ultimate_bot
 
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("VSF_REMOTE_MODE", "cloud")
     calls = []
 
     class FakeResponse:
@@ -609,7 +610,7 @@ def test_repeated_groq_400_stops_at_two_provider_calls(monkeypatch):
             None,
             "regular",
         )
-    except RuntimeError as exc:
+    except ValueError as exc:
         assert "HTTP 400" in str(exc)
     else:
         raise AssertionError("Repeated 400 responses must terminate after the bounded two-call retry ceiling.")
