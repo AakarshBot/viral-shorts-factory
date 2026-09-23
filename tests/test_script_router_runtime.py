@@ -286,6 +286,7 @@ def test_primary_writer_uses_duration_first_contract():
     assert "Scene 1 is the only headline-style beat." in source
     assert "Later scenes must add new, story-specific information" in source
     assert "Normally use four scenes for a regular story" in source
+    assert "use 5" not in source
     assert "Spoken duration is authoritative" in source
     assert 'For Top-5 mode, output 6 scenes' in source
     assert "Target roughly 50–60 spoken words in Top-5 mode" in source
