@@ -310,9 +310,11 @@ def strict_gemini_check_batch(
             for token in ("503", "unavailable", "deadline expired", "deadline exceeded")
         ):
             state.last_failure = "transient_unavailable"
+            with _LOCK:
+                state.circuit_open = True
             print(
                 f"   [Visual QA] ENTITY-BATCH transient failure: {type(exc).__name__}: {exc}; "
-                "candidate verification left uncertain; no retry fan-out.",
+                "opening the visual-QA circuit for this run; no retry fan-out.",
                 flush=True,
             )
             return results
