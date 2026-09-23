@@ -50,6 +50,7 @@ def test_script_pipeline_tries_original_free_provider_before_private_extractive_
         "title": "Recovered original script",
         "creator_insight": "The documented development matters because it changes the next stage.",
         "editorial_angle": "Why the development matters",
+        "seo_description": "A factual explanation of the documented development, its context, and the immediate consequence for the affected subject.",
         "titles": [
             "Recovered original script",
             "Recovered story explained",
