@@ -58,7 +58,11 @@ _STRUCTURE_HINTS = {
 
 
 def _originality_words(text):
-    return re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", str(text or "").casefold())
+    try:
+        from unicode_runtime import unicode_words
+        return unicode_words(text)
+    except Exception:
+        return re.findall(r"\b[\w]+(?:['’][\w]+)?\b", str(text or "").casefold(), flags=re.UNICODE)
 
 
 def _originality_sources(story_data):
@@ -221,8 +225,8 @@ NARRATION_IDEAL_MAX_SECONDS = 28.0
 NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 
 # The initial writer uses a deliberately conservative spoken-word ceiling.
-# 65 words stays below 30s even at the slowest configured narrator profile.
-INITIAL_SCRIPT_MAX_WORDS = 65
+# 62 words leaves margin below 30s even at the slowest configured narrator profile.
+INITIAL_SCRIPT_MAX_WORDS = 62
 SCENE_1_MAX_WORDS = 14
 
 
@@ -234,7 +238,7 @@ def estimate_narration_duration(script_data, persona_profile=None, base_wpm=NARR
         for scene in scenes
         if isinstance(scene, dict)
     ).strip()
-    words = re.findall(r"\b[\w]+(?:['’][\w]+)?\b", text, flags=re.UNICODE)
+    words = _originality_words(text)
     word_count = len(words)
     try:
         rate = float(str((persona_profile or {}).get("rate", "0")).replace("%", "").strip() or 0)
