@@ -1033,14 +1033,14 @@ def clean_script_data(script_data, story_data, format_mode):
 
 
 def assess_release_structure(script_data, format_mode="regular"):
-    """Check production-ready narrative structure without imposing scene-count quotas."""
-    assessment = assess_narrative_completeness(script_data)
-    if not assessment.get("passed"):
-        return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
+    """Check production-ready narrative structure and the renderer contract for each format."""
     if str(format_mode or "").strip().lower() == "top5":
         scenes = script_data.get("script", []) if isinstance(script_data, dict) else []
         if len(scenes) != 6:
-            return False, "Top-5 script must contain exactly one opening beat plus five ranked entries.", assessment
+            return False, "Top-5 script must contain exactly one opening beat plus five ranked entries.", {}
+    assessment = assess_narrative_completeness(script_data)
+    if not assessment.get("passed"):
+        return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
     return True, "Narrative structure is production-ready.", assessment
 
 def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
@@ -1225,10 +1225,9 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
     for index, sentence in enumerate(fallback_sentences, 1):
         role = (
             "hook" if index == 1
-            else "development" if index == 2
-            else "context" if index == 3
             else "consequence" if index == len(fallback_sentences)
-            else ""
+            else "development" if index == 2
+            else "context"
         )
         scenes.append({
             "voiceover": sentence,
