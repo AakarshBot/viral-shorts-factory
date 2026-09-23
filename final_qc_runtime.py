@@ -123,8 +123,9 @@ def patch_workflow_qc(bot) -> bool:
     try:
         import workflow_runtime
     except Exception as exc:
-        print(f"   [Final QC] Workflow runtime unavailable: {exc}", flush=True)
-        return False
+        raise RuntimeError(
+            f"Workflow runtime unavailable for final-QC binding: {type(exc).__name__}: {exc}"
+        ) from exc
 
     controller_cls = getattr(workflow_runtime, "WorkflowController", None)
     if controller_cls is None or getattr(controller_cls, "_final_qc_patched", False):
