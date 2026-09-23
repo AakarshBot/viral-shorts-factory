@@ -629,6 +629,9 @@ def _remember_unpublished_topic(candidate: Dict[str, Any]) -> None:
 
 
 def reset_run() -> None:
+    from dashboard_topic_discovery_runtime import clear_dashboard_discovery_cache
+
+    clear_dashboard_discovery_cache()
     controller: DashboardWorkflowController = st.session_state.workflow_controller
     before_reset = controller.snapshot()
     selected_story = before_reset.get("selected_story") or {}
