@@ -1075,6 +1075,11 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         if format_mode_key == "top5"
         else "For a regular Short, output 3 or 4 scenes: hook, development/context, and consequence/payoff. "
     )
+    word_contract = (
+        "- Target roughly 65–75 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
+        if format_mode_key == "top5"
+        else "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
+    )
 
     system_prompt = (
         "You are the original-news Shorts writer for a human-reviewed video factory. "
@@ -1082,8 +1087,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "Never copy any complete sentence verbatim from the evidence. "
         "Do not invent facts, quotes, motives, numbers, or outcomes.\n\n"
         "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
-        "- Target roughly 55–65 spoken words; never exceed the 90-word safety ceiling.\n"
-        "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
+        + word_contract
+        + "- Scene 1: 8–14 words, a factual headline, and the most compact scene.\n"
         "- Keep the scene count exactly aligned with the selected format contract below; do not pad with filler.\n"
         "- Spoken duration is authoritative: keep the narration below 30 seconds at the factory's configured voice rate.\n"
         "- No intro, greeting, CTA, retention bait, generic filler, or production instructions.\n"
