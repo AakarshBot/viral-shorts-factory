@@ -238,7 +238,7 @@ def discover_ai_topics(
     from dashboard_topic_discovery_runtime import discover_dashboard_topics
     from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
 
-    max_candidates = max(1, min(28, int(max_candidates or 28)))
+    max_candidates = max(1, min(30, int(max_candidates or 30)))
     requested_topic = str(web_config.get("requested_topic", "") or "").strip()
     configured_category = str(web_config.get("category", "") or "").strip().lower()
     language = str(web_config.get("language", "english"))
@@ -274,15 +274,18 @@ def discover_ai_topics(
         max_candidates=max_candidates,
     )
 
-    ranked = _merge_retained_topics(
-        bot,
-        web_config,
-        conn,
-        ranked,
-        retained_candidates,
-        max_candidates=max_candidates,
-    )
-    pool = ranked[:max_candidates]
+    if is_cricket:
+        pool = ranked[:30]
+    else:
+        ranked = _merge_retained_topics(
+            bot,
+            web_config,
+            conn,
+            ranked,
+            retained_candidates,
+            max_candidates=max_candidates,
+        )
+        pool = ranked[:max_candidates]
 
     for rank, item in enumerate(pool, 1):
         item["discovery_rank"] = rank
@@ -313,7 +316,6 @@ def discover_ranked_topics(
     retained_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Dashboard discovery entry point using the dedicated broad-recall topic desk."""
-    from dashboard_topic_discovery_runtime import discover_dashboard_topics
     from story_ranker import _candidate_reason, _source_label, _story_key, _story_url
     from workflow_runtime import CRICKET_CATEGORIES
 
@@ -361,20 +363,32 @@ def discover_ranked_topics(
         target_category = category or genre_key
         ai_cricket = False
 
-    ranked = discover_dashboard_topics(
-        bot,
-        genre_key,
-        genre_cfg,
-        conn=conn,
-        requested_topic=requested_topic,
-        custom_rss_url=custom_rss,
-        cricket_scope=cricket_name,
-        target_category=target_category,
-        target_format=web_config.get("format_mode", "regular"),
-        target_language=language,
-        ai_cricket=ai_cricket,
-        max_candidates=max_candidates,
-    )
+    if is_cricket:
+        from sports_topic_desk_runtime import discover_cricket_topics
+        ranked = discover_cricket_topics(
+            bot=bot,
+            conn=conn,
+            scope=cricket_name,
+            requested_topic=requested_topic,
+            max_candidates=30,
+            retained_candidates=retained_candidates,
+        )
+    else:
+        from dashboard_topic_discovery_runtime import discover_dashboard_topics
+        ranked = discover_dashboard_topics(
+            bot,
+            genre_key,
+            genre_cfg,
+            conn=conn,
+            requested_topic=requested_topic,
+            custom_rss_url=custom_rss,
+            cricket_scope=cricket_name,
+            target_category=target_category,
+            target_format=web_config.get("format_mode", "regular"),
+            target_language=language,
+            ai_cricket=ai_cricket,
+            max_candidates=max_candidates,
+        )
 
     ranked = _merge_retained_topics(
         bot,

@@ -45,7 +45,7 @@ from dashboard_runtime import (
 )
 
 
-MAX_DASHBOARD_DISCOVERY_HEADLINES = 28
+MAX_DASHBOARD_DISCOVERY_HEADLINES = 30
 
 _UI_ARTIFACT_RE = re.compile(
     r"(?i)(?<![a-z0-9])_arrow(?:_(?:right|left|up|down))?(?![a-z0-9])"
@@ -2852,7 +2852,12 @@ def render_live_factory(config: Dict[str, Any], controller: DashboardWorkflowCon
                 st.rerun()
         return
 
+
     candidates = st.session_state.candidates
+    if str(config.get("category") or "").strip() == "sports_stories_of_day" and str(config.get("format_mode") or "").strip() == "cricket":
+        from sports_topic_desk_runtime import render_cricket_topic_desk
+        render_cricket_topic_desk(candidates, _ui_text, _ui_html, _remember_unpublished_topic)
+        return
     total = min(len(candidates), MAX_DASHBOARD_DISCOVERY_HEADLINES)
     page_size = 6
     page_count = max(1, (total + page_size - 1) // page_size)
