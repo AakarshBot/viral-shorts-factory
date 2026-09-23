@@ -1394,8 +1394,18 @@ def tighten_script_for_duration_once(
                 replacements[index] = voiceover
 
     if set(replacements) != {item["index"] for item in scenes}:
-        print("   [Script Duration] Compression rewrite returned incomplete scene coverage; retaining the validated draft.", flush=True)
-        return None
+        print(
+            "   [Script Duration] Compression rewrite returned incomplete scene coverage; "
+            "falling back to deterministic duration compression.",
+            flush=True,
+        )
+        return _local_duration_compression(
+            script_data,
+            story_data,
+            format_mode,
+            persona_profile,
+            target_seconds,
+        )
 
     rewritten = dict(script_data)
     rewritten["script"] = [
@@ -1410,7 +1420,14 @@ def tighten_script_for_duration_once(
             f"   [Script Duration] Compression rewrite failed validation: {reason}; trying deterministic duration fallback.",
             flush=True,
         )
-        return _sentence_level_duration_fallback(
+        fallback = _sentence_level_duration_fallback(
+            script_data,
+            story_data,
+            format_mode,
+            persona_profile,
+            max_seconds=35.0,
+        )
+        return fallback or _hard_word_budget_duration_fallback(
             script_data,
             story_data,
             format_mode,
