@@ -88,7 +88,7 @@ def test_validate_script_rejects_overlong_compact_budget():
         "regular",
     )
     assert valid is False
-    assert "maximum is 62" in reason
+    assert "maximum is 60" in reason
 
 
 def test_validate_script_accepts_compact_three_scene_story():
@@ -113,7 +113,7 @@ def test_writer_contract_has_initial_duration_limits():
     import ultimate_bot
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "Voiceover total: 55–62 words." in source
+    assert "Voiceover total: 55–60 words." in source
     assert "Scene 1: 8–14 words" in source
     assert "naturally fit below 30 seconds" in source
     assert "Use as many scenes as the story genuinely needs" not in source
