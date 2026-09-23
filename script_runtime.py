@@ -4,6 +4,7 @@ import json
 import os
 import re
 import urllib.request
+import requests
 from difflib import SequenceMatcher
 
 _RETENTION_BAIT_RE = tuple(
@@ -920,6 +921,73 @@ def _originality_llm(url, payload, headers):
         return None
 
 
+_DURATION_SAFE_COMPACTIONS = (
+    (r"\\bit is important to note that\\b", ""),
+    (r"\\bit should be noted that\\b", ""),
+    (r"\\bit is worth noting that\\b", ""),
+    (r"\\bwhat this means is that\\b", ""),
+    (r"\\bin order to\\b", "to"),
+    (r"\\bdue to the fact that\\b", "because"),
+    (r"\\bat this point in time\\b", "now"),
+    (r"\\bat the present time\\b", "now"),
+    (r"\\bfor the purpose of\\b", "for"),
+    (r"\\bin the event that\\b", "if"),
+    (r"\\bhas the ability to\\b", "can"),
+    (r"\\bhave the ability to\\b", "can"),
+    (r"\\bis able to\\b", "can"),
+    (r"\\bare able to\\b", "can"),
+    (r"\\bin the meantime\\b", "meanwhile"),
+    (r"\\bin spite of\\b", "despite"),
+    (r"\\bas a result of\\b", "because of"),
+    (r"\\bit is\\b", "it's"),
+    (r"\\bthat is\\b", "that's"),
+    (r"\\bthere is\\b", "there's"),
+    (r"\\bdoes not\\b", "doesn't"),
+    (r"\\bdo not\\b", "don't"),
+    (r"\\bdid not\\b", "didn't"),
+    (r"\\bwill not\\b", "won't"),
+    (r"\\bis not\\b", "isn't"),
+    (r"\\bare not\\b", "aren't"),
+    (r"\\bwas not\\b", "wasn't"),
+    (r"\\bwere not\\b", "weren't"),
+    (r"\\bhas not\\b", "hasn't"),
+    (r"\\bhave not\\b", "haven't"),
+)
+
+
+def _compact_unquoted_voiceover(text):
+    """Make only meaning-preserving micro-edits outside direct quotations."""
+    parts = re.split(r'("[^"\\n]*"|“[^”\\n]*”)', str(text or ""))
+    for index in range(0, len(parts), 2):
+        value = parts[index]
+        for pattern, replacement in _DURATION_SAFE_COMPACTIONS:
+            value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
+        value = re.sub(r"\\s+([,.!?])", r"\\1", value)
+        value = re.sub(r"\\s{2,}", " ", value)
+        parts[index] = value
+    return "".join(parts).strip()
+
+
+def _local_duration_compression(script_data, story_data, format_mode, persona_profile, target_seconds):
+    """Provider-free micro-compression used when an LLM rewrite is unavailable."""
+    rewritten = dict(script_data)
+    rewritten["script"] = [
+        dict(scene, voiceover=_compact_unquoted_voiceover(scene.get("voiceover")))
+        for scene in script_data.get("script") or []
+        if isinstance(scene, dict)
+    ]
+    original_estimate = estimate_narration_duration(script_data, persona_profile)
+    local_estimate = estimate_narration_duration(rewritten, persona_profile)
+    if local_estimate["seconds"] >= original_estimate["seconds"]:
+        return None
+    valid, _ = validate_content_density(rewritten, story_data, format_mode)
+    if not valid or local_estimate["seconds"] > 35.0:
+        return None
+    rewritten["duration_compression_only"] = True
+    rewritten["duration_compression_provider"] = "deterministic_local"
+    return rewritten
+
+
 def tighten_script_for_duration_once(
     script_data,
     story_data,
@@ -927,6 +995,7 @@ def tighten_script_for_duration_once(
     format_mode,
     *,
     target_seconds=30.0,
+    persona_profile=None,
 ):
     """Perform one lightweight compression pass on an already validated script.
 
@@ -951,8 +1020,10 @@ def tighten_script_for_duration_once(
 
     groq = str(os.getenv("GROQ_API_KEY") or "").strip()
     if not groq:
-        print("   [Script Duration] Groq unavailable; retaining the validated draft.", flush=True)
-        return None
+        print("   [Script Duration] Groq unavailable; trying deterministic local compression.", flush=True)
+        return _local_duration_compression(
+            script_data, story_data, format_mode, persona_profile, target_seconds
+        )
 
     language_instruction = ""
     if isinstance(language_cfg, dict):
@@ -989,26 +1060,40 @@ def tighten_script_for_duration_once(
         "temperature": 0.15,
     }
 
+    parsed = None
     try:
-        request = urllib.request.Request(
+        response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            data=json.dumps(payload).encode(),
             headers={
                 "Authorization": "Bearer " + groq,
                 "Content-Type": "application/json",
             },
-            method="POST",
+            json=payload,
+            timeout=20,
         )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            body = json.loads(response.read().decode())
-        raw = body.get("choices", [{}])[0].get("message", {}).get("content", "")
-        parsed = _originality_json(raw)
-    except Exception as exc:
+        if response.status_code == 200:
+            raw = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            parsed = _originality_json(raw)
+        else:
+            print(
+                f"   [Script Duration] Groq compression returned HTTP {response.status_code}; trying deterministic local compression.",
+                flush=True,
+            )
+    except requests.RequestException as exc:
         print(
-            f"   [Script Duration] Compression rewrite unavailable: {type(exc).__name__}; retaining the validated draft.",
+            f"   [Script Duration] Groq compression request failed ({type(exc).__name__}); trying deterministic local compression.",
             flush=True,
         )
-        return None
+    except Exception as exc:
+        print(
+            f"   [Script Duration] Groq compression response failed ({type(exc).__name__}); trying deterministic local compression.",
+            flush=True,
+        )
+
+    if not isinstance(parsed, dict):
+        return _local_duration_compression(
+            script_data, story_data, format_mode, persona_profile, target_seconds
+        )
 
     replacements = {}
     if isinstance(parsed, dict) and isinstance(parsed.get("script"), list):

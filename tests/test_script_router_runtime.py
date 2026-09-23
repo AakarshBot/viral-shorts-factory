@@ -6,6 +6,9 @@ from script_router_runtime import (
     assess_story_source_sufficiency,
 )
 
+import script_runtime
+from script_runtime import estimate_narration_duration, tighten_script_for_duration_once
+
 
 def test_story_source_fallback_requires_real_factual_structure():
     rich_story = {
@@ -102,3 +105,61 @@ def test_duration_compression_is_a_single_lightweight_pass():
     assert "tighten_script_for_duration_once(" in source
     assert "write_script(\n                story_payload" not in source
     assert 'duration_story["research_evidence_pack"]' not in source
+
+
+def test_duration_compression_has_a_provider_free_fallback(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    script = {
+        "editorial_angle": "The injury changes the player's immediate tournament plans.",
+        "script": [
+            {"voiceover": "Anisimova withdrew from the Singapore Open in order to protect her left wrist.", "narrative_role": "hook"},
+            {"voiceover": "It is important to note that the withdrawal came before her scheduled match.", "narrative_role": "development"},
+            {"voiceover": "The consequence is that her tournament plans now change because of the injury.", "narrative_role": "consequence"},
+        ],
+    }
+    story = {"title": "Anisimova withdraws from Singapore Open with left wrist injury"}
+    persona = {"rate": 0}
+
+    result = tighten_script_for_duration_once(
+        script,
+        story,
+        {},
+        "regular",
+        target_seconds=30.0,
+        persona_profile=persona,
+    )
+
+    assert result is not None
+    assert result["duration_compression_provider"] == "deterministic_local"
+    assert estimate_narration_duration(result, persona)["seconds"] < estimate_narration_duration(script, persona)["seconds"]
+
+
+def test_duration_compression_falls_back_when_groq_http_fails(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+
+    def fail_request(*args, **kwargs):
+        raise script_runtime.requests.RequestException("simulated outage")
+
+    monkeypatch.setattr(script_runtime.requests, "post", fail_request)
+    script = {
+        "editorial_angle": "The injury changes the player's immediate tournament plans.",
+        "script": [
+            {"voiceover": "Anisimova withdrew from the Singapore Open in order to protect her left wrist.", "narrative_role": "hook"},
+            {"voiceover": "It is important to note that the withdrawal came before her scheduled match.", "narrative_role": "development"},
+            {"voiceover": "The consequence is that her tournament plans now change because of the injury.", "narrative_role": "consequence"},
+        ],
+    }
+    story = {"title": "Anisimova withdraws from Singapore Open with left wrist injury"}
+    persona = {"rate": 0}
+
+    result = tighten_script_for_duration_once(
+        script,
+        story,
+        {},
+        "regular",
+        target_seconds=30.0,
+        persona_profile=persona,
+    )
+
+    assert result is not None
+    assert result["duration_compression_provider"] == "deterministic_local"
