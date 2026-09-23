@@ -7,6 +7,7 @@ garbage, score the survivors, and return a diverse portfolio.
 from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 
@@ -29,7 +30,9 @@ _DASHBOARD_DISCOVERY_CACHE_LOCK = threading.Lock()
 
 GOOGLE_QUERY_LIMIT = 10
 GDELT_QUERY_LIMIT = 2
-DISCOVERY_TIMEOUT_SECONDS = 10.0
+DISCOVERY_TIMEOUT_SECONDS = 8.0
+CORE_REQUEST_TIMEOUT_SECONDS = 6.0
+SPARSE_CORE_ARTICLE_THRESHOLD = 45
 MAX_RAW_ARTICLES = 500
 MAX_TREND_ARTICLES = 30
 MAX_EVENTS_FOR_RANKING = 180
@@ -83,8 +86,16 @@ CRICKET_ALL_QUERIES = (
 
 DEFAULT_NON_CRICKET_LANES = {
     "sports": (
-        '(India OR Indian) (cricket OR football OR tennis OR badminton OR hockey OR athletics OR basketball OR kabaddi OR boxing OR wrestling)',
-        '(sports OR cricket OR football OR tennis) (record OR final OR upset OR comeback OR controversy OR transfer OR injury)',
+        '(India OR Indian OR Asia) sports latest when:3d',
+        'India football soccer ISL I-League national team transfer coach controversy when:3d',
+        'India tennis badminton athletics table tennis squash latest record tournament when:3d',
+        'India hockey kabaddi boxing wrestling martial arts latest record tournament when:3d',
+        'India basketball volleyball golf motorsport Formula 1 MotoGP latest when:3d',
+        'world international sports latest tournament final record championship when:3d',
+        'women sports India world latest record tournament controversy when:3d',
+        'Olympics Asian Games Commonwealth Games sports India latest when:7d',
+        'sports emerging athlete breakout upset comeback controversy viral reaction when:3d',
+        '(FIFA ATP WTA BWF FIH IOC) latest sports news India when:3d',
     ),
     "technology": (
         '(India OR global) (AI OR technology OR chip OR smartphone OR software OR startup) (launch OR breakthrough OR deal OR controversy)',
@@ -233,6 +244,7 @@ def _collect_articles(
     custom_rss_url: str = "",
     cricket_scope: str = "",
 ) -> tuple[list[dict], list[str]]:
+    """Collect current factual coverage first, then pay for fallback/signals only when useful."""
     queries = _query_lanes(
         genre_key,
         genre_cfg,
@@ -242,104 +254,155 @@ def _collect_articles(
 
     direct_feed = _direct_feed_url(custom_rss_url or genre_cfg.get("rss_url"))
     official_urls = sr._official_feed_urls(genre_key, genre_cfg)
-    gdelt_queries = []
-    if genre_key == "sports_stories_of_day":
-        scope = str(cricket_scope or "").strip().casefold()
-        if scope == "india / asia":
-            gdelt_queries = [
-                "India cricket Pakistan cricket BCCI",
-                "India cricket controversy calls records selection injury women",
-            ]
-        elif scope == "global":
-            gdelt_queries = [
-                "cricket ICC Australia England South Africa",
-                "cricket controversy calls records selection injury women",
-            ]
-        else:
-            gdelt_queries = [
-                "cricket ICC India BCCI Pakistan",
-                "cricket controversy calls records selection injury",
-            ]
-    elif queries:
-        gdelt_queries = [queries[0], queries[-1]]
 
-    jobs: list[tuple[str, object]] = []
+    if genre_key == "sports":
+        gdelt_query = (
+            "India sports football tennis badminton hockey athletics basketball kabaddi boxing "
+            "wrestling motorsport women records transfer controversy latest"
+        )
+    elif genre_key == "sports_stories_of_day":
+        scope = str(cricket_scope or "").strip().casefold()
+        gdelt_query = (
+            "India cricket Pakistan BCCI women domestic selection injury record controversy"
+            if scope == "india / asia"
+            else "international cricket ICC Australia England South Africa selection injury record controversy"
+        )
+    elif queries:
+        gdelt_query = queries[0]
+    else:
+        gdelt_query = ""
+
+    core_jobs: list[tuple[str, object]] = []
+    for index, query in enumerate(queries, 1):
+        core_jobs.append((
+            f"Google News lane {index}",
+            sr._google_news_search_items,
+            (query, genre_key, 50),
+            {"timeout": CORE_REQUEST_TIMEOUT_SECONDS},
+        ))
+    if direct_feed:
+        core_jobs.append((
+            "Configured RSS",
+            sr._rss_items,
+            (direct_feed, genre_key, "rss", 80),
+            {"timeout": CORE_REQUEST_TIMEOUT_SECONDS},
+        ))
+    if official_urls:
+        core_jobs.append(("Official feeds", sr._official_feed_items, (genre_key, genre_cfg), {}))
+
+    trend_geos = ("IN", "US") if genre_key == "sports" else ("IN",)
+    signal_jobs: list[tuple[str, object, tuple, dict]] = [
+        (f"Google Trends {geo}", sr._google_trends_items, (geo, 10), {"timeout": 4.0})
+        for geo in trend_geos
+    ]
+    if os.getenv("REDDIT_DISCOVERY_ENABLED", "0").strip().lower() in {"1", "true", "yes"}:
+        signal_jobs.append(("Reddit", sr._reddit_items, (genre_key, "", 40), {}))
+
+    jobs = core_jobs + signal_jobs
     pool = ThreadPoolExecutor(
-        max_workers=max(4, len(queries) + len(official_urls) + len(gdelt_queries) + 4),
+        max_workers=min(16, max(1, len(jobs))),
         thread_name_prefix="dashboard-discovery-v2",
     )
+    started = {}
+    futures = {}
     try:
-        for query in queries:
-            jobs.append(("google", pool.submit(sr._google_news_search_items, query, genre_key, 50)))
-        if direct_feed:
-            jobs.append(("rss", pool.submit(sr._rss_items, direct_feed, genre_key, "rss", 60)))
-        if official_urls:
-            jobs.append(("official", pool.submit(sr._official_feed_items, genre_key, genre_cfg)))
-        for query in gdelt_queries[:GDELT_QUERY_LIMIT]:
-            jobs.append(("gdelt", pool.submit(fetch_gdelt_articles, query, timespan="72h", max_records=60, timeout=3.0)))
+        for label, fn, args, kwargs in jobs:
+            future = pool.submit(fn, *args, **kwargs)
+            futures[future] = label
+            started[future] = time.monotonic()
 
-        jobs.append(("reddit", pool.submit(sr._reddit_items, genre_key, "", 40)))
-        jobs.extend(
-            ("trend", pool.submit(sr._google_trends_items, geo, 10))
-            for geo in ("IN", "US")
-        )
-
-        futures = [future for _, future in jobs]
-        done, pending = wait(futures, timeout=DISCOVERY_TIMEOUT_SECONDS)
+        done, pending = wait(tuple(futures), timeout=DISCOVERY_TIMEOUT_SECONDS)
 
         raw: list[dict] = []
         social_rows: list[dict] = []
         trend_rows: list[dict] = []
 
-        for label, future in jobs:
-            if future not in done:
-                continue
+        for future in done:
+            label = futures[future]
+            elapsed = time.monotonic() - started.get(future, time.monotonic())
             try:
                 result = future.result() or []
             except Exception as exc:
                 print(
-                    f"   [Dashboard Discovery v2] {label} failed ({type(exc).__name__}); continuing.",
+                    f"   [Dashboard Discovery v2] {label} failed ({type(exc).__name__}) after {elapsed:.2f}s; continuing.",
                     flush=True,
                 )
                 continue
-            if label == "reddit":
+            if label.startswith("Reddit"):
                 social_rows.extend(result)
-            elif label == "trend":
+            elif label.startswith("Google Trends"):
                 trend_rows.extend(result[:MAX_TREND_ARTICLES])
             else:
                 raw.extend(result)
+            print(
+                f"   [Dashboard Discovery v2] {label}: {len(result)} row(s) in {elapsed:.2f}s.",
+                flush=True,
+            )
 
         for future in pending:
+            label = futures[future]
+            elapsed = time.monotonic() - started.get(future, time.monotonic())
             future.cancel()
+            print(
+                f"   [Dashboard Discovery v2] {label}: timeout after {elapsed:.2f}s.",
+                flush=True,
+            )
 
         raw = _dedupe_articles(raw)
         print(
             f"   [Dashboard Discovery v2] collected {len(raw)} unique factual articles from "
-            f"{len(queries)} Google lanes + feeds/GDELT; secondary signals={len(social_rows) + len(trend_rows)}.",
+            f"{len(queries)} Google lanes + feeds; secondary signals={len(social_rows) + len(trend_rows)}.",
             flush=True,
         )
-
-        if trend_rows:
-            for row in trend_rows:
-                if not sr._discovery_category_allowed(genre_key, row):
-                    continue
-                if row.get("url"):
-                    raw.append(row)
-            raw = _dedupe_articles(raw)
-
-        social_titles = [
-            str(row.get("title") or "").strip()
-            for row in social_rows
-            if isinstance(row, dict) and str(row.get("title") or "").strip()
-        ]
-
-        for story in raw:
-            story["social_signal_raw"] = sr._social_signal(story.get("title", ""), social_titles)
-            story["trend_bonus"] = _trend_matches(story, trend_rows)
-
-        return raw, social_titles
     finally:
+        # Provider HTTP calls have shorter timeouts than the collector boundary.
+        # The shutdown remains non-blocking only as a final safety net.
         pool.shutdown(wait=False, cancel_futures=True)
+
+    # GDELT is a conditional factual backstop, never a parallel dependency. This
+    # prevents its latency/failure from delaying healthy Google/direct coverage.
+    if gdelt_query and len(raw) < SPARSE_CORE_ARTICLE_THRESHOLD:
+        try:
+            fallback = fetch_gdelt_articles(
+                gdelt_query,
+                timespan="72h",
+                max_records=75,
+                timeout=4.0,
+            )
+            raw = _dedupe_articles([*raw, *fallback])
+            print(
+                f"   [Dashboard Discovery v2] conditional GDELT fallback: +{len(fallback)} raw row(s); "
+                f"factual pool now {len(raw)}.",
+                flush=True,
+            )
+        except Exception as exc:
+            print(
+                f"   [Dashboard Discovery v2] conditional GDELT failed ({type(exc).__name__}); continuing.",
+                flush=True,
+            )
+
+    if trend_rows:
+        for row in trend_rows:
+            if not sr._discovery_category_allowed(genre_key, row):
+                continue
+            if row.get("url"):
+                # Trend-linked articles are enrichment signals, not an independent
+                # source family. Event clustering will dedupe them with the factual
+                # article already found through another lane.
+                raw.append(row)
+        raw = _dedupe_articles(raw)
+
+    social_titles = [
+        str(row.get("title") or "").strip()
+        for row in social_rows
+        if isinstance(row, dict) and str(row.get("title") or "").strip()
+    ]
+
+    for story in raw:
+        story["social_signal_raw"] = sr._social_signal(story.get("title", ""), social_titles)
+        story["trend_bonus"] = _trend_matches(story, trend_rows)
+
+    return raw, social_titles
 
 
 def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> bool:
