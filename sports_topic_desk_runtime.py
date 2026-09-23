@@ -966,7 +966,7 @@ def _bucketize(concepts, scope="India / Asia"):
             )
             picked.append(best)
             chosen.add(id(best))
-            remaining.remove(best)
+            search_pool.remove(best)
             row = dict(best)
             row["discovery_bucket"] = bucket
             row["bucket_score"] = float(row.get(score_name) or 0.0)
