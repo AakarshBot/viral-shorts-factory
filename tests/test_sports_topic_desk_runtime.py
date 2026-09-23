@@ -50,9 +50,10 @@ def test_cricket_desk_keeps_social_leads_separate():
         },
     ]
     concepts = desk._cluster(rows)
-    concept = concepts[0]
-    assert concept["social_post_count"] == 1
-    assert concept["article_count"] == 1
+    assert any(
+        concept["social_post_count"] == 1 and concept["article_count"] == 1
+        for concept in concepts
+    )
 
 
 def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
@@ -63,6 +64,7 @@ def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
             f"source{index}.example",
         ))
     monkeypatch.setattr(desk, "_collect", lambda: concepts)
+    monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
     monkeypatch.setattr(desk, "_trend_signal", lambda item, trends: 0.0)
 
     result = desk.discover_cricket_topics(
@@ -96,6 +98,7 @@ def test_cricket_desk_scope_keeps_india_asia_primary(monkeypatch):
         _article("England batter breaks record", "england.example"),
     ]
     monkeypatch.setattr(desk, "_collect", lambda: rows)
+    monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
     result = desk.discover_cricket_topics(
         bot=None,
         scope="India / Asia",

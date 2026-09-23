@@ -85,7 +85,18 @@ def _age_hours(value):
 
 def _is_cricket(item):
     text = _clean(" ".join(str(item.get(k) or "") for k in ("title", "text", "description", "summary", "snippet", "trend_query"))).casefold()
-    return any(term in text for term in CRICKET_TERMS)
+    source_hint = _clean(" ".join(
+        str(item.get(k) or "")
+        for k in ("source", "source_name", "publisher", "url")
+    )).casefold()
+    if any(term in text for term in CRICKET_TERMS):
+        return True
+    if bool(item.get("social_post")) and any(
+        marker in source_hint
+        for marker in ("r/cricket", "r/indiacricket", "cricketshitpost", "cricket", "bsky")
+    ):
+        return True
+    return False
 
 
 def _domain(item):

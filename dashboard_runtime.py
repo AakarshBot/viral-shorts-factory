@@ -274,18 +274,15 @@ def discover_ai_topics(
         max_candidates=max_candidates,
     )
 
-    if is_cricket:
-        pool = ranked[:30]
-    else:
-        ranked = _merge_retained_topics(
-            bot,
-            web_config,
-            conn,
-            ranked,
-            retained_candidates,
-            max_candidates=max_candidates,
-        )
-        pool = ranked[:max_candidates]
+    ranked = _merge_retained_topics(
+        bot,
+        web_config,
+        conn,
+        ranked,
+        retained_candidates,
+        max_candidates=max_candidates,
+    )
+    pool = ranked[:max_candidates]
 
     for rank, item in enumerate(pool, 1):
         item["discovery_rank"] = rank

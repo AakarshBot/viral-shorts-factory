@@ -922,36 +922,36 @@ def _originality_llm(url, payload, headers):
 
 
 _DURATION_SAFE_COMPACTIONS = (
-    (r"\\bit is important to note that\\b", ""),
-    (r"\\bit should be noted that\\b", ""),
-    (r"\\bit is worth noting that\\b", ""),
-    (r"\\bwhat this means is that\\b", ""),
-    (r"\\bin order to\\b", "to"),
-    (r"\\bdue to the fact that\\b", "because"),
-    (r"\\bat this point in time\\b", "now"),
-    (r"\\bat the present time\\b", "now"),
-    (r"\\bfor the purpose of\\b", "for"),
-    (r"\\bin the event that\\b", "if"),
-    (r"\\bhas the ability to\\b", "can"),
-    (r"\\bhave the ability to\\b", "can"),
-    (r"\\bis able to\\b", "can"),
-    (r"\\bare able to\\b", "can"),
-    (r"\\bin the meantime\\b", "meanwhile"),
-    (r"\\bin spite of\\b", "despite"),
-    (r"\\bas a result of\\b", "because of"),
-    (r"\\bit is\\b", "it's"),
-    (r"\\bthat is\\b", "that's"),
-    (r"\\bthere is\\b", "there's"),
-    (r"\\bdoes not\\b", "doesn't"),
-    (r"\\bdo not\\b", "don't"),
-    (r"\\bdid not\\b", "didn't"),
-    (r"\\bwill not\\b", "won't"),
-    (r"\\bis not\\b", "isn't"),
-    (r"\\bare not\\b", "aren't"),
-    (r"\\bwas not\\b", "wasn't"),
-    (r"\\bwere not\\b", "weren't"),
-    (r"\\bhas not\\b", "hasn't"),
-    (r"\\bhave not\\b", "haven't"),
+    (r"\bit is important to note that\\b", ""),
+    (r"\bit should be noted that\\b", ""),
+    (r"\bit is worth noting that\\b", ""),
+    (r"\bwhat this means is that\\b", ""),
+    (r"\bin order to\\b", "to"),
+    (r"\bdue to the fact that\\b", "because"),
+    (r"\bat this point in time\\b", "now"),
+    (r"\bat the present time\\b", "now"),
+    (r"\bfor the purpose of\\b", "for"),
+    (r"\bin the event that\\b", "if"),
+    (r"\bhas the ability to\\b", "can"),
+    (r"\bhave the ability to\\b", "can"),
+    (r"\bis able to\\b", "can"),
+    (r"\bare able to\\b", "can"),
+    (r"\bin the meantime\\b", "meanwhile"),
+    (r"\bin spite of\\b", "despite"),
+    (r"\bas a result of\\b", "because of"),
+    (r"\bit is\\b", "it's"),
+    (r"\bthat is\\b", "that's"),
+    (r"\bthere is\\b", "there's"),
+    (r"\bdoes not\\b", "doesn't"),
+    (r"\bdo not\\b", "don't"),
+    (r"\bdid not\\b", "didn't"),
+    (r"\bwill not\\b", "won't"),
+    (r"\bis not\\b", "isn't"),
+    (r"\bare not\\b", "aren't"),
+    (r"\bwas not\\b", "wasn't"),
+    (r"\bwere not\\b", "weren't"),
+    (r"\bhas not\\b", "hasn't"),
+    (r"\bhave not\\b", "haven't"),
 )
 
 
@@ -962,7 +962,7 @@ def _compact_unquoted_voiceover(text):
         value = parts[index]
         for pattern, replacement in _DURATION_SAFE_COMPACTIONS:
             value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
-        value = re.sub(r"\\s+([,.!?])", r"\\1", value)
+        value = re.sub(r"\s+([,.!?])", r"\1", value)
         value = re.sub(r"\\s{2,}", " ", value)
         parts[index] = value
     return "".join(parts).strip()
