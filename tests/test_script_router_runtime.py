@@ -93,7 +93,7 @@ def test_duration_repair_is_single_bounded_attempt():
         return repaired
 
     candidate = _valid_script()
-    candidate["script"][1]["voiceover"] = " ".join(["word"] * 75)
+    candidate["script"][1]["voiceover"] = " ".join(["word"] * 65)
 
     repaired, reason = tighten_script_for_duration_once(
         fake_primary,
