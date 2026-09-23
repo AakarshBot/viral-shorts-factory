@@ -1514,10 +1514,11 @@ def test_renderer_has_no_artificial_scene_audio_padding():
     assert "Audio is already encoded at its natural duration" in source
 
 
-def test_script_writer_prompt_requires_precise_first_scene_without_length_quota():
+def test_script_writer_prompt_requires_compact_first_scene_and_runtime_budget():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Scene 1 is the retention entry point" in source
-    assert "Return ONLY valid JSON. Use as many scenes as the story genuinely needs" in source
+    assert "Scene 1: 8–14 words" in source
+    assert "Voiceover total: 55–62 words." in source
+    assert "The entire narration must naturally fit below 30 seconds" in source
 
 
 def test_dashboard_upload_unlock_is_metadata_only():
