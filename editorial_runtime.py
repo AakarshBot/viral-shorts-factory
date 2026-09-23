@@ -30,6 +30,18 @@ def _num(value, default=0.0):
         return default
 
 
+
+def _tokens(value):
+    stop = {
+        "the", "and", "for", "with", "from", "this", "that", "into",
+        "after", "before", "over", "under", "what", "how", "why", "world",
+        "news", "latest", "today", "just", "new", "says", "said", "will",
+    }
+    return {
+        token for token in re.sub(r"[^a-z0-9 ]+", " ", str(value or "").lower()).split()
+        if len(token) > 2 and token not in stop
+    }
+
 def _similarity(a, b):
     aa, bb = _tokens(a), _tokens(b)
     if not aa or not bb:

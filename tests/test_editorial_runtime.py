@@ -1,6 +1,6 @@
 import pytest
 
-from editorial_runtime import score_candidates
+from editorial_runtime import _normalise_editorial_records, score_candidates
 
 
 @pytest.fixture
@@ -77,12 +77,11 @@ def test_missing_editorial_records_use_neutral_fallbacks():
         "hard_reject": False,
     }]
 
-    result = score_candidates(scored, stories, {}, "", "regular")
-
-    assert len(result) == 2
-    assert result[0]["hook_strength"] == 8.0
-    assert result[1]["hook_strength"] < 8.0
-    assert result[1]["hard_reject"] is False
+    normalised = _normalise_editorial_records(scored, stories)
+    assert len(normalised) == 2
+    assert normalised[0]["hook_strength"] == 8.0
+    assert normalised[1]["hook_strength"] < 8.0
+    assert normalised[1]["hard_reject"] is False
 
 
 def test_malformed_editorial_record_fields_are_normalized():
@@ -96,12 +95,11 @@ def test_malformed_editorial_record_fields_are_normalized():
         "hard_reject": "false",
     }]
 
-    result = score_candidates(scored, [story], {}, "", "regular")
-
-    assert len(result) == 1
-    assert result[0]["hook_strength"] == 5.0
-    assert result[0]["narrative_completeness"] == 5.0
-    assert result[0]["audience_fit"] == 7.0
-    assert result[0]["monetization_risk"] == 5.0
-    assert result[0]["shelf_life"] == 9.0
-    assert result[0]["hard_reject"] is False
+    normalised = _normalise_editorial_records(scored, [story])
+    assert len(normalised) == 1
+    assert normalised[0]["hook_strength"] == 5.0
+    assert normalised[0]["narrative_completeness"] == 5.0
+    assert normalised[0]["audience_fit"] == 7.0
+    assert normalised[0]["monetization_risk"] == 5.0
+    assert normalised[0]["shelf_life"] == 9.0
+    assert normalised[0]["hard_reject"] is False
