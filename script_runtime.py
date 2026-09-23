@@ -368,6 +368,7 @@ def classify_hook_style(value):
 
 
 def _story_structure(story_data, format_mode):
+    format_mode_key = str(format_mode or "").strip().lower()
     text = " ".join(
         str(story_data.get(key, ""))
         for key in ("title", "topic", "summary", "description", "category")
@@ -378,7 +379,7 @@ def _story_structure(story_data, format_mode):
         return _STRUCTURE_HINTS["how_to"]
     if any(term in text for term in ("history", "timeline", "since", "after", "before", "years later")):
         return _STRUCTURE_HINTS["timeline"]
-    if format_mode == "top5" or re.search(r"\btop\s*\d+\b|\bnumber\s+\d+\b", text):
+    if format_mode_key == "top5" or re.search(r"\btop\s*\d+\b|\bnumber\s+\d+\b", text):
         return _STRUCTURE_HINTS["ranking"]
     return _STRUCTURE_HINTS["explainer"]
 
