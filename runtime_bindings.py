@@ -9,66 +9,6 @@ from dashboard_theme import apply_dashboard_theme
 _VISUAL_CACHE_STATE = threading.local()
 
 
-def _coerce_bool(value, default=False):
-    """Safely coerce AI-returned booleans without treating 'false' as truthy."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = str(value).strip().lower()
-    if text in {"true", "1", "yes", "y", "on"}:
-        return True
-    if text in {"false", "0", "no", "n", "off", ""}:
-        return False
-    return default
-
-
-def _fallback_editorial_scores(story):
-    """Neutral local scores for a missing/malformed provider record."""
-    text_len = len(str(story.get("text", "") or "").split())
-    narrative = 6.5 if text_len >= 45 else 6.0 if text_len >= 20 else 5.5
-    velocity = float(story.get("velocity_score", 0.0) or 0.0)
-    hook = min(8.0, 5.5 + velocity * 0.35)
-    shelf_life = min(7.0, 5.0 + float(story.get("trend_bonus", 0.0) or 0.0) * 0.25)
-    return {
-        "hook_strength": round(hook, 2),
-        "narrative_completeness": round(narrative, 2),
-        "audience_fit": 6.0,
-        "monetization_risk": 5.0,
-        "shelf_life": round(shelf_life, 2),
-        "hard_reject": False,
-        "one_line_reasoning": "Local neutral fallback used because the editorial score record was missing or malformed.",
-    }
-
-
-def _normalise_editorial_records(scored_data, batch_stories):
-    """Return one safe score record per story while preserving real provider scores."""
-    records = list(scored_data) if isinstance(scored_data, list) else []
-    normalised = []
-    for index, story in enumerate(batch_stories or []):
-        raw = records[index] if index < len(records) and isinstance(records[index], dict) else None
-        if raw is None:
-            normalised.append(_fallback_editorial_scores(story))
-            continue
-        clean = dict(raw)
-        clean["hard_reject"] = _coerce_bool(clean.get("hard_reject"), False)
-        for field, default in (
-            ("hook_strength", 5.0),
-            ("narrative_completeness", 5.0),
-            ("audience_fit", 5.0),
-            ("monetization_risk", 5.0),
-            ("shelf_life", 5.0),
-        ):
-            try:
-                clean[field] = float(clean.get(field, default))
-            except (TypeError, ValueError):
-                clean[field] = default
-        normalised.append(clean)
-    return normalised
-
-
 def _install_visual_cache_safety():
     """Cache only assets that actually passed the visual verification gate."""
     try:
@@ -146,53 +86,6 @@ def _patch_editorial_scoring(bot):
     except Exception as exc:
         print(f"   [Bindings] Corrected editorial scoring unavailable: {exc}", flush=True)
         return bot
-
-
-def _wrap_scored_candidates(bot):
-    current = getattr(bot, "process_scored_candidates", None)
-    if current is None or getattr(current, "_hard_reject_safe", False):
-        return current
-
-    def safe_process(scored_data, batch_stories, bonuses, last_genre, format_mode):
-        scored_count = len(scored_data) if isinstance(scored_data, list) else 0
-        story_count = len(batch_stories) if isinstance(batch_stories, list) else 0
-        print(f"   [Editorial Diagnostics] Received {story_count} stories and {scored_count} Groq score records.", flush=True)
-        if not isinstance(batch_stories, list) or not batch_stories:
-            print("   [Editorial Diagnostics] STOP: no stories were available for editorial scoring.", flush=True)
-            return []
-
-        normalised = _normalise_editorial_records(scored_data, batch_stories)
-        missing_count = max(0, story_count - scored_count)
-        if missing_count:
-            print(f"   [Editorial Diagnostics] Filled {missing_count} missing/malformed score record(s) with neutral local scores.", flush=True)
-
-        hard_reject_count = sum(1 for scores in normalised if _coerce_bool(scores.get("hard_reject"), False))
-        risk_values = []
-        risk_reject_count = 0
-        for scores in normalised:
-            try:
-                risk = float(scores.get("monetization_risk", 5.0))
-            except (TypeError, ValueError):
-                risk = 5.0
-            risk_values.append(risk)
-            if risk >= 8:
-                risk_reject_count += 1
-        print("   [Editorial Diagnostics] Model risk signals: " + f"hard_reject={hard_reject_count}, monetization_risk>=8={risk_reject_count} (risk is a soft penalty), malformed/missing={missing_count}, risks={risk_values}", flush=True)
-
-        result = current(normalised, batch_stories, bonuses, last_genre, format_mode)
-        if not result:
-            print("   [Editorial Diagnostics] Corrected scorer returned 0 candidates.", flush=True)
-            return []
-
-        # The authoritative scorer owns rejection semantics. Do not apply a
-        # second blanket hard_reject filter here; that would undo its safety-aware
-        # override for strong stories where monetization risk is only advisory.
-        print(f"   [Editorial Diagnostics] Authoritative scorer candidates={len(result)}.", flush=True)
-        return result
-
-    safe_process._hard_reject_safe = True
-    bot.process_scored_candidates = safe_process
-    return safe_process
 
 
 def _wrap_editorial_provider_usage(bot):
@@ -274,7 +167,6 @@ def bind_dashboard_patches(bot):
         bot.validate_script = validate
 
     _patch_editorial_scoring(bot)
-    _wrap_scored_candidates(bot)
     _wrap_editorial_provider_usage(bot)
     _install_script_pipeline(bot)
     _wrap_content_first_visuals(bot)
