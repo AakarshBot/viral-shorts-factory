@@ -543,19 +543,28 @@ def _collect(scope="India / Asia"):
             )
             secondary_jobs[future] = label
 
-        # Resolve each lane against its own wall-clock budget. Every HTTP request
-        # is bounded below its lane deadline, so a healthy request cannot be
-        # labelled "timeout" solely because the scheduler stopped waiting first.
-        primary_done, primary_pending = wait(
-            tuple(primary_jobs),
-            timeout=PRIMARY_DESK_TIMEOUT,
-        )
-        secondary_done, secondary_pending = wait(
-            tuple(secondary_jobs),
-            timeout=SECONDARY_DESK_TIMEOUT,
-        )
-        done = set(primary_done) | set(secondary_done)
-        pending = set(primary_pending) | set(secondary_pending)
+        # Both pools start together. Give the short secondary lane its own
+        # 3s cutoff first, then let still-running primary work use only the
+        # remaining primary budget. This keeps total wall time <= 5.5s instead
+        # of accidentally adding the two lane budgets together.
+        all_jobs = tuple(primary_jobs) + tuple(secondary_jobs)
+        done, pending = wait(all_jobs, timeout=SECONDARY_DESK_TIMEOUT)
+        primary_done = {future for future in done if future in primary_jobs}
+        secondary_done = {future for future in done if future in secondary_jobs}
+        primary_pending = {future for future in pending if future in primary_jobs}
+        secondary_pending = {future for future in pending if future in secondary_jobs}
+
+        if primary_pending:
+            more_done, more_pending = wait(
+                tuple(primary_pending),
+                timeout=max(0.0, PRIMARY_DESK_TIMEOUT - SECONDARY_DESK_TIMEOUT),
+            )
+            done = set(done) | set(more_done)
+            pending = set(secondary_pending) | set(more_pending)
+            primary_done |= set(more_done)
+            primary_pending = set(more_pending)
+        else:
+            pending = set(secondary_pending)
 
         rows = []
         counts = {label: 0 for label in {
