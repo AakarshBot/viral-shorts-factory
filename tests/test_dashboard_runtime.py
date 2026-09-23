@@ -1582,7 +1582,7 @@ def test_renderer_has_no_artificial_scene_audio_padding():
 
 def test_script_writer_prompt_requires_compact_first_scene_and_runtime_budget():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Scene 1: 8–14 words" in source
+    assert "Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14." in source
     assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Spoken duration is authoritative" in source
 
