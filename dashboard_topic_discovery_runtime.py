@@ -610,15 +610,17 @@ def discover_dashboard_topics(
     for event in events:
         event["recommended_category"] = sr._infer_discovery_category(event)
 
+    uploaded = sr._load_uploaded_story_identities(conn)
     filtered = [
         event
         for event in events
         if _hard_dashboard_pass(event, genre_key, requested_topic)
+        and not sr._uploaded_story_match(event, uploaded)
     ]
 
     print(
         f"   [Dashboard Discovery v2] factual={len(raw)} -> events={len(events)} -> "
-        f"hard-eligible={len(filtered)}",
+        f"hard-eligible={len(filtered)} -> upload-suppressed={len(events) - len(filtered)}",
         flush=True,
     )
 
