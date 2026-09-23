@@ -944,10 +944,9 @@ def _bucketize(concepts, scope="India / Asia"):
             return True
 
         eligible = [item for item in remaining if bucket_eligibility(item)]
-        # Do not invent a bucket category when the source pool is genuinely
-        # sparse. Use the remaining candidates only after exhausting the
-        # semantically correct candidates for that bucket.
-        search_pool = eligible or remaining
+        # Prefer semantically correct candidates, then fill any shortfall from
+        # the remaining pool so sparse signals do not shrink the dashboard.
+        search_pool = eligible + [item for item in remaining if item not in eligible]
         picked = []
         while search_pool and len(picked) < count:
             best = max(
