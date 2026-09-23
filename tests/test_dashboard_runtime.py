@@ -1898,12 +1898,14 @@ def test_visual_approval_is_fail_closed_in_controller(tmp_path):
     image.write_bytes(b"image")
     controller._visual_packages = [[{
         "image": str(image),
-        "visual_verified": True,
-        "visual_qc_blocked": False,
+        "visual_verified": False,
+        "visual_qc_blocked": True,
     }]]
 
     assert controller.approve_visuals() is True
     assert controller._manual_gate_state["visual_event"].is_set() is True
+    assert controller._visual_packages[0][0]["human_visual_approved"] is True
+    assert controller._visual_packages[0][0]["human_visual_qc_override"] is True
 
 
 def test_dashboard_review_surface_exposes_editable_script_and_visual_replacement_controls():
