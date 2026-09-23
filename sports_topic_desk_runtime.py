@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -14,40 +15,48 @@ import requests
 import story_ranker as sr
 from event_discovery_runtime import fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "cricket-desk-v2-2026-09-23"
+SPORTS_DESK_VERSION = "cricket-desk-v3-2026-09-23"
 LOOKBACK_HOURS = 72
-DESK_TIMEOUT = 7.0
+# Primary factual collection has its own bounded lane so social/trend work cannot
+# occupy the workers needed for the actual news sources.
+PRIMARY_DESK_TIMEOUT = 5.5
+SECONDARY_DESK_TIMEOUT = 3.0
 REQUEST_TIMEOUT = 2.5
 PER_BUCKET = 10
 SOURCE_TIMEOUT = 2.2
+GOOGLE_QUERY_LIMIT = 7
+GOOGLE_RESULT_LIMIT = 20
 
 DIRECT_CRICKET_SOURCES = (
-    ("ICC", "https://www.icc-cricket.com/index?feed=rss2", "rss"),
+    ("ICC", "https://www.icc-cricket.com/news", "listing"),
     ("BCCI", "https://www.bcci.tv/news", "listing"),
     ("Cricbuzz", "https://www.cricbuzz.com/cricket-news/latest-news", "listing"),
     ("Wisden", "https://www.wisden.com/cricket-news", "listing"),
     ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news", "listing"),
 )
 
-NEWS_QUERIES = (
-    'cricket (India OR BCCI OR ICC) (selection OR injury OR retirement OR appointment OR ban OR investigation OR contract OR debut)',
-    'cricket (India OR Pakistan OR Sri Lanka OR Bangladesh) (record OR milestone OR comeback OR upset OR breakthrough OR controversy)',
-    'cricket (Australia OR England OR South Africa OR New Zealand OR West Indies) (record OR selection OR injury OR statement OR controversy)',
-    'cricket (women OR "India Women" OR WPL OR U19 OR U23 OR domestic) (record OR debut OR selection OR upset OR comeback OR milestone)',
-    'cricket (umpire OR law OR rule OR decision OR sanction OR fine OR controversy OR investigation)',
-    'cricket (coach OR captain OR selector OR board) (said OR says OR warned OR responds OR reveals OR comments)',
+INDIA_ASIA_GOOGLE_QUERIES = (
+    'India cricket (selection OR injury OR retirement OR appointment OR ban OR record OR milestone OR controversy OR upset)',
+    '(India Women OR WPL OR U19 OR U23 OR Ranji OR Duleep OR domestic) cricket (record OR debut OR selection OR upset OR comeback OR controversy)',
+    'India cricket (statement OR response OR reaction OR row OR dispute OR umpire OR law OR sanction OR investigation)',
+    'India cricket (Pakistan OR Sri Lanka OR Bangladesh OR Afghanistan OR Nepal) (upset OR controversy OR record OR milestone OR decision)',
+    'cricket India (uncapped OR youngster OR debut OR recall OR dropped OR comeback OR injury)',
+    'cricket India (viral OR fans react OR social media OR celebration OR unusual OR bizarre)',
+    'cricket India (Virat Kohli OR Rohit Sharma OR Jasprit Bumrah OR Shubman Gill OR Smriti Mandhana OR Harmanpreet Kaur) (said OR says OR record OR injury OR selection OR comeback OR controversy)',
 )
 
-VIRAL_QUERIES = (
-    'cricket (viral OR trending OR bizarre OR unusual OR shocking OR unexpected)',
-    'cricket (fans react OR reaction OR backlash OR debate OR praise)',
-    'cricket (social media OR meme OR celebration OR moment)',
-    'cricket (controversy OR row OR feud OR argument OR clash)',
+GLOBAL_GOOGLE_QUERIES = (
+    'cricket (Australia OR England OR South Africa OR New Zealand OR West Indies) (record OR selection OR injury OR statement OR controversy OR comeback OR upset)',
+    'international cricket (said OR says OR reaction OR row OR dispute OR umpire OR law OR sanction OR investigation)',
+    '(women cricket OR domestic cricket OR associate cricket) (record OR debut OR selection OR upset OR comeback OR breakthrough)',
+    'cricket (uncapped OR youngster OR debut OR recall OR dropped OR injury OR retirement)',
+    'cricket (viral OR fans react OR social media OR celebration OR unusual OR bizarre)',
+    'cricket (Virat Kohli OR Rohit Sharma OR Jasprit Bumrah OR Shubman Gill OR Smriti Mandhana OR Harmanpreet Kaur) (said OR says OR record OR injury OR selection OR comeback OR controversy)',
+    'cricket (Asia OR Pakistan OR Sri Lanka OR Bangladesh OR Afghanistan OR Nepal) (record OR milestone OR upset OR controversy OR decision)',
 )
 
-SOCIAL_QUERIES = ("cricket reaction", "cricket fans", "cricket debate")
 REDDIT_SUBREDDITS = ("Cricket", "IndiaCricket", "CricketShitpost")
-BLUESKY_QUERIES = ("cricket", '"India cricket"', '"Team India"', "cricket reaction", "cricket controversy", "cricket fans")
+BLUESKY_QUERIES = ("cricket", '"India cricket"', "cricket reaction")
 MASTODON_QUERIES = ("cricket", "India cricket")
 TREND_GEOS = ("IN", "GB", "AU", "US")
 
@@ -67,7 +76,10 @@ HOOK_TERMS = (
     "sanctioned", "fined", "retired", "ruled out", "recalled", "dropped",
     "statement", "revealed", "reveals", "banned",
 )
-SATURATION_TERMS = ("world cup", "final", "asia cup", "ashes", "india vs", "india v", "championship", "major final")
+SATURATION_TERMS = (
+    "world cup", "final", "asia cup", "asian games", "ashes",
+    "india vs", "india v", "championship", "major final",
+)
 
 
 def _clean(value):
@@ -242,6 +254,81 @@ def _relative_age_hours(text):
     return amount * 24.0
 
 
+def _listing_age_hours(text, now=None):
+    """Parse the common date formats used by cricket publisher listing pages."""
+    value = html.unescape(_clean(text))
+    current = now or datetime.now(timezone.utc)
+    candidates = []
+
+    relative = _relative_age_hours(value)
+    if relative is not None:
+        candidates.append(max(0.0, float(relative)))
+
+    # Prefer explicit time/ISO values when a listing card exposes them.
+    for raw in re.findall(
+        r"(?:datetime|datePublished|dateModified)\s*[:=]\s*[\"']([^\"']+)[\"']",
+        value,
+        re.IGNORECASE,
+    ):
+        age = _age_hours(raw)
+        if age != 9999.0:
+            candidates.append(age)
+
+    for raw in re.findall(
+        r"\b20\d{2}-\d{2}-\d{2}(?:T[0-9:.+\-Z]+)?\b",
+        value,
+    ):
+        age = _age_hours(raw)
+        if age != 9999.0:
+            candidates.append(age)
+
+    month_names = (
+        "Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|"
+        "Jul|July|Aug|August|Sep|September|Oct|October|Nov|November|Dec|December"
+    )
+    date_pattern = (
+        rf"\b(?:{month_names})\s+\d{{1,2}}(?:,\s*|\s+)\d{{4}}\b"
+        rf"|\b\d{{1,2}}\s+(?:{month_names})\s+\d{{4}}\b"
+        rf"|\b(?:{month_names})\s+\d{{1,2}}\b"
+    )
+    for raw in re.findall(date_pattern, value, re.IGNORECASE):
+        parsed = None
+        clean = _clean(raw).replace(",", "")
+        for fmt in ("%b %d %Y", "%B %d %Y", "%d %b %Y", "%d %B %Y"):
+            try:
+                parsed = datetime.strptime(clean, fmt).replace(tzinfo=timezone.utc)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            for fmt in ("%b %d", "%B %d"):
+                try:
+                    parsed = datetime.strptime(clean, fmt).replace(
+                        year=current.year, tzinfo=timezone.utc
+                    )
+                    if parsed > current:
+                        parsed = parsed.replace(year=current.year - 1)
+                    break
+                except ValueError:
+                    continue
+        if parsed is not None:
+            candidates.append(max(0.0, (current - parsed).total_seconds() / 3600.0))
+
+    valid = [age for age in candidates if age <= LOOKBACK_HOURS]
+    return min(valid) if valid else None
+
+
+def _google_queries_for_scope(scope):
+    scope_key = _clean(scope).casefold()
+    if scope_key == "india / asia":
+        queries = INDIA_ASIA_GOOGLE_QUERIES
+    elif scope_key == "global":
+        queries = GLOBAL_GOOGLE_QUERIES
+    else:
+        queries = tuple(dict.fromkeys((*INDIA_ASIA_GOOGLE_QUERIES[:4], *GLOBAL_GOOGLE_QUERIES[:3])))
+    return tuple(queries[:GOOGLE_QUERY_LIMIT])
+
+
 def _direct_listing_source(name, url):
     try:
         response = requests.get(
@@ -260,7 +347,7 @@ def _direct_listing_source(name, url):
         "BCCI": ("bcci.tv",),
         "Cricbuzz": ("cricbuzz.com",),
         "Wisden": ("wisden.com",),
-        "ESPNcricinfo": ("espncricinfo.com",),
+        "ESPNcricinfo": ("espncricinfo.com", "cricinfo.com"),
     }.get(name, ())
     out = []
     seen = set()
@@ -283,7 +370,13 @@ def _direct_listing_source(name, url):
         path = parsed.path.casefold()
         if name == "BCCI" and "/news/article/" not in path:
             continue
-        if name in {"Cricbuzz", "Wisden", "ESPNcricinfo"} and "/cricket-news/" not in path:
+        if name == "Cricbuzz" and "/cricket-news/" not in path:
+            continue
+        if name == "Wisden" and "/cricket-news/" not in path:
+            continue
+        if name == "ESPNcricinfo" and not any(
+            marker in path for marker in ("/story/", "/cricket-news/")
+        ):
             continue
         if name == "ICC" and "/news/" not in path:
             continue
@@ -292,16 +385,11 @@ def _direct_listing_source(name, url):
         if not key or key in seen:
             continue
 
-        nearby = _clean(re.sub(
-            r"<[^>]+>",
-            " ",
-            page[max(0, match.start() - 1400):min(len(page), match.end() + 1800)],
-        ))
-        age = _relative_age_hours(nearby)
-        if age is None:
-            iso = re.search(r"20\d{2}-\d{2}-\d{2}(?:T[0-9:.+\-Z]+)?", nearby)
-            if iso:
-                age = _age_hours(iso.group(0))
+        nearby_html = page[
+            max(0, match.start() - 1600):min(len(page), match.end() + 2200)
+        ]
+        nearby = _clean(re.sub(r"<[^>]+>", " ", nearby_html))
+        age = _listing_age_hours(nearby_html)
         if age is None or age > LOOKBACK_HOURS:
             continue
 
@@ -324,59 +412,119 @@ def _direct_listing_source(name, url):
     return out
 
 
-def _collect():
-    jobs = {}
-    pool = ThreadPoolExecutor(max_workers=20, thread_name_prefix="cricket-topic-desk")
+def _collect(scope="India / Asia"):
+    """Collect primary cricket news and secondary signals in isolated worker pools."""
+    primary_jobs = {}
+    secondary_jobs = {}
+    primary_pool = ThreadPoolExecutor(
+        max_workers=max(4, len(_google_queries_for_scope(scope)) + len(DIRECT_CRICKET_SOURCES)),
+        thread_name_prefix="cricket-topic-primary",
+    )
+    secondary_pool = ThreadPoolExecutor(
+        max_workers=10,
+        thread_name_prefix="cricket-topic-secondary",
+    )
+
     try:
-        for query in NEWS_QUERIES + VIRAL_QUERIES + SOCIAL_QUERIES:
-            future = pool.submit(sr._google_news_search_items, query, "sports_stories_of_day", 25)
-            jobs[future] = "Google News"
+        google_queries = _google_queries_for_scope(scope)
+        for query in google_queries:
+            future = primary_pool.submit(
+                sr._google_news_search_items,
+                query,
+                "sports_stories_of_day",
+                GOOGLE_RESULT_LIMIT,
+            )
+            primary_jobs[future] = "Google News"
 
         for name, url, kind in DIRECT_CRICKET_SOURCES:
             if kind == "rss":
-                future = pool.submit(sr._rss_items, url, "sports_stories_of_day", "official", 35)
+                future = primary_pool.submit(
+                    sr._rss_items,
+                    url,
+                    "sports_stories_of_day",
+                    "official",
+                    30,
+                )
             else:
-                future = pool.submit(_direct_listing_source, name, url)
-            jobs[future] = name
+                future = primary_pool.submit(_direct_listing_source, name, url)
+            primary_jobs[future] = name
 
+        # Secondary signals never consume the primary news-source worker budget.
         for subreddit in REDDIT_SUBREDDITS:
-            future = pool.submit(_reddit_search, subreddit, "cricket")
-            jobs[future] = f"Reddit r/{subreddit}"
+            future = secondary_pool.submit(_reddit_search, subreddit, "cricket")
+            secondary_jobs[future] = f"Reddit r/{subreddit}"
 
-        for query in BLUESKY_QUERIES[:4]:
-            future = pool.submit(_bluesky, query)
-            jobs[future] = "Bluesky"
+        social_queries = ("cricket",) if _clean(scope).casefold() == "global" else BLUESKY_QUERIES[1:2]
+        for query in social_queries:
+            future = secondary_pool.submit(_bluesky, query)
+            secondary_jobs[future] = "Bluesky"
 
-        for query in MASTODON_QUERIES:
-            future = pool.submit(_mastodon, query)
-            jobs[future] = "Mastodon"
+        mastodon_query = "cricket" if _clean(scope).casefold() == "global" else "India cricket"
+        future = secondary_pool.submit(_mastodon, mastodon_query)
+        secondary_jobs[future] = "Mastodon"
 
         for geo in TREND_GEOS:
-            future = pool.submit(sr._google_trends_items, geo, 20)
-            jobs[future] = f"Google Trends {geo}"
+            future = secondary_pool.submit(sr._google_trends_items, geo, 20)
+            secondary_jobs[future] = f"Google Trends {geo}"
 
-        jobs[pool.submit(
-            fetch_gdelt_articles,
-            "cricket India selection injury record controversy quotes",
-            timespan="72h",
-            max_records=60,
-            timeout=1.5,
-        )] = "GDELT India"
-        jobs[pool.submit(
-            fetch_gdelt_articles,
-            "cricket women domestic associate social reaction",
-            timespan="72h",
-            max_records=60,
-            timeout=1.5,
-        )] = "GDELT wider"
+        scope_lower = _clean(scope).casefold()
+        if scope_lower == "india / asia":
+            gdelt_jobs = (
+                ("GDELT India", "cricket India selection injury record controversy quotes"),
+                ("GDELT wider", "cricket women domestic associate Asia reaction"),
+            )
+        elif scope_lower == "global":
+            gdelt_jobs = (
+                ("GDELT global", "cricket international record injury selection controversy"),
+                ("GDELT women/associate", "cricket women domestic associate reaction"),
+            )
+        else:
+            gdelt_jobs = (
+                ("GDELT cricket", "cricket record injury selection controversy"),
+            )
+        for label, query in gdelt_jobs:
+            future = secondary_pool.submit(
+                fetch_gdelt_articles,
+                query,
+                timespan="72h",
+                max_records=50,
+                timeout=1.5,
+            )
+            secondary_jobs[future] = label
 
-        done, pending = wait(list(jobs), timeout=DESK_TIMEOUT)
+        # Both pools are running concurrently. The effective desk latency is the
+        # slower primary/secondary bound, not their sum.
+        primary_done, primary_pending = wait(
+            list(primary_jobs),
+            timeout=PRIMARY_DESK_TIMEOUT,
+        )
+        secondary_done, secondary_pending = wait(
+            list(secondary_jobs),
+            timeout=SECONDARY_DESK_TIMEOUT,
+        )
+
         rows = []
-        counts = {}
+        counts = {label: 0 for label in {
+            *primary_jobs.values(),
+            *secondary_jobs.values(),
+        }}
         failures = []
+        google_completed = 0
+        google_total = len(google_queries)
 
-        for future in done:
-            label = jobs[future]
+        for future in primary_done:
+            label = primary_jobs[future]
+            try:
+                values = future.result() or []
+                rows.extend(values)
+                counts[label] = counts.get(label, 0) + len(values)
+                if label == "Google News":
+                    google_completed += 1
+            except Exception as exc:
+                failures.append(f"{label}:{type(exc).__name__}")
+
+        for future in secondary_done:
+            label = secondary_jobs[future]
             try:
                 values = future.result() or []
                 rows.extend(values)
@@ -384,17 +532,17 @@ def _collect():
             except Exception as exc:
                 failures.append(f"{label}:{type(exc).__name__}")
 
-        for future in pending:
-            label = jobs[future]
+        for future in (*primary_pending, *secondary_pending):
+            label = primary_jobs.get(future) or secondary_jobs.get(future) or "unknown"
             future.cancel()
             failures.append(f"{label}:timeout")
-            counts.setdefault(label, 0)
 
         compact_counts = ", ".join(
             f"{label}={count}" for label, count in sorted(counts.items())
         )
         print(
-            f"   [Cricket Desk] Raw source intake: {compact_counts or 'none'}",
+            f"   [Cricket Desk] Raw source intake: {compact_counts or 'none'} "
+            f"| Google lanes {google_completed}/{google_total}",
             flush=True,
         )
         if failures:
@@ -404,9 +552,10 @@ def _collect():
             )
         return rows
     finally:
-        for future in jobs:
+        for future in (*primary_jobs.keys(), *secondary_jobs.keys()):
             future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
+        primary_pool.shutdown(wait=False, cancel_futures=True)
+        secondary_pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _normalise_rows(rows):
@@ -426,10 +575,7 @@ def _normalise_rows(rows):
                 continue
             if not sr._cricket_service_title_pass(item):
                 continue
-            if item.get("collection_source") not in {"official", "specialist_direct"}:
-                if not sr._story_substance_pass(item, minimum_body_chars=90):
-                    continue
-        url = _clean(item.get("url") or item.get("link"))
+            url = _clean(item.get("url") or item.get("link"))
         canonical = sr._canonical_url(url)
         key = canonical or ("title:" + _clean(item.get("title")).casefold())
         if key in seen:
@@ -594,12 +740,58 @@ def _select(pool, count, score_name, chosen):
 
 
 def _bucketize(concepts):
+    """Build three buckets while preventing one cricket event family from dominating."""
     remaining = list(concepts)
     result = []
-    for bucket, score_name in (("news","news_score"),("viral","viral_score"),("social","social_score")):
-        picked = _select(remaining, PER_BUCKET, score_name, [])
+    portfolio_selected = []
+    top_window = int(getattr(sr, "CRICKET_PORTFOLIO_TOP_WINDOW", 6) or 6)
+    top_cap = int(getattr(sr, "CRICKET_MAX_SAME_FAMILY_IN_TOP_WINDOW", 2) or 2)
+    portfolio_cap = int(getattr(sr, "CRICKET_MAX_SAME_FAMILY_IN_PORTFOLIO", 4) or 4)
+
+    def family_of(item):
+        try:
+            return _clean(sr._cricket_event_family(item))
+        except Exception:
+            return ""
+
+    def family_repeats(item):
+        family = family_of(item)
+        if not family:
+            return 0
+        return sum(1 for old in portfolio_selected if family == family_of(old))
+
+    def pick_bucket(score_name, count):
+        picked = []
+        while remaining and len(picked) < count:
+            eligible = []
+            for item in remaining:
+                repeats = family_repeats(item)
+                family = family_of(item)
+                cap = top_cap if len(portfolio_selected) < top_window else portfolio_cap
+                if family and repeats >= cap:
+                    continue
+                similarity = max(
+                    (_similarity(item, old) for old in portfolio_selected),
+                    default=0.0,
+                )
+                adjusted = (
+                    float(item.get(score_name) or 0.0)
+                    - similarity * 8.0
+                    - repeats * 3.0
+                    + (1.5 if float(item.get("undercovered_score") or 0) >= 7 else 0.0)
+                )
+                eligible.append((adjusted, item))
+            if not eligible:
+                break
+            _, winner = max(eligible, key=lambda pair: pair[0])
+            remaining.remove(winner)
+            portfolio_selected.append(winner)
+            picked.append(winner)
+        return picked
+
+    for bucket, score_name in (("news", "news_score"), ("viral", "viral_score"), ("social", "social_score")):
+        picked = pick_bucket(score_name, PER_BUCKET)
         for item in picked:
-            remaining.remove(item)
             row = dict(item)
             if bucket == "social" and row.get("social_post_count"):
                 social_titles = [
@@ -609,29 +801,38 @@ def _bucketize(concepts):
                 ]
                 if social_titles:
                     row["event_anchor_title"] = row.get("title")
-                    row["title"] = max(
-                        social_titles,
-                        key=lambda value: len(value),
-                    )
+                    row["title"] = max(social_titles, key=len)
             row["discovery_bucket"] = bucket
             row["bucket_score"] = float(row.get(score_name) or 0)
+            row["cricket_event_family"] = family_of(item)
             result.append(row)
-    for bucket, score_name in (("news","news_score"),("viral","viral_score"),("social","social_score")):
-        bucket_rows = [x for x in result if x.get("discovery_bucket")==bucket]
-        need = PER_BUCKET - len(bucket_rows)
-        if need:
-            for item in sorted(remaining, key=lambda x: float(x.get(score_name) or 0), reverse=True)[:need]:
-                remaining.remove(item)
-                row = dict(item)
-                row["discovery_bucket"] = bucket
-                row["cross_bucket_backfill"] = True
-                row["bucket_score"] = float(row.get(score_name) or 0)
-                result.append(row)
+
+    # When a source pool is genuinely small, fill the requested bucket sizes
+    # without inventing stories. The relaxed pass is explicitly a backfill only.
+    for bucket, score_name in (("news", "news_score"), ("viral", "viral_score"), ("social", "social_score")):
+        need = PER_BUCKET - sum(1 for x in result if x.get("discovery_bucket") == bucket)
+        while need and remaining:
+            winner = max(
+                remaining,
+                key=lambda item: (
+                    float(item.get(score_name) or 0.0)
+                    - max((_similarity(item, old) for old in portfolio_selected), default=0.0) * 8.0
+                ),
+            )
+            remaining.remove(winner)
+            portfolio_selected.append(winner)
+            row = dict(winner)
+            row["discovery_bucket"] = bucket
+            row["cross_bucket_backfill"] = True
+            row["bucket_score"] = float(row.get(score_name) or 0)
+            row["cricket_event_family"] = family_of(winner)
+            result.append(row)
+            need -= 1
     return result
 
 
 def discover_cricket_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=30, retained_candidates=None):
-    raw = _collect()
+    raw = _collect(scope)
     if isinstance(raw, dict):
         raw = raw.get("rows") or []
     trend_rows = [row for row in raw if isinstance(row, dict) and row.get("collection_source") == "google_trends"]
