@@ -258,6 +258,39 @@ def test_primary_writer_uses_duration_first_contract():
     assert "For a regular Short, output 3 or 4 scenes" in source
 
 
+def test_numeric_script_details_must_exist_in_supplied_evidence():
+    from quality_runtime import validate_deterministic_script_quality
+
+    script = _valid_script()
+    script["script"][1]["voiceover"] = "The decision changes preparation for 47 matches."
+    story = {
+        "title": "India squad change",
+        "research_evidence_text": (
+            "Officials confirmed the squad change after the latest review. "
+            "The decision affects preparation for the next assignment."
+        ),
+    }
+    ok, reason = validate_deterministic_script_quality(script, "regular", story)
+    assert ok is False
+    assert "47" in reason
+
+
+def test_numeric_script_details_are_allowed_when_grounded():
+    from quality_runtime import validate_deterministic_script_quality
+
+    script = _valid_script()
+    script["script"][1]["voiceover"] = "The decision changes preparation for 47 matches."
+    story = {
+        "title": "India squad change",
+        "research_evidence_text": (
+            "Officials confirmed the squad change after the latest review. "
+            "The decision affects preparation for 47 matches in the next assignment."
+        ),
+    }
+    ok, reason = validate_deterministic_script_quality(script, "regular", story)
+    assert ok is True, reason
+
+
 def test_router_error_contract_contains_provider_reasons():
     source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
     assert 'attempt_reasons = []' in source
