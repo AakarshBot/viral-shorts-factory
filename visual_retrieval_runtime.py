@@ -1509,7 +1509,7 @@ def collect_manual_visual_search(
                 visual_genre=visual_genre,
             )
             qa_failure = get_last_visual_qa_failure()
-            if qa_failure in {"transient_unavailable", "circuit_breaker"}:
+            if qa_failure in {"transient_unavailable", "quota_or_rate_limit", "circuit_breaker"}:
                 remaining = max(0, 10 - len(accepted))
                 accepted.extend(
                     {
