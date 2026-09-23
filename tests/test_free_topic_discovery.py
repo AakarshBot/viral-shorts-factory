@@ -38,7 +38,7 @@ def test_google_trends_rss_parser_keeps_linked_news_and_trend_strength(monkeypat
 def test_google_news_search_uses_public_rss_not_gnews(monkeypatch):
     captured = {}
 
-    def fake_rss(url, genre_key, collection_source="rss", max_items=60):
+    def fake_rss(url, genre_key, collection_source="rss", max_items=60, timeout=8.0):
         captured.update(
             url=url,
             genre_key=genre_key,
