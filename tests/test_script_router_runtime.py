@@ -69,7 +69,7 @@ def _valid_script():
 
 def test_initial_script_contract_is_compact():
     source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
-    assert "INITIAL_SCRIPT_MAX_WORDS = 65" in source
+    assert "INITIAL_SCRIPT_MAX_WORDS = 60" in source
     assert "SCENE_1_MAX_WORDS = 14" in source
     assert "def tighten_script_for_duration_once(" not in source
 
@@ -79,7 +79,7 @@ def test_initial_script_rejects_overlong_provider_output():
     script["script"][1]["voiceover"] = " ".join(["word"] * 60)
     ok, reason = validate_content_density(script, {}, "regular")
     assert ok is False
-    assert "maximum is 65" in reason
+    assert "maximum is 60" in reason
 
 
 def test_initial_script_requires_shortest_first_scene():
@@ -128,7 +128,7 @@ def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
 
 def test_primary_writer_uses_hard_initial_word_contract():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Voiceover total: 55–65 words." in source
+    assert "Voiceover total: 55–60 words." in source
     assert "Scene 1: 8–14 words" in source
     assert "The entire narration must naturally fit below 30 seconds" in source
     assert "tighten_script_for_duration_once" not in source
