@@ -45,7 +45,7 @@ def test_tts_duration_qc_stops_on_material_mismatch():
     assert result["delta_seconds"] == 6.0
 
 
-def test_initial_script_rejects_more_than_65_voiceover_words():
+def test_initial_script_rejects_more_than_60_voiceover_words():
     script = _script(["Hook words only."] + [" ".join(["word"] * 64)])
     ok, reason = validate_content_density(script, {}, "regular")
 
