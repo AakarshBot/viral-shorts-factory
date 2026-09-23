@@ -230,7 +230,7 @@ def test_near_verbatim_source_sentence_is_rejected():
     }
     script = _valid_script()
     script["script"][0]["voiceover"] = (
-        "Officials confirmed the major squad change after the latest review."
+        "Officials have now confirmed the major squad change after the latest review."
     )
     result = check_script_originality(script, source)
     assert result["passed"] is False
@@ -364,7 +364,6 @@ def test_groq_primary_writer_uses_current_gpt_oss_request_contract(monkeypatch):
     assert payload["model"] == "openai/gpt-oss-120b"
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
-    assert payload["provider"] == {"require_parameters": True}
     assert payload["include_reasoning"] is False
     assert payload["reasoning_effort"] == "low"
     assert payload["max_completion_tokens"] == 900
@@ -558,6 +557,7 @@ def test_openrouter_fallback_uses_strict_schema_and_900_tokens(monkeypatch):
     assert payload["max_tokens"] == 900
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
+    assert payload["provider"] == {"require_parameters": True}
 
 
 def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypatch):
