@@ -117,12 +117,13 @@ def test_local_tts_duration_repair_refuses_excessive_speed_change(monkeypatch, t
             [20.0, 14.0],
         )
 
-def test_production_does_not_fail_only_on_estimate_variance():
+def test_production_has_no_raw_post_tts_duration_abort():
     from pathlib import Path
 
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "TTS duration materially differs from the pre-TTS estimate" not in source
-    assert 'if audio_duration["total_seconds"] > 30.0:' in source
+    assert 'if audio_duration["total_seconds"] > 30.0:' not in source
+    assert "post-TTS duration contract" in source
 
 
 def test_initial_script_uses_a_safety_ceiling_above_the_normal_duration_target():
