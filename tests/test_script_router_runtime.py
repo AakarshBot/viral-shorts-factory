@@ -451,6 +451,174 @@ def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(mo
     assert calls[1]["messages"][0]["role"] == "user"
 
 
+
+def _fake_urlopen_response(payload):
+    import json
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+    return Response()
+
+
+def test_gemini_fallback_sends_canonical_response_schema(monkeypatch):
+    import json
+    import research_runtime
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        return _fake_urlopen_response({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": json.dumps(_valid_script())}]
+                }
+            }]
+        })
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+    result = research_runtime._gemini_script_fallback(
+        {"title": "India squad change", "research_evidence_text": (
+            "Officials confirmed a major squad change after the latest review. "
+            "The decision changes preparation for the next assignment."
+        )},
+        {"script_instruction": "English."},
+        "sports_stories_of_day",
+        "regular",
+    )
+
+    assert result["script"]
+    request = calls[0][0]
+    payload = json.loads(request.data.decode("utf-8"))
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+    assert payload["generationConfig"]["maxOutputTokens"] == 900
+    assert payload["generationConfig"]["responseSchema"]["additionalProperties"] is False
+    assert request.get_header("X-goog-api-key") == "test-key"
+
+
+def test_openrouter_fallback_uses_strict_schema_and_900_tokens(monkeypatch):
+    import json
+    import research_runtime
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        return _fake_urlopen_response({
+            "choices": [{
+                "message": {"content": json.dumps(_valid_script())}
+            }]
+        })
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+    result = research_runtime._openrouter_script_fallback(
+        {"title": "India squad change", "research_evidence_text": (
+            "Officials confirmed a major squad change after the latest review. "
+            "The decision changes preparation for the next assignment."
+        )},
+        {"script_instruction": "English."},
+        "sports_stories_of_day",
+        "regular",
+    )
+
+    assert result["script"]
+    payload = json.loads(calls[0][0].data.decode("utf-8"))
+    assert payload["model"] == "openrouter/free"
+    assert payload["max_tokens"] == 900
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
+
+
+def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypatch):
+    import json
+    import research_runtime
+
+    monkeypatch.delenv("VSF_REMOTE_MODE", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("OLLAMA_SCRIPT_MODEL", "llama3.2:latest")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        if request.full_url.endswith("/api/tags"):
+            return _fake_urlopen_response({
+                "models": [{"name": "llama3.2:latest"}]
+            })
+        return _fake_urlopen_response({
+            "choices": [{
+                "message": {"content": json.dumps(_valid_script())}
+            }]
+        })
+
+    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
+    result = research_runtime._ollama_script_fallback(
+        {"title": "India squad change", "research_evidence_text": (
+            "Officials confirmed a major squad change after the latest review. "
+            "The decision changes preparation for the next assignment."
+        )},
+        {"script_instruction": "English."},
+        "sports_stories_of_day",
+        "regular",
+    )
+
+    assert result["script"]
+    generation = next(request for request in calls if request.full_url.endswith("/v1/chat/completions"))
+    payload = json.loads(generation.data.decode("utf-8"))
+    assert payload["model"] == "llama3.2:latest"
+    assert payload["max_tokens"] == 900
+    assert payload["response_format"] == {"type": "json_object"}
+
+
+def test_repeated_groq_400_stops_at_two_provider_calls(monkeypatch):
+    import ultimate_bot
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    calls = []
+
+    class FakeResponse:
+        status_code = 400
+        text = '{"error":{"message":"unsupported parameter"}}'
+
+        def json(self):
+            return {"error": {"message": "unsupported parameter"}}
+
+    def fake_post(_url, **kwargs):
+        calls.append(kwargs["json"])
+        return FakeResponse()
+
+    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
+
+    try:
+        ultimate_bot.write_script(
+            {"title": "India squad change", "research_evidence_text": (
+                "Officials confirmed a major squad change after the latest review. "
+                "The decision changes preparation for the next assignment."
+            )},
+            {"script_instruction": "English."},
+            "sports_stories_of_day",
+            None,
+            "regular",
+        )
+    except RuntimeError as exc:
+        assert "HTTP 400" in str(exc)
+    else:
+        raise AssertionError("Repeated 400 responses must terminate after the bounded two-call retry ceiling.")
+
+    assert len(calls) == 2
+    assert calls[0]["model"] == "openai/gpt-oss-120b"
+    assert calls[1]["model"] == "openai/gpt-oss-20b"
+
+
 def test_router_includes_gemini_as_a_configured_script_fallback():
     source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(
         encoding="utf-8"
