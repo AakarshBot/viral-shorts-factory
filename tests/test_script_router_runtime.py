@@ -141,6 +141,20 @@ def test_initial_script_rejects_overlong_first_scene():
     assert "Scene 1 is too long" in reason
 
 
+def test_fallback_prompt_requires_explanatory_middle_beats():
+    import research_runtime
+
+    prompt = research_runtime._fallback_prompt(
+        {"script_instruction": "Write all narration in English."},
+        "regular",
+        {},
+    )
+    assert "Target roughly 60–72 spoken words" in prompt
+    assert "Scene 1 is the only headline-style beat." in prompt
+    assert "Every later scene must add new, story-specific information" in prompt
+    assert "not a stack of headlines" in prompt
+
+
 def test_router_rejects_incomplete_regular_narrative_before_dashboard_review():
     script = _valid_script()
     script["script"] = script["script"][:2]
@@ -267,12 +281,14 @@ def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
 
 def test_primary_writer_uses_duration_first_contract():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Target roughly 50–60 spoken words; never exceed the 90-word safety ceiling." in source
+    assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
     assert "Scene 1: 8–14 words" in source
+    assert "Scene 1 is the only headline-style beat." in source
+    assert "Later scenes must add new, story-specific information" in source
+    assert "Normally use four scenes for a regular story" in source
     assert "Spoken duration is authoritative" in source
     assert 'For Top-5 mode, output 6 scenes' in source
     assert "Target roughly 50–60 spoken words in Top-5 mode" in source
-    assert "For a regular Short, output 3 or 4 scenes" in source
 
 
 def test_numeric_script_details_must_exist_in_supplied_evidence():
