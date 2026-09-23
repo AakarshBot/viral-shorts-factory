@@ -1886,12 +1886,12 @@ def test_manual_pool_exposes_candidates_for_human_review_when_gemini_is_temporar
         calls.append(1)
         return [
             {
-                "bytes": _jpeg_bytes((1200, 1600), (40, 70, 100)),
-                "source_image_url": "https://example.test/image.jpg",
+                "bytes": _jpeg_bytes((1200, 1600), (40 + index * 10, 70, 100)),
+                "source_image_url": f"https://example.test/image-{index}.jpg",
                 "search_title": "IPL logo",
                 "provenance": {"provider": "Commons", "license": "cc0"},
             }
-            for _ in range(6)
+            for index in range(6)
         ]
 
     class FakeBot:
