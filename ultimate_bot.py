@@ -334,24 +334,49 @@ def enforce_cache_ttl_hygiene():
         pass
 
 def parse_groq_json_response(content_str):
-    """Safely parse provider JSON, accepting raw text or an already-decoded object."""
+    """Safely parse provider JSON, preferring the object that matches the script contract."""
     if isinstance(content_str, dict):
         parsed = copy.deepcopy(content_str)
     elif isinstance(content_str, str):
         cleaned = content_str.strip()
         cleaned = re.sub(r"^\x60\x60\x60(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*\x60\x60\x60$", "", cleaned).strip()
+        if not cleaned:
+            raise ValueError(
+                f"Failed to parse JSON response safely. Raw text: {content_str[:500]}"
+            )
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError:
             decoder = json.JSONDecoder()
-            try:
-                start = next(index for index, char in enumerate(cleaned) if char == "{")
-                parsed, _end = decoder.raw_decode(cleaned[start:])
-            except (StopIteration, json.JSONDecodeError) as exc:
+            candidates = []
+            for match in re.finditer(r"\{", cleaned):
+                try:
+                    candidate, _end = decoder.raw_decode(cleaned[match.start():])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    contract_score = sum(
+                        1
+                        for key in (
+                            "script",
+                            "titles",
+                            "creator_insight",
+                            "editorial_angle",
+                            "seo_description",
+                            "recommended_title_index",
+                            "data",
+                        )
+                        if key in candidate
+                    )
+                    candidates.append(
+                        (contract_score, len(json.dumps(candidate, ensure_ascii=False)), candidate)
+                    )
+            if not candidates:
                 raise ValueError(
                     f"Failed to parse JSON response safely. Raw text: {content_str[:500]}"
-                ) from exc
+                )
+            parsed = max(candidates, key=lambda item: (item[0], item[1]))[2]
     else:
         raise ValueError("Expected a string or decoded JSON object response.")
 
@@ -376,6 +401,7 @@ def parse_groq_json_response(content_str):
             scene["specific_search_prompt"] = safe_text(scene.get("specific_search_prompt"), "")
             scene["sport_or_topic_category"] = safe_text(scene.get("sport_or_topic_category"), "")
     return parsed
+
 def _provider_http_error_detail(response, max_chars=900):
     """Extract a safe, useful provider error message instead of hiding HTTP 4xx/5xx details."""
     detail = ""
