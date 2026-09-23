@@ -99,7 +99,7 @@ def test_cricket_desk_buckets_are_distinct_and_target_ten_each(monkeypatch):
             f"Undercovered cricket story: {phrase} involving player {index}",
             f"source{index}.example",
         ))
-    monkeypatch.setattr(desk, "_collect", lambda: concepts)
+    monkeypatch.setattr(desk, "_collect", lambda scope="India / Asia": concepts)
     monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
     monkeypatch.setattr(desk, "_trend_signal", lambda item, trends: 0.0)
 
@@ -133,7 +133,7 @@ def test_cricket_desk_scope_keeps_india_asia_primary(monkeypatch):
         _article("India domestic bowler breaks record", "india.example"),
         _article("England batter breaks record", "england.example"),
     ]
-    monkeypatch.setattr(desk, "_collect", lambda: rows)
+    monkeypatch.setattr(desk, "_collect", lambda scope="India / Asia": rows)
     monkeypatch.setattr(desk, "_normalise_rows", lambda rows: rows)
     result = desk.discover_cricket_topics(
         bot=None,
@@ -181,11 +181,15 @@ def test_direct_listing_source_accepts_cricinfo_story_paths_and_calendar_dates(m
     assert all(row["source"] == "ESPNcricinfo" for row in rows)
 
 
-def test_google_news_snippets_survive_until_event_clustering():
+def test_google_news_snippets_survive_until_event_clustering(monkeypatch):
     row = _article("India survive Japan scare in dramatic T20 finish", "news.google.com")
     row["text"] = "Too short"
     row["description"] = "Short"
     row["collection_source"] = "google_news_rss"
+    monkeypatch.setattr(desk.sr, "_safety_gate", lambda story: (True, []))
+    monkeypatch.setattr(desk.sr, "_source_page_pass", lambda story: True)
+    monkeypatch.setattr(desk.sr, "_headline_noise_pass", lambda story: True)
+    monkeypatch.setattr(desk.sr, "_cricket_service_title_pass", lambda story: True)
     result = desk._normalise_rows([row])
     assert len(result) == 1
 
