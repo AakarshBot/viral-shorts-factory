@@ -61,3 +61,47 @@ def test_deterministic_safety_block_remains_hard_reject():
     }]
 
     assert score_candidates(scored, [story], {}, "", "regular") == []
+
+
+def test_missing_editorial_records_use_neutral_fallbacks():
+    stories = [
+        {"title": "Story one", "text": "A factual story with enough context.", "velocity_score": 1.5},
+        {"title": "Story two", "text": "Another factual story with enough context.", "velocity_score": 0.0},
+    ]
+    scored = [{
+        "hook_strength": 8,
+        "narrative_completeness": 8,
+        "audience_fit": 8,
+        "monetization_risk": 2,
+        "shelf_life": 8,
+        "hard_reject": False,
+    }]
+
+    result = score_candidates(scored, stories, {}, "", "regular")
+
+    assert len(result) == 2
+    assert result[0]["hook_strength"] == 8.0
+    assert result[1]["hook_strength"] < 8.0
+    assert result[1]["hard_reject"] is False
+
+
+def test_malformed_editorial_record_fields_are_normalized():
+    story = {"title": "Malformed score story", "text": "Enough factual context for scoring."}
+    scored = [{
+        "hook_strength": "bad",
+        "narrative_completeness": None,
+        "audience_fit": "7",
+        "monetization_risk": "false",
+        "shelf_life": "9",
+        "hard_reject": "false",
+    }]
+
+    result = score_candidates(scored, [story], {}, "", "regular")
+
+    assert len(result) == 1
+    assert result[0]["hook_strength"] == 5.0
+    assert result[0]["narrative_completeness"] == 5.0
+    assert result[0]["audience_fit"] == 7.0
+    assert result[0]["monetization_risk"] == 5.0
+    assert result[0]["shelf_life"] == 9.0
+    assert result[0]["hard_reject"] is False
