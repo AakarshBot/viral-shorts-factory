@@ -59,6 +59,50 @@ def test_dashboard_workspace_navigation_uses_pills():
     assert "return selected or current" in source
 
 
+def test_cricket_discovery_forwards_requested_candidate_cap(monkeypatch):
+    import dashboard_runtime
+
+    calls = {}
+
+    monkeypatch.setattr(
+        dashboard_runtime,
+        "_merge_retained_topics",
+        lambda bot, config, conn, ranked, retained, max_candidates: ranked,
+    )
+    monkeypatch.setattr(
+        dashboard_runtime,
+        "migrate_vault",
+        lambda conn: None,
+        raising=False,
+    )
+
+    import sports_topic_desk_runtime
+    monkeypatch.setattr(
+        sports_topic_desk_runtime,
+        "discover_cricket_topics",
+        lambda **kwargs: calls.update(kwargs) or [],
+    )
+
+    class Bot:
+        CONTENT_CATEGORIES = {"sports_stories_of_day": {}}
+
+    dashboard_runtime.discover_ranked_topics(
+        Bot(),
+        {
+            "format_mode": "cricket",
+            "cricket_pipeline": True,
+            "cricket_category": "India / Asia",
+            "category": "sports_stories_of_day",
+            "language": "english",
+        },
+        None,
+        max_candidates=7,
+        retained_candidates=[],
+    )
+
+    assert calls["max_candidates"] == 7
+
+
 def test_dashboard_live_header_uses_canonical_mode():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
