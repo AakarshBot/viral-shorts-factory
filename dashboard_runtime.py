@@ -373,12 +373,13 @@ def discover_ranked_topics(
         target_category = category or genre_key
         ai_cricket = False
 
-    if is_cricket:
-        from sports_topic_desk_runtime import discover_cricket_topics
-        ranked = discover_cricket_topics(
+    if is_cricket or (category == "sports" and str(web_config.get("discovery_mode") or "").strip().lower() != "ai_sports"):
+        from sports_topic_desk_runtime import discover_sports_topics
+        sports_scope = cricket_name if is_cricket else "Niche Sports"
+        ranked = discover_sports_topics(
             bot=bot,
             conn=conn,
-            scope=cricket_name,
+            scope=sports_scope,
             requested_topic=requested_topic,
             max_candidates=max_candidates,
             retained_candidates=retained_candidates,
