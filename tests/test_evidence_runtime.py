@@ -133,3 +133,30 @@ def test_discover_sources_overlaps_independent_research_calls(monkeypatch):
 
     assert {item["publisher"] for item in result} == {"Reuters", "Nature"}
     assert {kind for kind, _ in calls} == {"ddg", "openalex"}
+
+    
+def test_discover_sources_skips_redundant_discovery_when_event_evidence_fills_budget(monkeypatch):
+    calls = []
+
+    def fail_ddg(_query):
+        calls.append("ddg")
+        raise AssertionError("DDG should not run when event evidence already fills the source budget.")
+
+    monkeypatch.setattr("evidence_runtime._ddg_sources", fail_ddg)
+    result = __import__("evidence_runtime").discover_sources(
+        {
+            "title": "India wins a major final",
+            "event_evidence": [
+                _source(
+                    f"https://source{i}.example/story",
+                    f"Publisher {i}",
+                    "A useful factual event report with enough text for source selection.",
+                )
+                for i in range(1, 6)
+            ],
+        },
+        max_sources=5,
+    )
+
+    assert len(result) == 5
+    assert calls == []
