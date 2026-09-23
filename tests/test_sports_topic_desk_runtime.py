@@ -117,7 +117,7 @@ def test_cricket_desk_primary_google_burst_is_bounded(monkeypatch):
 
     desk._collect("India / Asia")
 
-    assert len(calls) == desk.GOOGLE_PRIMARY_QUERY_LIMIT
+    assert len(calls) == desk.GOOGLE_QUERY_LIMIT
 
 
 def test_cricket_desk_duplicate_headlines_form_one_concept():
