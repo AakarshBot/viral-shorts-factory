@@ -18,7 +18,20 @@ def _normalise(text):
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())).strip()
 
 
-def validate_deterministic_script_quality(script_data, format_mode="regular"):
+
+
+def _normalise_numeric_token(value):
+    return re.sub(r"[, ]", "", str(value or "")).strip()
+
+
+def _numeric_tokens(text):
+    return {
+        _normalise_numeric_token(token)
+        for token in re.findall(r"(?<![A-Za-z])\d+(?:[.,]\d+)*(?:%)?", str(text or ""))
+        if _normalise_numeric_token(token)
+    }
+
+def validate_deterministic_script_quality(script_data, format_mode="regular", story_data=None):
     """Validate deterministic writer-output quality without making another model/API call."""
     if not isinstance(script_data, dict):
         return False, "Script payload is not an object."
@@ -26,6 +39,24 @@ def validate_deterministic_script_quality(script_data, format_mode="regular"):
     scenes = script_data.get("script", [])
     if not isinstance(scenes, list) or not scenes:
         return False, "Script contains no scenes."
+
+    story_data = story_data if isinstance(story_data, dict) else {}
+    evidence_blob = " ".join(
+        str(story_data.get(key) or "")
+        for key in ("title", "topic", "text", "summary", "description", "snippet", "research_evidence_text", "research_bundle")
+    )
+    evidence_numbers = _numeric_tokens(evidence_blob)
+    if evidence_blob:
+        for index, scene in enumerate(scenes, 1):
+            if not isinstance(scene, dict):
+                continue
+            scene_numbers = _numeric_tokens(scene.get("voiceover", ""))
+            unsupported = sorted(scene_numbers - evidence_numbers)
+            if unsupported:
+                return False, (
+                    f"Scene {index} contains unsupported numeric detail(s): "
+                    + ", ".join(unsupported[:6])
+                )
 
     mode = str(format_mode or "").strip().lower()
     expected = 6 if mode == "top5" else None
