@@ -964,12 +964,12 @@ def test_dashboard_six_topic_grid_uses_three_column_rows():
     assert "range(0, len(visible), 3)" in block
 
 
-def test_dashboard_retained_topics_are_sent_back_through_current_discovery():
+def test_dashboard_retained_topics_are_merged_without_reapplying_production_gates():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     assert 'retained_candidates=st.session_state.get("retained_topics", [])' in source
     runtime = Path(__file__).resolve().parents[1].joinpath("dashboard_runtime.py").read_text(encoding="utf-8")
     assert "def _merge_retained_topics(" in runtime
-    assert "rank_discovery_candidates(" in runtime
+    assert "return list(fresh_candidates or [])[:max_candidates]" in runtime
 
 
 def test_dashboard_error_progress_preserves_last_known_percent():
