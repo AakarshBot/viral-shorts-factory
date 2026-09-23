@@ -58,6 +58,7 @@ SURFACE_MAP: dict[str, str] = {
     "compile_video": "Live Factory",
     "upload_to_youtube": "Live Factory",
     "_report_youtube_upload_visibility": "Internal",
+    "_provider_http_error_detail": "Internal",
     "_ensure_youtube_public_visibility": "Internal",
     "font_preflight_check": "Live Factory",
     "run_robot": "Live Factory",
