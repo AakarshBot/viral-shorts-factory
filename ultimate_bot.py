@@ -2172,9 +2172,35 @@ def run_robot(web_config=None):
                 print("   [!] Not enough stories for Top 5.")
                 return
 
+            top5_stories = [dict(item) for item in cands[:5] if isinstance(item, dict)]
+            aggregated_event_evidence = [
+                dict(evidence)
+                for story in top5_stories
+                for evidence in (story.get("event_evidence") or [])
+                if isinstance(evidence, dict)
+            ]
+            event_entities = []
+            event_actions = []
+            for story in top5_stories:
+                for value in (story.get("event_entities") or []):
+                    value = str(value or "").strip()
+                    if value and value not in event_entities:
+                        event_entities.append(value)
+                for value in (story.get("event_actions") or []):
+                    value = str(value or "").strip()
+                    if value and value not in event_actions:
+                        event_actions.append(value)
             story_payload = {
                 "title": f"{genre_cfg['label']} - {datetime.now().strftime('%b %d')}",
-                "text": json.dumps(cands[:5]),
+                "text": json.dumps(top5_stories),
+                "summary": "\n".join(
+                    str(story.get("summary") or story.get("description") or story.get("title") or "").strip()
+                    for story in top5_stories
+                    if str(story.get("summary") or story.get("description") or story.get("title") or "").strip()
+                ),
+                "event_evidence": aggregated_event_evidence,
+                "event_entities": event_entities,
+                "event_actions": event_actions,
             }
             main_topic = story_payload["title"]
         else:
