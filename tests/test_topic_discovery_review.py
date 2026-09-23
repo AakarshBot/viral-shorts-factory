@@ -14,6 +14,9 @@ class _FakeResponse:
 
 
 def test_script_pipeline_tries_original_free_provider_before_private_extractive_fallback(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     import pipeline_integrity_runtime as pir
     import research_runtime as rr
     import script_router_runtime as router
@@ -69,6 +72,7 @@ def test_script_pipeline_tries_original_free_provider_before_private_extractive_
     result = write_script({"title": "Selected story", "text": "Verified story evidence."}, {}, "technology", object(), "regular")
 
     assert result["title"] == "Recovered original script"
+    assert result["provider_used"] == "OpenRouter free"
     assert result.get("fallback_mode") != "extractive_source_grounded"
     assert result.get("public_publish_blocked") is not True
 
