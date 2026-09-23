@@ -1005,11 +1005,28 @@ def get_insights_for_script(conn):
 
 def validate_script(script_data, source_text, format_mode):
     try:
-        return validate_content_density(
+        story_data = {"research_evidence_text": str(source_text or "")}
+        valid, reason = validate_content_density(
             script_data,
-            {"research_evidence_text": str(source_text or "")},
+            story_data,
             format_mode,
         )
+        if not valid:
+            return False, reason
+        from script_runtime import assess_release_structure
+        valid, reason, _assessment = assess_release_structure(script_data, format_mode)
+        if not valid:
+            return False, reason
+        titles = script_data.get("titles")
+        if not isinstance(titles, list) or len(titles) != 3:
+            return False, "Exactly three title candidates are required."
+        try:
+            recommended_index = int(script_data.get("recommended_title_index", 1))
+        except (TypeError, ValueError):
+            return False, "Recommended title index is invalid."
+        if recommended_index not in (1, 2, 3):
+            return False, "Recommended title index is invalid."
+        return True, "Passed canonical script validation"
     except Exception as exc:
         return False, f"Canonical script validation failed: {type(exc).__name__}: {exc}"
 
@@ -1050,6 +1067,13 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         else "CYNICAL CRITIC"
     )
 
+    scene_contract = (
+        "For Top-5 mode, output at least 5 substantive list-entry scenes with a clear opening hook "
+        "and a final consequence/payoff. "
+        if format_mode == "top5"
+        else "For a regular Short, output 3 or 4 scenes: hook, development/context, and consequence/payoff. "
+    )
+
     system_prompt = (
         "You are the original-news Shorts writer for a human-reviewed video factory. "
         "Use only the supplied evidence. Write a fresh narration in your own wording. "
@@ -1073,8 +1097,8 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
         "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
         "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
         "Use narrative_role values hook, development, context, consequence. "
-         "For a regular Short, output at least 3 scenes: hook, development/context, and consequence/payoff. "
-        f"Language: {language_cfg['script_instruction']}\n"
+        + scene_contract
+        + f"Language: {language_cfg['script_instruction']}\n"
     )
 
     duration_repair_script = story_data.get("_duration_tighten_script")
