@@ -2154,6 +2154,7 @@ class DashboardWorkflowController(WorkflowController):
                 )
                 self._visual_approved = False
                 self._visual_rejected = False
+                self._visual_manual_approved.discard(index)
 
             self.update(
                 "visual_approval",
