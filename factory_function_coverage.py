@@ -55,6 +55,7 @@ SURFACE_MAP: dict[str, str] = {
     "_scene_visual_segment_count": "Internal",
     "_caption_y_position": "Internal",
     "_normalize_audio_loudness": "Internal",
+    "_groq_script_output_schema": "Internal",
     "compile_video": "Live Factory",
     "upload_to_youtube": "Live Factory",
     "_report_youtube_upload_visibility": "Internal",

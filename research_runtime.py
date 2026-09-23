@@ -157,6 +157,34 @@ def _parse_provider_json(raw: Any) -> Dict[str, Any]:
     return parsed
 
 
+def _gemini_script_response_schema():
+    """Build the conservative schema accepted by the legacy Gemini REST boundary.
+
+    The canonical factory contract remains in script_runtime. This adapter removes
+    JSON-Schema constructs that the current generateContent protobuf serializer can
+    reject, while canonical QC enforces the exact semantic contract after parsing.
+    """
+    import copy
+    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA
+
+    schema = copy.deepcopy(SCRIPT_OUTPUT_JSON_SCHEMA)
+
+    def simplify(node):
+        if not isinstance(node, dict):
+            return
+        node.pop("additionalProperties", None)
+        # Gemini's legacy response_schema represents enum values as strings at the
+        # wire level. recommended_title_index is still range-checked by canonical QC.
+        if node.get("type") == "integer":
+            node.pop("enum", None)
+        for value in node.get("properties", {}).values():
+            simplify(value)
+        simplify(node.get("items"))
+
+    simplify(schema)
+    return schema
+
+
 def _gemini_script_fallback(
     story_data: Dict[str, Any],
     language_cfg: Dict[str, Any],
@@ -183,7 +211,7 @@ def _gemini_script_fallback(
         ],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "responseSchema": SCRIPT_OUTPUT_JSON_SCHEMA,
+            "responseSchema": _gemini_script_response_schema(),
             "maxOutputTokens": 900,
             "thinkingConfig": {"thinkingLevel": "low"},
         },
@@ -447,7 +475,7 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
         base_url.rstrip("/") + "/v1/chat/completions",
         payload,
         {"Content-Type": "application/json"},
-        90,
+        15,
         story_data,
         format_mode,
         f"ollama/{model}",

@@ -1052,6 +1052,32 @@ def self_critique_pass(script_data, format_mode):
 
 
 
+def _groq_script_output_schema():
+    """Return the strict subset used only at the Groq provider boundary.
+
+    Exact scene/title counts remain authoritative in canonical QC. The provider
+    schema intentionally avoids array cardinality keywords so the model-facing
+    contract stays small and portable; strict mode still guarantees every
+    required field and closed object shape.
+    """
+    import copy
+    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA
+
+    schema = copy.deepcopy(SCRIPT_OUTPUT_JSON_SCHEMA)
+
+    def simplify(node):
+        if not isinstance(node, dict):
+            return
+        node.pop("minItems", None)
+        node.pop("maxItems", None)
+        for value in node.get("properties", {}).values():
+            simplify(value)
+        simplify(node.get("items"))
+
+    simplify(schema)
+    return schema
+
+
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     """Generate one original information-dense script; the router may request one bounded duration repair."""
     format_mode_key = str(format_mode or "").strip().lower()
@@ -1162,7 +1188,7 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 "json_schema": {
                     "name": "viral_shorts_script",
                     "strict": True,
-                    "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
+                    "schema": _groq_script_output_schema(),
                 },
             },
             "include_reasoning": False,
@@ -1232,7 +1258,14 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
                 json={
                     "model": "openai/gpt-oss-20b",
                     "messages": compatibility_messages,
-                    "response_format": {"type": "json_object"},
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "viral_shorts_script_compat",
+                            "strict": True,
+                            "schema": _groq_script_output_schema(),
+                        },
+                    },
                     "include_reasoning": False,
                     "reasoning_effort": "low",
                     "temperature": 0.2,

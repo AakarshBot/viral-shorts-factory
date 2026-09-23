@@ -354,10 +354,10 @@ def install_script_pipeline(bot):
             attempts.append(
                 ("Gemini", lambda: rr._gemini_script_fallback(data, language_cfg, genre_key, format_mode))
             )
-        if str(os.getenv("OPENROUTER_API_KEY") or "").strip():
-            attempts.append(
-                ("OpenRouter free", lambda: rr._openrouter_script_fallback(data, language_cfg, genre_key, format_mode))
-            )
+        # Production script providers are deliberately bounded to the approved
+        # fallback ladder: Groq → Gemini → Ollama. OpenRouter is not part of
+        # the production path; keeping it here would create an untested fourth
+        # writer contract and make failures slower and harder to diagnose.
         # Local Ollama is only useful when the process is actually able to reach it.
         # The fallback performs a /api/tags preflight and refuses an uninstalled model.
         remote_mode = str(os.getenv("VSF_REMOTE_MODE") or "").strip().lower()
