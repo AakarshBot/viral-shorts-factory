@@ -63,7 +63,7 @@ def test_overlong_story_is_rejected_by_word_budget():
     assert "maximum is 60" in reason
 
 
-def test_scene_one_must_be_shorter_than_following_scenes():
+def test_scene_one_compact_cap_is_independent_of_later_scene_length():
     script = {
         "editorial_angle": "Explain the event and consequence.",
         "script": [
@@ -72,8 +72,7 @@ def test_scene_one_must_be_shorter_than_following_scenes():
         ],
     }
     valid, reason = validate_content_density(script, {}, "regular")
-    assert valid is False
-    assert "Scene 1 must remain strictly shorter" in reason
+    assert valid, reason
 
 
 def test_retention_bait_is_explicitly_rejected():
