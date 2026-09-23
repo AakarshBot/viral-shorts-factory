@@ -170,10 +170,13 @@ def run_robot_with_exact_identity(bot, web_config=None):
                 or selected_story.get("event_id")
                 or ""
             ).strip()
-    state = _IdentityState(
-        run_id=requested_run_id,
-        discovery_event_key=discovery_event_key,
-    )
+    if discovery_event_key:
+        state = _IdentityState(
+            run_id=requested_run_id,
+            discovery_event_key=discovery_event_key,
+        )
+    else:
+        state = _IdentityState(run_id=requested_run_id)
     bot._last_run_identity = state
     bot._last_run_row_id = None
     bot._last_run_run_id = state.run_id
