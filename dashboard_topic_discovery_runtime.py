@@ -552,6 +552,12 @@ def _dashboard_discovery_cache_key(
     )
 
 
+def clear_dashboard_discovery_cache() -> None:
+    """Force the next explicit dashboard discovery click to perform a fresh provider sweep."""
+    with _DASHBOARD_DISCOVERY_CACHE_LOCK:
+        _DASHBOARD_DISCOVERY_CACHE.clear()
+
+
 def discover_dashboard_topics(
     bot,
     genre_key: str,
@@ -655,4 +661,4 @@ def discover_dashboard_topics(
     return copy.deepcopy(cached_selected)
 
 
-__all__ = ["DASHBOARD_DISCOVERY_VERSION", "discover_dashboard_topics"]
+__all__ = ["DASHBOARD_DISCOVERY_VERSION", "discover_dashboard_topics", "clear_dashboard_discovery_cache"]
