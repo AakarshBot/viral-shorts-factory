@@ -260,7 +260,7 @@ NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 INITIAL_SCRIPT_MAX_WORDS = 90
 SCENE_1_MAX_WORDS = 14
 
-# Provider-facing schema shared by the primary and fallback writers.
+# Canonical script contract consumed by provider adapters and canonical QC.
 # Keep every field required: Groq strict Structured Outputs requires required
 # properties and closed objects (additionalProperties=false).
 SCRIPT_OUTPUT_JSON_SCHEMA = {
