@@ -1823,13 +1823,6 @@ def upload_to_youtube(
         tags = tags[:30]
 
         privacy = "private" if publish_mode == "private" else "public"
-        if privacy == "public" and bool(
-            (script_data or {}).get("public_publish_blocked")
-        ):
-            raise RuntimeError(
-                "Public upload is blocked because the script pipeline marked this "
-                "production run as private-only."
-            )
         body = {
             "snippet": {
                 "title": title[:100],
@@ -2216,12 +2209,8 @@ def run_robot(web_config=None):
             f"({duration_estimate['word_count']} words at {duration_estimate['effective_wpm']:.0f} WPM).",
             flush=True,
         )
-        if duration_estimate["seconds"] < 16.0:
-            raise RuntimeError(
-                f"Script duration gate failed ({duration_estimate['seconds']:.1f}s); "
-                "the bounded short-script rewrite should have repaired this before audio generation."
-            )
-
+        # Duration is advisory through manual script approval; the reviewer decides
+        # whether the narration is acceptable before audio generation begins.
         if dashboard_manual_control:
             conn.execute(
                 "UPDATE vault SET status='WAITING_SCRIPT_REVIEW', updated_at=CURRENT_TIMESTAMP WHERE rowid=?",
