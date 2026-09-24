@@ -180,6 +180,48 @@ def test_diversification_uses_discovery_profiles_and_avoids_duplicate_themes():
     assert all(any(profile in x["discovery_profiles"] for profile in ("news", "emerging", "social")) for x in result)
 
 
+
+def test_bucket_uses_content_signals_even_when_profile_is_news():
+    events = [
+        {
+            "title": "Fans react after shocking player statement",
+            "event_identity_key": "social-signal",
+            "discovery_profiles": ["news"],
+            "news_score": 50,
+            "viral_score": 25,
+            "social_score": 80,
+            "social_post_count": 3,
+            "undercovered_score": 8,
+        },
+        {
+            "title": "Uncapped player makes bizarre breakthrough",
+            "event_identity_key": "viral-signal",
+            "discovery_profiles": ["news"],
+            "news_score": 45,
+            "viral_score": 80,
+            "social_score": 20,
+            "undercovered_score": 8,
+        },
+        {
+            "title": "Team announces squad change",
+            "event_identity_key": "news-signal",
+            "discovery_profiles": ["news"],
+            "news_score": 75,
+            "viral_score": 15,
+            "social_score": 10,
+            "undercovered_score": 2,
+        },
+    ]
+
+    result = desk._diversify_events(events, limit=3)
+    buckets = {item["event_identity_key"]: item["discovery_bucket"] for item in result}
+
+    assert buckets["social-signal"] == "social"
+    assert buckets["viral-signal"] == "viral"
+    assert buckets["news-signal"] == "news"
+
+
+
 def test_score_exposes_simple_editorial_signals():
     item = _article("Uncapped bowler takes first five wicket haul", profile="emerging")
     item.update({"event_source_count": 1, "event_article_count": 1, "social_post_count": 2, "social_engagement_total": 5})
