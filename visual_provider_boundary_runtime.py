@@ -894,6 +894,7 @@ def fetch_duckduckgo_candidates(
 def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("PEXELS_API_KEY", "")).strip()
     provider_page = _provider_page(_args)
+    manual_mode = bool(len(_args) > 4 and isinstance(_args[4], bool) and _args[4])
     q = _clean_query(query)
     if not key or not q:
         return []
@@ -932,6 +933,7 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
 def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
     key = str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip()
     provider_page = _provider_page(_args)
+    manual_mode = bool(len(_args) > 4 and isinstance(_args[4], bool) and _args[4])
     q = _clean_query(query)
     if not key or not q:
         return []
