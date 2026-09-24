@@ -79,9 +79,7 @@ def test_global_collect_does_not_use_bcci_listing(monkeypatch):
     assert len(google_calls) == 3
     assert {profile for _, profile, _ in google_calls} == {"news", "emerging", "social"}
     assert "BCCI" not in {name for name, _ in direct_calls}
-    assert "ICC" in {name for name, _ in direct_calls}
-    assert "ESPNcricinfo" in {name for name, _ in direct_calls}
-    assert "Wisden" in {name for name, _ in direct_calls}
+    assert {name for name, _ in direct_calls} == {"ICC", "ESPNcricinfo"}
 
 
 def test_niche_sports_collect_uses_all_three_profiles(monkeypatch):
