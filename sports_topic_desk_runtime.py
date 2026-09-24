@@ -753,18 +753,16 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
         article_count = int(item.get("event_article_count") or 0)
 
         # A reaction word such as "said" or "comments" is common in ordinary
-        # reporting. It must not turn a confirmed news event into a social card.
-        # Social gets an event only when the social evidence is the primary
-        # evidence stream: either it is a social-only lead or the social posts
-        # materially outweigh the article evidence.
+        # reporting, and broad social search can attach many reactions to one
+        # confirmed event. Keep confirmed reporting in NEWS; SOCIAL is reserved
+        # for genuinely social-first leads.
         social_only = social_posts > 0 and article_count == 0
-        social_dominant = social_posts >= 2 and social_posts >= max(1, article_count)
 
         if bucket == "social":
-            return social_only or social_dominant
+            return social_only
 
         if bucket == "viral":
-            if social_only or social_dominant:
+            if social_only:
                 return False
             return (
                 "emerging" in profiles
