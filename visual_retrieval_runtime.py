@@ -947,7 +947,6 @@ def collect_manual_visual_pool(
                 added += 1
             return added, qa_requests
 
-        start_visual_qa_scene()
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         for offset in range(0, len(candidates), batch_size):
             if len(assets) >= requested_max or query_added >= target:
