@@ -1906,7 +1906,7 @@ def test_manual_qc_can_select_a_provenance_review_candidate():
     assert selected is candidate
 
 
-def test_manual_pool_expands_past_first_two_preferred_providers_before_qa(monkeypatch):
+def test_manual_pool_stops_after_first_two_providers_when_target_is_met(monkeypatch):
     calls = []
 
     def make_provider(name):
@@ -1962,7 +1962,66 @@ def test_manual_pool_expands_past_first_two_preferred_providers_before_qa(monkey
         allow_auto_backfill=False,
     )
 
+    assert calls == ["Commons", "Openverse"]
+    assert len(result["assets"]) == 2
+
+def test_manual_pool_uses_second_provider_stage_only_when_first_stage_fails_qa(monkeypatch):
+    calls = []
+    qa_calls = []
+
+    def make_provider(name):
+        def fetch(*args):
+            calls.append(name)
+            candidate = _licensed_candidate(
+                _jpeg_bytes(
+                    (1200, 1600),
+                    color=(40 + len(calls) * 20, 70, 100),
+                ),
+                "cc-by-nc",
+            )
+            candidate["source_image_url"] = f"https://{name}.example/image-{len(calls)}.jpg"
+            candidate["search_title"] = f"{name} result"
+            return [candidate]
+        return fetch
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", make_provider("Commons")),
+            ("Openverse", make_provider("Openverse")),
+            ("Pexels", make_provider("Pexels")),
+            ("Unsplash", make_provider("Unsplash")),
+        ],
+    )
+
+    def fake_gemini(images, *args, **kwargs):
+        qa_calls.append(len(images))
+        return {index: (len(qa_calls) > 1) for index in range(len(images))}
+
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_gemini)
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Rishabh Pant", "voiceover": "Rishabh Pant appears."}],
+        ["Rishabh Pant"],
+        "Test story",
+        pool_target=2,
+        pool_max=2,
+        allow_auto_backfill=False,
+    )
+
     assert calls == ["Commons", "Openverse", "Pexels", "Unsplash"]
+    assert qa_calls == [2, 2]
     assert len(result["assets"]) == 2
 def test_manual_pool_exposes_candidates_for_human_review_when_gemini_is_temporarily_unavailable(monkeypatch):
     calls = []
