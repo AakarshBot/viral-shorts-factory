@@ -142,24 +142,6 @@ def _tokens(value):
     return set(sr._tokens(value))
 
 
-def _similarity(left, right):
-    left = left if isinstance(left, dict) else {}
-    right = right if isinstance(right, dict) else {}
-    a = _tokens(left.get("title"))
-    b = _tokens(right.get("title"))
-    if not a or not b:
-        return 0.0
-    token_sim = len(a & b) / max(1, len(a | b))
-    title_sim = SequenceMatcher(
-        None,
-        _clean(left.get("title")).casefold(),
-        _clean(right.get("title")).casefold(),
-    ).ratio()
-    ea, eb = set(sr._topic_entities(left)), set(sr._topic_entities(right))
-    entity_sim = len(ea & eb) / max(1, len(ea | eb))
-    return min(1.0, token_sim * 0.45 + title_sim * 0.35 + entity_sim * 0.20)
-
-
 def _is_cricket(item):
     item = item if isinstance(item, dict) else {}
     text = _clean(" ".join(
@@ -735,7 +717,7 @@ def _collect(scope="India / Asia"):
                 failures.append(f"{label}:timeout")
                 future.cancel()
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
 
     print(
         f"   [Sports Desk] Raw intake: {', '.join(f'{k}={v}' for k, v in sorted(counts.items())) or 'none'}",
