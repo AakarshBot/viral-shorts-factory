@@ -1486,19 +1486,49 @@ def render_script_visual_query_review(
             st.caption(f"Editorial angle · {angle}")
 
         voiceovers = []
+        visual_edits = []
         st.markdown("#### Narration")
         if edit_mode:
             for index, scene in enumerate(scenes, 1):
                 if not isinstance(scene, dict):
                     continue
-                voiceovers.append(
-                    st.text_area(
-                        f"Slide {index:02d}",
-                        value=str(scene.get("voiceover") or "").strip(),
-                        height=120,
-                        key=f"script_review_voice_{run_id}_{index}",
+                with st.container(border=True):
+                    st.caption(f"Slide {index:02d} visual identity")
+                    primary_entity = st.text_input(
+                        "Primary entity",
+                        value=str(scene.get("primary_entity") or "").strip(),
+                        key=f"script_review_entity_{run_id}_{index}",
                     )
-                )
+                    visual_query = st.text_input(
+                        "Visual search query",
+                        value=str(
+                            scene.get("specific_search_prompt")
+                            or scene.get("manual_visual_query")
+                            or ""
+                        ).strip(),
+                        key=f"script_review_visual_query_{run_id}_{index}",
+                        help="Use this to correct an ambiguous identity before visuals are fetched.",
+                    )
+                    visual_intent = st.text_input(
+                        "Visual intent",
+                        value=str(scene.get("visual_intent") or "").strip(),
+                        key=f"script_review_visual_intent_{run_id}_{index}",
+                    )
+                    voiceovers.append(
+                        st.text_area(
+                            f"Slide {index:02d} narration",
+                            value=str(scene.get("voiceover") or "").strip(),
+                            height=120,
+                            key=f"script_review_voice_{run_id}_{index}",
+                        )
+                    )
+                    visual_edits.append(
+                        {
+                            "primary_entity": primary_entity,
+                            "specific_search_prompt": visual_query,
+                            "visual_intent": visual_intent,
+                        }
+                    )
         else:
             for index, scene in enumerate(scenes, 1):
                 if not isinstance(scene, dict):
@@ -1545,8 +1575,24 @@ def render_script_visual_query_review(
                 if voice_index < len(voiceovers)
                 else str(scene.get("voiceover") or "")
             )
-            voice_index += 1
+            metadata_edit = (
+                visual_edits[voice_index]
+                if voice_index < len(visual_edits)
+                else {}
+            )
+            visual_changed = False
+            for field in ("primary_entity", "specific_search_prompt", "visual_intent"):
+                incoming_value = str(metadata_edit.get(field) or "").strip()
+                if incoming_value != str(scene.get(field) or "").strip():
+                    visual_changed = True
+                updated[field] = incoming_value
+            if visual_changed:
+                updated["human_visual_metadata_override"] = True
+                if updated.get("specific_search_prompt"):
+                    updated["manual_visual_query"] = updated["specific_search_prompt"]
+                    updated["manual_visual_query_source"] = "dashboard_script_review"
             review_scenes.append(updated)
+            voice_index += 1
         reviewed["script"] = review_scenes
 
     ok, message = controller.submit_script_review(reviewed)
@@ -2409,9 +2455,6 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
     approved_metadata = st.session_state.get("approved_metadata") or {}
     if metadata_approved and not isinstance(approved_metadata, dict):
         approved_metadata = {}
-    public_publish_blocked = bool(
-        (script_data or {}).get("public_publish_blocked")
-    )
     with st.container(border=True):
         if metadata_approved and not st.session_state.get("metadata_editing"):
             st.markdown(
@@ -2548,17 +2591,12 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
         )
         if not metadata_approved:
             st.info("Approve metadata to unlock upload.")
-        if public_publish_blocked:
-            st.warning(
-                "Public upload is disabled for this run because the script pipeline "
-                "marked the script as requiring private-only publication."
-            )
         if st.button(
             "Upload Publicly",
             type="primary",
             width="stretch",
             key="upload_public",
-            disabled=not upload_unlocked or public_publish_blocked,
+            disabled=not upload_unlocked,
         ):
             st.session_state["confirm_public_upload"] = True
             st.rerun()
