@@ -15,7 +15,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import story_ranker as sr
-from event_discovery_runtime import cluster_news_events
+from event_discovery_runtime import cluster_news_events, fetch_gdelt_articles
 
 SPORTS_DESK_VERSION = "sports-desk-v16-2026-09-24"
 LOOKBACK_HOURS = 48
@@ -25,7 +25,6 @@ REQUEST_TIMEOUT = 4.0
 DISCOVERY_TIMEOUT = 5.5
 SECONDARY_TIMEOUT = 2.5
 SOURCE_TIMEOUT = REQUEST_TIMEOUT
-SECONDARY_REQUEST_TIMEOUT = SECONDARY_TIMEOUT
 GOOGLE_RESULT_LIMIT = 25
 DIRECT_RESULT_LIMIT = 30
 PRIMARY_QUERIES_PER_PROFILE = 1
@@ -86,16 +85,6 @@ NICHE_PROFILE_QUERIES = {
     ),
 }
 
-DIRECT_CRICKET_SOURCES = (
-    ("ICC", "https://www.icc-cricket.com/news"),
-    ("BCCI", "https://www.bcci.tv/news"),
-    ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news"),
-)
-GLOBAL_CRICKET_SOURCES = (
-    ("ICC", "https://www.icc-cricket.com/news"),
-    ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news"),
-    ("Wisden", "https://www.wisden.com/cricket-news"),
-)
 
 REACTION_TERMS = (
     "said", "says", "called", "responded", "reaction", "reacts", "comment",
@@ -421,49 +410,6 @@ def _direct_listing_source(name, url):
     return out
 
 
-def _bluesky(query):
-    try:
-        r = requests.get(
-            "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts",
-            params={"q": query, "limit": 40, "sort": "latest"},
-            headers={"User-Agent": "ViralShortsFactory/2026 cricket-desk"},
-            timeout=SECONDARY_REQUEST_TIMEOUT,
-        )
-        if r.status_code != 200:
-            return []
-        posts = r.json().get("posts") or []
-    except Exception:
-        return []
-    output = []
-    for post in posts:
-        record = post.get("record") or {}
-        author = post.get("author") or {}
-        text = _clean(record.get("text"))
-        if not text:
-            continue
-        handle = _clean(author.get("handle"))
-        uri = _clean(post.get("uri"))
-        rkey = uri.rsplit("/", 1)[-1] if uri else ""
-        url = f"https://bsky.app/profile/{handle}/post/{rkey}" if handle and rkey else ""
-        output.append({
-            "title": text[:220],
-            "text": text,
-            "description": text,
-            "source": f"Bluesky @{handle}" if handle else "Bluesky",
-            "source_name": f"Bluesky @{handle}" if handle else "Bluesky",
-            "url": url,
-            "publishedAt": record.get("createdAt") or post.get("indexedAt") or "",
-            "collection_source": "bluesky",
-            "discovery_profile": "social",
-            "social_post": True,
-            "social_like": float(post.get("likeCount") or 0),
-            "social_reply": float(post.get("replyCount") or 0),
-            "social_repost": float(post.get("repostCount") or 0),
-            "social_quote": float(post.get("quoteCount") or 0),
-        })
-    return output
-
-
 def _profile_queries(scope):
     key = _clean(scope).casefold()
     if key == "niche sports":
@@ -493,43 +439,6 @@ def _google_search(query, profile, scope):
             row["discovery_profile"] = profile
             row["discovery_query"] = query
     return rows
-
-
-def _reddit_search(subreddit, query):
-    try:
-        response = requests.get(
-            "https://www.reddit.com/search.json",
-            params={"q": query, "restrict_sr": "on", "subreddit": subreddit, "sort": "new", "t": "week", "limit": 30},
-            headers={"User-Agent": "ViralShortsFactory/2026 topic-discovery"},
-            timeout=SECONDARY_TIMEOUT,
-        )
-        if response.status_code != 200:
-            return []
-        children = ((response.json() or {}).get("data") or {}).get("children") or []
-    except Exception:
-        return []
-    output = []
-    for child in children:
-        data = child.get("data") or {}
-        title = _clean(data.get("title"))
-        if not title:
-            continue
-        output.append({
-            "title": title[:220],
-            "text": _clean(data.get("selftext"))[:1200] or title,
-            "description": _clean(data.get("selftext"))[:1200] or title,
-            "source": f"Reddit r/{subreddit}",
-            "source_name": f"Reddit r/{subreddit}",
-            "url": f"https://www.reddit.com{data.get('permalink', '')}",
-            "publishedAt": datetime.fromtimestamp(float(data.get("created_utc") or 0), tz=timezone.utc).isoformat(),
-            "collection_source": "reddit",
-            "social_post": True,
-            "social_like": float(data.get("ups") or 0),
-            "social_reply": float(data.get("num_comments") or 0),
-            "discovery_profile": "social",
-            "discovery_query": query,
-        })
-    return output
 
 
 def _is_non_cricket_sports(item):
@@ -721,8 +630,25 @@ def _collect(scope="India / Asia"):
         finally:
             recovery_pool.shutdown(wait=False, cancel_futures=True)
 
+    # GDELT is one final factual backstop for a sparse/blocked intake. It is
+    # never part of the normal sweep and its own adapter has a failure cooldown.
+    if len(rows) < RECOVERY_MIN_RAW_ROWS:
+        gdelt_query = (
+            "India cricket" if key == "india / asia"
+            else "international cricket" if key == "global"
+            else "India sports"
+        )
+        fallback = fetch_gdelt_articles(
+            gdelt_query,
+            timespan="48h",
+            max_records=50,
+            timeout=4.0,
+        )
+        rows.extend(fallback)
+        counts["GDELT"] = len(fallback)
+
     # Trends are an enrichment signal, not an intake dependency. Only spend the
-    # extra request when the primary/recovery pool is genuinely sparse.
+    # extra request when the complete factual pool is still sparse.
     if len(rows) < RECOVERY_MIN_RAW_ROWS:
         trend_geo = "IN" if key != "global" else "GB"
         try:
