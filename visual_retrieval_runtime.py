@@ -1242,6 +1242,7 @@ def collect_manual_visual_pool(
                 entity_anchor,
             )
             if refined_query and refined_query.casefold() != exact_query.casefold():
+                refined_result = {"assets": [], "qa_requests": 0}
                 try:
                     refined_result = collect_manual_visual_search(
                         runtime,
@@ -1615,9 +1616,10 @@ def collect_manual_visual_search(
 
     accepted: list[dict] = []
     qa_requests = 0
+    batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
     if candidates:
         if reset_qa_scene:
-            batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
+            start_visual_qa_scene()
         for offset in range(0, len(candidates), batch_size):
             if len(accepted) >= 10:
                 break
