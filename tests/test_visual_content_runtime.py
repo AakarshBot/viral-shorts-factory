@@ -45,9 +45,6 @@ def test_content_first_visuals_installer_is_idempotent(tmp_path):
 def test_article_loader_falls_back_to_discovered_story_image(monkeypatch):
     import news_source_image_runtime as module
 
-    async def no_html_images(*_args, **_kwargs):
-        return []
-
     fallback = {
         "bytes": b"image-bytes",
         "hash": "fallback-hash",
@@ -58,7 +55,6 @@ def test_article_loader_falls_back_to_discovered_story_image(monkeypatch):
 
     monkeypatch.setattr(module, "extract_news_source_images", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(module, "fetch_direct_source_image", lambda *args, **kwargs: dict(fallback))
-    monkeypatch.setattr(content_runtime, "asyncio", __import__("asyncio", fromlist=[""]))
 
     assets = asyncio.run(
         content_runtime._load_news_source_image_pool(
