@@ -60,10 +60,9 @@ def validate_deterministic_script_quality(script_data, format_mode="regular", st
                     + ", ".join(unsupported[:6])
                 )
 
-        # Creator insight, editorial angle and SEO copy are still factual output;
-        # keep numbers in those fields grounded in the same evidence. Titles and
-        # pinned comments remain looser because they may use packaging language.
-        for field in ("creator_insight", "editorial_angle", "seo_description"):
+        # Keep numbers in the generated description grounded in the evidence.
+        # Titles and pinned comments remain looser packaging fields.
+        for field in ("seo_description",):
             field_numbers = _numeric_tokens(script_data.get(field, ""))
             unsupported = sorted(field_numbers - evidence_numbers)
             if unsupported:
@@ -76,8 +75,8 @@ def validate_deterministic_script_quality(script_data, format_mode="regular", st
     expected = 6 if mode == "top5" else None
     if expected is not None and len(scenes) != expected:
         return False, "Top-5 script must contain exactly 6 scenes."
-    if expected is None and len(scenes) not in (3, 4):
-        return False, "Regular Short must contain exactly 3 or 4 scenes."
+    if expected is None and len(scenes) not in (4, 5):
+        return False, "Regular Short must contain exactly 4 or 5 scenes."
 
     allowed_roles = {"hook", "development", "context", "consequence"}
     for i, scene in enumerate(scenes, 1):
@@ -137,14 +136,6 @@ def validate_deterministic_script_quality(script_data, format_mode="regular", st
     description = str(script_data.get("seo_description", "")).strip()
     if len(_words(description)) < 10:
         return False, "SEO description is too short."
-
-    creator_insight = str(script_data.get("creator_insight", "")).strip()
-    if len(_words(creator_insight)) < 6:
-        return False, "Creator insight is missing or too short."
-
-    editorial_angle = str(script_data.get("editorial_angle", "")).strip()
-    if not editorial_angle:
-        return False, "Editorial angle is missing."
 
     return True, "Passed deterministic Shorts QC"
 

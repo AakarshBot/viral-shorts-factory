@@ -173,6 +173,8 @@ def _gemini_script_response_schema():
         if not isinstance(node, dict):
             return
         node.pop("additionalProperties", None)
+        node.pop("minItems", None)
+        node.pop("maxItems", None)
         # Gemini's legacy response_schema represents enum values as strings at the
         # wire level. recommended_title_index is still range-checked by canonical QC.
         if node.get("type") == "integer":
@@ -263,46 +265,19 @@ def _gemini_script_fallback(
 
 
 def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data: Dict[str, Any] | None = None) -> str:
-    language_instruction = _clean((language_cfg or {}).get("script_instruction"))
-    top5 = str(format_mode or "").lower() == "top5"
-    scene_contract = (
-        "- Top-5 mode MUST contain 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
-        "the fifth entry should deliver the final payoff.\n"
-        if top5
-        else "- A regular Short normally uses 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple.\n"
-    )
-    word_contract = (
-        "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
-        if top5
-        else "- Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling.\n"
-    )
+    language_instruction=_clean((language_cfg or {}).get("script_instruction"))
+    top5=str(format_mode or "").lower()=="top5"
+    contract="Top-5 mode: exactly 6 scenes, one opener followed by five ranked entries." if top5 else "Regular mode: exactly 4 or 5 scenes using a three-beat arc of hook, development/context and consequence."
     return (
-        "You are the backup original-news Shorts writer. Use only the supplied evidence and never copy a complete "
-        "source sentence verbatim. Do not invent facts, quotes, motives, numbers, or outcomes. "
-        "Return ONLY JSON matching this exact object shape; no Markdown or commentary. "
-        "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
-        "\"recommended_title_index\":1,\"seo_description\":\"...\",\"pinned_comment\":\"...\","
-        "\"script\":[{\"voiceover\":\"...\",\"narrative_role\":\"hook\","
-        "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
-        "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
-        "Use narrative_role values hook, development, context, consequence.\n"
-        "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
-        + word_contract
-        + "- Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14. It must be a factual headline and the most compact scene.\n"
-        f"{scene_contract}"
-        "- Scene 1 is the only headline-style beat. Every later scene must add new, story-specific information rather than restating the title.\n"
-        "- Normally use four scenes for a regular story; use three only when a fourth beat would be artificial.\n"
-        "- Put the substance in the middle beats; do not let Scene 1 carry the detail.\n"
-        "- The full narration must naturally fit below 30 seconds.\n"
-        "- No intro, CTA, generic filler, retention bait, or production instructions.\n"
-        "STORY SHAPE: Scene 1 states the concrete event/person immediately. Scene 2 adds the most important new evidence or development. "
-        "Scene 3 adds useful context, explanation, timeline, comparison, or a second factual development when supported. "
-        "The final scene closes with the immediate consequence or most useful factual takeaway. Curiosity must come from a real supported fact. The finished narration should feel like one explained story, not a stack of headlines.\n"
-        f"EDITORIAL ANGLE: {choose_editorial_angle(story_data or {}, format_mode)['instruction']}\n"
-        "CREATOR INSIGHT: Give one concise evidence-grounded synthesis of why the event matters; do not invent facts or predictions.\n"
-        f"Language: {language_instruction}"
+        "You are the backup original-news Shorts writer. Use only supplied evidence and write fresh wording. "
+        "Never copy a complete source sentence. Never invent facts, quotes, motives, numbers, predictions or outcomes. "
+        "Tell the complete important story in 4–5 regular scenes and naturally fit 16–30 seconds. "
+        "Do not pad to reach 16 seconds and do not omit crucial facts merely to hit the time limit. "
+        "Every scene must add useful information. No filler, CTA, retention bait or production instructions. "
+        "Scene 1 is the factual hook; middle scenes explain key evidence/context; final scene gives the consequence or most useful final fact. "
+        "Generate exactly three title candidates. Use narrative_role values hook, development, context, consequence. "
+        "Return ONLY JSON matching the factory schema. "+contract+"\nLanguage: "+language_instruction
     )
-
 
 def _call_chat_completion(
     url: str,
