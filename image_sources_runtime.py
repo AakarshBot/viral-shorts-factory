@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,8 @@ PIXABAY_API = "https://pixabay.com/api/"
 SERPAPI_API = "https://serpapi.com/search"
 SERPAPI_SAFE_SOURCE_HOSTS = {"pexels.com", "pixabay.com"}
 CACHE_TTL_SECONDS = 24 * 60 * 60
-DEFAULT_TIMEOUT = 10
+API_TIMEOUT_SECONDS = max(2, min(5, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "4"))))
+IMAGE_TIMEOUT_SECONDS = max(2, min(5, int(os.getenv("VISUAL_IMAGE_DOWNLOAD_TIMEOUT_SECONDS", "5"))))
 MAX_PROVIDER_CANDIDATES = max(1, min(6, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "6"))))
 
 
@@ -101,7 +103,7 @@ def _download(url: str, used_urls: set[str] | None = None, metadata: dict[str, A
     try:
         response = requests.get(
             str(url),
-            timeout=DEFAULT_TIMEOUT,
+            timeout=IMAGE_TIMEOUT_SECONDS,
             headers={"User-Agent": "ViralShortsFactory/1.0 (+image-retrieval)"},
             allow_redirects=True,
         )
@@ -118,8 +120,41 @@ def _download(url: str, used_urls: set[str] | None = None, metadata: dict[str, A
         return None
 
 
+def _bounded_downloads(
+    urls: list[tuple[str, dict[str, Any]]],
+    used_urls: set[str] | None = None,
+    limit: int = MAX_PROVIDER_CANDIDATES,
+) -> list[dict[str, Any]]:
+    jobs: list[tuple[str, dict[str, Any]]] = []
+    seen_urls: set[str] = set()
+    for url, metadata in urls:
+        value = str(url or "").strip()
+        if not value or value in seen_urls:
+            continue
+        if used_urls is not None and value in used_urls:
+            continue
+        seen_urls.add(value)
+        if used_urls is not None:
+            used_urls.add(value)
+        jobs.append((value, dict(metadata or {})))
+        if len(jobs) >= max(1, int(limit)):
+            break
+    if not jobs:
+        return []
+
+    def _worker(job: tuple[str, dict[str, Any]]):
+        url, metadata = job
+        return _download(url, None, metadata)
+
+    with ThreadPoolExecutor(
+        max_workers=min(4, len(jobs)),
+        thread_name_prefix="image-source-download",
+    ) as executor:
+        return [item for item in executor.map(_worker, jobs) if item]
+
+
 def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
-    """Search Openverse and return a bounded set of downloadable candidates."""
+    """Search Openverse and download a small bounded result set concurrently."""
     q = _clean_query(query)
     if not q:
         return []
@@ -145,7 +180,7 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
                         }
                     ),
                 },
-                timeout=DEFAULT_TIMEOUT,
+                timeout=API_TIMEOUT_SECONDS,
                 headers={"User-Agent": "ViralShortsFactory/1.0 (+image-retrieval)"},
             )
             response.raise_for_status()
@@ -157,7 +192,7 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
             print(f"   [Visual Source] Openverse | failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
             return []
 
-    candidates: list[dict[str, Any]] = []
+    jobs = []
     for position, item in enumerate(payload.get("results", []) if isinstance(payload, dict) else [], 1):
         if not isinstance(item, dict):
             continue
@@ -165,16 +200,15 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
         if not manual_mode and not is_allowed_license(license_code):
             continue
         raw_tags = item.get("tags") or []
-        if isinstance(raw_tags, str):
-            search_tags = raw_tags
-        else:
-            search_tags = " ".join(
-                str(tag.get("name") if isinstance(tag, dict) else tag)
-                for tag in raw_tags
-            )
+        search_tags = raw_tags if isinstance(raw_tags, str) else " ".join(
+            str(tag.get("name") if isinstance(tag, dict) else tag) for tag in raw_tags
+        )
+        image_url = str(item.get("url") or item.get("thumbnail") or "").strip()
+        if not image_url:
+            continue
         metadata = {
             "provider": "Openverse",
-            "url": str(item.get("url") or ""),
+            "url": image_url,
             "author": str(item.get("creator") or ""),
             "license": license_code,
             "license_url": str(item.get("license_url") or LICENSE_URLS.get(license_code, "")),
@@ -183,14 +217,8 @@ def fetch_openverse_candidates(query: str, used_urls: set[str] | None = None, *_
             "search_tags": search_tags,
             "search_position": ((page - 1) * 15) + position,
         }
-        for candidate in (item.get("url"), item.get("thumbnail")):
-            data = _download(candidate, used_urls, metadata)
-            if data:
-                candidates.append(data)
-                break
-        if len(candidates) >= MAX_PROVIDER_CANDIDATES:
-            break
-    return candidates
+        jobs.append((image_url, metadata))
+    return _bounded_downloads(jobs, used_urls, limit=4 if manual_mode else MAX_PROVIDER_CANDIDATES)
 
 
 def fetch_serpapi_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
@@ -223,7 +251,7 @@ def fetch_serpapi_candidates(query: str, used_urls: set[str] | None = None, *_ar
                     "start_date": f"{today.year}0101",
                     "end_date": today.strftime("%Y%m%d"),
                 },
-                timeout=DEFAULT_TIMEOUT,
+                timeout=API_TIMEOUT_SECONDS,
                 headers={"User-Agent": "ViralShortsFactory/1.0 (+recent-visual-retrieval)"},
             )
             response.raise_for_status()
@@ -339,13 +367,16 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
             print(f"   [Visual Source] Pixabay | failed: {type(exc).__name__}: {exc} | query='{q}'", flush=True)
             return []
 
-    candidates: list[bytes] = []
+    jobs = []
     for position, item in enumerate(payload.get("hits", []) if isinstance(payload, dict) else [], 1):
         if not isinstance(item, dict):
             continue
+        image_url = str(item.get("largeImageURL") or item.get("webformatURL") or "").strip()
+        if not image_url:
+            continue
         metadata = {
             "provider": "Pixabay",
-            "url": str(item.get("pageURL") or item.get("largeImageURL") or item.get("webformatURL") or ""),
+            "url": str(item.get("pageURL") or image_url),
             "author": str(item.get("user") or ""),
             "license": "Pixabay Content License",
             "license_url": "https://pixabay.com/service/license-summary/",
@@ -354,13 +385,7 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
             "search_tags": str(item.get("tags") or ""),
             "search_position": ((page - 1) * 20) + position,
         }
-        for candidate in (item.get("largeImageURL"), item.get("webformatURL")):
-            data = _download(candidate, used_urls, metadata)
-            if data:
-                candidates.append(data)
-                break
-        if len(candidates) >= 4:
-            break
-    return candidates
+        jobs.append((image_url, metadata))
+    return _bounded_downloads(jobs, used_urls, limit=4 if manual_mode else MAX_PROVIDER_CANDIDATES)
 
 
