@@ -416,6 +416,12 @@ def _provider_search_query(
 
 
 
+_VISUAL_REFINE_ACTION_TERMS = {
+    "bat", "batting", "batter", "batsman", "bowling", "bowler", "cricket",
+    "match", "innings", "playing", "player", "shot", "shooting", "scoring",
+    "scores", "scored", "celebrating", "celebration", "running", "racing",
+}
+
 _VISUAL_REFINE_STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
     "with", "from", "by", "is", "are", "was", "were", "be", "been", "this",
@@ -449,12 +455,17 @@ def _scene_refinement_query(seg: dict, entity: str) -> str:
         )
     )
     candidates = []
+    action_candidates = []
+    other_candidates = []
     for token in re.findall(r"[\w-]+", source_text, flags=re.UNICODE):
         lowered = token.casefold()
         if len(lowered) < 3 or lowered in _VISUAL_REFINE_STOPWORDS or lowered in entity_tokens:
             continue
-        if lowered not in candidates:
-            candidates.append(lowered)
+        target = action_candidates if lowered in _VISUAL_REFINE_ACTION_TERMS else other_candidates
+        if lowered not in target:
+            target.append(lowered)
+    candidates.extend(action_candidates)
+    candidates.extend(other_candidates)
     if not candidates:
         return ""
     return f"{entity_text} {' '.join(candidates[:2])}".strip()
@@ -721,9 +732,10 @@ def _manual_query_visual_context(query: str, scenes: list[dict]) -> tuple[str, s
             "primary_entity": query_text,
             "factual_primary_entity": query_text,
             "specific_search_prompt": query_text,
-            "visual_intent": query_text,
         }
     )
+    if not str(context.get("visual_intent") or "").strip():
+        context["visual_intent"] = query_text
     resolution = resolve_subject(context, "")
     visual_type = str(resolution.get("visual_type") or "GENERAL_CONTEXT").upper()
     visual_genre = str(
