@@ -677,7 +677,6 @@ def _enrich_events(events, rows, social_rows=None):
         event["discovery_profiles"]=profiles or ["news"]
         event["social_post_count"]=social_count
         event["social_engagement_total"]=social_engagement
-        event["event_article_count"] = max(0, int(event.get("event_article_count") or 0) - social_count)
         event["event_identity_key"] = str(event.get("event_identity_key") or event.get("event_id") or "").strip()
     return events
 
