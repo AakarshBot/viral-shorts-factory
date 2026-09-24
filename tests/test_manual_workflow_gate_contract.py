@@ -91,3 +91,37 @@ def test_dashboard_manual_visual_gate_is_core_and_blocks_render_until_approved(t
     thread.join(timeout=2)
     assert not thread.is_alive()
     assert result["value"][0][0]["human_visual_approved"] is True
+
+def test_manual_script_review_can_correct_ambiguous_entity_before_audio():
+    controller = DashboardWorkflowController(type("Bot", (), {
+        "PERSONA_PROFILES": {"LISTICLE HOST": {"gender": "male", "rate": "+0%", "pitch": "+0Hz"}},
+    })())
+    controller.state.script_data = {
+        "title": "Rinku Singh story",
+        "titles": ["Rinku Singh story", "Rinku Singh cricket update", "Rinku Singh latest"],
+        "recommended_title_index": 1,
+        "script": [
+            {"voiceover": "Rinku Singh featured in the latest cricket development.", "narrative_role": "hook", "primary_entity": "Rinku Singh", "specific_search_prompt": "Rinku Singh latest", "visual_intent": "person_action"},
+            {"voiceover": "The latest announcement changes the team's immediate plans.", "narrative_role": "development", "primary_entity": "India cricket team", "specific_search_prompt": "India cricket team plans", "visual_intent": "news_event"},
+            {"voiceover": "The background explains the decision and its context.", "narrative_role": "context", "primary_entity": "India cricket team", "specific_search_prompt": "India cricket team context", "visual_intent": "news_event"},
+            {"voiceover": "The consequence affects the team's next assignment.", "narrative_role": "consequence", "primary_entity": "India cricket team", "specific_search_prompt": "India cricket team assignment", "visual_intent": "news_event"},
+        ],
+    }
+    controller.update("script_review", 40, "review")
+    controller._ensure_manual_gate_state()
+
+    reviewed = {
+        **controller.state.script_data,
+        "script": [dict(scene) for scene in controller.state.script_data["script"]],
+    }
+    reviewed["script"][0]["primary_entity"] = "Rinku Singh (cricketer)"
+    reviewed["script"][0]["specific_search_prompt"] = "Rinku Singh cricketer batting India"
+
+    ok, message = controller.submit_script_review(reviewed)
+    assert ok, message
+    approved = controller.snapshot()["script_data"]["script"][0]
+    assert approved["primary_entity"] == "Rinku Singh (cricketer)"
+    assert approved["specific_search_prompt"] == "Rinku Singh cricketer batting India"
+    assert approved["manual_visual_query"] == "Rinku Singh cricketer batting India"
+    assert approved["visual_entity_grounding"] == "MANUAL_LOCK"
+
