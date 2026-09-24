@@ -50,7 +50,7 @@ def test_dashboard_upload_actions_use_stable_approved_metadata():
     start = source.index("def render_upload_panel(")
     end = source.index("\ndef _perform_upload(", start)
     panel = source[start:end]
-    upload_start = panel.index('st.caption("Public asks')
+    upload_start = panel.index('Upload Publicly')
     upload_block = panel[upload_start:]
     for key in ("final_title", "final_description", "final_comment"):
         assert f'st.session_state["{key}"]' not in upload_block

@@ -17,9 +17,11 @@ def test_upload_panel_uses_stable_approved_metadata_not_widget_state():
     # Streamlit may remove a widget-owned key when that widget is no longer
     # rendered. Upload actions therefore must never depend on direct reads of
     # final_title/final_description/final_comment from session_state.
-    assert 'st.session_state["final_title"]' not in source[source.index('st.caption("Public asks'):]
-    assert 'st.session_state["final_description"]' not in source[source.index('st.caption("Public asks'):]
-    assert 'st.session_state["final_comment"]' not in source[source.index('st.caption("Public asks'):]
+    publish_start = source.index('Upload Publicly')
+    upload_block = source[publish_start:]
+    assert 'st.session_state["final_title"]' not in upload_block
+    assert 'st.session_state["final_description"]' not in upload_block
+    assert 'st.session_state["final_comment"]' not in upload_block
 
     assert 'approved_metadata.get("title")' in source
     assert 'approved_metadata.get("description")' in source
