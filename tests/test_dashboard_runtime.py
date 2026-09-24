@@ -1209,6 +1209,72 @@ def test_dashboard_visual_pool_assignment_locks_image_to_one_slide(monkeypatch, 
     assert "already assigned to slide 2" in message
 
 
+
+def test_article_source_pool_preserves_publisher_through_assignment_and_crop(monkeypatch, tmp_path):
+    from PIL import Image
+    import branding_runtime
+    import visual_quality_runtime
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    current = tmp_path / "current.jpg"
+    article = tmp_path / "article.jpg"
+    Image.new("RGB", (1080, 1920), "white").save(current, "JPEG")
+    Image.new("RGB", (1400, 1000), "gray").save(article, "JPEG")
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.script_data = {
+        "title": "Article source assignment",
+        "script": [{"primary_entity": "Story", "voiceover": "The story.", "visual_genre": "GENERAL_CONTEXT"}],
+    }
+    controller._visual_packages = [[{
+        "image": str(current),
+        "visual_verified": True,
+        "visual_genre": "GENERAL_CONTEXT",
+        "source_type": "commons",
+    }]]
+    controller._visual_pool = [{
+        "path": str(article),
+        "original_path": str(article),
+        "hash": "article-hash",
+        "source": "news_source",
+        "source_type": "news_source",
+        "credit": "Source: Example News",
+        "query": "article source",
+        "provenance": {
+            "provider": "Example News",
+            "url": "https://example.com/images/article.jpg",
+            "author": "Example News",
+        },
+        "source_image_url": "https://example.com/images/article.jpg",
+        "status": "article-source",
+        "used": False,
+    }]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    monkeypatch.setattr(visual_quality_runtime, "fit_visual_image", lambda image, *_args: image)
+    monkeypatch.setattr(branding_runtime, "source_credit_for_type", lambda source, explicit="": f"credit:{explicit or source}")
+
+    ok, message = controller.assign_visual_pool_asset("article-hash", 1)
+    assert ok is True
+    layer = controller._visual_packages[0][0]
+    assert layer["source_type"] == "news_source"
+    assert layer["source_credit"] == "credit:Source: Example News"
+    assert layer["asset_provenance"]["provider"] == "Example News"
+    assert layer["source_image_url"] == "https://example.com/images/article.jpg"
+
+    ok, message = controller.crop_visual(
+        1,
+        crop_box={"left": 0, "top": 0, "width": 900, "height": 1000},
+        crop_mode="free",
+    )
+    assert ok is True
+    assert controller._visual_packages[0][0]["source_credit"] == "credit:Source: Example News"
+
+
 def test_dashboard_manual_visual_search_releases_operation_lock_after_failure(monkeypatch, tmp_path):
     from dashboard_runtime import DashboardWorkflowController
 
