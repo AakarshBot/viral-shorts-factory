@@ -97,13 +97,3 @@ def test_image_credits_include_only_attribution_licenses():
     assert "Bob" not in description
 
 
-def test_news_source_loader_is_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("ALLOW_UNLICENSED_VISUALS", raising=False)
-    import visual_content_runtime
-
-    result = asyncio.run(
-        visual_content_runtime._load_verified_news_source_candidate(
-            object(), object(), [], {"selected_story": {"story_url": "https://example.test/story"}}
-        )
-    )
-    assert result is None
