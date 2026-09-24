@@ -2018,8 +2018,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             st.image(path, width=220)
                         query = str(asset.get("query") or "").strip()
                         source = str(asset.get("source") or "").strip()
-                        caption = source or "visual source"
-                        if query:
+                        credit = str(asset.get("credit") or "").strip()
+                        caption = credit or source or "visual source"
+                        if query and not credit:
                             caption += f" · {query}"
                         st.caption(caption)
                         choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
