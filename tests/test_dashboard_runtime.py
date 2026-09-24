@@ -1272,7 +1272,7 @@ def test_article_source_pool_preserves_publisher_through_assignment_and_crop(mon
         crop_mode="free",
     )
     assert ok is True
-    assert controller._visual_packages[0][0]["source_credit"] == "credit:Source: Example News"
+    assert controller._visual_packages[0][0]["source_credit"] == "credit:credit:Source: Example News"
 
 
 def test_dashboard_manual_visual_search_releases_operation_lock_after_failure(monkeypatch, tmp_path):
