@@ -353,6 +353,7 @@ def patch_content_first_visuals(bot):
         active_config = getattr(bot, "_active_web_config", {}) or {}
         article_source_assets = await _load_news_source_image_pool(bot, active_config)
         article_source_materialized = []
+        article_source_hashes: set[str] = set()
         if article_source_assets:
             story_url = str((active_config.get('selected_story') or {}).get('story_url') or '').strip()
             article_pool_id = f"article_{abs(hash(story_url or 'story')) & 0xffffffff}"
@@ -373,7 +374,7 @@ def patch_content_first_visuals(bot):
                 asset["pool_origin"] = "article-source"
                 image_hash = str(asset.get("hash") or "").strip()
                 if image_hash:
-                    used_hashes.add(image_hash)
+                    article_source_hashes.add(image_hash)
             print(
                 f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
                 flush=True,
@@ -391,13 +392,15 @@ def patch_content_first_visuals(bot):
             # depend on a remote Gemini identity verdict; candidates stay labelled
             # unverified until the reviewer approves the visual package.
             remaining_pool_target = max(1, MANUAL_POOL_TARGET - len(article_source_materialized))
+            manual_search_hashes = set(used_hashes)
+            manual_search_hashes.update(article_source_hashes)
             manual_pool_result = collect_manual_visual_pool(
                 visual_runtime,
                 bot,
                 scenes,
                 manual_queries,
                 video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
-                used_hashes=used_hashes,
+                used_hashes=manual_search_hashes,
                 pool_target=remaining_pool_target,
                 allow_auto_backfill=False,
                 verify_with_ai=False,
