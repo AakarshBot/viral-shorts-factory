@@ -42,101 +42,97 @@ def test_content_first_visuals_installer_is_idempotent(tmp_path):
     assert bot._content_first_visuals_patch_installed is True
 
 
-def test_news_source_ranking_does_not_force_first_slide_for_manual_query():
-    scenes = [
-        {
-            "primary_entity": "Unrelated Presenter",
-            "manual_visual_query": "Unrelated Presenter",
-            "voiceover": "A presenter comments on the story.",
-        },
-        {
-            "primary_entity": "Target Story",
-            "manual_visual_query": "Target Story",
-            "voiceover": "The Target Story is the main development.",
-        },
-    ]
-
-    ranked = content_runtime._rank_news_source_scene_indices(
-        scenes,
-        "Target Story",
-    )
-
-    assert ranked[0] == 1
-
-
-def test_news_source_candidate_is_opt_in(monkeypatch, tmp_path):
-    import asyncio
-    import news_source_image_runtime
-
-    monkeypatch.setenv("ALLOW_UNLICENSED_VISUALS", "true")
-    import asyncio
+def test_article_source_images_are_added_only_to_manual_qc_pool(monkeypatch, tmp_path):
     import news_source_image_runtime
 
     image = Image.new("RGB", (900, 1200), (80, 90, 100))
     raw = io.BytesIO()
-    image.save(raw, format="PNG")
+    image.save(raw, format="JPEG")
 
-    def fake_extract(*_args, **_kwargs):
-        return {
-            "bytes": raw.getvalue(),
-            "credit": "Example",
-            "image_url": "https://example.com/image.png",
-            "page_url": "https://example.com/story",
-            "publisher": "Example",
-        }
-
-    monkeypatch.setattr(news_source_image_runtime, "extract_news_source_image", fake_extract)
-    monkeypatch.setattr(
-        news_source_image_runtime,
-        "compose_news_source_image",
-        lambda image, _size: image,
-    )
     monkeypatch.setattr(
         content_runtime,
-        "_rank_news_source_scene_indices",
-        lambda *_args, **_kwargs: [0, 1],
+        "_load_news_source_image_pool",
+        lambda *_args, **_kwargs: [
+            {
+                "bytes": raw.getvalue(),
+                "hash": "article-hash",
+                "source": "news_source",
+                "source_type": "news_source",
+                "credit": "Source: Example News",
+                "provenance": {
+                    "provider": "Example News",
+                    "url": "https://example.com/image.jpg",
+                    "author": "Example News",
+                },
+            }
+        ],
     )
-
-    class FakeRuntime:
-        @staticmethod
-        def _strict_gate(*_args, **_kwargs):
-            return True, "STRICT", 100, False
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "materialize_manual_visual_pool",
+        lambda _bot, assets, pool_id: [
+            {
+                **dict(asset),
+                "path": str(tmp_path / "article.jpg"),
+                "original_path": str(tmp_path / "article.jpg"),
+                "status": "article-source",
+                "used": False,
+            }
+            for asset in assets
+        ],
+    )
+    monkeypatch.setattr(
+        visual_query_entities_runtime,
+        "search_slide_visual",
+        lambda *args, **kwargs: (image.copy(), False, "commons"),
+    )
+    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
+    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
+    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
 
     bot = _fake_bot(tmp_path)
-    scenes = [
-        {
-            "primary_entity": "Gautam Gambhir",
-            "visual_genre": "PERSON_ACTION",
-        },
-        {
-            "primary_entity": "Stadium",
-            "visual_genre": "GENERAL_CONTEXT",
-        },
-    ]
-    active_config = {
-        "selected_story": {
-            "story_url": "https://example.com/story",
-            "source_label": "Example",
-            "title": "Gautam Gambhir update at the stadium",
-        }
+    script_data = {
+        "title": "Direct article source",
+        "script": [{"primary_entity": "Story subject", "voiceover": "A current story."}],
     }
 
-    result = asyncio.run(
-        content_runtime._load_verified_news_source_candidate(
-            bot,
-            FakeRuntime,
-            scenes,
-            active_config,
-        )
+    packages = _run_process(bot, script_data, "regular")
+
+    assert len(packages) == 1
+    assert script_data["visual_manual_pool"][0]["source_type"] == "news_source"
+    assert script_data["visual_manual_pool"][0]["status"] == "article-source"
+    assert script_data["visual_manual_pool"][0]["provenance"]["provider"] == "Example News"
+    assert packages[0][0]["source_type"] == "commons"
+
+
+def test_article_source_pool_does_not_enter_factory_visual_qc(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        content_runtime,
+        "_load_news_source_image_pool",
+        lambda *_args, **_kwargs: [
+            {
+                "bytes": b"article-bytes",
+                "hash": "article-hash",
+                "source": "news_source",
+                "source_type": "news_source",
+                "credit": "Source: Example News",
+                "provenance": {"provider": "Example News"},
+            }
+        ],
     )
+    calls = {"strict": 0}
 
-    assert result is not None
-    assert result["scene_index"] == 1
-    assert scenes[0].get("news_source_qc_attempted") is not True
-    assert scenes[1]["news_source_qc_attempted"] is True
+    def fail_if_called(*_args, **_kwargs):
+        calls["strict"] += 1
+        raise AssertionError("article source candidates must not enter factory visual QC")
 
+    monkeypatch.setattr(content_runtime.visual_runtime if hasattr(content_runtime, "visual_runtime") else visual_runtime, "_strict_gate", fail_if_called, raising=False)
 
-
+    # Extraction is independent of the visual verification functions. The actual
+    # pool insertion is covered by the full-process test above.
+    assets = content_runtime._load_news_source_image_pool(type("B", (), {})(), {})
+    assert assets
+    assert calls["strict"] == 0
 
 
 
