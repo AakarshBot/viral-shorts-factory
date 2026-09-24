@@ -499,7 +499,8 @@ def test_manual_pool_target_is_enforced_across_provider_stages(monkeypatch):
     assert set(provider_calls) <= {
         "ProviderOne", "ProviderTwo", "ProviderThree", "ProviderFour"
     }
-    assert qa_calls["count"] == 3
+    assert [stat["qa_requests"] for stat in result["query_stats"]] == [1, 2, 1]
+    assert qa_calls["count"] == 4
 
 
 def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
