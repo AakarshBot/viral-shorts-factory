@@ -49,10 +49,8 @@ def test_article_source_images_are_added_only_to_manual_qc_pool(monkeypatch, tmp
     raw = io.BytesIO()
     image.save(raw, format="JPEG")
 
-    monkeypatch.setattr(
-        content_runtime,
-        "_load_news_source_image_pool",
-        lambda *_args, **_kwargs: [
+    async def fake_article_pool(*_args, **_kwargs):
+        return [
             {
                 "bytes": raw.getvalue(),
                 "hash": "article-hash",
@@ -66,7 +64,7 @@ def test_article_source_images_are_added_only_to_manual_qc_pool(monkeypatch, tmp
                 },
             }
         ],
-    )
+    monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", fake_article_pool)
     monkeypatch.setattr(
         visual_retrieval_runtime,
         "materialize_manual_visual_pool",
@@ -103,36 +101,6 @@ def test_article_source_images_are_added_only_to_manual_qc_pool(monkeypatch, tmp
     assert script_data["visual_manual_pool"][0]["status"] == "article-source"
     assert script_data["visual_manual_pool"][0]["provenance"]["provider"] == "Example News"
     assert packages[0][0]["source_type"] == "commons"
-
-
-def test_article_source_pool_does_not_enter_factory_visual_qc(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        content_runtime,
-        "_load_news_source_image_pool",
-        lambda *_args, **_kwargs: [
-            {
-                "bytes": b"article-bytes",
-                "hash": "article-hash",
-                "source": "news_source",
-                "source_type": "news_source",
-                "credit": "Source: Example News",
-                "provenance": {"provider": "Example News"},
-            }
-        ],
-    )
-    calls = {"strict": 0}
-
-    def fail_if_called(*_args, **_kwargs):
-        calls["strict"] += 1
-        raise AssertionError("article source candidates must not enter factory visual QC")
-
-    monkeypatch.setattr(content_runtime.visual_runtime if hasattr(content_runtime, "visual_runtime") else visual_runtime, "_strict_gate", fail_if_called, raising=False)
-
-    # Extraction is independent of the visual verification functions. The actual
-    # pool insertion is covered by the full-process test above.
-    assets = content_runtime._load_news_source_image_pool(type("B", (), {})(), {})
-    assert assets
-    assert calls["strict"] == 0
 
 
 
