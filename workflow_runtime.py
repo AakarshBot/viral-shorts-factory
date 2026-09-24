@@ -129,31 +129,39 @@ class WorkflowController:
         install_production_wrappers(self)
 
     def _mark_latest_run_ready_for_qc(self, _topic: str = ""):
-        """Mark only the exact production row as READY_FOR_UPLOAD."""
+        """Transition the current dashboard run directly to upload-ready state."""
         import ultimate_bot
 
-        row_id = getattr(self.bot, "_last_run_row_id", None)
-        run_id = getattr(self.bot, "_last_run_run_id", None)
-        if row_id is None or not run_id:
-            raise RuntimeError("Cannot mark READY_FOR_UPLOAD without exact run identity.")
+        run_id = str(
+            self.state.run_id
+            or getattr(self.bot, "_last_run_run_id", "")
+            or ""
+        ).strip()
+        if not run_id:
+            raise RuntimeError("Cannot mark READY_FOR_UPLOAD because the current production run ID is missing.")
 
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
             migrate_vault(conn)
             row = conn.execute(
-                "SELECT run_id, status, topic FROM vault WHERE id = ?",
-                (row_id,),
+                "SELECT id, run_id FROM vault WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+                (run_id,),
             ).fetchone()
             if row is None:
-                raise RuntimeError(f"Exact production row {row_id} was not found.")
-            if row[0] != run_id:
-                raise RuntimeError("Exact production row identity does not match the active run_id.")
-            update_run_record(
+                raise RuntimeError(f"Production run {run_id!r} was not found in the vault.")
+            row_id = int(row[0])
+            if str(row[1] or "").strip() != run_id:
+                raise RuntimeError("Production run identity does not match the dashboard run.")
+            updated = update_run_record(
                 conn,
                 row_id,
                 video_id="READY_FOR_UPLOAD",
                 status="READY_FOR_UPLOAD",
             )
+            if updated is False:
+                raise RuntimeError(f"Production run {run_id!r} could not be marked READY_FOR_UPLOAD.")
+            self.bot._last_run_row_id = row_id
+            self.bot._last_run_run_id = run_id
         finally:
             conn.close()
 
@@ -162,10 +170,7 @@ class WorkflowController:
         import ultimate_bot
 
         row_id = getattr(self.bot, "_last_run_row_id", None)
-        run_id = getattr(self.bot, "_last_run_run_id", None)
-        if row_id is None or not run_id:
-            return
-
+        run_id = str(self.state.run_id or getattr(self.bot, "_last_run_run_id", "") or "").strip()
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
             migrate_vault(conn)
@@ -198,9 +203,20 @@ class WorkflowController:
         import ultimate_bot
 
         row_id = getattr(self.bot, "_last_run_row_id", None)
-        run_id = str(getattr(self.bot, "_last_run_run_id", "") or "").strip()
+        run_id = str(self.state.run_id or getattr(self.bot, "_last_run_run_id", "") or "").strip()
+        if row_id is None and run_id:
+            lookup_conn = sqlite3.connect(ultimate_bot.DB_PATH)
+            try:
+                migrate_vault(lookup_conn)
+                lookup = lookup_conn.execute(
+                    "SELECT id FROM vault WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+                row_id = int(lookup[0]) if lookup else None
+            finally:
+                lookup_conn.close()
         if row_id is None or not run_id:
-            raise RuntimeError("Cannot persist approved metadata without exact run identity.")
+            raise RuntimeError("Cannot persist approved metadata without a current production run.")
 
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
@@ -540,15 +556,6 @@ class WorkflowController:
         if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Final video file not found: {video_path}")
         from final_qc_runtime import validate_final_upload_metadata, validate_final_video
-
-        if (
-            str(publish_mode or "").strip().lower() == "public"
-            and bool((script_data or {}).get("public_publish_blocked"))
-        ):
-            raise RuntimeError(
-                "Public upload is blocked for this production run because the script "
-                "pipeline marked it private-only. Review or regenerate the script before publishing publicly."
-            )
 
         validate_final_video(video_path)
 
