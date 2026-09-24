@@ -469,7 +469,7 @@ def test_niche_sports_contract(monkeypatch):
 def test_direct_source_parser_accepts_compact_relative_timestamp(monkeypatch):
     class Response:
         status_code = 200
-        text = "<article><a href='/story/india-record'>India women complete record win</a><time>11h</time></article>"
+        text = "<article><a href='/news/india-record'>India women complete record win</a><time>11h</time></article>"
     monkeypatch.setattr(desk.requests, "get", lambda *args, **kwargs: Response())
     rows = desk._direct_listing_source("ICC", "https://www.icc-cricket.com/news")
     assert len(rows) == 1
