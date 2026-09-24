@@ -1117,6 +1117,41 @@ def test_dashboard_replacement_returns_used_pool_asset_without_duplicate(tmp_pat
     assert controller._visual_pool[0]["assigned_slide"] == 0
 
 
+def test_dashboard_replacement_preserves_pool_provenance_metadata(tmp_path):
+    from dashboard_runtime import DashboardWorkflowController
+
+    selected = tmp_path / "article.jpg"
+    selected.write_bytes(b"jpeg-placeholder")
+
+    controller = DashboardWorkflowController(_Bot())
+    controller._return_slide_visual_to_pool(
+        {
+            "image": str(selected),
+            "visual_original_path": str(selected),
+            "visual_selected_hash": "article-hash",
+            "visual_verified": True,
+            "source_type": "news_source",
+            "source_credit": "Source: Example News",
+            "source_image_url": "https://example.com/article.jpg",
+            "provenance_status": "provenance-review",
+            "asset_provenance": {
+                "provider": "Example News",
+                "url": "https://example.com/article.jpg",
+                "license": "Unverified article-source license",
+            },
+            "visual_query_used": "article source",
+        },
+        {"primary_entity": "Story subject"},
+    )
+
+    item = controller._visual_pool[0]
+    assert item["source_type"] == "news_source"
+    assert item["pool_origin"] == "article-source"
+    assert item["provenance_status"] == "provenance-review"
+    assert item["credit"] == "Source: Example News"
+    assert item["source_image_url"] == "https://example.com/article.jpg"
+
+
 def test_dashboard_retained_topic_is_revalidated_before_reappearing(monkeypatch):
     import story_ranker
     from dashboard_runtime import _merge_retained_topics
