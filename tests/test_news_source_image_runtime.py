@@ -1,19 +1,43 @@
+import io
+
+from PIL import Image
+
 from news_source_image_runtime import _ArticleImageParser, _candidate_urls, _publisher
 
 
-def test_article_image_priority_and_publisher():
+def _jpeg_bytes(size=(900, 1200)):
+    raw = io.BytesIO()
+    Image.new("RGB", size, "white").save(raw, format="JPEG")
+    return raw.getvalue()
+
+
+def test_article_image_candidates_use_multiple_page_signals_and_skip_video():
     html = """
     <html><head>
       <meta property="og:site_name" content="Example News">
       <meta property="og:image" content="/images/lead.jpg">
       <meta name="twitter:image" content="/images/twitter.jpg">
-    </head><body></body></html>
+      <script type="application/ld+json">
+        {"@type":"NewsArticle","image":"https://example.com/images/json.jpg"}
+      </script>
+    </head><body>
+      <picture>
+        <source srcset="/images/picture-small.jpg 480w, /images/picture-large.jpg 1200w">
+        <img class="article-image" src="/images/body.jpg"
+             data-src="/images/lazy.jpg" srcset="/images/body-small.jpg 480w, /images/body-large.jpg 1400w">
+      </picture>
+      <video><source src="/video/story.mp4" type="video/mp4"></video>
+    </body></html>
     """
     parser = _ArticleImageParser()
     parser.feed(html)
     urls = _candidate_urls(parser, "https://example.com/story/one")
+
     assert urls[0] == "https://example.com/images/lead.jpg"
-    assert urls[1] == "https://example.com/images/twitter.jpg"
+    assert "https://example.com/images/twitter.jpg" in urls
+    assert "https://example.com/images/json.jpg" in urls
+    assert "https://example.com/images/body-large.jpg" in urls
+    assert not any("story.mp4" in url for url in urls)
     assert _publisher(parser, "https://example.com/story/one", "") == "Example News"
 
 
@@ -24,26 +48,90 @@ def test_no_non_http_image_candidate():
     assert _candidate_urls(parser, "https://example.com/story") == []
 
 
-def test_compose_news_source_image_is_vertical():
-    from PIL import Image
-    from news_source_image_runtime import compose_news_source_image
+def test_extract_news_source_images_returns_multiple_direct_images(monkeypatch, tmp_path):
+    import news_source_image_runtime as module
 
-    image = Image.new("RGB", (1600, 900), "white")
-    result = compose_news_source_image(image, (1080, 1920))
-    assert result.size == (1080, 1920)
+    monkeypatch.setenv("ASSET_CACHE_DIR", str(tmp_path))
 
-def test_news_source_scene_routing_can_use_any_manual_query_slide():
-    from visual_content_runtime import _rank_news_source_scene_indices
+    image_bytes = _jpeg_bytes()
+    page_html = """
+    <html><head>
+      <meta property="og:site_name" content="Example News">
+      <meta property="og:image" content="/images/lead.jpg">
+      <script type="application/ld+json">
+        {"@type":"NewsArticle","image":["https://example.com/images/two.jpg","https://example.com/images/three.jpg"]}
+      </script>
+    </head><body><article>
+      <img class="article-image" src="/images/four.jpg">
+    </article></body></html>
+    """
 
-    scenes = [
-        {"primary_entity": "India Afghanistan", "manual_visual_query": "India Afghanistan cricket match"},
-        {"primary_entity": "Shubman Gill", "voiceover": "Shubman Gill batting"},
-        {"primary_entity": "New Delhi", "voiceover": "The New Delhi stadium hosts the match"},
-    ]
-    ranked = _rank_news_source_scene_indices(
-        scenes,
-        "India Afghanistan final cricket match in New Delhi",
+    class Response:
+        def __init__(self, url, content, content_type="text/html"):
+            self.url = url
+            self.content = content
+            self.encoding = "utf-8"
+            self.apparent_encoding = "utf-8"
+            self.headers = {"content-type": content_type}
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, _chunk_size):
+            yield self.content
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, url, **_kwargs):
+            if url.endswith("/story"):
+                return Response(url, page_html.encode("utf-8"))
+            return Response(url, image_bytes, "image/jpeg")
+
+    monkeypatch.setattr(module.requests, "Session", Session)
+
+    assets = module.extract_news_source_images(
+        "https://example.com/story",
+        "Example News",
+        max_images=3,
     )
-    assert ranked
-    assert ranked[0] == 0
 
+    assert len(assets) == 3
+    assert all(item["source"] == "news_source" for item in assets)
+    assert all(item["source_type"] == "news_source" for item in assets)
+    assert all(item["publisher"] == "Example News" for item in assets)
+    assert all(item["provenance"]["provider"] == "Example News" for item in assets)
+    assert all(item["provenance"]["url"].startswith("https://example.com/images/") for item in assets)
+
+
+def test_news_source_extraction_does_not_require_visual_ai_qc(monkeypatch):
+    import visual_content_runtime as content_runtime
+
+    called = {"strict": 0}
+
+    class FakeRuntime:
+        @staticmethod
+        def _strict_gate(*_args, **_kwargs):
+            called["strict"] += 1
+            raise AssertionError("article-source pool must never enter factory visual QC")
+
+    monkeypatch.setattr(
+        content_runtime,
+        "_load_news_source_image_pool",
+        lambda *_args, **_kwargs: [
+            {
+                "bytes": _jpeg_bytes(),
+                "hash": "article-hash",
+                "path": "",
+                "source": "news_source",
+                "source_type": "news_source",
+                "credit": "Source: Example News",
+                "provenance": {"provider": "Example News", "url": "https://example.com/image.jpg"},
+            }
+        ],
+    )
+
+    assets = content_runtime._load_news_source_image_pool(type("B", (), {})(), {})
+    assert assets[0]["source_type"] == "news_source"
+    assert called["strict"] == 0
