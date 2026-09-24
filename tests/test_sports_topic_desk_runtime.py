@@ -466,14 +466,10 @@ def test_niche_sports_contract(monkeypatch):
     assert result[0]["cricket_pipeline"] is False
 
 
-def test_direct_source_parser_accepts_compact_relative_timestamp(monkeypatch):
-    class Response:
-        status_code = 200
-        text = "<article><a href='/news/india-record'>India women complete record win</a><time>11h</time></article>"
-    monkeypatch.setattr(desk.requests, "get", lambda *args, **kwargs: Response())
-    rows = desk._direct_listing_source("ICC", "https://www.icc-cricket.com/news")
-    assert len(rows) == 1
-    assert rows[0]["source"] == "ICC"
+def test_source_local_date_accepts_compact_relative_timestamp():
+    age = desk._source_local_date("<time>11h</time>")
+    assert age is not None
+    assert 10.5 <= age <= 11.5
 
 
 def test_direct_source_parser_accepts_recent_story(monkeypatch):
