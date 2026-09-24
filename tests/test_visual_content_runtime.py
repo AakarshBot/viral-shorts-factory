@@ -42,6 +42,78 @@ def test_content_first_visuals_installer_is_idempotent(tmp_path):
     assert bot._content_first_visuals_patch_installed is True
 
 
+def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch, tmp_path):
+    image = Image.new("RGB", (900, 1200), (80, 90, 100))
+    raw = io.BytesIO()
+    image.save(raw, format="JPEG")
+    materialized_path = tmp_path / "manual.jpg"
+    image.save(materialized_path, format="JPEG")
+
+    async def no_article_source(*_args, **_kwargs):
+        return []
+
+    def fake_collect(*_args, **_kwargs):
+        return {
+            "assets": [{
+                "bytes": raw.getvalue(),
+                "hash": "manual-hash",
+                "subject": "Virender Sehwag",
+                "query": "Virender Sehwag",
+                "visual_type": "PERSON",
+                "source": "Commons",
+                "provenance_status": "commercial-verified",
+            }],
+            "query_stats": [],
+            "rejection_counts": {},
+        }
+
+    def fake_materialize(_bot, assets, pool_id):
+        return [
+            {
+                **dict(assets[0]),
+                "path": str(materialized_path),
+                "original_path": str(materialized_path),
+                "used": False,
+                "status": "manual-review-ready",
+            }
+        ]
+
+    monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", no_article_source)
+    monkeypatch.setattr(content_runtime, "collect_manual_visual_pool", fake_collect)
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "materialize_manual_visual_pool",
+        fake_materialize,
+    )
+    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
+    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
+    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "PERSON")
+    monkeypatch.setattr(
+        visual_query_entities_runtime,
+        "search_slide_visual",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("automatic visual search must not run before the manual pool is consumed")
+        ),
+    )
+
+    bot = _fake_bot(tmp_path)
+    bot._active_web_config = {"visual_search_queries": "Virender Sehwag"}
+    script_data = {
+        "title": "Manual visual pool scope test",
+        "script": [{
+            "primary_entity": "Virender Sehwag",
+            "voiceover": "Sehwag is the subject.",
+            "visual_intent": "person portrait",
+        }],
+    }
+
+    packages = _run_process(bot, script_data, "regular")
+
+    assert len(packages) == 1
+    assert script_data["visual_manual_pool_size"] == 1
+    assert packages[0][0]["source_type"] == "manual"
+
+
 def test_article_source_images_are_added_only_to_manual_qc_pool(monkeypatch, tmp_path):
     import news_source_image_runtime
 
