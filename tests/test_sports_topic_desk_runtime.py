@@ -114,7 +114,6 @@ def test_collect_skips_recovery_when_primary_pool_is_healthy(monkeypatch):
 
     monkeypatch.setattr(desk, "_google_search", fake_google)
     monkeypatch.setattr(desk, "_direct_listing_source", fake_direct)
-    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: calls.__setitem__("trends", calls["trends"] + 1) or [])
 
@@ -430,7 +429,6 @@ def test_collect_uses_small_bounded_profile_set(monkeypatch):
     monkeypatch.setattr(desk, "_google_search", lambda query, profile, scope: calls.append((query, profile, scope)) or [])
     monkeypatch.setattr(desk, "_direct_listing_source", lambda name, url: [])
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
-    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
     result = desk._collect("India / Asia")
