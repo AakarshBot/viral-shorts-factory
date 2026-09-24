@@ -110,6 +110,17 @@ def test_dashboard_live_header_uses_canonical_mode():
     assert 'render_header("Live")' not in app_source
 
 
+def test_visual_pool_provenance_warning_defines_state_before_use():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = app_source.index("    def render_pool_section(")
+    end = app_source.index("\n    st.markdown(\"### Available manual-search images\")", start)
+    source = app_source[start:end]
+
+    assignment = source.index("provenance_state = str(")
+    warning = source.index("if provenance_state != \"commercial-verified\":")
+    assert assignment < warning
+
+
 def test_dashboard_live_monitor_uses_controlled_polling():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
