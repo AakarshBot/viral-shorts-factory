@@ -6,16 +6,16 @@ import html
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
 import story_ranker as sr
-from event_discovery_runtime import cluster_news_events, event_identity_key
+from event_discovery_runtime import cluster_news_events
 
 SPORTS_DESK_VERSION = "sports-desk-v11-2026-09-24"
 LOOKBACK_HOURS = 72
@@ -24,6 +24,8 @@ PER_BUCKET = 20
 REQUEST_TIMEOUT = 4.0
 DISCOVERY_TIMEOUT = 7.0
 SECONDARY_TIMEOUT = 2.5
+SOURCE_TIMEOUT = REQUEST_TIMEOUT
+SECONDARY_REQUEST_TIMEOUT = SECONDARY_TIMEOUT
 GOOGLE_RESULT_LIMIT = 25
 DIRECT_RESULT_LIMIT = 30
 ICC_RSS_URL = "https://www.icc-cricket.com/index?feed=rss2"
@@ -35,14 +37,17 @@ DISCOVERY_PROFILES = {
     "news": (
         '"India cricket" BCCI latest when:3d',
         'India cricket selection injury retirement appointment result record when:3d',
+        'India cricket women domestic Ranji U19 emerging player latest when:7d',
     ),
     "emerging": (
         'India cricket breakthrough emerging uncapped unusual upset comeback record when:7d',
         'India cricket bizarre controversy surprise debut viral when:7d',
+        'India cricket unexpected incident milestone breakout player when:7d',
     ),
     "social": (
         'India cricket reaction comments debate controversy fans player statement when:3d',
         'India cricket social media reaction former player fans when:3d',
+        'India cricket player said called slammed praised debate reaction when:3d',
     ),
 }
 GLOBAL_PROFILE_QUERIES = {
@@ -82,6 +87,7 @@ CRICKET_PLAYER_ALIASES = (
     "babar azam", "shaheen afridi", "pat cummins", "travis head", "ben stokes",
     "joe root", "steve smith", "mohammed siraj", "kane williamson",
 )
+INDIA_ASIA_PLAYER_ALIASES = CRICKET_PLAYER_ALIASES
 INDIA_ASIA_ANCHORS = (
     "india", "indian", "bcci", "india a", "ranji", "duleep", "wpl", "ipl", "u19", "u-19",
     "u23", "u-23", "pakistan", "pcb", "sri lanka", "bangladesh", "afghanistan", "nepal",
@@ -370,86 +376,6 @@ def _direct_listing_source(name, url):
     return out
 
 
-def _direct_listing_source(name, url):
-    try:
-        response = requests.get(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 ViralShortsFactory/2026 cricket-desk",
-                "Accept": "text/html,application/xhtml+xml",
-            },
-            timeout=SOURCE_TIMEOUT,
-        )
-        if response.status_code != 200:
-            return []
-        soup = BeautifulSoup(response.text or "", "html.parser")
-    except Exception:
-        return []
-
-    allowed_hosts = {
-        "ICC": ("icc-cricket.com",),
-        "BCCI": ("bcci.tv",),
-        "Cricbuzz": ("cricbuzz.com",),
-        "Wisden": ("wisden.com",),
-        "ESPNcricinfo": ("espncricinfo.com", "cricinfo.com"),
-    }.get(name, ())
-
-    out, seen = [], set()
-    for anchor in soup.find_all("a", href=True):
-        href = _clean(anchor.get("href"))
-        title = _clean(anchor.get_text(" ", strip=True))
-        if not href or len(title) < 12:
-            continue
-        if not href.startswith(("http://", "https://")):
-            href = urljoin(url, href)
-        parsed = urlparse(href)
-        host = parsed.netloc.lower().removeprefix("www.")
-        path = parsed.path.casefold()
-        if allowed_hosts and not any(host == allowed or host.endswith("." + allowed) for allowed in allowed_hosts):
-            continue
-        if name == "BCCI" and "/news/article/" not in path:
-            continue
-        if name == "Cricbuzz" and "/cricket-news/" not in path:
-            continue
-        if name == "Wisden" and "/cricket-news/" not in path:
-            continue
-        if name == "ESPNcricinfo" and not any(marker in path for marker in ("/story/", "/cricket-news/")):
-            continue
-        if name == "ICC" and "/news/" not in path:
-            continue
-
-        card = _card_container(anchor)
-        card_text = _clean(card.get_text(" ", strip=True) if card else "")
-        age = _source_local_date(str(card) if card else card_text)
-        if age is None:
-            age = _source_local_date(str(anchor.parent) if anchor.parent else "")
-        if age is None or age > LOOKBACK_HOURS:
-            continue
-
-        key = sr._canonical_url(href)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        published = datetime.now(timezone.utc) - timedelta(hours=age)
-
-        # Keep only card-local context; never use a giant neighboring-page window.
-        out.append({
-            "title": title[:220],
-            "text": card_text[:1200] or title,
-            "description": card_text[:1200] or title,
-            "source": name,
-            "source_name": name,
-            "publisher": name,
-            "url": href,
-            "publishedAt": published.isoformat(),
-            "collection_source": "official" if name in {"ICC", "BCCI"} else "specialist_direct",
-            "direct_source": name,
-        })
-        if len(out) >= DIRECT_RESULT_LIMIT:
-            break
-    return out
-
-
 def _bluesky(query):
     try:
         r = requests.get(
@@ -488,48 +414,6 @@ def _bluesky(query):
             "social_reply": float(post.get("replyCount") or 0),
             "social_repost": float(post.get("repostCount") or 0),
             "social_quote": float(post.get("quoteCount") or 0),
-        })
-    return output
-
-
-def _reddit_search(subreddit, query):
-    try:
-        return sr._reddit_items("sports_stories_of_day", subreddit, 35)
-    except Exception:
-        return []
-
-
-def _mastodon(query):
-    try:
-        r = requests.get(
-            "https://mastodon.social/api/v2/search",
-            params={"q": query, "type": "statuses", "limit": 30},
-            headers={"User-Agent": "ViralShortsFactory/2026 cricket-desk"},
-            timeout=SECONDARY_REQUEST_TIMEOUT,
-        )
-        if r.status_code != 200:
-            return []
-        statuses = r.json().get("statuses") or []
-    except Exception:
-        return []
-    output = []
-    for status in statuses:
-        text = _clean(re.sub(r"<[^>]+>", " ", _clean(status.get("content"))))
-        if not text:
-            continue
-        output.append({
-            "title": text[:220],
-            "text": text,
-            "description": text,
-            "source": "Mastodon",
-            "source_name": "Mastodon",
-            "url": _clean(status.get("url")),
-            "publishedAt": _clean(status.get("created_at")),
-            "collection_source": "mastodon",
-            "social_post": True,
-            "social_like": float(status.get("favourites_count") or 0),
-            "social_reply": float(status.get("replies_count") or 0),
-            "social_repost": float(status.get("reblogs_count") or 0),
         })
     return output
 
