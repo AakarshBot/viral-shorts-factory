@@ -353,7 +353,6 @@ def patch_content_first_visuals(bot):
         article_source_assets = await _load_news_source_image_pool(bot, active_config)
         article_source_materialized = []
         if article_source_assets:
-            from visual_retrieval_runtime import materialize_manual_visual_pool
             story_url = str((active_config.get('selected_story') or {}).get('story_url') or '').strip()
             article_pool_id = f"article_{abs(hash(story_url or 'story')) & 0xffffffff}"
             article_source_materialized = materialize_manual_visual_pool(
