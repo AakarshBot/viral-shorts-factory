@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict
@@ -280,10 +281,11 @@ def _fallback_prompt(language_cfg: Dict[str, Any], format_mode: str, story_data:
     return (
         "You are the backup original-news Shorts writer. Use only supplied evidence and write fresh wording. "
         "Never copy a complete source sentence. Never invent facts, quotes, motives, numbers, predictions or outcomes. "
-        "Tell the complete important story in 4–5 regular scenes and naturally fit 16–30 seconds. "
+        "Tell the complete important story in 4–5 regular scenes and target about 22–27 seconds of natural narration; never exceed 30 seconds. "
         "Do not pad to reach 16 seconds and do not omit crucial facts merely to hit the time limit. "
         "Every scene must add useful information. No filler, CTA, retention bait or production instructions. "
-        "Scene 1 is the factual hook; middle scenes explain key evidence/context; final scene gives the consequence or most useful final fact. "
+        "Scene 1 is the factual hook: target 10–12 words, hard maximum 14. Before returning JSON, count it and rewrite internally if it exceeds 14; middle scenes explain key evidence/context; final scene gives the consequence or most useful final fact. "
+        "Before returning JSON, silently verify the Scene 1 cap, the roughly 22–27 second narration target, full factual support, non-repetition, and exactly three titles. "
         "Generate exactly three title candidates. Use narrative_role values hook, development, context, consequence. "
         "Return ONLY JSON matching the factory schema. "+contract+"\nLanguage: "+language_instruction
     )
@@ -459,7 +461,7 @@ def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, 
         base_url.rstrip("/") + "/v1/chat/completions",
         payload,
         {"Content-Type": "application/json"},
-        15,
+        90,
         story_data,
         format_mode,
         f"ollama/{model}",
