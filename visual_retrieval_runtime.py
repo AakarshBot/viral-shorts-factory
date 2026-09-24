@@ -860,7 +860,7 @@ def collect_manual_visual_pool(
     allow_auto_backfill: bool = True,
     verify_with_ai: bool = True,
 ) -> dict:
-    """Build the shared entity-verified pool from the first two preferred manual sources."""
+    """Build the shared entity-verified pool from bounded staged manual sources."""
     from visual_qa_runtime import (
         GEMINI_VISUAL_BATCH_SIZE,
         get_last_visual_qa_failure,
@@ -872,7 +872,7 @@ def collect_manual_visual_pool(
     parsed_queries = [str(item or "").strip() for item in (manual_queries or []) if str(item or "").strip()]
     default_max = sum(_manual_query_target(index) for index in range(1, len(parsed_queries) + 1))
     if pool_target is not None:
-        requested_max = max(1, int(pool_target))
+        requested_max = max(1, min(int(pool_target), MANUAL_POOL_MAX))
     elif pool_max is not None:
         requested_max = max(1, min(int(pool_max), MANUAL_POOL_MAX))
     else:
@@ -901,6 +901,16 @@ def collect_manual_visual_pool(
         if isinstance(data, (list, tuple)):
             return list(data)
         return [data]
+
+    if parsed_queries and verify_with_ai:
+        # Treat the complete shared manual pool as one bounded QA operation.
+        # Provider fallback stages and sparse refinement must not reopen the
+        # per-scene Gemini budget.
+    if parsed_queries and verify_with_ai:
+        # Treat the complete shared manual pool as one bounded QA operation.
+        # Provider fallback stages and sparse-query refinement must not reopen the
+        # per-scene Gemini budget.
+        start_visual_qa_scene()
 
     def _verify(candidates, entity_anchor, query_index, target, source_label):
         if not candidates or len(assets) >= requested_max:
@@ -1246,6 +1256,7 @@ def collect_manual_visual_pool(
                         used_hashes=seen_hashes,
                         used_source_image_urls=seen_image_urls,
                         search_round=1,
+                        reset_qa_scene=False,
                     )
                     refined_assets = list(refined_result.get("assets") or [])
                 except Exception as exc:
@@ -1413,6 +1424,7 @@ def collect_manual_visual_search(
     used_hashes: set[str] | None = None,
     used_source_image_urls: set[str] | None = None,
     search_round: int = 1,
+    reset_qa_scene: bool = True,
 ) -> dict:
     """Fetch up to ten new images from the first two preferred manual sources with identity AI checks.
 
@@ -1609,7 +1621,8 @@ def collect_manual_visual_search(
     accepted: list[dict] = []
     qa_requests = 0
     if candidates:
-        start_visual_qa_scene()
+        if reset_qa_scene:
+            start_visual_qa_scene()
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         for offset in range(0, len(candidates), batch_size):
             if len(accepted) >= 10:
