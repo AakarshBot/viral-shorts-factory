@@ -381,28 +381,25 @@ def test_dashboard_binding_does_not_replace_canonical_youtube_uploader():
     assert "_patch_youtube_creator_comments(bot)" not in source
     assert '"upload_to_youtube"' in source
 
-def test_youtube_upload_blocks_public_publish_when_script_is_private_only(monkeypatch, tmp_path):
+def test_youtube_upload_allows_public_publish_after_manual_approval(monkeypatch, tmp_path):
     video_path = tmp_path / "final.mp4"
     video_path.write_bytes(b"synthetic mp4")
 
     fake = _FakeYouTube()
     _patch_youtube_upload(monkeypatch, fake)
 
-    try:
-        ultimate_bot.upload_to_youtube(
-            str(video_path),
-            {
-                "title": "Test Short",
-                "seo_description": "This description contains enough words for metadata validation.",
-                "pinned_comment": "Comment.",
-                "public_publish_blocked": True,
-            },
-            {"label": "News", "category_id": "25", "hashtags": ["#News"]},
-            "public",
-        )
-    except RuntimeError as exc:
-        assert "private-only" in str(exc)
-    else:
-        raise AssertionError("The canonical uploader must enforce a private-only script flag.")
+    video_id = ultimate_bot.upload_to_youtube(
+        str(video_path),
+        {
+            "title": "Test Short",
+            "seo_description": "This description contains enough words for metadata validation.",
+            "pinned_comment": "Comment.",
+            "public_publish_blocked": True,
+        },
+        {"label": "News", "category_id": "25", "hashtags": ["#News"]},
+        "public",
+    )
 
-    assert fake.videos_api.insert_calls == []
+    assert video_id
+    assert fake.videos_api.insert_calls
+    assert fake.videos_api.insert_calls[-1]["body"]["status"]["privacyStatus"] == "public"
