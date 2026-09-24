@@ -766,7 +766,7 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
         # into VIRAL. Likewise, a Google social-lane hit is a SOCIAL lead even
         # though it is not a Reddit/Bluesky post.
         social_first = "social" in profiles and not profiles.intersection({"news", "emerging"})
-        emerging_first = "emerging" in profiles and "social" not in profiles
+        emerging_first = "emerging" in profiles and not profiles.intersection({"news", "social"})
 
         if bucket == "social":
             return social_first
