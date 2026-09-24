@@ -35,19 +35,19 @@ SPORTS_RSS_URL = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=
 # each profile asks for a different kind of story before clustering happens.
 DISCOVERY_PROFILES = {
     "news": (
-        '"India cricket" BCCI latest when:2d',
-        'India cricket selection injury retirement appointment result record when:3d',
-        'India cricket women domestic Ranji U19 emerging player latest when:2d',
+        'India cricket latest selection injury retirement appointment result record when:2d',
+        'India cricket women domestic Ranji U19 latest when:3d',
+        'India cricket player team milestone comeback upset result when:3d',
     ),
     "emerging": (
-        'India cricket breakthrough emerging uncapped unusual upset comeback record when:7d',
-        'India cricket bizarre controversy surprise debut viral when:7d',
-        'India cricket unexpected incident milestone breakout player when:7d',
+        'India cricket uncapped player debut breakthrough record milestone when:7d',
+        'India cricket unusual bizarre upset comeback surprise when:7d',
+        'India cricket women domestic Ranji U19 young emerging player latest when:7d',
     ),
     "social": (
-        'India cricket reaction comments debate controversy fans player statement when:3d',
-        'India cricket social media reaction former player fans when:3d',
-        'India cricket player said called slammed praised debate reaction when:3d',
+        'India cricket reactions statements controversy debate fans when:3d',
+        'India cricket player coach said comments response when:3d',
+        'India cricket social media reaction viral when:3d',
     ),
 }
 GLOBAL_PROFILE_QUERIES = {
