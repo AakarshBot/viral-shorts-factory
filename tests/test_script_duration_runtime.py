@@ -127,19 +127,15 @@ def test_production_has_no_raw_post_tts_duration_abort():
     assert "Final synthesized narration is over 30s" not in source
 
 
-def test_initial_script_uses_a_safety_ceiling_above_the_normal_duration_target():
-    script = _script(["Hook words only."] + [" ".join(["word"] * 75)])
+def test_initial_script_has_no_total_word_safety_ceiling():
+    script = _script([
+        "one two three four five six seven eight nine ten eleven twelve",
+        " ".join(["word"] * 100),
+    ])
     ok, reason = validate_content_density(script, {}, "regular")
 
     assert ok is True, reason
 
-
-def test_initial_script_rejects_only_beyond_the_safety_ceiling():
-    script = _script(["Hook words only."] + [" ".join(["word"] * 90)])
-    ok, reason = validate_content_density(script, {}, "regular")
-
-    assert ok is False
-    assert "maximum is 90" in reason
 
 
 def test_initial_script_rejects_a_long_first_scene():
