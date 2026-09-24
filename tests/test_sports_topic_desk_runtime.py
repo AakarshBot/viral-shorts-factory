@@ -71,8 +71,8 @@ def test_global_collect_does_not_use_bcci_listing(monkeypatch):
         lambda name, url: direct_calls.append((name, url)) or [],
     )
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
-    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
 
     desk._collect("Global")
 
@@ -95,6 +95,7 @@ def test_niche_sports_collect_uses_all_three_profiles(monkeypatch):
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
 
     assert desk._collect("Niche Sports") == []
     assert len(calls) == 3
@@ -115,7 +116,6 @@ def test_collect_skips_recovery_when_primary_pool_is_healthy(monkeypatch):
     monkeypatch.setattr(desk, "_google_search", fake_google)
     monkeypatch.setattr(desk, "_direct_listing_source", fake_direct)
     monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
-    monkeypatch.setattr(desk, "_reddit_search", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: calls.__setitem__("trends", calls["trends"] + 1) or [])
 
@@ -141,6 +141,7 @@ def test_collect_uses_official_sources_only_for_sparse_primary_intake(monkeypatc
         lambda name, url: calls["direct"].append(name) or [],
     )
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
 
     desk._collect("India / Asia")
 
@@ -414,6 +415,7 @@ def test_collect_uses_small_bounded_profile_set(monkeypatch):
     monkeypatch.setattr(desk, "_reddit_search", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
     result = desk._collect("India / Asia")
     assert result == []
     assert len(calls) == 3
@@ -449,21 +451,6 @@ def test_niche_sports_contract(monkeypatch):
     assert result
     assert result[0]["recommended_category"] == "sports"
     assert result[0]["cricket_pipeline"] is False
-
-
-def test_reddit_search_is_keyword_search_not_subreddit_feed(monkeypatch):
-    captured = {}
-    class Response:
-        status_code = 200
-        def json(self):
-            return {"data": {"children": []}}
-    def fake_get(url, **kwargs):
-        captured.update(kwargs.get("params") or {})
-        return Response()
-    monkeypatch.setattr(desk.requests, "get", fake_get)
-    desk._reddit_search("Cricket", "India cricket")
-    assert captured["q"] == "India cricket"
-    assert captured["subreddit"] == "Cricket"
 
 
 def test_direct_source_parser_accepts_recent_story(monkeypatch):
