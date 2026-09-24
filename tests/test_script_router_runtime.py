@@ -80,6 +80,9 @@ def test_duration_repair_does_not_become_a_loop():
     assert source.count("def _duration_rewrite(") == 1
     assert source.count("_duration_rewrite(current,data,valid") == 2
     assert "for provider_name,call in attempts" in source
+    assert "Scene 1 must be 10–12 words, hard maximum 14" in source
+    assert "never exceed 30 seconds" in source
+    assert 'if "Scene 1 is too long:" in str(reason):' in source
 
 
 def test_originality_gate_rejects_near_verbatim_source_wording():
