@@ -224,6 +224,22 @@ def test_unsupported_numeric_metadata_is_rejected():
                 "sport_or_topic_category": "Cricket",
             },
             {
+                "voiceover": "The documented change also affects the team's immediate planning.",
+                "narrative_role": "context",
+                "primary_entity": "India",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India squad consequence",
+                "sport_or_topic_category": "Cricket",
+            },
+            {
+                "voiceover": "The documented change also affects the team's immediate planning.",
+                "narrative_role": "context",
+                "primary_entity": "India",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India squad planning",
+                "sport_or_topic_category": "Cricket",
+            },
+            {
                 "voiceover": "The change affects preparation for the next assignment.",
                 "narrative_role": "consequence",
                 "primary_entity": "India",

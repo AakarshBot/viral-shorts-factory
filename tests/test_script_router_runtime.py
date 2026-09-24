@@ -77,7 +77,8 @@ def test_five_scene_regular_script_is_allowed():
 
 def test_duration_repair_does_not_become_a_loop():
     source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
-    assert source.count("_duration_rewrite(") == 2
+    assert source.count("def _duration_rewrite(") == 1
+    assert source.count("_duration_rewrite(current,data,valid") == 2
     assert "for provider_name,call in attempts" in source
 
 

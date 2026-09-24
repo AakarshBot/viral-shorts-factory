@@ -64,7 +64,7 @@ def test_validate_script_rejects_beyond_safety_ceiling():
     assert "maximum is 90" in reason
 
 
-def test_validate_script_accepts_compact_three_scene_story():
+def test_validate_script_accepts_complete_four_scene_story():
     script = {
         "editorial_angle": "This explains the development and practical consequence.",
         "titles": ["India policy update", "India announces policy change", "What the change means"],
@@ -72,6 +72,7 @@ def test_validate_script_accepts_compact_three_scene_story():
         "script": [
             _contract_scene("India announced the policy today.", "hook"),
             _contract_scene("Officials are implementing the revised process.", "development"),
+            _contract_scene("The background explains why the revised process was introduced.", "context"),
             _contract_scene("The practical consequence is a new process for affected departments.", "consequence"),
         ],
     }
@@ -88,8 +89,9 @@ def test_writer_contract_has_initial_duration_limits():
     import ultimate_bot
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
-    assert "Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14." in source
+    assert "Regular Shorts contain 4–5 scenes and the whole important story." in source
+    assert "Target 16–30 seconds naturally; maximum 30 seconds." in source
+    assert "Never pad merely to reach 16 seconds." in source
     assert "Spoken duration is authoritative" in source
     assert "Use as many scenes as the story genuinely needs" not in source
     assert "_duration_tighten_script" in source

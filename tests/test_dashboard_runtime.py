@@ -1556,6 +1556,7 @@ def test_regular_script_release_structure_accepts_compact_semantic_story():
         "script": [
             {"voiceover": "Did this defeat actually change Pakistan cricket?", "narrative_role": "hook"},
             {"voiceover": "Former players argued the result exposed problems that had been building around the team.", "narrative_role": "development"},
+            {"voiceover": "The result followed a difficult run of performances and renewed scrutiny.", "narrative_role": "context"},
             {"voiceover": "The immediate consequence is a deeper debate over what Pakistan must change next.", "narrative_role": "consequence"},
         ]
     }
