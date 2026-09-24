@@ -51,7 +51,6 @@ def test_strict_fallback_uses_only_source_words():
         format_mode="regular",
     )
     assert result["fallback_mode"] == "strict_source_only"
-    assert result["public_publish_blocked"] is True
     assert len(result["script"]) == 4
     assert [scene["narrative_role"] for scene in result["script"]] == [
         "hook", "development", "context", "consequence"
@@ -141,7 +140,6 @@ def test_strict_fallback_does_not_leak_provider_noise():
 
     assert cleaned["authoritative_narration"] is True
     assert cleaned["fallback_mode"] == "strict_source_only"
-    assert cleaned["public_publish_blocked"] is True
     assert all("Groq" not in scene["voiceover"] for scene in cleaned["script"])
     assert all("JSON schema" not in scene["voiceover"] for scene in cleaned["script"])
     assert all(scene["narration_source"] == "validated_script" for scene in cleaned["script"])

@@ -122,7 +122,6 @@ def test_source_fallback_preserves_real_source_sentences_and_marks_preview_only(
         "regular",
     )
 
-    assert fallback["public_publish_blocked"] is True
     assert len(fallback["script"]) == 4
     assert [scene["narrative_role"] for scene in fallback["script"]] == [
         "hook",

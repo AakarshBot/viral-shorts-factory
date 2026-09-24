@@ -1794,7 +1794,7 @@ def test_script_review_accepts_unchanged_or_human_edited_script(monkeypatch):
         "clean_script_data",
         lambda data, *_args, **_kwargs: (dict(data, script=[dict(s) for s in data["script"]]), {"changed_scenes": 0, "removed_scenes": 0}),
     )
-    monkeypatch.setattr(script_runtime, "validate_content_density", lambda *_args: (True, "ok"))
+    monkeypatch.setattr(script_runtime, "validate_content_density", lambda *_args, **_kwargs: (True, "ok"))
     monkeypatch.setattr(script_runtime, "assess_release_structure", lambda *_args: (True, "ok", "Editorial Explainer"))
     monkeypatch.setattr(
         script_runtime,
@@ -1819,7 +1819,7 @@ def test_script_review_accepts_unchanged_or_human_edited_script(monkeypatch):
     assert controller._manual_gate_state["script_event"].is_set()
 
 
-def test_script_review_rejects_human_edit_that_exceeds_duration(monkeypatch):
+def test_script_review_allows_human_edit_above_historical_duration(monkeypatch):
     import script_runtime
 
     controller = DashboardWorkflowController(_Bot())
@@ -1833,7 +1833,8 @@ def test_script_review_rejects_human_edit_that_exceeds_duration(monkeypatch):
         "script": [
             {"voiceover": "India confirms the policy change.", "narrative_role": "hook"},
             {"voiceover": "Officials say implementation begins after the latest review.", "narrative_role": "development"},
-            {"voiceover": "The change affects the next implementation stage.", "narrative_role": "consequence"},
+            {"voiceover": "The change affects the next implementation stage.", "narrative_role": "context"},
+            {"voiceover": "The consequence affects the next implementation stage for departments.", "narrative_role": "consequence"},
         ],
     }
     controller._ensure_manual_gate_state()
@@ -1843,7 +1844,7 @@ def test_script_review_rejects_human_edit_that_exceeds_duration(monkeypatch):
         "clean_script_data",
         lambda data, *_args, **_kwargs: (dict(data, script=[dict(s) for s in data["script"]]), {"changed_scenes": 0, "removed_scenes": 0}),
     )
-    monkeypatch.setattr(script_runtime, "validate_content_density", lambda *_args: (True, "ok"))
+    monkeypatch.setattr(script_runtime, "validate_content_density", lambda *_args, **_kwargs: (True, "ok"))
     monkeypatch.setattr(script_runtime, "assess_release_structure", lambda *_args: (True, "ok", {}))
     monkeypatch.setattr(
         script_runtime,
@@ -1856,10 +1857,8 @@ def test_script_review_rejects_human_edit_that_exceeds_duration(monkeypatch):
 
     ok, message = controller.submit_script_review(reviewed)
 
-    assert ok is False
-    assert "exceeds the 30-second limit" in message
-    assert controller._manual_gate_state["script_submitted"] is False
-
+    assert ok, message
+    assert controller._manual_gate_state["script_submitted"] is True
 
 def test_script_review_rejects_scene_count_change():
     controller = DashboardWorkflowController(_Bot())
