@@ -1980,8 +1980,10 @@ class DashboardWorkflowController(WorkflowController):
             self._return_slide_visual_to_pool(layer, scene)
 
             selected_source = str(selected.get("source") or "verified-bank").strip()
+            selected_source_type = str(selected.get("source_type") or selected_source).strip()
             selected_query = str(selected.get("query") or "").strip()
             selected_status = str(selected.get("status") or "entity-verified").strip()
+            selected_credit = str(selected.get("credit") or "").strip()
             low_resolution_manual_qc = selected_status == "factory-rejected-resolution"
             new_layer = dict(layer)
             selected_original_path = str(selected.get("original_path") or selected_path).strip()
@@ -1989,7 +1991,11 @@ class DashboardWorkflowController(WorkflowController):
                 {
                     "image": replacement_path,
                     "visual_original_path": selected_original_path,
-                    "source_type": "verified-bank",
+                    "source_type": (
+                        selected_source_type
+                        if selected_source_type == "news_source"
+                        else "verified-bank"
+                    ),
                     "visual_verified": True,
                     "visual_qc_blocked": False,
                     "visual_qc_block_reason": "",
@@ -2003,7 +2009,10 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_fallback_reason": "",
                     "visual_query_used": f"bank:{selected_query}",
                     "visual_selected_hash": str(selected.get("hash") or "").strip(),
-                    "source_credit": source_credit_for_type(selected_source),
+                    "source_credit": source_credit_for_type(
+                        selected_source,
+                        selected_credit,
+                    ),
                     "bank_selected_status": selected_status,
                     "source_image_url": str(
                         selected.get("source_image_url")
@@ -2013,6 +2022,7 @@ class DashboardWorkflowController(WorkflowController):
                     "asset_provenance": dict(selected.get("provenance") or {}),
                     "visual_asset_bank": new_bank,
                     "bank_selected_source": selected_source,
+                    "bank_selected_source_type": selected_source_type,
                     "bank_selected_query": selected_query,
                 }
             )
@@ -2168,7 +2178,8 @@ class DashboardWorkflowController(WorkflowController):
                     "visual_crop_manual": True,
                     "visual_crop_mode": "free" if str(crop_mode or "").strip().casefold() == "free" else "shorts",
                     "source_credit": source_credit_for_type(
-                        str(layer.get("source_type") or "visual")
+                        str(layer.get("source_type") or "visual"),
+                        str(layer.get("source_credit") or "").strip(),
                     ),
                 }
             )
