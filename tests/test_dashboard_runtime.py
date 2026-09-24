@@ -1572,7 +1572,7 @@ def test_regular_script_release_structure_accepts_compact_semantic_story():
     }
     passed, reason, _ = assess_release_structure(two_scene, "regular")
     assert passed is False
-    assert "3 or 4 scenes" in reason.lower()
+    assert "4 or 5 scenes" in reason.lower()
 
 
 def test_renderer_has_no_artificial_scene_audio_padding():
@@ -1583,9 +1583,9 @@ def test_renderer_has_no_artificial_scene_audio_padding():
 
 def test_script_writer_prompt_requires_compact_first_scene_and_runtime_budget():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14." in source
-    assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
-    assert "Spoken duration is authoritative" in source
+    assert "Regular Shorts contain 4–5 scenes and the whole important story." in source
+    assert "Target 16–30 seconds naturally; maximum 30 seconds." in source
+    assert "Never pad merely to reach 16 seconds." in source
 
 
 def test_dashboard_upload_unlock_is_metadata_only():

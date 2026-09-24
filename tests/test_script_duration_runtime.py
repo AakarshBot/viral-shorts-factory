@@ -208,7 +208,7 @@ def test_unsupported_numeric_metadata_is_rejected():
         "recommended_title_index": 1,
         "script": [
             {
-                "voiceover": "India confirmed the squad change.",
+                "voiceover": "India confirmed the squad change involving 99 affected players.",
                 "narrative_role": "hook",
                 "primary_entity": "India",
                 "visual_intent": "news_event",
@@ -228,17 +228,10 @@ def test_unsupported_numeric_metadata_is_rejected():
                 "narrative_role": "context",
                 "primary_entity": "India",
                 "visual_intent": "news_event",
-                "specific_search_prompt": "India squad consequence",
+                "specific_search_prompt": "India squad context",
                 "sport_or_topic_category": "Cricket",
             },
-            {
-                "voiceover": "The documented change also affects the team's immediate planning.",
-                "narrative_role": "context",
-                "primary_entity": "India",
-                "visual_intent": "news_event",
-                "specific_search_prompt": "India squad planning",
-                "sport_or_topic_category": "Cricket",
-            },
+
             {
                 "voiceover": "The change affects preparation for the next assignment.",
                 "narrative_role": "consequence",

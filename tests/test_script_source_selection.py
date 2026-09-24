@@ -92,7 +92,6 @@ def test_writer_contract_has_initial_duration_limits():
     assert "Regular Shorts contain 4–5 scenes and the whole important story." in source
     assert "Target 16–30 seconds naturally; maximum 30 seconds." in source
     assert "Never pad merely to reach 16 seconds." in source
-    assert "Spoken duration is authoritative" in source
     assert "Use as many scenes as the story genuinely needs" not in source
     assert "_duration_tighten_script" in source
 
