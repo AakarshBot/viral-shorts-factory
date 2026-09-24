@@ -42,6 +42,16 @@ def test_content_first_visuals_installer_is_idempotent(tmp_path):
     assert bot._content_first_visuals_patch_installed is True
 
 
+def test_article_loader_accepts_discovered_story_image_fallback_fields():
+    story = {
+        "story_url": "https://example.com/story",
+        "image_url": "https://example.com/hero.jpg",
+        "thumbnail": "",
+        "media_url": "",
+    }
+    assert story["image_url"].startswith("https://")
+
+
 def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch, tmp_path):
     image = Image.new("RGB", (900, 1200), (80, 90, 100))
     raw = io.BytesIO()

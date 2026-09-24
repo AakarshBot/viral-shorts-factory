@@ -41,10 +41,45 @@ async def _load_news_source_image_pool(bot, active_config):
     ).strip()
 
     try:
-        from news_source_image_runtime import extract_news_source_images
-        return await __import__("asyncio").get_running_loop().run_in_executor(
+        from news_source_image_runtime import (
+            extract_news_source_images,
+            fetch_direct_source_image,
+        )
+        assets = await __import__("asyncio").get_running_loop().run_in_executor(
             None, extract_news_source_images, article_url, publisher
         )
+        if assets:
+            print(
+                f"   [News Source Image Pool] extracted {len(assets)} image(s) from article HTML.",
+                flush=True,
+            )
+            return assets
+
+        # Discovery often already carries the publisher's hero image. Use it as
+        # a direct fallback when the article page is JS-rendered, blocked, or has
+        # no static <img>/metadata candidate that can be downloaded.
+        for field in ("image_url", "thumbnail", "media_url"):
+            image_url = str(selected_story.get(field) or "").strip()
+            if not image_url:
+                continue
+            fallback = fetch_direct_source_image(
+                image_url,
+                article_url,
+                publisher,
+            )
+            if fallback:
+                print(
+                    f"   [News Source Image Pool] article HTML yielded 0 images; "
+                    f"using discovered {field} as source-image fallback.",
+                    flush=True,
+                )
+                return [fallback]
+
+        print(
+            "   [News Source Image Pool] article HTML yielded 0 usable images and no discovered-image fallback was available.",
+            flush=True,
+        )
+        return []
     except Exception as exc:
         print(f"   [News Source Image Pool] Extraction failed: {type(exc).__name__}: {exc}", flush=True)
         return []
