@@ -654,7 +654,7 @@ def patch_content_first_visuals(bot):
         existing_hashes = {str(item.get("hash") or "").strip() for item in combined_manual_pool if str(item.get("hash") or "").strip()}
         for item in article_source_materialized:
             item_hash = str(item.get("hash") or "").strip()
-            if item_hash and item_hash in existing_hashes:
+            if item_hash and (item_hash in existing_hashes or item_hash in used_hashes):
                 continue
             combined_manual_pool.append(dict(item))
             if item_hash:
