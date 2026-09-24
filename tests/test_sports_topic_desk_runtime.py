@@ -18,6 +18,13 @@ def _article(title, domain="example.com", profile="news"):
     }
 
 
+def test_india_news_lane_has_a_broad_query_without_extra_calls():
+    queries = desk._profile_queries("India / Asia")["news"]
+
+    assert queries[0] == "India cricket when:2d"
+    assert any("OR" in query for query in queries[1:])
+
+
 def test_profile_queries_are_small_and_editorially_distinct():
     profiles = desk._profile_queries("India / Asia")
     assert set(profiles) == {"news", "emerging", "social"}
@@ -194,11 +201,11 @@ def test_diversification_uses_discovery_profiles_and_avoids_duplicate_themes():
 
 
 
-def test_bucket_uses_content_signals_even_when_profile_is_news():
+def test_news_profile_does_not_change_lane_from_content_keywords():
     events = [
         {
             "title": "Fans react after shocking player statement",
-            "event_identity_key": "social-signal",
+            "event_identity_key": "news-social-language",
             "discovery_profiles": ["news"],
             "news_score": 50,
             "viral_score": 25,
@@ -208,7 +215,7 @@ def test_bucket_uses_content_signals_even_when_profile_is_news():
         },
         {
             "title": "Uncapped player makes bizarre breakthrough",
-            "event_identity_key": "viral-signal",
+            "event_identity_key": "news-viral-language",
             "discovery_profiles": ["news"],
             "news_score": 45,
             "viral_score": 80,
@@ -227,11 +234,9 @@ def test_bucket_uses_content_signals_even_when_profile_is_news():
     ]
 
     result = desk._diversify_events(events, limit=3)
-    buckets = {item["event_identity_key"]: item["discovery_bucket"] for item in result}
 
-    assert buckets["social-signal"] == "news"
-    assert buckets["viral-signal"] == "news"
-    assert buckets["news-signal"] == "news"
+    assert len(result) == 3
+    assert all(item["discovery_bucket"] == "news" for item in result)
 
 
 
