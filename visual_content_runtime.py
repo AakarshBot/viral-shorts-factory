@@ -397,11 +397,9 @@ def patch_content_first_visuals(bot):
                 seg["visual_original_path"] = selected_path
                 seg["visual_asset_bank"] = []
                 seg["visual_selected_scene_score"] = 0.0
-                manual_available_pool = [
-                    dict(item)
-                    for item in manual_available_pool
-                    if str(item.get("hash") or "").strip() != selected_hash
-                ]
+                manual_selected["used"] = True
+                manual_selected["assigned_slide"] = idx + 1
+                manual_available_pool = [dict(item) for item in manual_available_pool]
                 seg["visual_manual_pool_mode"] = True
                 seg["visual_rejection_counts"] = dict(
                     (manual_pool_result or {}).get("rejection_counts") or {}
@@ -564,7 +562,7 @@ def patch_content_first_visuals(bot):
 
         combined_manual_pool = [
             dict(item) for item in manual_available_pool
-            if isinstance(item, dict) and str(item.get("path") or "").strip() and not bool(item.get("used"))
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
         ]
         existing_hashes = {str(item.get("hash") or "").strip() for item in combined_manual_pool if str(item.get("hash") or "").strip()}
         for item in article_source_materialized:
@@ -576,7 +574,9 @@ def patch_content_first_visuals(bot):
                 existing_hashes.add(item_hash)
 
         script_data["visual_manual_pool"] = combined_manual_pool
-        script_data["visual_manual_pool_unused_count"] = len(combined_manual_pool)
+        script_data["visual_manual_pool_unused_count"] = sum(
+            1 for item in combined_manual_pool if not bool(item.get("used"))
+        )
 
         # Second pass: only unverified/failed scenes may borrow an already-
         # verified alternative for the same factual subject. Successful

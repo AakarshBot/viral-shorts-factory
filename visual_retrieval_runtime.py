@@ -1112,7 +1112,7 @@ def collect_manual_visual_pool(
             return source_index, source_name, cache_key, list(_raw_items(raw_data)), local_used_urls
 
         for stage_index in range(0, len(manual_sources), 2):
-            if len(assets) >= requested_max:
+            if len(assets) >= requested_max or verified_for_query >= target:
                 break
             stage_sources = manual_sources[stage_index : stage_index + 2]
             provider_jobs = []
@@ -1185,11 +1185,12 @@ def collect_manual_visual_pool(
                 )
             )
             before = len(assets)
+            stage_target = max(0, target - verified_for_query)
             added, requests_made = _verify(
                 stage_candidates,
                 entity_anchor,
                 query_index,
-                target,
+                stage_target,
                 f"manual:{query_index}/stage:{stage_index // 2 + 1}",
             )
             qa_requests += requests_made

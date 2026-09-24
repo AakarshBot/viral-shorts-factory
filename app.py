@@ -1864,10 +1864,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     # Every retained image that passed AI identity verification is displayed.
     # Provider rights/provenance stay visible as metadata for the human reviewer;
     # they are not an automatic manual-QC acceptance filter.
-    available = [
-        item for item in pool
-        if not bool(item.get("used"))
-    ]
+    available = list(pool)
     ready_count = sum(1 for item in items if item.get("qc_passed"))
     manual_approved = set(
         int(x) for x in (snapshot.get("visual_manual_approved") or []) if str(x).isdigit()
@@ -2072,7 +2069,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     st.markdown("### Available manual-search images")
     render_pool_section(
         "Manual-search image pool",
-        "Images returned by your manual search are shown here. AI identity verdicts, context and soft-resolution flags are diagnostics; your visual review decides what is usable.",
+        "All identity-checked pool images are shown here. Already-assigned images stay visible and are marked with the slide using them.",
         available,
         "verified",
     )

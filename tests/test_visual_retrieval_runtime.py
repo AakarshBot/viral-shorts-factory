@@ -349,6 +349,78 @@ def _jpeg_bytes(size=(900, 1200), color=(80, 90, 100)):
 
 
 
+def test_manual_pool_target_is_enforced_across_provider_stages(monkeypatch):
+    provider_calls = []
+    qa_calls = {"count": 0}
+
+    def make_candidates(seed):
+        values = []
+        for index in range(4):
+            values.append(_licensed_candidate(
+                _jpeg_bytes(color=(seed + index, 80, 120)),
+                "cc0",
+            ))
+        return values
+
+    provider_data = {
+        "ProviderOne": make_candidates(20),
+        "ProviderTwo": make_candidates(40),
+        "ProviderThree": make_candidates(60),
+        "ProviderFour": make_candidates(80),
+    }
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            provider_calls.append(source)
+            return fetcher()
+
+    class FakeBot:
+        pass
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("ProviderOne", lambda *inner: provider_data["ProviderOne"]),
+            ("ProviderTwo", lambda *inner: provider_data["ProviderTwo"]),
+            ("ProviderThree", lambda *inner: provider_data["ProviderThree"]),
+            ("ProviderFour", lambda *inner: provider_data["ProviderFour"]),
+        ],
+    )
+
+    def fake_batch(images, *args, **kwargs):
+        qa_calls["count"] += 1
+        return {index: True for index in range(len(images))}
+
+    monkeypatch.setattr(visual_qa, "strict_gemini_check_batch", fake_batch)
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [
+            {"primary_entity": "One", "voiceover": "One."},
+            {"primary_entity": "Two", "voiceover": "Two."},
+            {"primary_entity": "Three", "voiceover": "Three."},
+        ],
+        ["One", "Two", "Three"],
+        "Test story",
+        pool_target=10,
+        allow_auto_backfill=False,
+    )
+
+    assert len(result["assets"]) == 10
+    assert [stat["target"] for stat in result["query_stats"]] == [4, 3, 3]
+    assert [stat["verified"] for stat in result["query_stats"]] == [4, 3, 3]
+    assert len(provider_calls) == 6
+    assert provider_calls == [
+        "ProviderOne", "ProviderTwo",
+        "ProviderOne", "ProviderTwo",
+        "ProviderOne", "ProviderTwo",
+    ]
+    assert qa_calls["count"] == 3
+
+
 def test_retrieval_spreads_semantic_qa_across_providers(monkeypatch):
     candidates_one = []
     candidates_two = []

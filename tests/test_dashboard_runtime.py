@@ -110,6 +110,22 @@ def test_dashboard_live_header_uses_canonical_mode():
     assert 'render_header("Live")' not in app_source
 
 
+def test_dashboard_keeps_selected_manual_pool_images_visible():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    render_start = app_source.index("def render_visual_review")
+    available_start = app_source.index("    available = ", render_start)
+    available_end = app_source.index("    ready_count =", available_start)
+    assert app_source[available_start:available_end].strip() == "available = list(pool)"
+
+    visual_source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
+    assert 'manual_selected["used"] = True' in visual_source
+    assert 'manual_selected["assigned_slide"] = idx + 1' in visual_source
+    combined_start = visual_source.index("        combined_manual_pool = [")
+    combined_end = visual_source.index('        script_data["visual_manual_pool"]', combined_start)
+    combined_block = visual_source[combined_start:combined_end]
+    assert 'not bool(item.get("used"))' not in combined_block
+
+
 def test_visual_pool_provenance_warning_defines_state_before_use():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index("    def render_pool_section(")
