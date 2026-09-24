@@ -371,6 +371,9 @@ def patch_content_first_visuals(bot):
                 asset.setdefault("subject", article_subject)
                 asset["manual_query_index"] = 0
                 asset["pool_origin"] = "article-source"
+                image_hash = str(asset.get("hash") or "").strip()
+                if image_hash:
+                    used_hashes.add(image_hash)
             print(
                 f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
                 flush=True,
