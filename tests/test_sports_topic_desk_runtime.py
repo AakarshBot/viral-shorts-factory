@@ -93,7 +93,6 @@ def test_niche_sports_collect_uses_all_three_profiles(monkeypatch):
         lambda query, profile, scope: calls.append((query, profile, scope)) or [],
     )
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
-    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
 
@@ -125,6 +124,25 @@ def test_collect_skips_recovery_when_primary_pool_is_healthy(monkeypatch):
     assert calls["google"] == 3
     assert calls["direct"] == 0
     assert calls["trends"] == 0
+
+
+def test_collect_uses_gdelt_as_last_factual_backstop(monkeypatch):
+    calls = {"gdelt": 0}
+
+    monkeypatch.setattr(desk, "_google_search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_direct_listing_source", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+
+    def fake_gdelt(query, **kwargs):
+        calls["gdelt"] += 1
+        return [_article(f"GDELT cricket story {i}", f"gdelt{i}.example") for i in range(15)]
+
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", fake_gdelt)
+
+    rows = desk._collect("India / Asia")
+
+    assert len(rows) == 15
+    assert calls["gdelt"] == 1
 
 
 def test_collect_uses_official_sources_only_for_sparse_primary_intake(monkeypatch):
@@ -412,7 +430,6 @@ def test_collect_uses_small_bounded_profile_set(monkeypatch):
     monkeypatch.setattr(desk, "_google_search", lambda query, profile, scope: calls.append((query, profile, scope)) or [])
     monkeypatch.setattr(desk, "_direct_listing_source", lambda name, url: [])
     monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
-    monkeypatch.setattr(desk, "_reddit_search", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
     monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
@@ -451,6 +468,16 @@ def test_niche_sports_contract(monkeypatch):
     assert result
     assert result[0]["recommended_category"] == "sports"
     assert result[0]["cricket_pipeline"] is False
+
+
+def test_direct_source_parser_accepts_compact_relative_timestamp(monkeypatch):
+    class Response:
+        status_code = 200
+        text = "<article><a href='/story/india-record'>India women complete record win</a><time>11h</time></article>"
+    monkeypatch.setattr(desk.requests, "get", lambda *args, **kwargs: Response())
+    rows = desk._direct_listing_source("ICC", "https://www.icc-cricket.com/news")
+    assert len(rows) == 1
+    assert rows[0]["source"] == "ICC"
 
 
 def test_direct_source_parser_accepts_recent_story(monkeypatch):
