@@ -548,7 +548,13 @@ def _normalise_rows(rows, scope="India / Asia"):
             if not _is_non_cricket_sports(raw):
                 continue
         elif not _is_cricket(raw):
-            continue
+            query_context = _clean(raw.get("discovery_query")).casefold()
+            is_cricket_query = (
+                _clean(raw.get("collection_source")).casefold() == "google_news_rss"
+                and _word_match(query_context, "cricket")
+            )
+            if not is_cricket_query:
+                continue
         item = dict(raw)
         age = _age_hours(item.get("publishedAt") or item.get("published_at") or item.get("created_at"))
         if age == 9999.0 or age > LOOKBACK_HOURS:
