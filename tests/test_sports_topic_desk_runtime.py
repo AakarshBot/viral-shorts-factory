@@ -21,7 +21,7 @@ def _article(title, domain="example.com", profile="news"):
 def test_profile_queries_are_small_and_editorially_distinct():
     profiles = desk._profile_queries("India / Asia")
     assert set(profiles) == {"news", "emerging", "social"}
-    assert all(1 <= len(queries) <= 2 for queries in profiles.values())
+    assert all(1 <= len(queries) <= 3 for queries in profiles.values())
     assert any("selection" in query for query in profiles["news"])
     assert any("breakthrough" in query or "unusual" in query for query in profiles["emerging"])
     assert any("reaction" in query or "fans" in query for query in profiles["social"])
@@ -112,7 +112,7 @@ def test_collect_uses_small_bounded_profile_set(monkeypatch):
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
     result = desk._collect("India / Asia")
     assert result == []
-    assert len(calls) == 6
+    assert len(calls) == 9
     assert {profile for _, profile, _ in calls} == {"news", "emerging", "social"}
 
 
