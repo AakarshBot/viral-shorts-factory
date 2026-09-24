@@ -137,8 +137,7 @@ def test_provenance_review_candidate_is_kept_for_dashboard_pool():
     assert counts.get("monetization", 0) == 0
 
 
-def test_provenance_review_candidate_is_not_auto_selected():
-    image_bytes = _jpeg_bytes()
+def test_provenance_review_candidate_is_available_for_manual_qc():
     review = {
         "hash": "review-only",
         "status": "entity-verified",
@@ -146,12 +145,16 @@ def test_provenance_review_candidate_is_not_auto_selected():
         "priority": 100,
         "query": "Example person",
         "source": "DDG",
+        "manual_query_index": 1,
+        "visual_genre": "PERSON_PORTRAIT",
+        "search_text": "Example person",
     }
-    assert retrieval.select_manual_visual_candidate(
+    selected = retrieval.select_manual_visual_candidate(
         [review],
         {"primary_entity": "Example person", "visual_genre": "PERSON_PORTRAIT"},
         set(),
-    ) is None
+    )
+    assert selected is review
 
 
 def test_failed_semantic_candidates_never_become_final_visual(monkeypatch):
