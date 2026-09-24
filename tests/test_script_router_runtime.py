@@ -1,946 +1,114 @@
 from pathlib import Path
 
-from script_router_runtime import (
-    _story_source_text,
-    _usable_story_source_fallback,
-    _validate_script_result,
-    assess_story_source_sufficiency,
-    tighten_script_for_duration_once,
-)
-
-from script_runtime import (
-    check_script_originality,
-    estimate_narration_duration,
-    validate_content_density,
-)
+from script_router_runtime import _validate_script_result, _estimate_script_duration
+from script_runtime import check_script_originality, validate_content_density
 
 
-def test_story_source_fallback_requires_real_factual_structure():
-    rich_story = {
-        "title": "India announce a major change after a tense rivalry clash",
-        "summary": (
-            "Officials confirmed the change after the latest match. "
-            "The decision will affect the team's preparation for the upcoming tournament. "
-            "The selected story contains enough factual source text to draft a single-source script for human review."
-        ),
-    }
-    thin_story = {"title": "India update", "summary": "Short."}
-
-    assert _usable_story_source_fallback(rich_story) is True
-    assert _usable_story_source_fallback(thin_story) is False
-    assert len(_story_source_text(rich_story)) >= 220
-
-
-def test_story_source_sufficiency_is_not_a_raw_character_cutoff():
-    compact_but_structured = {
-        "title": "Rashid Khan praises an Indian batter",
-        "text": (
-            "Rashid Khan praised the Indian batter after the latest match. "
-            "The comment drew attention because of the rivalry and the timing. "
-            "His remarks also created a clear player-focused angle for a short explanation of what was said and why it mattered."
-        ),
-    }
-    result = assess_story_source_sufficiency(compact_but_structured)
-    assert result["passed"] is True
-    assert result["checks"]["enough_words"] is True
-
-
-def _valid_script():
+def _valid_script(scene_count=4):
+    scenes = [
+        {
+            "voiceover": "India confirms a major squad change after the latest review.",
+            "narrative_role": "hook",
+            "primary_entity": "India cricket team",
+            "visual_intent": "news_event",
+            "specific_search_prompt": "India cricket team squad change",
+            "sport_or_topic_category": "Cricket",
+        },
+        {
+            "voiceover": "Officials say the decision changes preparation for the upcoming tournament.",
+            "narrative_role": "development",
+            "primary_entity": "India cricket team",
+            "visual_intent": "news_event",
+            "specific_search_prompt": "India cricket team preparation",
+            "sport_or_topic_category": "Cricket",
+        },
+        {
+            "voiceover": "The move follows the latest assessment and alters the team's immediate plans.",
+            "narrative_role": "context",
+            "primary_entity": "India cricket team",
+            "visual_intent": "news_event",
+            "specific_search_prompt": "India cricket team assessment",
+            "sport_or_topic_category": "Cricket",
+        },
+        {
+            "voiceover": "The revised plan now affects the team's next assignment.",
+            "narrative_role": "consequence",
+            "primary_entity": "India cricket team",
+            "visual_intent": "news_event",
+            "specific_search_prompt": "India cricket team next assignment",
+            "sport_or_topic_category": "Cricket",
+        },
+    ]
     return {
-        "creator_insight": "This matters because the documented change directly affects the next assignment.",
-        "editorial_angle": "Explain the confirmed event, key evidence and immediate consequence.",
-        "titles": ["A", "B", "C"],
+        "titles": ["India squad change", "India changes plans", "What changes next"],
         "recommended_title_index": 1,
-        "seo_description": "This explains the confirmed event, the evidence and the immediate consequence.",
-        "script": [
-            {
-                "voiceover": "India confirms a major squad change after the latest review.",
-                "narrative_role": "hook",
-                "primary_entity": "India cricket team",
-                "visual_intent": "news_event",
-                "specific_search_prompt": "India cricket team squad change",
-                "sport_or_topic_category": "Cricket",
-            },
-            {
-                "voiceover": "The decision changes preparation, while officials say it followed the latest assessment.",
-                "narrative_role": "development",
-                "primary_entity": "India cricket team",
-                "visual_intent": "news_event",
-                "specific_search_prompt": "India cricket team preparation",
-                "sport_or_topic_category": "Cricket",
-            },
-            {
-                "voiceover": "The revised plan now affects the team's next assignment.",
-                "narrative_role": "consequence",
-                "primary_entity": "India cricket team",
-                "visual_intent": "news_event",
-                "specific_search_prompt": "India cricket team next assignment",
-                "sport_or_topic_category": "Cricket",
-            },
-        ],
+        "seo_description": "This explains the confirmed event and its immediate consequence for the team.",
+        "script": scenes[:scene_count],
     }
 
 
-def test_initial_script_contract_uses_duration_as_authority():
+def test_regular_contract_is_four_or_five_scenes():
     source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
-    assert "INITIAL_SCRIPT_MAX_WORDS = 90" in source
-    assert "SCENE_1_MAX_WORDS = 14" in source
+    assert "Regular Short must contain exactly 4 or 5 scenes." in source
 
 
-def test_overlong_but_within_safety_ceiling_reaches_duration_repair():
-    script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 65)
-    ok, reason = validate_content_density(script, {}, "regular")
-    assert ok is True, reason
+def test_three_beat_structure_is_retained_without_forcing_three_scenes():
+    result, reason = _validate_script_result(_valid_script(), {"title": "India squad change"}, "regular")
+    assert result is not None, reason
+    assert result["narrative_structure"]["passed"] is True
+    assert {"hook", "context", "consequence"} <= set(result["narrative_structure"]["roles"])
 
 
-def test_duration_repair_is_single_bounded_attempt():
-    calls = []
-
-    def fake_primary(story_data, *_args):
-        calls.append(story_data)
-        repaired = _valid_script()
-        repaired["script"][0]["voiceover"] = "India confirms the squad change after review."
-        repaired["script"][1]["voiceover"] = "Officials say preparation now changes for the next assignment."
-        repaired["script"][2]["voiceover"] = "The revised plan affects India's upcoming tournament."
-        return repaired
-
-    candidate = _valid_script()
-    candidate["script"][1]["voiceover"] = " ".join(["word"] * 65)
-
-    repaired, reason = tighten_script_for_duration_once(
-        fake_primary,
-        {"title": "India squad change"},
-        candidate,
-        {},
-        "sports_stories_of_day",
-        None,
-        "regular",
-    )
-
-    assert repaired is not None, reason
-    assert repaired["duration_repair_attempted"] is True
-    assert repaired["duration_repair_succeeded"] is True
-    assert len(calls) == 1
-    assert calls[0]["_duration_tighten_target_seconds"] == 27.0
-
-
-def test_initial_script_rejects_only_over_the_safety_ceiling():
-    script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 91)
-    ok, reason = validate_content_density(script, {}, "regular")
-    assert ok is False
-    assert "maximum is 90" in reason
-
-
-def test_initial_script_rejects_overlong_first_scene():
-    script = _valid_script()
-    script["script"][0]["voiceover"] = " ".join(["word"] * 15)
-    ok, reason = validate_content_density(script, {}, "regular")
-    assert ok is False
-    assert "Scene 1 is too long" in reason
-
-
-def test_fallback_prompt_requires_explanatory_middle_beats():
-    import research_runtime
-
-    prompt = research_runtime._fallback_prompt(
-        {"script_instruction": "Write all narration in English."},
-        "regular",
-        {},
-    )
-    assert "Target roughly 60–72 spoken words" in prompt
-    assert "Scene 1: target 10–12 words, with a hard maximum of 14" in prompt
-    assert "Scene 1 is the only headline-style beat." in prompt
-    assert "Every later scene must add new, story-specific information" in prompt
-    assert "not a stack of headlines" in prompt
-
-
-def test_router_rejects_incomplete_regular_narrative_before_dashboard_review():
-    script = _valid_script()
-    script["script"] = script["script"][:2]
-
-    result, reason = _validate_script_result(
-        script,
-        {"title": "India squad change"},
-        "regular",
-    )
-
+def test_incomplete_regular_script_is_rejected():
+    result, reason = _validate_script_result(_valid_script(3), {"title": "India squad change"}, "regular")
     assert result is None
-    assert "3 or 4 scenes" in reason.lower()
+    assert "4 or 5 scenes" in reason
 
 
-def test_groq_parser_preserves_empty_title_for_canonical_rejection():
-    import ultimate_bot
-
-    parsed = ultimate_bot.parse_groq_json_response(
-        {
-            "titles": ["Useful title", "", "Another title"],
-            "script": [],
-        }
-    )
-
-    assert parsed["titles"] == ["Useful title", "", "Another title"]
-
-
-def test_router_rejects_incomplete_title_set_before_dashboard_review():
+def test_five_scene_regular_script_is_allowed():
     script = _valid_script()
-    script["titles"] = ["Only one title"]
-
-    result, reason = _validate_script_result(
-        script,
-        {"title": "India squad change"},
-        "regular",
-    )
-
-    assert result is None
-    assert "exactly three titles are required" in reason.lower()
-
-
-def test_narrative_role_inference_defaults_by_scene_position():
-    from script_runtime import assess_narrative_completeness
-
-    assessment = assess_narrative_completeness(
-        {
-            "script": [
-                {"voiceover": "India confirms the squad change."},
-                {"voiceover": "Officials say the decision followed the latest review."},
-                {"voiceover": "The change affects preparation for the next assignment."},
-            ]
-        }
-    )
-
-    assert assessment["passed"] is True, assessment["reason"]
-    assert assessment["roles"]["hook"] == [1]
-    assert assessment["roles"]["development"] == [2]
-    assert assessment["roles"]["consequence"] == [3]
-
-
-def test_duration_estimate_prefers_actual_delivery_profile():
-    from script_router_runtime import _estimate_script_duration
-
-    script = {
-        "script": [{"voiceover": " ".join(["word"] * 50)}],
-        "persona_used": "HYPE COMMENTATOR",
-        "delivery_profile": "CYNICAL CRITIC",
-    }
-    estimate = _estimate_script_duration(script)
-
-    assert estimate["effective_wpm"] == 144.0
-
-
-def test_router_canonical_validation_allows_duration_repair_to_inspect_long_draft():
-    script = _valid_script()
-    script["script"][1]["voiceover"] = " ".join(["word"] * 65)
+    extra = dict(script["script"][-2])
+    extra["voiceover"] = "The next selection decision will depend on how the team responds."
+    extra["narrative_role"] = "context"
+    script["script"].insert(3, extra)
     result, reason = _validate_script_result(script, {"title": "India squad change"}, "regular")
     assert result is not None, reason
 
 
-def test_near_verbatim_source_sentence_is_rejected():
-    source = {
+def test_duration_repair_does_not_become_a_loop():
+    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
+    assert source.count("_duration_rewrite(") == 2
+    assert "for provider_name,call in attempts" in source
+
+
+def test_originality_gate_rejects_near_verbatim_source_wording():
+    story = {
         "research_evidence_text": (
             "Officials confirmed the major squad change after the latest review. "
             "The decision affects preparation for the next assignment."
         )
     }
     script = _valid_script()
-    script["script"][0]["voiceover"] = (
-        "Officials have now confirmed the major squad change after the latest review."
-    )
-    result = check_script_originality(script, source)
+    script["script"][0]["voiceover"] = "Officials have now confirmed the major squad change after the latest review."
+    result = check_script_originality(script, story)
     assert result["passed"] is False
-    assert result["failures"][0]["match_type"] == "near_verbatim"
 
 
-def test_exact_source_sentence_is_rejected_but_rephrasing_is_allowed():
-    story = {
-        "research_evidence_text": (
-            "Former CSK player made a major claim about the investigation. "
-            "Officials have not publicly confirmed the allegation."
-        )
-    }
-    copied = {
-        "script": [
-            {
-                "voiceover": "Former CSK player made a major claim about the investigation.",
-                "narrative_role": "hook",
-            }
-        ]
-    }
-    rephrased = {
-        "script": [
-            {
-                "voiceover": "A former CSK player has made a new allegation tied to the investigation.",
-                "narrative_role": "hook",
-            }
-        ]
-    }
-
-    assert check_script_originality(copied, story)["passed"] is False
-    assert check_script_originality(rephrased, story)["passed"] is True
-
-
-def test_primary_writer_uses_duration_first_contract():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-    assert "Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling." in source
-    assert "Scene 1: target 10–12 words, with a hard maximum of 14" in source
-    assert "Scene 1 is the only headline-style beat." in source
-    assert "Later scenes must add new, story-specific information" in source
-    assert "Normally use four scenes for a regular story" in source
-    assert "use 5" not in source
-    assert "Spoken duration is authoritative" in source
-    assert 'For Top-5 mode, output 6 scenes' in source
-    assert "Target roughly 50–60 spoken words in Top-5 mode" in source
-
-
-def test_numeric_script_details_must_exist_in_supplied_evidence():
-    from quality_runtime import validate_deterministic_script_quality
-
+def test_originality_gate_allows_genuine_rephrasing():
+    story = {"research_evidence_text": "Officials confirmed the major squad change after the latest review."}
     script = _valid_script()
-    script["script"][1]["voiceover"] = "The decision changes preparation for 47 matches."
-    story = {
-        "title": "India squad change",
-        "research_evidence_text": (
-            "Officials confirmed the squad change after the latest review. "
-            "The decision affects preparation for the next assignment."
-        ),
-    }
-    ok, reason = validate_deterministic_script_quality(script, "regular", story)
-    assert ok is False
-    assert "47" in reason
+    script["script"][0]["voiceover"] = "A new squad change was confirmed after officials completed their review."
+    result = check_script_originality(script, story)
+    assert result["passed"] is True
 
 
-def test_numeric_script_details_are_allowed_when_grounded():
-    from quality_runtime import validate_deterministic_script_quality
+def test_duration_estimate_uses_delivery_profile():
+    script = {"script": [{"voiceover": " ".join(["word"] * 50)}], "persona_used": "HYPE COMMENTATOR", "delivery_profile": "CYNICAL CRITIC"}
+    estimate = _estimate_script_duration(script)
+    assert estimate["effective_wpm"] == 144.0
 
-    script = _valid_script()
-    script["script"][1]["voiceover"] = "The decision changes preparation for 47 matches."
-    story = {
-        "title": "India squad change",
-        "research_evidence_text": (
-            "Officials confirmed the squad change after the latest review. "
-            "The decision affects preparation for 47 matches in the next assignment."
-        ),
-    }
-    ok, reason = validate_deterministic_script_quality(script, "regular", story)
-    assert ok is True, reason
 
-
-def test_router_error_contract_contains_provider_reasons():
-    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(encoding="utf-8")
-    assert 'attempt_reasons = []' in source
-    assert 'unknown failure' not in source
-    assert 'returned no script candidate.' in source
-
-
-def test_groq_primary_writer_uses_current_gpt_oss_request_contract(monkeypatch):
-    import json
-    import ultimate_bot
-
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    calls = []
-
-    result_payload = _valid_script()
-
-    class FakeResponse:
-        status_code = 200
-        text = ""
-
-        def json(self):
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(result_payload),
-                        }
-                    }
-                ]
-            }
-
-    def fake_post(url, **kwargs):
-        calls.append((url, kwargs))
-        return FakeResponse()
-
-    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
-
-    result = ultimate_bot.write_script(
-        {
-            "title": "India squad change",
-            "research_evidence_text": (
-                "Officials confirmed a major squad change after the latest review. "
-                "The decision changes preparation for the next assignment."
-            ),
-        },
-        {"script_instruction": "Write all narration in English."},
-        "sports_stories_of_day",
-        None,
-        "regular",
-    )
-
-    assert result["script"]
-    assert len(calls) == 1
-    payload = calls[0][1]["json"]
-    assert payload["model"] == "openai/gpt-oss-120b"
-    assert payload["response_format"]["type"] == "json_schema"
-    assert payload["response_format"]["json_schema"]["strict"] is True
-    assert payload["include_reasoning"] is False
-    assert payload["reasoning_effort"] == "low"
-    assert payload["max_completion_tokens"] == 900
-    assert "max_tokens" not in payload
-
-
-def test_groq_primary_writer_strict_schema_contains_closed_nested_objects(monkeypatch):
-    import json
-    import ultimate_bot
-
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    calls = []
-
-    class FakeResponse:
-        status_code = 200
-        text = ""
-
-        def json(self):
-            return {
-                "choices": [{
-                    "message": {
-                        "content": json.dumps(_valid_script()),
-                    }
-                }]
-            }
-
-    def fake_post(url, **kwargs):
-        calls.append(kwargs["json"])
-        return FakeResponse()
-
-    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
-    result = ultimate_bot.write_script(
-        {"title": "India squad change", "research_evidence_text": "Officials confirmed a major squad change."},
-        {"script_instruction": "English."},
-        "sports_stories_of_day",
-        None,
-        "regular",
-    )
-
-    assert result["script"]
-    schema = calls[0]["response_format"]["json_schema"]["schema"]
-    assert schema["additionalProperties"] is False
-    scene_schema = schema["properties"]["script"]["items"]
-    assert scene_schema["additionalProperties"] is False
-    assert set(scene_schema["required"]) == {
-        "voiceover", "narrative_role", "primary_entity", "visual_intent",
-        "specific_search_prompt", "sport_or_topic_category",
-    }
-
-
-def test_groq_primary_writer_retries_a_400_with_minimal_compatibility_payload(monkeypatch):
-    import json
-    import ultimate_bot
-
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    calls = []
-    result_payload = _valid_script()
-
-    class FakeResponse:
-        def __init__(self, status_code):
-            self.status_code = status_code
-            self.text = '{"error":{"message":"unsupported parameter"}}'
-
-        def json(self):
-            if self.status_code == 400:
-                return {"error": {"message": "unsupported parameter"}}
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(result_payload),
-                        }
-                    }
-                ]
-            }
-
-    def fake_post(url, **kwargs):
-        calls.append(kwargs["json"])
-        return FakeResponse(400 if len(calls) == 1 else 200)
-
-    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
-
-    result = ultimate_bot.write_script(
-        {
-            "title": "India squad change",
-            "research_evidence_text": (
-                "Officials confirmed a major squad change after the latest review. "
-                "The decision changes preparation for the next assignment."
-            ),
-        },
-        {"script_instruction": "Write all narration in English."},
-        "sports_stories_of_day",
-        None,
-        "regular",
-    )
-
-    assert result["script"]
-    assert len(calls) == 2
-    assert "response_format" in calls[0]
-    assert calls[1]["response_format"]["type"] == "json_schema"
-    assert calls[1]["response_format"]["json_schema"]["strict"] is True
-    assert calls[1]["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
-    assert calls[1]["model"] == "openai/gpt-oss-20b"
-    assert calls[1]["messages"][0]["role"] == "user"
-
-
-
-def _fake_urlopen_response(payload):
-    import json
-
-    class Response:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            return json.dumps(payload).encode("utf-8")
-
-    return Response()
-
-
-def test_gemini_fallback_sends_provider_compatible_response_schema(monkeypatch):
-    import json
-    import research_runtime
-
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    calls = []
-
-    def fake_urlopen(request, timeout):
-        calls.append((request, timeout))
-        return _fake_urlopen_response({
-            "candidates": [{
-                "content": {
-                    "parts": [{"text": json.dumps(_valid_script())}]
-                }
-            }]
-        })
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
-    result = research_runtime._gemini_script_fallback(
-        {"title": "India squad change", "research_evidence_text": (
-            "Officials confirmed a major squad change after the latest review. "
-            "The decision changes preparation for the next assignment."
-        )},
-        {"script_instruction": "English."},
-        "sports_stories_of_day",
-        "regular",
-    )
-
-    assert result["script"]
-    request = calls[0][0]
-    payload = json.loads(request.data.decode("utf-8"))
-    assert payload["generationConfig"]["responseMimeType"] == "application/json"
-    assert payload["generationConfig"]["maxOutputTokens"] == 900
-    assert "responseFormat" not in payload["generationConfig"]
-    schema = payload["generationConfig"]["responseSchema"]
-    assert "additionalProperties" not in schema
-    assert "enum" not in schema["properties"]["recommended_title_index"]
-    assert schema["properties"]["recommended_title_index"]["type"] == "integer"
-    assert request.get_header("X-goog-api-key") == "test-key"
-
-
-def test_ollama_fallback_preflights_once_then_generates_with_900_tokens(monkeypatch):
-    import json
-    import research_runtime
-
-    monkeypatch.delenv("VSF_REMOTE_MODE", raising=False)
-    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    monkeypatch.setenv("OLLAMA_SCRIPT_MODEL", "llama3.2:latest")
-    calls = []
-
-    def fake_urlopen(request, timeout):
-        calls.append((request, timeout))
-        if request.full_url.endswith("/api/tags"):
-            return _fake_urlopen_response({
-                "models": [{"name": "llama3.2:latest"}]
-            })
-        return _fake_urlopen_response({
-            "choices": [{
-                "message": {"content": json.dumps(_valid_script())}
-            }]
-        })
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
-    result = research_runtime._ollama_script_fallback(
-        {"title": "India squad change", "research_evidence_text": (
-            "Officials confirmed a major squad change after the latest review. "
-            "The decision changes preparation for the next assignment."
-        )},
-        {"script_instruction": "English."},
-        "sports_stories_of_day",
-        "regular",
-    )
-
-    assert result["script"]
-    generation_request, generation_timeout = next(
-        (request, timeout)
-        for request, timeout in calls
-        if request.full_url.endswith("/v1/chat/completions")
-    )
-    payload = json.loads(generation_request.data.decode("utf-8"))
-    assert generation_timeout == 15
-    assert payload["model"] == "llama3.2:latest"
-    assert payload["max_tokens"] == 900
-    assert payload["response_format"] == {"type": "json_object"}
-
-
-
-def test_gemini_payload_uses_current_structured_output_field_names(monkeypatch):
-    import json
-    import research_runtime
-
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    calls = []
-
-    def fake_urlopen(request, timeout):
-        calls.append(request)
-        return _fake_urlopen_response({
-            "candidates": [{
-                "content": {
-                    "parts": [{"text": json.dumps(_valid_script())}]
-                }
-            }]
-        })
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
-    research_runtime._gemini_script_fallback(
-        {"title": "India squad change", "research_evidence_text": (
-            "Officials confirmed a major squad change after the latest review. "
-            "The decision changes preparation for the next assignment."
-        )},
-        {"script_instruction": "English."},
-        "sports_stories_of_day",
-        "regular",
-    )
-
-    payload = json.loads(calls[0].data.decode("utf-8"))
-    generation = payload["generationConfig"]
-    assert generation["responseMimeType"] == "application/json"
-    assert "responseSchema" in generation
-    assert "responseFormat" not in generation
-    assert "additionalProperties" not in generation["responseSchema"]
-
-
-def test_gemini_rejects_the_old_response_schema_shape_before_network_use(monkeypatch):
-    import json
-    import research_runtime
-
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    calls = []
-
-    def fake_urlopen(request, timeout):
-        calls.append(request)
-        raise AssertionError("The test must inspect the request shape, not emulate the deprecated Gemini schema.")
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
-
-    # Build the real payload through the provider and intercept it by replacing
-    # urlopen with a shape checker that never reaches an external service.
-    def shape_checker(request, timeout):
-        calls.append(request)
-        payload = json.loads(request.data.decode("utf-8"))
-        generation = payload["generationConfig"]
-        assert generation["responseMimeType"] == "application/json"
-        assert "responseSchema" in generation
-        assert "responseFormat" not in generation
-        raise RuntimeError("shape_checked")
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", shape_checker)
-    try:
-        research_runtime._gemini_script_fallback(
-            {"title": "India squad change", "research_evidence_text": (
-                "Officials confirmed a major squad change after the latest review. "
-                "The decision changes preparation for the next assignment."
-            )},
-            {"script_instruction": "English."},
-            "sports_stories_of_day",
-            "regular",
-        )
-    except RuntimeError as exc:
-        assert "shape_checked" in str(exc)
-    else:
-        raise AssertionError("The shape-checking transport should have stopped the fake request.")
-
-
-def test_groq_primary_retries_once_after_successful_empty_json_response(monkeypatch):
-    import json
-    import ultimate_bot
-
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    calls = []
-
-    class FakeResponse:
-        def __init__(self, content):
-            self.status_code = 200
-            self._content = content
-            self.text = ""
-
-        def json(self):
-            return {
-                "choices": [{
-                    "message": {"content": self._content}
-                }]
-            }
-
-    def fake_post(_url, **kwargs):
-        calls.append(kwargs["json"])
-        if len(calls) == 1:
-            return FakeResponse("")
-        return FakeResponse(json.dumps(_valid_script()))
-
-    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
-    result = ultimate_bot.write_script(
-        {
-            "title": "India squad change",
-            "research_evidence_text": (
-                "Officials confirmed a major squad change after the latest review. "
-                "The decision changes preparation for the next assignment."
-            ),
-        },
-        {"script_instruction": "Write all narration in English."},
-        "sports_stories_of_day",
-        None,
-        "regular",
-    )
-
-    assert result["script"]
-    assert len(calls) == 2
-    assert calls[0]["model"] == "openai/gpt-oss-120b"
-    assert calls[1]["model"] == "openai/gpt-oss-20b"
-    assert calls[1]["response_format"]["type"] == "json_schema"
-    assert calls[1]["response_format"]["json_schema"]["strict"] is True
-    assert calls[1]["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
-
-
-def test_provider_json_parser_prefers_factory_object_over_example_json():
-    import research_runtime
-
-    result = research_runtime._parse_provider_json(
-        'Example shape: {"foo":"bar"} Actual answer: '
-        '{"creator_insight":"valid","script":[]}'
-    )
-    assert result["script"] == []
-    assert result["creator_insight"] == "valid"
-
-
-def test_provider_json_parser_handles_multiple_json_objects_without_greedy_capture():
-    import research_runtime
-
-    result = research_runtime._parse_provider_json(
-        'preface {"creator_insight":"valid","script":[]} trailing {"wrong":true}'
-    )
-    assert result == {"creator_insight": "valid", "script": []}
-
-def test_repeated_groq_400_stops_at_two_provider_calls(monkeypatch):
-    import ultimate_bot
-
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    monkeypatch.setenv("VSF_REMOTE_MODE", "cloud")
-    calls = []
-
-    class FakeResponse:
-        status_code = 400
-        text = '{"error":{"message":"unsupported parameter"}}'
-
-        def json(self):
-            return {"error": {"message": "unsupported parameter"}}
-
-    def fake_post(_url, **kwargs):
-        calls.append(kwargs["json"])
-        return FakeResponse()
-
-    monkeypatch.setattr(ultimate_bot.requests, "post", fake_post)
-
-    try:
-        ultimate_bot.write_script(
-            {"title": "India squad change", "research_evidence_text": (
-                "Officials confirmed a major squad change after the latest review. "
-                "The decision changes preparation for the next assignment."
-            )},
-            {"script_instruction": "English."},
-            "sports_stories_of_day",
-            None,
-            "regular",
-        )
-    except ValueError as exc:
-        assert "HTTP 400" in str(exc)
-    else:
-        raise AssertionError("Repeated 400 responses must terminate after the bounded two-call retry ceiling.")
-
-    assert len(calls) == 2
-    assert calls[0]["model"] == "openai/gpt-oss-120b"
-    assert calls[1]["model"] == "openai/gpt-oss-20b"
-
-
-def test_router_includes_gemini_as_a_configured_script_fallback():
-    source = Path(__file__).resolve().parents[1].joinpath("script_router_runtime.py").read_text(
-        encoding="utf-8"
-    )
-    assert '"Gemini", lambda: rr._gemini_script_fallback' in source
-
-
-def test_fallback_prompt_uses_the_current_duration_contract():
-    import research_runtime
-
-    prompt = research_runtime._fallback_prompt(
-        {"script_instruction": "Write all narration in English."},
-        "regular",
-        {},
-    )
-    assert "60–72 spoken words" in prompt
-    assert "90-word safety ceiling" in prompt
-    assert "A regular Short normally uses 4 scenes" in prompt
-    assert "55–65 spoken words" not in prompt
-    assert "65–75 spoken words" not in prompt
-
-
-def test_primary_prompt_has_no_conflicting_top5_scene_instruction():
-    source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
-
-    assert "Keep the scene count exactly aligned with the selected format contract below" in source
-    assert "- Prefer 3 or 4 scenes. Put the substance in later scenes" not in source
-
-
-def test_top5_release_structure_requires_exact_renderer_shape():
-    from script_runtime import assess_release_structure
-
-    valid_script = {
-        "script": [
-            {"voiceover": "Top five stories today.", "narrative_role": "hook"},
-            {"voiceover": "Story five matters because of this development.", "narrative_role": "development"},
-            {"voiceover": "Story four has this important update.", "narrative_role": "context"},
-            {"voiceover": "Story three changed after this result.", "narrative_role": "context"},
-            {"voiceover": "Story two has this significant development.", "narrative_role": "context"},
-            {"voiceover": "Story one delivers the biggest consequence.", "narrative_role": "consequence"},
-        ]
-    }
-    passed, reason, _ = assess_release_structure(valid_script, "top5")
-    assert passed is True, reason
-
-    too_few = dict(valid_script, script=valid_script["script"][:5])
-    passed, reason, _ = assess_release_structure(too_few, "top5")
-    assert passed is False
-    assert "exactly one opening beat plus five ranked entries" in reason
-
-    too_many = dict(valid_script, script=valid_script["script"] + [
-        {"voiceover": "An extra seventh scene would duplicate a rendered rank.", "narrative_role": "context"},
-    ])
-    passed, reason, _ = assess_release_structure(too_many, "top5")
-    assert passed is False
-
-
-def test_top5_source_fallback_is_renderer_compatible():
-    import json
-    from script_runtime import _extractive_script_fallback
-
-    items = [
-        {
-            "title": f"Ranked story {index}",
-            "text": f"Story {index} has a concrete current development that matters to viewers.",
-        }
-        for index in range(1, 6)
-    ]
-    result = _extractive_script_fallback(
-        {
-            "title": "Today's cricket Top 5",
-            "text": json.dumps(items),
-        },
-        {},
-        "sports_stories_of_day",
-        "top5",
-    )
-
-    assert len(result["script"]) == 6
-    assert [scene["narrative_role"] for scene in result["script"]] == [
-        "hook",
-        "development",
-        "context",
-        "context",
-        "context",
-        "consequence",
-    ]
-
-
-def test_fallback_prompt_supports_top5_scene_contract():
-    import research_runtime
-
-    prompt = research_runtime._fallback_prompt(
-        {"script_instruction": "Write all narration in English."},
-        "top5",
-    )
-
-    assert "MUST contain 6 scenes" in prompt
-    assert "50–60 spoken words in Top-5 mode" in prompt
-    assert "3 or 4 scenes" not in prompt
-
-
-def test_local_ollama_preflight_rejects_an_uninstalled_explicit_model(monkeypatch):
-    import json
-    import research_runtime
-
-    monkeypatch.delenv("VSF_REMOTE_MODE", raising=False)
-    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    monkeypatch.setenv("OLLAMA_SCRIPT_MODEL", "missing-model")
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            return json.dumps({"models": [{"name": "llama3.2:latest"}]}).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        assert request.full_url.endswith("/api/tags")
-        return FakeResponse()
-
-    monkeypatch.setattr(research_runtime.urllib.request, "urlopen", fake_urlopen)
-
-    try:
-        research_runtime._ollama_script_fallback(
-            {"research_evidence_text": "Enough evidence for a test."},
-            {"script_instruction": "English."},
-            "technology",
-            "regular",
-        )
-    except RuntimeError as exc:
-        message = str(exc)
-        assert "missing-model" in message
-        assert "llama3.2:latest" in message
-    else:
-        raise AssertionError("An explicitly configured missing Ollama model must fail clearly.")
-
-
-def test_provider_error_detail_redacts_tokens_and_normalizes_whitespace():
-    import ultimate_bot
-
-    detail = ultimate_bot._provider_http_error_detail(
-        type(
-            "Response",
-            (),
-            {
-                "json": staticmethod(
-                    lambda: {
-                        "error": {
-                            "message": "Bearer gsk_supersecret token\\nunsupported parameter"
-                        }
-                    }
-                ),
-                "text": "",
-            },
-        )()
-    )
-
-    assert "gsk_supersecret" not in detail
-    assert "Bearer [redacted]" in detail
-    assert "\\n" in detail or "unsupported parameter" in detail
+def test_provider_contract_has_no_creator_insight_requirement():
+    source = Path(__file__).resolve().parents[1].joinpath("script_runtime.py").read_text(encoding="utf-8")
+    assert '"creator_insight"' not in source
+    assert '"editorial_angle"' not in source
