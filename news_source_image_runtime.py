@@ -209,6 +209,8 @@ class _ArticleImageParser(HTMLParser):
 
 def _walk_json_images(value: Any) -> list[str]:
     found: list[str] = []
+    if isinstance(value, str):
+        return [_clean(value)]
     if isinstance(value, dict):
         image = value.get("image")
         if isinstance(image, str):
