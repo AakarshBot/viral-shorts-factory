@@ -349,6 +349,121 @@ def _jpeg_bytes(size=(900, 1200), color=(80, 90, 100)):
 
 
 
+def test_manual_pool_opens_one_shared_gemini_scene_budget(monkeypatch):
+    scene_resets = []
+    provider_calls = []
+
+    def provider(query, *args):
+        provider_calls.append(query)
+        base = 10 if query == "One" else 100 if query == "Two" else 200
+        return [
+            _licensed_candidate(
+                _jpeg_bytes(color=(base + index, 80, 120)),
+                "cc0",
+            )
+            for index in range(4)
+        ]
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    class FakeBot:
+        pass
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("ProviderOne", provider),
+            ("ProviderTwo", provider),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "start_visual_qa_scene",
+        lambda: scene_resets.append(True),
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [
+            {"primary_entity": "One", "voiceover": "One."},
+            {"primary_entity": "Two", "voiceover": "Two."},
+            {"primary_entity": "Three", "voiceover": "Three."},
+        ],
+        ["One", "Two", "Three"],
+        "Test story",
+        pool_target=6,
+        allow_auto_backfill=False,
+    )
+
+    assert len(result["assets"]) == 6
+    assert len(scene_resets) == 1
+    assert len(provider_calls) == 4
+
+
+def test_manual_pool_target_cannot_exceed_hard_pool_max(monkeypatch):
+    def provider(query, *args):
+        base = {"One": 20, "Two": 80}[query]
+        return [
+            {
+                **_licensed_candidate(
+                    _jpeg_bytes(color=(base + index, 90, 120)),
+                    "cc0",
+                ),
+                "source_image_url": f"https://example.test/{query}/{index}.jpg",
+            }
+            for index in range(20)
+        ]
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher(*args)
+
+    class FakeBot:
+        pass
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [("ProviderOne", provider)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [
+            {"primary_entity": "One", "voiceover": "One."},
+            {"primary_entity": "Two", "voiceover": "Two."},
+        ],
+        ["One", "Two"],
+        "Test story",
+        pool_target=retrieval.MANUAL_POOL_MAX + 5,
+        allow_auto_backfill=False,
+    )
+
+    assert len(result["assets"]) == retrieval.MANUAL_POOL_MAX
+    assert result["target"] == retrieval.MANUAL_POOL_MAX
+
+
 def test_sparse_manual_query_uses_one_refinement_to_fill_target(monkeypatch):
     image_bytes = _jpeg_bytes()
     refine_calls = []
