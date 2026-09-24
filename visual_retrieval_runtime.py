@@ -904,10 +904,6 @@ def collect_manual_visual_pool(
 
     if parsed_queries and verify_with_ai:
         # Treat the complete shared manual pool as one bounded QA operation.
-        # Provider fallback stages and sparse refinement must not reopen the
-        # per-scene Gemini budget.
-    if parsed_queries and verify_with_ai:
-        # Treat the complete shared manual pool as one bounded QA operation.
         # Provider fallback stages and sparse-query refinement must not reopen the
         # per-scene Gemini budget.
         start_visual_qa_scene()
