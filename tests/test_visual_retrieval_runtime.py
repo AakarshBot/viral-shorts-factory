@@ -940,6 +940,59 @@ def test_manual_visual_search_can_rank_a_later_provider_candidate(monkeypatch):
 
 
 
+
+def test_manual_visual_search_respects_shared_qa_reset_mode(monkeypatch):
+    resets = []
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            return fetcher(*args)
+
+    def provider(*args):
+        return [
+            _licensed_candidate(_jpeg_bytes(color=(20 + index, 80, 120)), "cc0")
+            for index in range(2)
+        ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [("Commons", provider)],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "start_visual_qa_scene",
+        lambda: resets.append(True),
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    shared = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Vaibhav Sooryavanshi batting",
+        reset_qa_scene=False,
+    )
+    standalone = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Vaibhav Sooryavanshi press conference",
+        reset_qa_scene=True,
+    )
+
+    assert shared["assets"]
+    assert standalone["assets"]
+    assert resets == [True]
+
 def test_manual_visual_pool_falls_through_to_additional_real_sources(monkeypatch):
     image_one = _jpeg_bytes((1200, 1600), (20, 80, 120))
     image_two = _jpeg_bytes((1200, 1600), (120, 80, 20))
