@@ -843,6 +843,12 @@ def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic
         profiles = ", ".join(str(x).replace("_", " ").title() for x in row.get("discovery_profiles") or [])
         row["discovery_reason"] = f"{profiles or 'News'} discovery · {int(row.get('event_source_count') or 0)} publisher(s) · {int(row.get('social_post_count') or 0)} social signal(s) · {float(row.get('age_hours') or 0):.1f}h old"
         output.append(row)
+    bucket_counts = {bucket: sum(1 for item in output if item.get("discovery_bucket") == bucket) for bucket in ("news", "viral", "social")}
+    print(
+        "   [Sports Desk] Buckets: "
+        + ", ".join(f"{bucket.upper()}={count}" for bucket, count in bucket_counts.items()),
+        flush=True,
+    )
     return output
 
 
