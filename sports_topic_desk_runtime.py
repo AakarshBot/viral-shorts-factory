@@ -749,37 +749,43 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
 
     def bucket_eligible(item, bucket):
         profiles = set(item.get("discovery_profiles") or [])
-        text = _clean(" ".join(
-            str(item.get(key) or "")
-            for key in ("title", "event_search_text", "social_titles")
-        )).casefold()
-        social_signal = (
-            "social" in profiles
-            or int(item.get("social_post_count") or 0) > 0
-            or any(_word_match(text, term) for term in REACTION_TERMS)
-        )
-        viral_signal = (
-            "emerging" in profiles
-            or float(item.get("undercovered_score") or 0.0) >= 6.0
-            or float(item.get("trend_signal_score") or 0.0) > 0.0
-            or any(_word_match(text, term) for term in HOOK_TERMS)
-        )
-        if bucket == "social":
-            return social_signal
-        if bucket == "viral":
-            return viral_signal
-        return True
+        social_posts = int(item.get("social_post_count") or 0)
+        article_count = int(item.get("event_article_count") or 0)
 
-    # Reserve social and emerging candidates before general news candidates so
-    # a broad news lane cannot consume every dashboard slot.
+        # A reaction word such as "said" or "comments" is common in ordinary
+        # reporting. It must not turn a confirmed news event into a social card.
+        # Social gets an event only when the social evidence is the primary
+        # evidence stream: either it is a social-only lead or the social posts
+        # materially outweigh the article evidence.
+        social_only = social_posts > 0 and article_count == 0
+        social_dominant = social_posts >= 2 and social_posts >= max(1, article_count)
+
+        if bucket == "social":
+            return social_only or social_dominant
+
+        if bucket == "viral":
+            if social_only or social_dominant:
+                return False
+            return (
+                "emerging" in profiles
+                or float(item.get("undercovered_score") or 0.0) >= 8.0
+                or float(item.get("trend_signal_score") or 0.0) > 0.0
+            )
+
+        return not (social_only or social_dominant)
+
+    # Reserve genuinely social-first and emerging candidates before ordinary
+    # news. Do not force an unrelated story into a bucket when that lane has no
+    # eligible candidates; the dashboard should reflect the actual mix of leads.
     for bucket in ("social", "viral", "news"):
         for _ in range(quotas[bucket]):
             available = [x for x in candidates if id(x) not in used]
             if not available:
                 break
             eligible = [x for x in available if bucket_eligible(x, bucket)]
-            pool = eligible or available
-            best = max(pool, key=lambda x: score(x, bucket))
+            if not eligible:
+                break
+            best = max(eligible, key=lambda x: score(x, bucket))
             used.add(id(best))
             row = dict(best)
             row["discovery_bucket"] = bucket
