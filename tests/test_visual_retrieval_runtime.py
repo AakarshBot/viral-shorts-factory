@@ -409,7 +409,7 @@ def test_manual_pool_opens_one_shared_gemini_scene_budget(monkeypatch):
 
     assert len(result["assets"]) == 6
     assert len(scene_resets) == 1
-    assert len(provider_calls) == 4
+    assert provider_calls == ["One", "One", "Two", "Two", "Three", "Three"]
 
 
 def test_manual_pool_target_cannot_exceed_hard_pool_max(monkeypatch):
