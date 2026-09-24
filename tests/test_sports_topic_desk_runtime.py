@@ -93,6 +93,27 @@ def test_sports_desk_fans_out_google_queries_only_after_sparse_first_wave(monkey
     assert len(calls) == desk.GOOGLE_QUERY_LIMIT
 
 
+def test_sports_desk_uses_first_class_reddit_lanes_for_india_asia(monkeypatch):
+    calls = []
+
+    def fake_reddit(*args, **kwargs):
+        calls.append(args)
+        return []
+
+    monkeypatch.setattr(desk, "_reddit_search", fake_reddit)
+    monkeypatch.setattr(desk.sr, "_google_news_search_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_direct_listing_source", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "fetch_gdelt_articles", lambda *args, **kwargs: [])
+
+    desk._collect("India / Asia")
+
+    assert {args[0] for args in calls} == {"Cricket", "IndiaCricket"}
+
+
+
 def test_sports_desk_primary_google_burst_is_bounded(monkeypatch):
     calls = []
 
@@ -219,6 +240,42 @@ def test_sports_desk_buckets_are_unique_and_cover_three_editorial_categories(mon
         item.get("event_identity_key") or item.get("event_id")
         for item in result
     }) == 35
+
+
+def test_sports_desk_social_bucket_prefers_real_social_or_reaction_leads():
+    concepts = [
+        {
+            "title": f"Social reaction to cricket development {index}",
+            "event_id": f"social-{index}",
+            "event_identity_key": f"social-{index}",
+            "news_score": 40,
+            "viral_score": 50,
+            "social_score": 80,
+            "undercovered_score": 8,
+            "social_post_count": 1,
+        }
+        for index in range(12)
+    ]
+    concepts.extend(
+        {
+            "title": f"Routine cricket news event {index}",
+            "event_id": f"news-{index}",
+            "event_identity_key": f"news-{index}",
+            "news_score": 90,
+            "viral_score": 20,
+            "social_score": 5,
+            "undercovered_score": 3,
+            "social_post_count": 0,
+        }
+        for index in range(12)
+    )
+
+    result = desk._bucketize(concepts)
+    social = [item for item in result if item.get("discovery_bucket") == "social"]
+
+    assert social
+    assert all(int(item.get("social_post_count") or 0) > 0 for item in social)
+
 
 
 def test_sports_desk_exposes_undercoverage_and_signal_dimensions():

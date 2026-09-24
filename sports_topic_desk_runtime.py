@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events, event_identity_key, fetch_gdelt_articles
 
-SPORTS_DESK_VERSION = "sports-desk-v9-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v10-2026-09-24"
 LOOKBACK_HOURS = 72
 MAX_DASHBOARD_HEADLINES = 60
 
@@ -919,10 +919,38 @@ def _bucketize(concepts, scope="India / Asia"):
 
     def choose_bucket(bucket, score_name, count):
         remaining = [item for item in candidates if id(item) not in chosen]
+
+        def bucket_eligibility(item):
+            title_text = _clean(
+                " ".join(
+                    str(item.get(key) or "")
+                    for key in ("title", "event_search_text", "social_titles")
+                )
+            ).casefold()
+            reaction_signal = int(item.get("social_post_count") or 0) > 0 or any(
+                _word_match(title_text, term) for term in REACTION_TERMS
+            )
+            viral_signal = (
+                float(item.get("undercovered_score") or 0.0) >= 6.0
+                or float(item.get("viral_signal_score") or 0.0) >= 4.0
+                or float(item.get("trend_signal_score") or 0.0) > 0.0
+                or any(_word_match(title_text, term) for term in HOOK_TERMS)
+            )
+
+            if bucket == "social":
+                return reaction_signal
+            if bucket == "viral":
+                return viral_signal
+            return True
+
+        eligible = [item for item in remaining if bucket_eligibility(item)]
+        # Prefer semantically correct candidates, then fill any shortfall from
+        # the remaining pool so sparse signals do not shrink the dashboard.
+        search_pool = eligible + [item for item in remaining if item not in eligible]
         picked = []
-        while remaining and len(picked) < count:
+        while search_pool and len(picked) < count:
             best = max(
-                remaining,
+                search_pool,
                 key=lambda item: (
                     float(item.get(score_name) or 0.0)
                     - max(
@@ -937,7 +965,7 @@ def _bucketize(concepts, scope="India / Asia"):
             )
             picked.append(best)
             chosen.add(id(best))
-            remaining.remove(best)
+            search_pool.remove(best)
             row = dict(best)
             row["discovery_bucket"] = bucket
             row["bucket_score"] = float(row.get(score_name) or 0.0)
@@ -946,9 +974,9 @@ def _bucketize(concepts, scope="India / Asia"):
             result.append(row)
 
     for bucket, score_name in (
-        ("news", "news_score"),
-        ("viral", "viral_score"),
         ("social", "social_score"),
+        ("viral", "viral_score"),
+        ("news", "news_score"),
     ):
         choose_bucket(bucket, score_name, target_counts[bucket])
 
@@ -998,12 +1026,17 @@ def _collect(scope="India / Asia"):
             pool.shutdown(wait=False, cancel_futures=True)
         return rows, source_counts, failures
 
-    # Four Google lanes are enough for a fast first pass. The other six are
-    # conditional so a slow Google transport cannot make every dashboard refresh
-    # pay for ten simultaneous requests.
+    # India / Asia is the broad cricket desk. All ten editorial lenses run in
+    # the same bounded pass so the dashboard cannot silently collapse back to
+    # one headline cycle. Other sports scopes retain the faster four-lane pass.
     primary_jobs = []
     collection_genre = "sports" if scope_key == "niche sports" else "sports_stories_of_day"
-    for query in google_queries[:GOOGLE_PRIMARY_QUERY_LIMIT]:
+    primary_query_limit = (
+        GOOGLE_QUERY_LIMIT
+        if scope_key == "india / asia"
+        else GOOGLE_PRIMARY_QUERY_LIMIT
+    )
+    for query in google_queries[:primary_query_limit]:
         primary_jobs.append((
             f"Google News:{query}",
             sr._google_news_search_items,
@@ -1051,6 +1084,16 @@ def _collect(scope="India / Asia"):
     secondary_jobs = [
         ("Bluesky", _bluesky, (bluesky_query,), {}),
     ]
+    if scope_key == "india / asia":
+        # Social is a first-class discovery lane for the India/Asia cricket desk.
+        # It remains secondary for factual verification but can supply genuine
+        # reaction-led story candidates for the dashboard.
+        secondary_jobs.extend(
+            [
+                ("Reddit r/Cricket", _reddit_search, ("Cricket", "cricket"), {}),
+                ("Reddit r/IndiaCricket", _reddit_search, ("IndiaCricket", "cricket"), {}),
+            ]
+        )
     trend_geos = (
         ("IN", "US") if scope_key == "niche sports"
         else (("IN",) if scope_key == "india / asia" else ("GB", "AU"))
@@ -1062,7 +1105,7 @@ def _collect(scope="India / Asia"):
             (geo, 20),
             {"timeout": SECONDARY_REQUEST_TIMEOUT},
         ))
-    if ENABLE_REDDIT_DISCOVERY:
+    if ENABLE_REDDIT_DISCOVERY and scope_key != "india / asia":
         if scope_key == "niche sports":
             secondary_jobs.append(("Reddit r/sports", sr._reddit_items, ("sports", "sports", 35), {}))
         else:
@@ -1114,7 +1157,7 @@ def _collect(scope="India / Asia"):
     # same-host request burst.
     if _unique_core_event_count(rows) < CRICKET_PRIMARY_EVENT_FLOOR:
         secondary_google_jobs = []
-        for query in google_queries[GOOGLE_PRIMARY_QUERY_LIMIT:]:
+        for query in google_queries[primary_query_limit:]:
             secondary_google_jobs.append((
                 f"Google News:{query}",
                 sr._google_news_search_items,
