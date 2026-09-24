@@ -236,6 +236,16 @@ def _absolute(url: str, page_url: str) -> str:
     return urljoin(page_url, value)
 
 
+def _video_first_story(parser: _ArticleImageParser) -> bool:
+    """Reject pages explicitly identified as video-first stories."""
+    og_type = str(parser.meta.get("og:type") or "").casefold()
+    twitter_card = str(parser.meta.get("twitter:card") or "").casefold()
+    if "video" in og_type or twitter_card == "player":
+        return True
+    # A page exposing only a video/player plus a thumbnail is not an image story.
+    return bool(parser.meta.get("og:video") and not parser.image_candidates)
+
+ 
 def _ranked_candidate_urls(
     parser: _ArticleImageParser,
     page_url: str,
@@ -415,6 +425,8 @@ def extract_news_source_images(
     except Exception:
         return []
 
+    if _video_first_story(parser):
+        return []
     candidates = _ranked_candidate_urls(parser, final_url)
     if not candidates:
         return []
