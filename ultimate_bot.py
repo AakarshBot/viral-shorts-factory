@@ -1993,43 +1993,9 @@ def run_robot(web_config=None):
         )
         conn.commit()
 
-        sync_file = os.path.join(BASE_DIR, "last_sync.txt")
-        locked_story = bool(
-            isinstance(web_config, dict)
-            and isinstance(web_config.get("selected_story"), dict)
-            and str(web_config["selected_story"].get("title") or "").strip()
-        )
-        should_sync = not locked_story
-        if locked_story:
-            print(
-                "   [Learning] Analytics sync skipped: dashboard story is already locked; "
-                "no discovery ranking depends on a fresh learning sweep.",
-                flush=True,
-            )
-        if os.path.exists(sync_file):
-            try:
-                with open(sync_file, "r", encoding="utf-8") as f:
-                    last_sync = datetime.fromisoformat(f.read().strip())
-                should_sync = (
-                    datetime.now() - last_sync >= timedelta(hours=24)
-                )
-            except (ValueError, OSError):
-                should_sync = True
-
-        if should_sync:
-            analytics_result = run_analytics_sweep(conn)
-            # Only advance the cooldown after the exact-video sync has actually
-            # completed without analytics errors. The dashboard used to replace
-            # this function with a no-op, which could falsely mark stale data fresh.
-            if not isinstance(analytics_result, dict) or not int(
-                analytics_result.get("analytics_errors", 0) or 0
-            ):
-                try:
-                    with open(sync_file, "w", encoding="utf-8") as f:
-                        f.write(datetime.now().isoformat())
-                except OSError:
-                    pass
-
+        # Analytics is an explicit dashboard action, not a factory-startup dependency.
+        # Keep external YouTube Analytics calls out of the production startup path.
+        
         # ASSETS_DIR is already a fresh run-scoped workspace. Never wipe
         # the shared output root here: earlier READY_FOR_UPLOAD artifacts may
         # still be waiting for human upload approval.
