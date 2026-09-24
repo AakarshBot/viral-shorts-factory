@@ -886,7 +886,6 @@ def _clear_live_run_selection() -> None:
     st.session_state.approved_metadata = {}
     st.session_state.metadata_editing = False
     st.session_state.metadata_loaded_run_id = ""
-    st.session_state.confirm_public_upload = False
     st.session_state.candidate_page = 0
     st.session_state.visual_query_story_key = ""
     st.session_state.visual_query_suggestions = []
@@ -2613,7 +2612,6 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             key="upload_private",
             disabled=not upload_unlocked,
         ):
-            st.session_state["confirm_public_upload"] = False
             _perform_upload(
                 controller,
                 snapshot,
@@ -2622,34 +2620,6 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
                 str(approved_metadata.get("comment") or "").strip(),
                 "private",
             )
-
-        if st.session_state.get("confirm_public_upload"):
-            st.warning("You are about to publish this video publicly. Continue?")
-            confirm_col, cancel_col = st.columns(2)
-            with confirm_col:
-                if st.button(
-                    "Yes, publish",
-                    type="primary",
-                    width="stretch",
-                    key="confirm_upload_public",
-                ):
-                    st.session_state["confirm_public_upload"] = False
-                    _perform_upload(
-                        controller,
-                        snapshot,
-                        str(approved_metadata.get("title") or "").strip(),
-                        str(approved_metadata.get("description") or "").strip(),
-                        str(approved_metadata.get("comment") or "").strip(),
-                        "public",
-                    )
-            with cancel_col:
-                if st.button(
-                    "Cancel",
-                    width="stretch",
-                    key="cancel_upload_public",
-                ):
-                    st.session_state["confirm_public_upload"] = False
-                    st.rerun()
 
     result = st.session_state.get("upload_result", "")
     if result:
