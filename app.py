@@ -571,7 +571,6 @@ def _init_state() -> None:
         "upload_mode": "",
         "upload_notice": "",
         "upload_notice_kind": "",
-        "confirm_public_upload": False,
         "candidate_page": 0,
         "selected_channel": _channel_options()[0],
         "last_demo_results": {},
@@ -646,7 +645,6 @@ def reset_run() -> None:
         "upload_mode": "",
         "upload_notice": "",
         "upload_notice_kind": "",
-        "confirm_public_upload": False,
         "candidate_page": 0,
         # final_title/final_description/final_comment belong to Streamlit widgets.
         # They are repopulated safely before widget instantiation on the next rerun.
@@ -2582,7 +2580,7 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             "<div class='release-subhead'><span class='release-step-dot'>3</span><b>Publish</b></div>",
             unsafe_allow_html=True,
         )
-        st.caption("Public asks for one final confirmation. Private uploads remain hidden.")
+        st.caption("Metadata approved. Choose Public or Private to publish this Short.")
         upload_unlocked = (
             metadata_approved
             and not bool(st.session_state.get("upload_result"))

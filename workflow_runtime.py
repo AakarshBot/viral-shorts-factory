@@ -174,6 +174,14 @@ class WorkflowController:
         conn = sqlite3.connect(ultimate_bot.DB_PATH)
         try:
             migrate_vault(conn)
+            if row_id is None and run_id:
+                lookup = conn.execute(
+                    "SELECT id FROM vault WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+                row_id = int(lookup[0]) if lookup else None
+            if row_id is None:
+                return
             row = conn.execute(
                 "SELECT run_id FROM vault WHERE id = ?",
                 (row_id,),

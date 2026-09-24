@@ -40,3 +40,13 @@ def test_edit_metadata_reopens_fields_for_reapproval():
     edit_block = source[start:end]
     assert 'st.session_state["metadata_approved"] = False' in edit_block
     assert 'st.session_state["metadata_editing"] = True' in edit_block
+
+
+def test_publish_choice_has_no_second_public_confirmation():
+    source = _upload_panel_source()
+    publish_start = source.index('st.caption("Metadata approved. Choose Public or Private to publish this Short.")')
+    publish_block = source[publish_start:]
+    assert 'Yes, publish' not in publish_block
+    assert 'confirm_public_upload' not in publish_block
+    assert 'Upload Publicly' in publish_block
+    assert 'Upload Privately' in publish_block
