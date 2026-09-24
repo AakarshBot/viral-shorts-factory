@@ -355,7 +355,7 @@ def fetch_pixabay_candidates(query: str, used_urls: set[str] | None = None, *_ar
                     "page": page,
                     "per_page": 20,
                 },
-                timeout=DEFAULT_TIMEOUT,
+                timeout=API_TIMEOUT_SECONDS,
                 headers={"User-Agent": "ViralShortsFactory/1.0 (+image-retrieval)"},
             )
             response.raise_for_status()
