@@ -279,11 +279,11 @@ SCRIPT_OUTPUT_JSON_SCHEMA = {
                 "visual_intent": {"type": "string"},
                 "specific_search_prompt": {"type": "string"},
                 "sport_or_topic_category": {"type": "string"}
-            }, "required": ["voiceover","narrative_role","primary_entity","visual_intent","specific_search_prompt","sport_or_topic_category"], "additionalProperties": false}
+            }, "required": ["voiceover","narrative_role","primary_entity","visual_intent","specific_search_prompt","sport_or_topic_category"], "additionalProperties": False}
         }
     },
     "required": ["titles","recommended_title_index","seo_description","pinned_comment","script"],
-    "additionalProperties": false
+    "additionalProperties": False
 }
 
 
