@@ -974,9 +974,9 @@ def _bucketize(concepts, scope="India / Asia"):
             result.append(row)
 
     for bucket, score_name in (
-        ("news", "news_score"),
-        ("viral", "viral_score"),
         ("social", "social_score"),
+        ("viral", "viral_score"),
+        ("news", "news_score"),
     ):
         choose_bucket(bucket, score_name, target_counts[bucket])
 
