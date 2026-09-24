@@ -131,6 +131,19 @@ def test_normalise_rows_keeps_recent_safe_cricket(monkeypatch):
     assert result[0]["discovery_profile"] == "news"
 
 
+def test_normalise_rows_keeps_cricket_query_matches_without_cricket_in_headline(monkeypatch):
+    row = _article("BCCI names surprise squad change", "sports.example", "news")
+    row["collection_source"] = "google_news_rss"
+    row["discovery_query"] = "India cricket latest selection"
+    monkeypatch.setattr(desk.sr, "_safety_gate", lambda story: (True, []))
+    monkeypatch.setattr(desk.sr, "_source_page_pass", lambda story: True)
+    monkeypatch.setattr(desk.sr, "_cricket_service_title_pass", lambda story: True)
+
+    result = desk._normalise_rows([row], scope="India / Asia")
+
+    assert len(result) == 1
+
+
 def test_normalise_rows_filters_non_cricket_for_india_desk(monkeypatch):
     football = _article("India football comeback reaches final", "sports.example")
     monkeypatch.setattr(desk.sr, "_safety_gate", lambda story: (True, []))
