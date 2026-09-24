@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from branding_runtime import source_credit_for_type
 from manual_visual_query_runtime import parse_manual_visual_queries
-from visual_licensing_runtime import allow_unlicensed_visuals, provenance, rescue_provenance
+from visual_licensing_runtime import provenance, rescue_provenance
 from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
 
 
@@ -106,65 +106,11 @@ def _fit_hook_text(bot, text, font_name, max_width):
     return font, [text]
 
 
-_SOURCE_STOPWORDS = {
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
-    "with", "from", "by", "is", "are", "was", "were", "be", "has", "have",
-    "had", "this", "that", "these", "those", "news", "latest", "today",
-    "report", "reports", "says", "said", "story",
-}
-
-
-def _source_tokens(value):
-    words = re.findall(r"[\w-]+", str(value or "").lower(), flags=re.UNICODE)
-    return {word for word in words if len(word) > 2 and word not in _SOURCE_STOPWORDS}
-
-
-def _rank_news_source_scene_indices(scenes, article_title=""):
-    """Rank scenes for one article image without assigning a special manual-query slide."""
-    article_tokens = _source_tokens(article_title)
-    ranked = []
-    for index, scene in enumerate(scenes):
-        text = " ".join(
-            str(scene.get(key, "") or "")
-            for key in (
-                "primary_entity",
-                "voiceover",
-                "visual_intent",
-                "specific_search_prompt",
-                "visual_context",
-                "manual_visual_query",
-            )
-        )
-        scene_tokens = _source_tokens(text)
-        score = float(len(article_tokens & scene_tokens) * 4)
-        entity = str(
-            scene.get("factual_primary_entity")
-            or scene.get("primary_entity")
-            or scene.get("manual_visual_query")
-            or ""
-        ).strip()
-        if entity and _source_tokens(entity) & article_tokens:
-            score += 12.0
-        if scene.get("manual_visual_query"):
-            score += len(_source_tokens(scene.get("manual_visual_query"))) * 2.0
-        ranked.append((score, index))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [index for score, index in ranked if score > 0] or [index for _, index in ranked]
-
-
-async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, active_config):
-    """Extract the selected article image only when explicitly opted in."""
-    if not allow_unlicensed_visuals():
-        return None
-    try:
-        from news_source_image_runtime import extract_news_source_image, compose_news_source_image
-    except Exception as exc:
-        print(f"   [News Source Image] Runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
-        return None
-
+def _load_news_source_image_pool(bot, active_config):
+    """Fetch static images from the selected article for manual dashboard QC only."""
     selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else None
     if not isinstance(selected_story, dict):
-        return None
+        return []
 
     article_url = str(
         selected_story.get("story_url")
@@ -173,7 +119,7 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, acti
         or ""
     ).strip()
     if not article_url:
-        return None
+        return []
 
     publisher = str(
         selected_story.get("source_label")
@@ -181,97 +127,15 @@ async def _load_verified_news_source_candidate(bot, visual_runtime, scenes, acti
         or selected_story.get("publisher")
         or ""
     ).strip()
-    article_title = str(selected_story.get("title") or "").strip()
-    if not article_title:
-        return None
 
     try:
-        source_pack = await __import__("asyncio").get_running_loop().run_in_executor(
-            None, extract_news_source_image, article_url, publisher
+        from news_source_image_runtime import extract_news_source_images
+        return await __import__("asyncio").get_running_loop().run_in_executor(
+            None, extract_news_source_images, article_url, publisher
         )
     except Exception as exc:
-        print(f"   [News Source Image] Extraction failed: {type(exc).__name__}: {exc}", flush=True)
-        return None
-
-    if not isinstance(source_pack, dict) or not source_pack.get("bytes"):
-        print("   [News Source Image] No article image was extracted.", flush=True)
-        return None
-
-    raw = source_pack["bytes"]
-    try:
-        image = Image.open(io.BytesIO(raw)).convert("RGB")
-    except Exception as exc:
-        print(f"   [News Source Image] Invalid extracted image: {type(exc).__name__}: {exc}", flush=True)
-        return None
-
-    ranked_indices = _rank_news_source_scene_indices(scenes, article_title)
-    person_scene_indices = {
-        index
-        for index, scene in enumerate(scenes)
-        if str(scene.get("visual_genre") or "").strip().upper()
-        in {"PERSON_PORTRAIT", "PERSON_ACTION"}
-    }
-    for scene_index in ranked_indices:
-        scene = scenes[scene_index]
-        if scene_index in person_scene_indices:
-            # Article lead images frequently contain headlines, cards or page
-            # artwork rather than the actual person. Person slides must use the
-            # person-specific retrieval path instead.
-            print(
-                f"   [News Source Image] Skipped person scene {scene_index + 1}; "
-                "person-specific retrieval is required.",
-                flush=True,
-            )
-            continue
-        scene["news_source_qc_attempted"] = True
-        try:
-            accepted, tier, score, hard_reject = visual_runtime._strict_gate(
-                bot, raw, scene, article_title, source="news_source"
-            )
-        except Exception as exc:
-            print(
-                f"   [News Source Image] QC exception for scene {scene_index + 1}: "
-                f"{type(exc).__name__}: {exc}",
-                flush=True,
-            )
-            continue
-
-        print(
-            f"   [News Source Image] QC scene {scene_index + 1} | "
-            f"accepted={accepted} tier={tier} score={score} hard_reject={hard_reject}",
-            flush=True,
-        )
-        if not accepted:
-            continue
-
-        scene["visual_verified"] = True
-        scene["visual_query_used"] = "selected article lead image"
-        scene["visual_source"] = "news_source"
-        image_url = str(source_pack.get("image_url") or "")
-        page_url = str(source_pack.get("page_url") or article_url)
-        publisher_name = str(source_pack.get("publisher") or publisher or "News source").strip()
-        return {
-            "scene_index": scene_index,
-            "image": compose_news_source_image(image, (1080, 1920)),
-            "source_type": "news_source",
-            "credit": str(
-                source_pack.get("credit")
-                or f"Source: {publisher_name}"
-            ).strip(),
-            "image_url": image_url,
-            "page_url": page_url,
-            "provenance": provenance(
-                "Article source",
-                url=image_url or page_url,
-                author=publisher_name,
-                license="Unverified article-source license",
-                license_url=page_url,
-            ),
-        }
-
-    print("   [News Source Image] Extracted image failed the normal visual QC for every relevant scene; discarded.", flush=True)
-    return None
-
+        print(f"   [News Source Image Pool] Extraction failed: {type(exc).__name__}: {exc}", flush=True)
+        return []
 
 
 _RELATED_POOL_LIMIT_PER_SUBJECT = 10
@@ -486,16 +350,19 @@ def patch_content_first_visuals(bot):
             )
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
-        news_source_candidate = None
-        if not manual_queries:
-            news_source_candidate = await _load_verified_news_source_candidate(
-                bot, visual_runtime, scenes, active_config
+        article_source_assets = await _load_news_source_image_pool(bot, active_config)
+        article_source_materialized = []
+        if article_source_assets:
+            from visual_retrieval_runtime import materialize_manual_visual_pool
+            story_url = str((active_config.get('selected_story') or {}).get('story_url') or '').strip()
+            article_pool_id = f"article_{abs(hash(story_url or 'story')) & 0xffffffff}"
+            article_source_materialized = materialize_manual_visual_pool(
+                bot, article_source_assets, pool_id=article_pool_id
             )
-        news_source_scene_index = (
-            int(news_source_candidate["scene_index"])
-            if isinstance(news_source_candidate, dict)
-            else -1
-        )
+            print(
+                f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
+                flush=True,
+            )
 
         ai_count = 0
         verified_count = 0
@@ -643,16 +510,6 @@ def patch_content_first_visuals(bot):
                 seg["visual_rejection_counts"] = dict(
                     (manual_pool_result or {}).get("rejection_counts") or {}
                 )
-            elif idx == news_source_scene_index and isinstance(news_source_candidate, dict):
-                bg_img = news_source_candidate["image"]
-                used_ai = False
-                source_type = news_source_candidate["source_type"]
-                source_credit = news_source_candidate["credit"]
-                seg["asset_provenance"] = dict(news_source_candidate.get("provenance") or {})
-                print(
-                    f"   [News Source Image] Accepted for scene {idx + 1} after normal visual QC.",
-                    flush=True,
-                )
             else:
                 try:
                     bg_img, used_ai, source_type = search_slide_visual(
@@ -769,12 +626,21 @@ def patch_content_first_visuals(bot):
             seg.pop("_verified_subject_assets", None)
             seg.pop("visual_asset_bank", None)
 
-        if manual_queries:
-            script_data["visual_manual_pool"] = [
-                dict(item) for item in manual_available_pool
-                if isinstance(item, dict) and not bool(item.get("used"))
-            ]
-            script_data["visual_manual_pool_unused_count"] = len(script_data["visual_manual_pool"])
+        combined_manual_pool = [
+            dict(item) for item in manual_available_pool
+            if isinstance(item, dict) and str(item.get("path") or "").strip() and not bool(item.get("used"))
+        ]
+        existing_hashes = {str(item.get("hash") or "").strip() for item in combined_manual_pool if str(item.get("hash") or "").strip()}
+        for item in article_source_materialized:
+            item_hash = str(item.get("hash") or "").strip()
+            if item_hash and item_hash in existing_hashes:
+                continue
+            combined_manual_pool.append(dict(item))
+            if item_hash:
+                existing_hashes.add(item_hash)
+
+        script_data["visual_manual_pool"] = combined_manual_pool
+        script_data["visual_manual_pool_unused_count"] = len(combined_manual_pool)
 
         # Second pass: only unverified/failed scenes may borrow an already-
         # verified alternative for the same factual subject. Successful
