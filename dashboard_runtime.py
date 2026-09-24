@@ -1029,10 +1029,19 @@ class DashboardWorkflowController(WorkflowController):
 
         with self._lock:
             if origin == "pool":
-                live_item = self._visual_pool[position]
+                pool_items = self._visual_pool
             else:
                 group_index = int(str(origin).split(":", 1)[1])
-                live_item = self._visual_search_groups[group_index]["items"][position]
+                pool_items = self._visual_search_groups[group_index]["items"]
+
+            selected_hash = str(asset_hash or "").strip()
+            live_item = next(
+                (item for item in pool_items
+                 if isinstance(item, dict) and str(item.get("hash") or "").strip() == selected_hash),
+                None,
+            )
+            if live_item is None:
+                return False, "That image moved while it was being assigned. Please retry."
             live_item["used"] = True
             live_item["assigned_slide"] = index
             live_item["assigned_time"] = datetime.now(timezone.utc).isoformat()
