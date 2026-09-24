@@ -260,6 +260,40 @@ NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 INITIAL_SCRIPT_MAX_WORDS = 90
 SCENE_1_MAX_WORDS = 14
 
+# The writer receives the same production rules that final QC enforces.
+WRITER_QC_CONTRACT = """HARD SCRIPT QC — satisfy these before returning JSON:
+- Regular Short: exactly 4 or 5 scenes.
+- Tell the complete supported story: essential event, who/what, key facts, necessary context, and supported consequence/significance.
+- Three-beat arc across the scenes: factual hook -> development/context -> consequence/payoff.
+- Scene 1: factual, concrete hook; maximum 14 words.
+- Total narration: maximum 90 words on the first pass.
+- Natural target: 16–30 seconds. Never pad just to reach 16 seconds.
+- Every scene adds new useful information; no filler, repetition, generic setup, CTA, or production instructions.
+- No retention bait or withheld-reveal language.
+- No invented facts, quotes, motives, numbers, predictions, causal claims, or unsupported analysis.
+- Use only supplied evidence and genuinely synthesise/paraphrase it; never copy source sentences.
+- Exactly 3 non-empty title candidates; recommended_title_index must be 1, 2, or 3.
+- Every scene needs a grounded primary entity and a specific visual search prompt tied to the supported story.
+- Curiosity must come from a real supported fact, not withheld information.
+- Use natural spoken wording suitable for TTS; spell out numbers/acronyms/symbols where practical.
+- Do not add a separate insight, editorial angle, or Creator Insight field.
+
+SOFT QC:
+- Hook quality is scored after generation; a low score is a warning, not permission to invent a stronger claim.
+- Visual metadata is checked separately by production.
+- Originality is checked again after generation.
+
+If a constraint conflicts with a crucial supported fact, preserve the fact and compress non-essential wording."""
+
+def get_writer_qc_contract(format_mode="regular"):
+    """Return the writer-facing production QC contract."""
+    if str(format_mode or "").strip().lower() == "top5":
+        return WRITER_QC_CONTRACT.replace(
+            "Regular Short: exactly 4 or 5 scenes.",
+            "Top-5 Short: exactly 6 scenes — one opener plus five ranked entries.",
+        )
+    return WRITER_QC_CONTRACT
+
 # Provider-facing schema shared by the primary and fallback writers.
 # Keep every field required: Groq strict Structured Outputs requires required
 # properties and closed objects (additionalProperties=false).

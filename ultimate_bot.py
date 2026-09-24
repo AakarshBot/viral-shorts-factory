@@ -27,6 +27,7 @@ from visual_licensing_runtime import append_image_credits
 from script_runtime import (
     append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
     estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
+    get_writer_qc_contract,
 )
 
 
@@ -1084,26 +1085,16 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     print(f"\n✍️ Generating Complete Editorial Script ({mode.upper()} MODE)...")
     source=str(story_data.get("research_evidence_text") or story_data.get("text") or story_data.get("summary") or story_data.get("description") or story_data.get("title") or story_data.get("topic") or "")[:12000]
     persona=("LISTICLE HOST" if mode=="top5" else "TECH REVIEWER" if genre_key=="tech_reviews" else "HYPE COMMENTATOR" if genre_key in ["sports","sports_stories_of_day"] else "ANALYTICAL INSIDER" if genre_key in ["national_global_affairs","business_finance","technology"] else "CYNICAL CRITIC")
-    repair=story_data.get("_duration_tighten_script") or story_data.get("_duration_expand_script")
-    instruction=story_data.get("_duration_tighten_instruction") if story_data.get("_duration_tighten_script") else story_data.get("_duration_expand_instruction")
+    repair=story_data.get("_duration_tighten_script") or story_data.get("_duration_expand_script") or story_data.get("_qc_repair_script")
+    instruction=(story_data.get("_duration_tighten_instruction") if story_data.get("_duration_tighten_script") else story_data.get("_duration_expand_instruction") if story_data.get("_duration_expand_script") else story_data.get("_qc_repair_instruction"))
+    qc_contract=get_writer_qc_contract(mode)
     scene_contract=("Top-5 mode: exactly 6 scenes, one opener followed by five ranked entries." if mode=="top5" else "Regular mode: exactly 4 or 5 scenes. Use a three-beat arc — factual hook, development/context, consequence — across those scenes.")
     system_prompt=(
         "You are the original editorial writer for a human-reviewed sports/news Shorts channel. Tell the COMPLETE story using only supplied evidence. "
         "Write fresh wording and never copy a complete source sentence. Never invent facts, quotes, motives, numbers, predictions or causal claims.\n\n"
-        "WRITING CONTRACT:\n"
-        "- Regular Shorts contain 4–5 scenes and the whole important story.\n"
-        "- Include the essential event, key facts, who/what is involved, necessary context and the immediate consequence or why-it-matters point when supported.\n"
-        "- Do not skip crucial information to save words. Remove only non-essential detail.\n"
-        "- Target 16–30 seconds naturally; maximum 30 seconds. Never pad merely to reach 16 seconds.\n"
-        "- Every scene adds new useful information. No filler, repetition, CTA, retention bait, generic setup or production instructions.\n"
-        "- Scene 1 is the concrete factual hook. Middle scenes explain key evidence/context. Final scene delivers the consequence, significance or most useful closing fact.\n"
-        "- Curiosity must come from a real supported fact, never withheld information.\n"
-        "- Use natural spoken sentences and spell out numbers, acronyms and symbols where practical for TTS.\n"
-        "- Generate exactly 3 title candidates.\n"
-        "- Make narration materially original through synthesis and useful context; never manufacture an 'insight' field.\n"
-        +scene_contract+"\nReturn ONLY JSON matching the supplied schema. Use narrative_role values hook, development, context, consequence.\nLanguage: "+str((language_cfg or {}).get("script_instruction") or "")
+        +qc_contract+"\n"        +scene_contract+"\nReturn ONLY JSON matching the supplied schema. Use narrative_role values hook, development, context, consequence.\nLanguage: "+str((language_cfg or {}).get("script_instruction") or "")
     )
-    if repair: system_prompt+="\n\nBOUNDED DURATION REWRITE:\n"+str(instruction or "")+"\nRewrite the supplied draft once. Preserve every supported crucial fact, entity, number and attribution."
+    if repair: system_prompt+="\n\nBOUNDED REPAIR:\n"+str(instruction or "")+"\nRewrite the supplied draft once. Preserve every supported crucial fact, entity, number and attribution. Return a complete schema-valid replacement, not a patch."
     user="STORY TITLE: "+str(story_data.get("title") or story_data.get("topic") or "")+"\nVERIFIED STORY EVIDENCE:\n"+source
     if repair: user+="\n\nEXISTING DRAFT:\n"+str(repair)
     messages=[{"role":"system","content":system_prompt},{"role":"user","content":user}]
