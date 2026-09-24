@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events
 
-SPORTS_DESK_VERSION = "sports-desk-v11-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v12-2026-09-24"
 LOOKBACK_HOURS = 48
 MAX_DASHBOARD_HEADLINES = 60
 PER_BUCKET = 20
@@ -35,30 +35,63 @@ SPORTS_RSS_URL = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=
 # each profile asks for a different kind of story before clustering happens.
 DISCOVERY_PROFILES = {
     "news": (
-        '"India cricket" BCCI latest when:2d',
-        'India cricket selection injury retirement appointment result record when:3d',
-        'India cricket women domestic Ranji U19 emerging player latest when:2d',
+        '"India cricket" latest BCCI squad result injury record when:2d',
+        'India cricket selection captain coach retirement appointment controversy when:2d',
+        'India women cricket domestic Ranji U19 emerging player latest when:2d',
+        'India cricket match result milestone record selection venue when:2d',
     ),
     "emerging": (
-        'India cricket breakthrough emerging uncapped unusual upset comeback record when:7d',
-        'India cricket bizarre controversy surprise debut viral when:7d',
-        'India cricket unexpected incident milestone breakout player when:7d',
+        'India cricket uncapped debut breakout breakthrough upset comeback record when:2d',
+        'India cricket unusual incident surprise development emerging player when:2d',
+        'India cricket lower-profile domestic women U19 Ranji milestone when:2d',
+        'India cricket injury return selection change unexpected development when:2d',
     ),
     "social": (
-        'India cricket reaction comments debate controversy fans player statement when:3d',
-        'India cricket social media reaction former player fans when:3d',
-        'India cricket player said called slammed praised debate reaction when:3d',
+        'India cricket reaction debate statement criticism response former player when:2d',
+        'India cricket fans reaction controversy comments after match when:2d',
+        'India cricket player called slammed praised responded debate when:2d',
+        'India cricket unusual reaction interview statement online discussion when:2d',
     ),
 }
 GLOBAL_PROFILE_QUERIES = {
-    "news": ('international cricket latest result selection injury record when:3d',),
-    "emerging": ('international cricket upset breakthrough unusual comeback emerging when:7d',),
-    "social": ('international cricket reaction comments controversy debate fans when:3d',),
+    "news": (
+        'international cricket latest result selection injury record when:2d',
+        'international cricket captain coach retirement controversy appointment when:2d',
+        'international cricket women domestic emerging player milestone when:2d',
+        'international cricket unusual incident comeback upset development when:2d',
+    ),
+    "emerging": (
+        'international cricket breakthrough uncapped debut upset comeback record when:2d',
+        'international cricket unusual incident surprise emerging player when:2d',
+        'international cricket lower-profile women domestic milestone when:2d',
+        'international cricket unexpected selection injury return development when:2d',
+    ),
+    "social": (
+        'international cricket reaction debate statement criticism response when:2d',
+        'international cricket fans reaction controversy comments after match when:2d',
+        'international cricket player called slammed praised responded when:2d',
+        'international cricket unusual reaction interview online discussion when:2d',
+    ),
 }
 NICHE_PROFILE_QUERIES = {
-    "news": ('India football tennis badminton hockey latest result selection when:3d',),
-    "emerging": ('India football tennis badminton hockey breakthrough upset unusual when:7d',),
-    "social": ('India football tennis badminton hockey reaction controversy fans when:3d',),
+    "news": (
+        'India football tennis badminton hockey latest result selection when:2d',
+        'India football tennis badminton hockey injury appointment controversy when:2d',
+        'India women domestic emerging player milestone result when:2d',
+        'India unusual sports incident comeback upset record when:2d',
+    ),
+    "emerging": (
+        'India football tennis badminton hockey breakthrough upset emerging when:2d',
+        'India unusual sports debut comeback surprise milestone when:2d',
+        'India women domestic junior emerging player breakthrough when:2d',
+        'India lower-profile sports incident development when:2d',
+    ),
+    "social": (
+        'India football tennis badminton hockey reaction debate statement when:2d',
+        'India sports fans reaction controversy comments after match when:2d',
+        'India athlete called slammed praised responded debate when:2d',
+        'India unusual sports interview reaction online discussion when:2d',
+    ),
 }
 
 DIRECT_CRICKET_SOURCES = (
@@ -546,16 +579,20 @@ def _normalise_rows(rows, scope="India / Asia"):
     return output
 
 
-def _social_stats_by_url(rows):
-    result = {}
-    for row in rows:
-        if not isinstance(row, dict) or not row.get("social_post"):
-            continue
-        url = sr._canonical_url(row.get("url") or row.get("link"))
-        if url:
-            result[url] = result.get(url, 0.0) + float(row.get("social_engagement") or 0.0)
-    return result
-
+def _social_signal_for_event(event, social_rows):
+    """Attach social discussion as a signal to an article event, never as story evidence."""
+    event_tokens=_tokens(event.get("event_search_text") or event.get("title"))
+    event_entities=set(event.get("event_entities") or [])
+    matches=0; engagement=0.0
+    for row in social_rows or []:
+        if not isinstance(row,dict): continue
+        row_tokens=_tokens(" ".join(str(row.get(key) or "") for key in ("title","text","description")))
+        shared=event_tokens & row_tokens
+        entity_shared=event_entities & row_tokens
+        if (len(entity_shared)>=1 and len(shared)>=2) or len(shared)>=4:
+            matches+=1
+            engagement+=float(row.get("social_engagement") or 0.0)
+    return matches,round(engagement,3)
 
 def _collect(scope="India / Asia"):
     profiles = _profile_queries(scope)
@@ -619,8 +656,7 @@ def _collect(scope="India / Asia"):
     return rows
 
 
-def _enrich_events(events, rows):
-    social_by_url = _social_stats_by_url(rows)
+def _enrich_events(events, rows, social_rows=None):
     profile_by_url = {}
     for row in rows:
         if not isinstance(row, dict):
@@ -632,20 +668,15 @@ def _enrich_events(events, rows):
     for event in events:
         evidence = event.get("event_evidence") or []
         profiles = []
-        social_count = 0
-        social_engagement = 0.0
         for item in evidence:
             url = sr._canonical_url(item.get("url") or item.get("link"))
             profile = profile_by_url.get(url) or _clean(item.get("discovery_profile")).casefold()
             if profile and profile not in profiles:
                 profiles.append(profile)
-            collection = _clean(item.get("collection_source")).casefold()
-            if collection in {"bluesky", "reddit", "mastodon", "social"}:
-                social_count += 1
-                social_engagement += social_by_url.get(url, 0.0)
-        event["discovery_profiles"] = profiles or ["news"]
-        event["social_post_count"] = social_count
-        event["social_engagement_total"] = round(social_engagement, 3)
+        social_count,social_engagement=_social_signal_for_event(event,social_rows or [])
+        event["discovery_profiles"]=profiles or ["news"]
+        event["social_post_count"]=social_count
+        event["social_engagement_total"]=social_engagement
         event["event_article_count"] = max(0, int(event.get("event_article_count") or 0) - social_count)
         event["event_identity_key"] = str(event.get("event_identity_key") or event.get("event_id") or "").strip()
     return events
@@ -721,9 +752,12 @@ def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic
     raw = _collect(scope)
     all_rows = _normalise_rows(raw, scope=scope)
     trend_rows = [row for row in all_rows if _clean(row.get("collection_source")).casefold() == "google_trends"]
-    rows = [row for row in all_rows if _clean(row.get("collection_source")).casefold() != "google_trends" and _scope_pass(row, scope)]
-    events = cluster_news_events(rows)
-    events = _enrich_events(events, rows)
+    usable_rows=[row for row in all_rows if _clean(row.get("collection_source")).casefold()!="google_trends" and _scope_pass(row,scope)]
+    # Social posts are signals only. Actual articles are the only event candidates.
+    social_rows=[row for row in usable_rows if row.get("social_post")]
+    article_rows=[row for row in usable_rows if not row.get("social_post")]
+    events=cluster_news_events(article_rows)
+    events=_enrich_events(events,article_rows,social_rows)
     for event in events:
         title_tokens = _tokens(event.get("title"))
         best = 0.0
@@ -764,7 +798,7 @@ def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic
         row["recommended_format"] = "regular" if niche_scope else "cricket"
         row["cricket_pipeline"] = not niche_scope
         row["primary_genre"] = "sports" if niche_scope else "cricket"
-        row["verification_level"] = "social lead" if int(row.get("social_post_count") or 0) and int(row.get("event_article_count") or 0) == 0 else "corroborated" if int(row.get("event_source_count") or 0) >= 2 else "single-source lead"
+        row["verification_level"] = "socially signalled" if int(row.get("social_post_count") or 0) else "corroborated" if int(row.get("event_source_count") or 0) >= 2 else "single-source lead"
         profiles = ", ".join(str(x).replace("_", " ").title() for x in row.get("discovery_profiles") or [])
         row["discovery_reason"] = f"{profiles or 'News'} discovery · {int(row.get('event_source_count') or 0)} publisher(s) · {int(row.get('social_post_count') or 0)} social signal(s) · {float(row.get('age_hours') or 0):.1f}h old"
         output.append(row)

@@ -36,21 +36,35 @@ def _validate_script_result(result,story_data,format_mode):
         return cleaned,""
     except Exception as exc: return None,f"Script QC failed: {type(exc).__name__}: {exc}"
 
-def _duration_rewrite(primary_writer,story_data,candidate,language_cfg,genre_key,conn,format_mode,direction):
+def _bounded_rewrite(provider_writer,story_data,candidate,language_cfg,genre_key,conn,format_mode,direction,reason=""):
     payload=dict(story_data or {})
-    key="_duration_tighten_script" if direction=="tighten" else "_duration_expand_script"
-    payload[key]=json.dumps(candidate,ensure_ascii=False)
-    payload["_duration_tighten_instruction" if direction=="tighten" else "_duration_expand_instruction"]=(
-        f"Compress toward {DURATION_REPAIR_TARGET_SECONDS:.0f} seconds while preserving every crucial supported fact, entity, number, attribution and consequence; remove repetition only; do not add facts."
-        if direction=="tighten" else
-        "Rewrite the unusually short draft within four or five scenes and add only missing supported context or crucial factual detail. Do not add filler or invented analysis. Aim for 18–24 seconds."
-    )
-    try: revised=primary_writer(payload,language_cfg,genre_key,conn,format_mode)
-    except Exception as exc: return None,f"duration rewrite failed: {type(exc).__name__}: {exc}"
-    valid,reason=_validate_script_result(revised,story_data,format_mode)
-    if valid is None: return None,reason
+    if direction=="qc":
+        payload["_qc_repair_script"]=json.dumps(candidate,ensure_ascii=False)
+        payload["_qc_repair_instruction"]=(
+            "Repair the failed QC rule without changing the underlying story. "
+            f"QC failure: {reason} Preserve every crucial supported fact, entity, number and attribution. "
+            "If Scene 1 is over 14 words, compress it to 14 words or fewer. "
+            "If narration is over 90 words, remove only repetition or non-essential wording. "
+            "If retention bait, filler, narrative structure, title count, or originality caused the failure, "
+            "rewrite the affected parts while preserving the complete factual story. "
+            "Return a complete 4–5 scene replacement for regular Shorts with exactly 3 titles. "
+            "Do not invent facts and do not pad duration."
+        )
+    elif direction=="tighten":
+        payload["_duration_tighten_script"]=json.dumps(candidate,ensure_ascii=False)
+        payload["_duration_tighten_instruction"]=f"Compress toward {DURATION_REPAIR_TARGET_SECONDS:.0f} seconds while preserving every crucial supported fact, entity, number, attribution and consequence; remove repetition only; do not add facts."
+    else:
+        payload["_duration_expand_script"]=json.dumps(candidate,ensure_ascii=False)
+        payload["_duration_expand_instruction"]="Rewrite the unusually short draft within four or five scenes and add only missing supported context or crucial factual detail. Do not add filler or invented analysis. Aim for 18–24 seconds."
+    try: revised=provider_writer(payload,language_cfg,genre_key,conn,format_mode)
+    except Exception as exc: return None,f"bounded {direction} rewrite failed: {type(exc).__name__}: {exc}"
+    valid,validation_reason=_validate_script_result(revised,story_data,format_mode)
+    if valid is None: return None,validation_reason
     est=_estimate_script_duration(valid)
-    valid["duration_repair_attempted"]=True; valid["duration_repair_direction"]=direction
+    valid["duration_repair_attempted"]=direction in {"tighten","expand"}
+    valid["qc_repair_attempted"]=direction=="qc"
+    valid["duration_repair_direction"]=direction if direction in {"tighten","expand"} else ""
+    valid["qc_repair_reason"]=reason if direction=="qc" else ""
     valid["estimated_duration_seconds"]=est["seconds"]; valid["estimated_duration_word_count"]=est["word_count"]; valid["estimated_duration_effective_wpm"]=est["effective_wpm"]
     return valid,""
 
@@ -85,19 +99,24 @@ def install_script_pipeline(bot):
             if not candidate: reasons.append(f"{provider_name}: no candidate"); continue
             valid,reason=_validate_script_result(candidate,data,format_mode)
             if valid is None:
-                if "Narration exceeds the safety ceiling:" in str(reason):
-                    repaired,rr=_duration_rewrite(current,data,candidate,language_cfg,genre_key,conn,format_mode,"tighten")
+                repairable=any(marker in str(reason) for marker in (
+                    "Narration exceeds the safety ceiling:","Scene 1 is too long:",
+                    "contains prohibited retention-bait phrasing.","Narrative is incomplete:",
+                    "Scene 1 must be the factual retention hook.","final scene must deliver the consequence",
+                    "Narrative needs at least one development or context beat",
+                    "Regular Short must contain exactly 4 or 5 scenes.",
+                    "Exactly three non-empty title candidates are required.","Recommended title index is invalid.",
+                    "Script contains copied or near-verbatim source wording.",
+                ))
+                if repairable:
+                    repaired,rr=_bounded_rewrite(call,data,candidate,language_cfg,genre_key,conn,format_mode,"qc",str(reason))
                     if repaired is not None:
                         valid=repaired
                         _apply_delivery_profile(bot,valid)
-                        est=_estimate_script_duration(valid)
-                        valid["estimated_duration_seconds"]=est["seconds"]
-                        valid["estimated_duration_word_count"]=est["word_count"]
-                        valid["estimated_duration_effective_wpm"]=est["effective_wpm"]
-                        print("   [Script Writer] Primary draft exceeded the word safety ceiling; one bounded tightening rewrite succeeded.",flush=True)
+                        print(f"   [Script Writer] {provider_name} failed QC once; bounded preflight repair succeeded.",flush=True)
                     else:
-                        reasons.append(f"{provider_name}: {reason}; tightening rewrite failed: {rr}")
-                        print(f"   [Script Writer] Rejected: {reason}; tightening rewrite failed: {rr}",flush=True)
+                        reasons.append(f"{provider_name}: {reason}; bounded QC repair failed: {rr}")
+                        print(f"   [Script Writer] Rejected: {reason}; bounded QC repair failed: {rr}",flush=True)
                         continue
                 else:
                     reasons.append(f"{provider_name}: {reason}")
@@ -106,13 +125,13 @@ def install_script_pipeline(bot):
             _apply_delivery_profile(bot,valid); est=_estimate_script_duration(valid)
             valid["estimated_duration_seconds"]=est["seconds"]; valid["estimated_duration_word_count"]=est["word_count"]; valid["estimated_duration_effective_wpm"]=est["effective_wpm"]
             if est["seconds"]<MIN_SCRIPT_SECONDS:
-                repaired,rr=_duration_rewrite(current,data,valid,language_cfg,genre_key,conn,format_mode,"expand")
+                repaired,rr=_bounded_rewrite(call,data,valid,language_cfg,genre_key,conn,format_mode,"expand")
                 if repaired is None or repaired.get("estimated_duration_seconds",0)<MIN_SCRIPT_SECONDS:
                     reasons.append(f"{provider_name}: short after bounded expansion ({rr})"); continue
                 valid=repaired; est=_estimate_script_duration(valid)
             if est["seconds"]>=MAX_SCRIPT_SECONDS:
                 if provider_name=="primary writer":
-                    repaired,rr=_duration_rewrite(current,data,valid,language_cfg,genre_key,conn,format_mode,"tighten")
+                    repaired,rr=_bounded_rewrite(call,data,valid,language_cfg,genre_key,conn,format_mode,"tighten")
                     if repaired is not None and repaired.get("estimated_duration_seconds",999)<MAX_SCRIPT_SECONDS: valid=repaired
                     else: valid["tts_speed_adjustment_required"]=True; valid["duration_repair_failed_reason"]=rr
                 else: valid["tts_speed_adjustment_required"]=True
