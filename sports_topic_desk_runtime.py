@@ -18,7 +18,7 @@ import story_ranker as sr
 from event_discovery_runtime import cluster_news_events
 
 SPORTS_DESK_VERSION = "sports-desk-v11-2026-09-24"
-LOOKBACK_HOURS = 72
+LOOKBACK_HOURS = 48
 MAX_DASHBOARD_HEADLINES = 60
 PER_BUCKET = 20
 REQUEST_TIMEOUT = 4.0
@@ -35,9 +35,9 @@ SPORTS_RSS_URL = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=
 # each profile asks for a different kind of story before clustering happens.
 DISCOVERY_PROFILES = {
     "news": (
-        '"India cricket" BCCI latest when:3d',
+        '"India cricket" BCCI latest when:2d',
         'India cricket selection injury retirement appointment result record when:3d',
-        'India cricket women domestic Ranji U19 emerging player latest when:7d',
+        'India cricket women domestic Ranji U19 emerging player latest when:2d',
     ),
     "emerging": (
         'India cricket breakthrough emerging uncapped unusual upset comeback record when:7d',
@@ -415,6 +415,7 @@ def _bluesky(query):
             "url": url,
             "publishedAt": record.get("createdAt") or post.get("indexedAt") or "",
             "collection_source": "bluesky",
+            "discovery_profile": "social",
             "social_post": True,
             "social_like": float(post.get("likeCount") or 0),
             "social_reply": float(post.get("replyCount") or 0),
@@ -620,19 +621,28 @@ def _collect(scope="India / Asia"):
 
 def _enrich_events(events, rows):
     social_by_url = _social_stats_by_url(rows)
+    profile_by_url = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        url = sr._canonical_url(row.get("url") or row.get("link"))
+        profile = _clean(row.get("discovery_profile")).casefold()
+        if url and profile:
+            profile_by_url[url] = profile
     for event in events:
         evidence = event.get("event_evidence") or []
         profiles = []
         social_count = 0
         social_engagement = 0.0
         for item in evidence:
-            profile = _clean(item.get("discovery_profile")).casefold()
+            url = sr._canonical_url(item.get("url") or item.get("link"))
+            profile = profile_by_url.get(url) or _clean(item.get("discovery_profile")).casefold()
             if profile and profile not in profiles:
                 profiles.append(profile)
             collection = _clean(item.get("collection_source")).casefold()
             if collection in {"bluesky", "reddit", "mastodon", "social"}:
                 social_count += 1
-                social_engagement += social_by_url.get(sr._canonical_url(item.get("url")), 0.0)
+                social_engagement += social_by_url.get(url, 0.0)
         event["discovery_profiles"] = profiles or ["news"]
         event["social_post_count"] = social_count
         event["social_engagement_total"] = round(social_engagement, 3)

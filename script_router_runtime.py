@@ -84,7 +84,25 @@ def install_script_pipeline(bot):
             except Exception as exc: reasons.append(f"{provider_name}: {type(exc).__name__}: {exc}"); print(f"   [Script Writer] {reasons[-1]}",flush=True); continue
             if not candidate: reasons.append(f"{provider_name}: no candidate"); continue
             valid,reason=_validate_script_result(candidate,data,format_mode)
-            if valid is None: reasons.append(f"{provider_name}: {reason}"); print(f"   [Script Writer] Rejected: {reason}",flush=True); continue
+            if valid is None:
+                if "Narration exceeds the safety ceiling:" in str(reason):
+                    repaired,rr=_duration_rewrite(current,data,candidate,language_cfg,genre_key,conn,format_mode,"tighten")
+                    if repaired is not None:
+                        valid=repaired
+                        _apply_delivery_profile(bot,valid)
+                        est=_estimate_script_duration(valid)
+                        valid["estimated_duration_seconds"]=est["seconds"]
+                        valid["estimated_duration_word_count"]=est["word_count"]
+                        valid["estimated_duration_effective_wpm"]=est["effective_wpm"]
+                        print("   [Script Writer] Primary draft exceeded the word safety ceiling; one bounded tightening rewrite succeeded.",flush=True)
+                    else:
+                        reasons.append(f"{provider_name}: {reason}; tightening rewrite failed: {rr}")
+                        print(f"   [Script Writer] Rejected: {reason}; tightening rewrite failed: {rr}",flush=True)
+                        continue
+                else:
+                    reasons.append(f"{provider_name}: {reason}")
+                    print(f"   [Script Writer] Rejected: {reason}",flush=True)
+                    continue
             _apply_delivery_profile(bot,valid); est=_estimate_script_duration(valid)
             valid["estimated_duration_seconds"]=est["seconds"]; valid["estimated_duration_word_count"]=est["word_count"]; valid["estimated_duration_effective_wpm"]=est["effective_wpm"]
             if est["seconds"]<MIN_SCRIPT_SECONDS:
