@@ -2598,8 +2598,15 @@ def render_upload_panel(controller: DashboardWorkflowController, snapshot: Dict[
             key="upload_public",
             disabled=not upload_unlocked,
         ):
-            st.session_state["confirm_public_upload"] = True
-            st.rerun()
+            _perform_upload(
+                controller,
+                snapshot,
+                str(approved_metadata.get("title") or "").strip(),
+                str(approved_metadata.get("description") or "").strip(),
+                str(approved_metadata.get("comment") or "").strip(),
+                "public",
+            )
+
         if st.button(
             "Upload Privately",
             width="stretch",
