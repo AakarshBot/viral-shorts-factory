@@ -852,10 +852,17 @@ class DashboardWorkflowController(WorkflowController):
             "original_path": str(layer.get("visual_original_path") or source_path).strip(),
             "hash": selected_hash,
             "source": str(layer.get("source_type") or "visual").strip(),
+            "source_type": str(layer.get("source_type") or "visual").strip(),
             "query": str(layer.get("manual_visual_query") or layer.get("visual_query_used") or layer.get("bank_selected_query") or "").strip(),
             "visual_type": str(layer.get("visual_type") or scene.get("visual_type") or "").strip().upper(),
             "visual_genre": str(layer.get("visual_genre") or scene.get("visual_genre") or "").strip().upper(),
             "provenance": provenance,
+            "provenance_status": str(layer.get("provenance_status") or "commercial-verified").strip(),
+            "credit": str(layer.get("source_credit") or "").strip(),
+            "pool_origin": str(
+                layer.get("pool_origin")
+                or ("article-source" if str(layer.get("source_type") or "").strip() == "news_source" else "manual-replacement")
+            ).strip(),
             "source_image_url": source_url,
             "status": "previously-selected",
             "used": False,
