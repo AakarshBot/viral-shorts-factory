@@ -1874,7 +1874,36 @@ def test_new_manual_search_does_not_apply_monetization_filter(monkeypatch):
 
 
 
-def test_manual_pool_searches_only_first_two_preferred_providers_before_qa(monkeypatch):
+
+def test_manual_qc_can_select_a_provenance_review_candidate():
+    candidate = {
+        "hash": "rights-review",
+        "status": "entity-verified",
+        "provenance_status": "provenance-review",
+        "priority": 100,
+        "query": "Vaibhav Sooryavanshi",
+        "source": "Openverse",
+        "manual_query_index": 1,
+        "subject": "Vaibhav Sooryavanshi",
+        "visual_type": "PERSON",
+        "visual_genre": "PERSON_PORTRAIT",
+        "search_text": "Vaibhav Sooryavanshi cricket",
+    }
+
+    selected = retrieval.select_manual_visual_candidate(
+        [candidate],
+        {
+            "slide_index": 1,
+            "primary_entity": "Vaibhav Sooryavanshi",
+            "visual_genre": "PERSON_PORTRAIT",
+        },
+        set(),
+    )
+
+    assert selected is candidate
+
+
+def test_manual_pool_expands_past_first_two_preferred_providers_before_qa(monkeypatch):
     calls = []
 
     def make_provider(name):
@@ -1930,7 +1959,7 @@ def test_manual_pool_searches_only_first_two_preferred_providers_before_qa(monke
         allow_auto_backfill=False,
     )
 
-    assert calls == ["Commons", "DDG"]
+    assert calls == ["Commons", "Openverse", "Pexels", "Unsplash"]
     assert len(result["assets"]) == 2
 def test_manual_pool_exposes_candidates_for_human_review_when_gemini_is_temporarily_unavailable(monkeypatch):
     calls = []

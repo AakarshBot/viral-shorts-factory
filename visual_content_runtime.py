@@ -412,6 +412,9 @@ def patch_content_first_visuals(bot):
                 elif selected_status == "manual-review-unverified":
                     seg["visual_qc_blocked"] = True
                     seg["visual_qc_block_reason"] = "Gemini identity verification was unavailable; this image requires human visual QC before rendering."
+                elif str(manual_selected.get("provenance_status") or "").strip() == "provenance-review":
+                    seg["visual_qc_blocked"] = True
+                    seg["visual_qc_block_reason"] = "Image provenance/license is not automatically verified; human visual and rights QC is required before rendering."
                 else:
                     seg["visual_qc_blocked"] = False
                     seg["visual_qc_block_reason"] = ""

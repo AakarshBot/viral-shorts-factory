@@ -534,21 +534,26 @@ def select_manual_visual_candidate(
         for asset in candidates
         if str(asset.get("status") or "").strip() != "factory-rejected-resolution"
     ]
-    commercial_verified = [
+
+    # Manual visual QC is explicitly human-controlled. Assets with uncertain
+    # licensing/provenance may be shown and selected for review, while assets
+    # marked rights-restricted remain excluded. This does not weaken the global
+    # automatic/cached licensing gate.
+    human_reviewable = [
         asset
         for asset in normal
         if str(asset.get("provenance_status") or "commercial-verified").strip()
-        == "commercial-verified"
+        in {"commercial-verified", "provenance-review"}
     ]
     scene_good = [
         asset
-        for asset in commercial_verified
+        for asset in human_reviewable
         if _manual_candidate_scene_score(asset, scene) >= MANUAL_SCENE_GOOD_SCORE
     ]
 
     # The first supplied manual query is the first-slide anchor. Prefer only
-    # first-query assets there, falling back to the broader verified pool when
-    # that query produced no usable candidate.
+    # first-query assets there, falling back to the broader human-reviewable
+    # pool when that query produced no usable candidate.
     if int(scene.get("slide_index") or 0) == 1:
         first_query_assets = [
             asset
@@ -558,15 +563,13 @@ def select_manual_visual_candidate(
         if not first_query_assets:
             first_query_assets = [
                 asset
-                for asset in commercial_verified
+                for asset in human_reviewable
                 if int(asset.get("manual_query_index") or 0) == 1
             ]
-        pool = first_query_assets or scene_good or commercial_verified
+        pool = first_query_assets or scene_good or human_reviewable
     else:
-        pool = scene_good or commercial_verified
+        pool = scene_good or human_reviewable
 
-    if not pool:
-        return None
 
     return sorted(
         pool,
