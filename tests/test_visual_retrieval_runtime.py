@@ -349,6 +349,87 @@ def _jpeg_bytes(size=(900, 1200), color=(80, 90, 100)):
 
 
 
+def test_sparse_manual_query_uses_one_refinement_to_fill_target(monkeypatch):
+    image_bytes = _jpeg_bytes()
+    refine_calls = []
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query):
+            return fetcher()
+
+    class FakeBot:
+        pass
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("ProviderOne", lambda *inner: [
+                {**_licensed_candidate(image_bytes, "cc0"), "search_title": "Unrelated result"}
+            ]),
+            ("ProviderTwo", lambda *inner: [
+                {**_licensed_candidate(_jpeg_bytes(color=(81, 91, 101)), "cc0"), "search_title": "Unrelated result"}
+            ]),
+            ("ProviderThree", lambda *inner: []),
+            ("ProviderFour", lambda *inner: []),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: False for index in range(len(images))
+        },
+    )
+
+    refined_bytes = _jpeg_bytes(color=(100, 110, 120))
+
+    def fake_refinement(*args, **kwargs):
+        refine_calls.append(args[2])
+        return {
+            "assets": [
+                {
+                    "bytes": refined_bytes,
+                    "hash": f"refined-{index}",
+                    "source": "Commons",
+                    "query": args[2],
+                    "visual_type": "PERSON",
+                    "visual_genre": "PERSON_ACTION",
+                    "provenance": {},
+                    "provenance_status": "commercial-verified",
+                    "status": "new-search-ai-verified",
+                    "used": False,
+                }
+                for index in range(3)
+            ],
+            "qa_requests": 1,
+        }
+
+    monkeypatch.setattr(retrieval, "collect_manual_visual_search", fake_refinement)
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{
+            "primary_entity": "Vaibhav Sooryavanshi",
+            "voiceover": "Vaibhav Sooryavanshi batting in the match.",
+            "visual_intent": "batting cricket action",
+        }],
+        ["Vaibhav Sooryavanshi"],
+        "Test story",
+        pool_target=3,
+        allow_auto_backfill=False,
+    )
+
+    assert len(result["assets"]) == 3
+    assert result["query_stats"][0]["verified"] == 3
+    assert result["query_stats"][0]["qa_requests"] == 1
+    assert refine_calls
+    assert "Vaibhav Sooryavanshi" in refine_calls[0]
+    assert "batting" in refine_calls[0]
+
+
 def test_manual_pool_target_is_enforced_across_provider_stages(monkeypatch):
     provider_calls = []
     qa_calls = {"count": 0}

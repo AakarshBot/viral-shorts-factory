@@ -1267,10 +1267,7 @@ def collect_manual_visual_pool(
                     if image_url:
                         seen_image_urls.add(image_url)
                     verified_for_query += 1
-                if refined_assets:
-                    qa_requests += int(
-                        len(refined_assets) > 0
-                    )
+                qa_requests += int(refined_result.get("qa_requests") or 0)
 
         query_stats.append(
             {
@@ -1610,6 +1607,7 @@ def collect_manual_visual_search(
     candidates = candidates[:20]
 
     accepted: list[dict] = []
+    qa_requests = 0
     if candidates:
         start_visual_qa_scene()
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
@@ -1628,6 +1626,8 @@ def collect_manual_visual_search(
                 visual_genre=visual_genre,
             )
             qa_failure = get_last_visual_qa_failure()
+            if qa_failure != "circuit_breaker":
+                qa_requests += 1
             if qa_failure in {"transient_unavailable", "quota_or_rate_limit", "circuit_breaker"}:
                 remaining = max(0, 10 - len(accepted))
                 accepted.extend(
@@ -1700,6 +1700,7 @@ def collect_manual_visual_search(
         "entity_anchor": entity_anchor,
         "rejection_counts": rejected_counts,
         "search_exhausted": len(accepted) < 10,
+        "qa_requests": qa_requests,
     }
 
 def collect_manual_visual_options(
