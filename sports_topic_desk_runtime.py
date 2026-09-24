@@ -843,6 +843,7 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
 def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=60, retained_candidates=None):
     raw = _collect(scope)
     all_rows = _normalise_rows(raw, scope=scope)
+    niche_scope = _clean(scope).casefold() == "niche sports"
     trend_rows = [
         row for row in all_rows
         if _clean(row.get("collection_source")).casefold() == "google_trends"
@@ -870,7 +871,6 @@ def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic
 
     uploaded = sr._load_uploaded_story_identities(conn)
     events = [event for event in events if not sr._uploaded_story_match(event, uploaded)]
-    niche_scope = _clean(scope).casefold() == "niche sports"
     history_titles = []
     if conn is not None:
         try:
