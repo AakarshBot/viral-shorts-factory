@@ -222,6 +222,39 @@ def test_bucket_uses_content_signals_even_when_profile_is_news():
 
 
 
+def test_confirmed_event_with_social_reactions_stays_out_of_social_bucket():
+    events = [
+        {
+            "title": "Confirmed cricket report draws heavy fan reaction",
+            "event_identity_key": "confirmed-with-social",
+            "discovery_profiles": ["news", "social"],
+            "news_score": 75,
+            "viral_score": 35,
+            "social_score": 95,
+            "event_article_count": 1,
+            "social_post_count": 10,
+            "undercovered_score": 5,
+        },
+        {
+            "title": "Social-first fan reaction to surprise selection",
+            "event_identity_key": "social-only",
+            "discovery_profiles": ["social"],
+            "news_score": 20,
+            "viral_score": 55,
+            "social_score": 90,
+            "event_article_count": 0,
+            "social_post_count": 4,
+            "undercovered_score": 8,
+        },
+    ]
+
+    result = desk._diversify_events(events, limit=2)
+    buckets = {item["event_identity_key"]: item["discovery_bucket"] for item in result}
+
+    assert buckets["confirmed-with-social"] == "news"
+    assert buckets["social-only"] == "social"
+
+
 def test_score_exposes_simple_editorial_signals():
     item = _article("Uncapped bowler takes first five wicket haul", profile="emerging")
     item.update({"event_source_count": 1, "event_article_count": 1, "social_post_count": 2, "social_engagement_total": 5})
