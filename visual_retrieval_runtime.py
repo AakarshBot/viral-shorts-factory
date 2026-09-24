@@ -615,6 +615,8 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "subject": str(asset.get("subject") or "").strip(),
                 "hash": image_hash,
                 "source": str(asset.get("source") or "").strip(),
+                "source_type": str(asset.get("source_type") or asset.get("source") or "").strip(),
+                "credit": str(asset.get("credit") or "").strip(),
                 "query": str(asset.get("query") or "").strip(),
                 "visual_type": str(asset.get("visual_type") or "").strip().upper(),
                 "visual_genre": str(asset.get("visual_genre") or "").strip().upper(),
