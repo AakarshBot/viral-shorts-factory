@@ -770,7 +770,7 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
                 or float(item.get("trend_signal_score") or 0.0) > 0.0
             )
 
-        return not (social_only or social_dominant)
+        return not social_only
 
     # Reserve genuinely social-first and emerging candidates before ordinary
     # news. Do not force an unrelated story into a bucket when that lane has no
