@@ -87,7 +87,7 @@ CRICKET_PLAYER_ALIASES = (
     "babar azam", "shaheen afridi", "pat cummins", "travis head", "ben stokes",
     "joe root", "steve smith", "mohammed siraj", "kane williamson",
 )
-INDIA_ASIA_PLAYER_ALIASES = tuple(CRICKET_PLAYER_ALIASES[:24])
+INDIA_ASIA_PLAYER_ALIASES = (\n    "virat kohli", "kohli", "rohit sharma", "jasprit bumrah", "bumrah",\n    "shubman gill", "gill", "rishabh pant", "pant", "hardik pandya", "hardik",\n    "ravindra jadeja", "jadeja", "suryakumar yadav", "suryakumar",\n    "yashasvi jaiswal", "jaiswal", "kl rahul", "sanju samson",\n    "smriti mandhana", "harmanpreet kaur", "mohammed siraj",\n)
 INDIA_ASIA_ANCHORS = (
     "india", "indian", "bcci", "india a", "ranji", "duleep", "wpl", "ipl", "u19", "u-19",
     "u23", "u-23", "pakistan", "pcb", "sri lanka", "bangladesh", "afghanistan", "nepal",
