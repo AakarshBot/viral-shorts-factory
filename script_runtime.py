@@ -1326,7 +1326,6 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         "persona_used": "Analytical Insider",
         "script": scenes,
         "fallback_mode": "extractive_source_grounded",
-        "public_publish_blocked": False,
     }
     valid, reason = validate_content_density(result, story_data, format_mode)
     if not valid:
