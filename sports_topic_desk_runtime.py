@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events
 
-SPORTS_DESK_VERSION = "sports-desk-v11-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v12-2026-09-24"
 LOOKBACK_HOURS = 48
 MAX_DASHBOARD_HEADLINES = 60
 PER_BUCKET = 20
@@ -51,20 +51,49 @@ DISCOVERY_PROFILES = {
     ),
 }
 GLOBAL_PROFILE_QUERIES = {
-    "news": ('international cricket latest result selection injury record when:3d',),
-    "emerging": ('international cricket upset breakthrough unusual comeback emerging when:7d',),
-    "social": ('international cricket reaction comments controversy debate fans when:3d',),
+    "news": (
+        '(Australia OR England OR South Africa OR New Zealand OR West Indies OR Pakistan OR Sri Lanka OR Bangladesh OR Afghanistan OR Zimbabwe OR Ireland) cricket latest when:3d',
+        '(Pakistan OR Sri Lanka OR Bangladesh OR Afghanistan OR Zimbabwe OR Ireland) cricket (selection OR injury OR retirement OR appointment OR result OR record OR sanction OR controversy) when:3d',
+        '(women cricket OR women\'s cricket) (Australia OR England OR South Africa OR New Zealand OR West Indies OR Pakistan OR Sri Lanka OR Bangladesh) latest result selection record controversy when:3d',
+    ),
+    "emerging": (
+        'international cricket (uncapped OR emerging OR debut OR breakthrough OR young OR grassroots) (record OR milestone OR upset OR comeback OR selection) when:7d',
+        '(Pakistan OR Sri Lanka OR Bangladesh OR Afghanistan OR Zimbabwe OR Ireland OR Nepal OR Netherlands) cricket (upset OR comeback OR record OR debut OR breakthrough OR bizarre) when:7d',
+        'international cricket (bizarre OR unusual OR surprise OR sanctions OR investigation OR controversy) player team when:7d',
+    ),
+    "social": (
+        'international cricket (reaction OR reacts OR comments OR statement OR debate OR controversy OR fans) when:3d',
+        '(Pakistan OR Australia OR England OR South Africa OR New Zealand OR Sri Lanka OR Bangladesh) cricket (player OR coach OR former) (said OR called OR praised OR slammed OR warned) when:3d',
+        'cricket social media reaction fans player controversy statement worldwide when:3d',
+    ),
 }
 NICHE_PROFILE_QUERIES = {
-    "news": ('India football tennis badminton hockey latest result selection when:3d',),
-    "emerging": ('India football tennis badminton hockey breakthrough upset unusual when:7d',),
-    "social": ('India football tennis badminton hockey reaction controversy fans when:3d',),
+    "news": (
+        'India football soccer (ISL OR I-League OR national team) latest result transfer coach record controversy when:3d',
+        'India (tennis OR badminton OR table tennis OR squash) latest result record injury retirement selection tournament when:3d',
+        'India (hockey OR athletics OR shooting OR archery OR wrestling OR boxing) latest result medal record qualification controversy when:3d',
+    ),
+    "emerging": (
+        'India sport (emerging OR junior OR U23 OR U19 OR academy OR uncapped) (debut OR breakthrough OR record OR upset OR comeback OR milestone) when:7d',
+        '(football OR tennis OR badminton OR hockey OR athletics) India (women OR junior OR youth OR academy) (breakthrough OR upset OR record OR qualification) when:7d',
+        '(motorsport OR golf OR basketball OR volleyball OR kabaddi OR chess) India (breakthrough OR upset OR record OR debut OR qualification OR title) when:7d',
+    ),
+    "social": (
+        'India sports (reaction OR reacts OR comments OR controversy OR debate OR fans OR statement) when:3d',
+        '(football OR tennis OR badminton OR hockey OR athletics) India (player OR coach OR fan) (said OR called OR praised OR slammed OR reacts) when:3d',
+        '(boxing OR wrestling OR shooting OR motorsport OR golf OR kabaddi OR chess) India (reaction OR controversy OR fans OR statement OR viral) when:3d',
+    ),
 }
 
 DIRECT_CRICKET_SOURCES = (
     ("ICC", "https://www.icc-cricket.com/news"),
     ("BCCI", "https://www.bcci.tv/news"),
     ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news"),
+)
+GLOBAL_CRICKET_SOURCES = (
+    ("ICC", "https://www.icc-cricket.com/news"),
+    ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news"),
+    ("Wisden", "https://www.wisden.com/cricket-news"),
 )
 
 REACTION_TERMS = (
@@ -496,7 +525,15 @@ def _reddit_search(subreddit, query):
 def _is_non_cricket_sports(item):
     item = item if isinstance(item, dict) else {}
     text = _clean(" ".join(str(item.get(key) or "") for key in ("title", "text", "description", "summary", "snippet", "trend_query", "event_search_text", "event_entities"))).casefold()
-    terms = ("football", "soccer", "tennis", "badminton", "hockey", "athletics", "basketball", "volleyball", "golf", "rugby", "motorsport", "formula 1", "f1", "motogp", "wrestling", "boxing", "mma", "kabaddi", "table tennis", "squash", "archery", "shooting", "swimming", "aquatics", "cycling", "gymnastics", "weightlifting", "olympics", "olympic")
+    terms = (
+        "football", "soccer", "tennis", "badminton", "hockey", "athletics", "basketball",
+        "volleyball", "golf", "rugby", "motorsport", "formula 1", "f1", "motogp",
+        "wrestling", "boxing", "mma", "kabaddi", "table tennis", "squash", "archery",
+        "shooting", "swimming", "aquatics", "cycling", "gymnastics", "weightlifting",
+        "olympics", "olympic", "chess", "judo", "karate", "taekwondo", "fencing",
+        "equestrian", "rowing", "canoe", "triathlon", "skateboarding", "sport climbing",
+        "powerlifting", "esports", "e-sports",
+    )
     return any(_word_match(text, term) for term in terms)
 
 
@@ -571,6 +608,10 @@ def _collect(scope="India / Asia"):
 
     if key == "niche sports":
         jobs.append(("Sports RSS", sr._rss_items, (SPORTS_RSS_URL, "sports", "rss", 40), {"timeout": REQUEST_TIMEOUT}))
+    elif key == "global":
+        jobs.append(("ICC RSS", sr._rss_items, (ICC_RSS_URL, "sports_stories_of_day", "official", 35), {"timeout": REQUEST_TIMEOUT}))
+        for name, url in GLOBAL_CRICKET_SOURCES:
+            jobs.append((name, _direct_listing_source, (name, url), {}))
     else:
         jobs.append(("ICC RSS", sr._rss_items, (ICC_RSS_URL, "sports_stories_of_day", "official", 35), {"timeout": REQUEST_TIMEOUT}))
         for name, url in DIRECT_CRICKET_SOURCES:
@@ -591,7 +632,7 @@ def _collect(scope="India / Asia"):
     rows = []
     counts = {}
     failures = []
-    pool = ThreadPoolExecutor(max_workers=min(12, max(1, len(jobs))), thread_name_prefix="sports-discovery")
+    pool = ThreadPoolExecutor(max_workers=min(16, max(1, len(jobs))), thread_name_prefix="sports-discovery")
     future_map = {pool.submit(fn, *args, **kwargs): label for label, fn, args, kwargs in jobs}
     try:
         for future in as_completed(future_map, timeout=DISCOVERY_TIMEOUT):
@@ -628,7 +669,7 @@ def _enrich_events(events, rows):
         url = sr._canonical_url(row.get("url") or row.get("link"))
         profile = _clean(row.get("discovery_profile")).casefold()
         if url and profile:
-            profile_by_url[url] = profile
+            profile_by_url.setdefault(url, set()).add(profile)
     for event in events:
         evidence = event.get("event_evidence") or []
         profiles = []
@@ -636,11 +677,16 @@ def _enrich_events(events, rows):
         social_engagement = 0.0
         for item in evidence:
             url = sr._canonical_url(item.get("url") or item.get("link"))
-            profile = profile_by_url.get(url) or _clean(item.get("discovery_profile")).casefold()
-            if profile and profile not in profiles:
-                profiles.append(profile)
+            row_profiles = profile_by_url.get(url) or {
+                _clean(item.get("discovery_profile")).casefold()
+            }
+            for profile in sorted(profile for profile in row_profiles if profile):
+                if profile not in profiles:
+                    profiles.append(profile)
             collection = _clean(item.get("collection_source")).casefold()
             if collection in {"bluesky", "reddit", "mastodon", "social"}:
+                if "social" not in profiles:
+                    profiles.append("social")
                 social_count += 1
                 social_engagement += social_by_url.get(url, 0.0)
         event["discovery_profiles"] = profiles or ["news"]
@@ -701,12 +747,37 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
         diversity_penalty = max((sr._story_theme_similarity(candidate, old) for old in selected), default=0.0) * 10.0
         return base + profile_bonus - diversity_penalty
 
-    for bucket in ("news", "viral", "social"):
+    def bucket_eligible(item, bucket):
+        profiles = set(item.get("discovery_profiles") or [])
+        text = _clean(" ".join(
+            str(item.get(key) or "")
+            for key in ("title", "event_search_text", "social_titles")
+        )).casefold()
+        social_signal = (
+            "social" in profiles
+            or int(item.get("social_post_count") or 0) > 0
+            or any(_word_match(text, term) for term in REACTION_TERMS)
+        )
+        viral_signal = (
+            "emerging" in profiles
+            or float(item.get("undercovered_score") or 0.0) >= 6.0
+            or float(item.get("trend_signal_score") or 0.0) > 0.0
+            or any(_word_match(text, term) for term in HOOK_TERMS)
+        )
+        if bucket == "social":
+            return social_signal
+        if bucket == "viral":
+            return viral_signal
+        return True
+
+    # Reserve social and emerging candidates before general news candidates so
+    # a broad news lane cannot consume every dashboard slot.
+    for bucket in ("social", "viral", "news"):
         for _ in range(quotas[bucket]):
             available = [x for x in candidates if id(x) not in used]
             if not available:
                 break
-            eligible = [x for x in available if preferences[bucket][0] in set(x.get("discovery_profiles") or [])]
+            eligible = [x for x in available if bucket_eligible(x, bucket)]
             pool = eligible or available
             best = max(pool, key=lambda x: score(x, bucket))
             used.add(id(best))
