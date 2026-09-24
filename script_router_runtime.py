@@ -41,9 +41,9 @@ def _duration_rewrite(primary_writer,story_data,candidate,language_cfg,genre_key
     key="_duration_tighten_script" if direction=="tighten" else "_duration_expand_script"
     payload[key]=json.dumps(candidate,ensure_ascii=False)
     payload["_duration_tighten_instruction" if direction=="tighten" else "_duration_expand_instruction"]=(
-        f"Compress toward {DURATION_REPAIR_TARGET_SECONDS:.0f} seconds while preserving every crucial supported fact, entity, number, attribution and consequence; remove repetition only; do not add facts."
+        f"Rewrite toward {DURATION_REPAIR_TARGET_SECONDS:.0f} seconds of natural narration; never exceed {MAX_SCRIPT_SECONDS:.0f} seconds. Scene 1 must be 10–12 words, hard maximum 14; count it before returning JSON and rewrite it if needed. Preserve every crucial supported fact, entity, number, attribution and consequence; remove repetition only; do not add facts."
         if direction=="tighten" else
-        "Rewrite the unusually short draft within four or five scenes and add only missing supported context or crucial factual detail. Do not add filler or invented analysis. Aim for 18–24 seconds."
+        "Rewrite the unusually short draft within four or five scenes, target 22–27 seconds, never exceed 30 seconds, and keep Scene 1 at 10–12 words with a hard maximum of 14. Add only missing supported context or crucial factual detail. Do not add filler or invented analysis."
     )
     try: revised=primary_writer(payload,language_cfg,genre_key,conn,format_mode)
     except Exception as exc: return None,f"duration rewrite failed: {type(exc).__name__}: {exc}"
@@ -85,7 +85,7 @@ def install_script_pipeline(bot):
             if not candidate: reasons.append(f"{provider_name}: no candidate"); continue
             valid,reason=_validate_script_result(candidate,data,format_mode)
             if valid is None:
-                if "Narration exceeds the safety ceiling:" in str(reason):
+                if "Scene 1 is too long:" in str(reason):
                     repaired,rr=_duration_rewrite(current,data,candidate,language_cfg,genre_key,conn,format_mode,"tighten")
                     if repaired is not None:
                         valid=repaired
@@ -94,7 +94,7 @@ def install_script_pipeline(bot):
                         valid["estimated_duration_seconds"]=est["seconds"]
                         valid["estimated_duration_word_count"]=est["word_count"]
                         valid["estimated_duration_effective_wpm"]=est["effective_wpm"]
-                        print("   [Script Writer] Primary draft exceeded the word safety ceiling; one bounded tightening rewrite succeeded.",flush=True)
+                        print("   [Script Writer] Primary draft failed the compact-opening contract; one bounded repair succeeded.",flush=True)
                     else:
                         reasons.append(f"{provider_name}: {reason}; tightening rewrite failed: {rr}")
                         print(f"   [Script Writer] Rejected: {reason}; tightening rewrite failed: {rr}",flush=True)
