@@ -135,8 +135,6 @@ def bind_dashboard_patches(bot):
     _install_script_pipeline(bot)
     _wrap_content_first_visuals(bot)
     _patch_audio_direction(bot)
-    from final_qc_runtime import patch_workflow_qc
-    patch_workflow_qc(bot)
     try:
         from channel_intelligence_runtime import install_channel_intelligence_dialog
         install_channel_intelligence_dialog()
