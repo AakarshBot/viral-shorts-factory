@@ -76,7 +76,7 @@ def test_global_collect_does_not_use_bcci_listing(monkeypatch):
 
     desk._collect("Global")
 
-    assert len(google_calls) == 9
+    assert len(google_calls) == 3
     assert {profile for _, profile, _ in google_calls} == {"news", "emerging", "social"}
     assert "BCCI" not in {name for name, _ in direct_calls}
     assert "ICC" in {name for name, _ in direct_calls}
@@ -97,8 +97,55 @@ def test_niche_sports_collect_uses_all_three_profiles(monkeypatch):
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
 
     assert desk._collect("Niche Sports") == []
-    assert len(calls) == 9
+    assert len(calls) == 3
     assert {profile for _, profile, _ in calls} == {"news", "emerging", "social"}
+
+
+def test_collect_skips_recovery_when_primary_pool_is_healthy(monkeypatch):
+    calls = {"google": 0, "direct": 0, "trends": 0}
+
+    def fake_google(query, profile, scope):
+        calls["google"] += 1
+        return [_article(f"{profile} current cricket story {i}", f"{profile}{i}.example") for i in range(5)]
+
+    def fake_direct(*args, **kwargs):
+        calls["direct"] += 1
+        return []
+
+    monkeypatch.setattr(desk, "_google_search", fake_google)
+    monkeypatch.setattr(desk, "_direct_listing_source", fake_direct)
+    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_reddit_search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: calls.__setitem__("trends", calls["trends"] + 1) or [])
+
+    rows = desk._collect("India / Asia")
+
+    assert len(rows) == 15
+    assert calls["google"] == 3
+    assert calls["direct"] == 0
+    assert calls["trends"] == 0
+
+
+def test_collect_uses_official_sources_only_for_sparse_primary_intake(monkeypatch):
+    calls = {"google": 0, "direct": []}
+
+    monkeypatch.setattr(
+        desk,
+        "_google_search",
+        lambda query, profile, scope: calls.__setitem__("google", calls["google"] + 1) or [],
+    )
+    monkeypatch.setattr(
+        desk,
+        "_direct_listing_source",
+        lambda name, url: calls["direct"].append(name) or [],
+    )
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+
+    desk._collect("India / Asia")
+
+    assert calls["google"] == 3
+    assert calls["direct"] == ["ICC", "BCCI"] or set(calls["direct"]) == {"ICC", "BCCI"}
 
 
 def test_enrich_events_preserves_multiple_discovery_profiles():
@@ -369,7 +416,7 @@ def test_collect_uses_small_bounded_profile_set(monkeypatch):
     monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
     result = desk._collect("India / Asia")
     assert result == []
-    assert len(calls) == 9
+    assert len(calls) == 3
     assert {profile for _, profile, _ in calls} == {"news", "emerging", "social"}
 
 
