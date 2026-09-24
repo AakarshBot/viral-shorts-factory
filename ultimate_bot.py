@@ -1079,255 +1079,104 @@ def _groq_script_output_schema():
 
 
 def write_script(story_data, language_cfg, genre_key, conn, format_mode):
-    """Generate one original information-dense script; the router may request one bounded duration repair."""
-    format_mode_key = str(format_mode or "").strip().lower()
-    print(f"\n✍️ Generating Original Editorial Script ({format_mode_key.upper()} MODE)...")
-
-    research_evidence_text = str(story_data.get("research_evidence_text", "") or "").strip()
-    if research_evidence_text:
-        source_text = research_evidence_text[:20000]
-    else:
-        source_text = str(
-            story_data.get("text")
-            or story_data.get("summary")
-            or story_data.get("description")
-            or story_data.get("title")
-            or story_data.get("topic")
-            or ""
-        )[:8000]
-
-    persona_name = (
-        "LISTICLE HOST" if format_mode_key == "top5"
-        else "TECH REVIEWER" if genre_key == "tech_reviews"
-        else "HYPE COMMENTATOR" if genre_key in ["sports", "sports_stories_of_day"]
-        else "ANALYTICAL INSIDER" if genre_key in ["national_global_affairs", "business_finance", "technology"]
-        else "CYNICAL CRITIC"
+    """Restored simple editorial writer with a complete 4–5 scene contract."""
+    mode=str(format_mode or "").strip().lower()
+    print(f"\n✍️ Generating Complete Editorial Script ({mode.upper()} MODE)...")
+    source=str(story_data.get("research_evidence_text") or story_data.get("text") or story_data.get("summary") or story_data.get("description") or story_data.get("title") or story_data.get("topic") or "")[:12000]
+    persona=("LISTICLE HOST" if mode=="top5" else "TECH REVIEWER" if genre_key=="tech_reviews" else "HYPE COMMENTATOR" if genre_key in ["sports","sports_stories_of_day"] else "ANALYTICAL INSIDER" if genre_key in ["national_global_affairs","business_finance","technology"] else "CYNICAL CRITIC")
+    repair=story_data.get("_duration_tighten_script") or story_data.get("_duration_expand_script")
+    instruction=story_data.get("_duration_tighten_instruction") if story_data.get("_duration_tighten_script") else story_data.get("_duration_expand_instruction")
+    scene_contract=("Top-5 mode: exactly 6 scenes, one opener followed by five ranked entries." if mode=="top5" else "Regular mode: exactly 4 or 5 scenes. Use a three-beat arc — factual hook, development/context, consequence — across those scenes.")
+    system_prompt=(
+        "You are the original editorial writer for a human-reviewed sports/news Shorts channel. Tell the COMPLETE story using only supplied evidence. "
+        "Write fresh wording and never copy a complete source sentence. Never invent facts, quotes, motives, numbers, predictions or causal claims.\n\n"
+        "WRITING CONTRACT:\n"
+        "- Regular Shorts contain 4–5 scenes and the whole important story.\n"
+        "- Include the essential event, key facts, who/what is involved, necessary context and the immediate consequence or why-it-matters point when supported.\n"
+        "- Do not skip crucial information to save words. Remove only non-essential detail.\n"
+        "- Target 16–30 seconds naturally; maximum 30 seconds. Never pad merely to reach 16 seconds.\n"
+        "- Every scene adds new useful information. No filler, repetition, CTA, retention bait, generic setup or production instructions.\n"
+        "- Scene 1 is the concrete factual hook. Middle scenes explain key evidence/context. Final scene delivers the consequence, significance or most useful closing fact.\n"
+        "- Curiosity must come from a real supported fact, never withheld information.\n"
+        "- Use natural spoken sentences and spell out numbers, acronyms and symbols where practical for TTS.\n"
+        "- Generate exactly 3 title candidates.\n"
+        "- Make narration materially original through synthesis and useful context; never manufacture an 'insight' field.\n"
+        +scene_contract+"\nReturn ONLY JSON matching the supplied schema. Use narrative_role values hook, development, context, consequence.\nLanguage: "+str((language_cfg or {}).get("script_instruction") or "")
     )
-
-    scene_contract = (
-        "For Top-5 mode, output 6 scenes: one opening hook/title beat followed by five substantive ranked entries; "
-        "the fifth entry should deliver the final payoff. "
-        if format_mode_key == "top5"
-        else "For a regular Short, normally use 4 scenes: hook, development, context, consequence. Use 3 only when the evidence is genuinely simple. "
-    )
-    word_contract = (
-        "- Target roughly 50–60 spoken words in Top-5 mode; never exceed the 90-word safety ceiling.\n"
-        if format_mode_key == "top5"
-        else "- Target roughly 60–72 spoken words; never exceed the 90-word safety ceiling.\n"
-    )
-    from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
-    editorial_angle = choose_editorial_angle(story_data, format_mode)
-
-    system_prompt = (
-        "You are the original-news Shorts writer for a human-reviewed video factory. "
-        "Use only the supplied evidence. Write a fresh narration in your own wording. "
-        "Never copy any complete sentence verbatim from the evidence. "
-        "Do not invent facts, quotes, motives, numbers, or outcomes.\n\n"
-        "RUNTIME CONTRACT — NON-NEGOTIABLE:\n"
-        + word_contract
-        + "- Scene 1: target 10–12 words, with a hard maximum of 14; count the words before returning JSON and rewrite any opening that exceeds 14. It must be a factual headline and the most compact scene.\n"
-        "- Scene 1 is the only headline-style beat. Do not turn later scenes into separate headlines or title rewrites.\n"
-        "- Later scenes must add new, story-specific information: verified evidence, a key number, an attribution, necessary context, a mechanism, a timeline point, or a consequence.\n"
-        "- Normally use four scenes for a regular story so the explanation has room to breathe; combine beats only when they are genuinely inseparable.\n"
-        "- Keep the scene count exactly aligned with the selected format contract below; do not pad with filler.\n"
-        "- Spoken duration is authoritative: keep the narration below 30 seconds at the factory's configured voice rate.\n"
-        "- No intro, greeting, CTA, retention bait, generic filler, or production instructions.\n"
-        "- Curiosity must come from a real fact or tension, not withheld information.\n\n"
-        "STORY SHAPE:\n"
-        "Scene 1 = the concrete event/person and strongest supported hook. "
-        "Scene 2 = the most important new evidence or development. "
-        "Scene 3 = the most useful context, explanation, timeline, comparison, or second factual development when supported. "
-        "Final scene = the immediate consequence, implication, limitation, or most useful closing fact. "
-        "The finished narration should feel like one explained story, not a stack of headlines. "
-        "Every sentence must earn its speaking time.\n\n"
-        "Return ONLY JSON matching this exact object shape; do not wrap it in Markdown or add commentary. "
-        "{\"creator_insight\":\"...\",\"editorial_angle\":\"...\",\"titles\":[\"...\",\"...\",\"...\"],"
-        "\"recommended_title_index\":1,\"seo_description\":\"...\",\"pinned_comment\":\"...\","
-        "\"script\":[{\"voiceover\":\"...\",\"narrative_role\":\"hook\","
-        "\"primary_entity\":\"...\",\"visual_intent\":\"news_event\","
-        "\"specific_search_prompt\":\"...\",\"sport_or_topic_category\":\"...\"}]}. "
-        "Use narrative_role values hook, development, context, consequence. "
-        + scene_contract
-        + f"EDITORIAL ANGLE — {editorial_angle['instruction']}\n"
-        "CREATOR INSIGHT: Provide one concise evidence-grounded synthesis of why the documented event matters. "
-        "This is analysis of the supplied facts, not a new fact, opinion, motive, or prediction.\n"
-        + f"Language: {language_cfg['script_instruction']}\n"
-    )
-
-    duration_repair_script = story_data.get("_duration_tighten_script")
-    if duration_repair_script:
-        system_prompt += (
-            "\nBOUNDED DURATION REPAIR:\n"
-            + str(story_data.get("_duration_tighten_instruction") or "")
-            + "\nRewrite the supplied draft instead of starting a longer new script. "
-              "Preserve supported facts, entities, numbers, attributions and narrative roles."
-        )
-
-    user_content = (
-        f"STORY TITLE: {str(story_data.get('title') or story_data.get('topic') or '').strip()}\n"
-        f"VERIFIED EVIDENCE:\n{source_text}"
-    )
-    if duration_repair_script:
-        user_content += "\n\nEXISTING DRAFT TO TIGHTEN:\n" + str(duration_repair_script)
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content},
-    ]
-
-    groq_api_key = str(os.getenv("GROQ_API_KEY") or globals().get("GROQ_API_KEY") or "").strip()
-    if not groq_api_key:
-        raise RuntimeError("Groq script provider unavailable: GROQ_API_KEY is not configured.")
-
+    if repair: system_prompt+="\n\nBOUNDED DURATION REWRITE:\n"+str(instruction or "")+"\nRewrite the supplied draft once. Preserve every supported crucial fact, entity, number and attribution."
+    user="STORY TITLE: "+str(story_data.get("title") or story_data.get("topic") or "")+"\nVERIFIED STORY EVIDENCE:\n"+source
+    if repair: user+="\n\nEXISTING DRAFT:\n"+str(repair)
+    messages=[{"role":"system","content":system_prompt},{"role":"user","content":user}]
+    key=str(os.getenv("GROQ_API_KEY") or globals().get("GROQ_API_KEY") or "").strip()
+    if not key: raise RuntimeError("Groq script provider unavailable: GROQ_API_KEY is not configured.")
     try:
-        structured_payload = {
-            "model": "openai/gpt-oss-120b",
-            "messages": messages,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "viral_shorts_script",
-                    "strict": True,
-                    "schema": _groq_script_output_schema(),
-                },
-            },
-            "include_reasoning": False,
-            "reasoning_effort": "low",
-            "temperature": 0.5,
-            "max_completion_tokens": 900,
-        }
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {groq_api_key}",
-                "Content-Type": "application/json",
-            },
-            json=structured_payload,
-            timeout=30,
-        )
-
-        data = None
-        retry_reason = ""
-        if response.status_code == 200:
-            try:
-                raw_content = response.json()["choices"][0]["message"]["content"]
-                data = parse_groq_json_response(raw_content)
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                retry_reason = (
-                    "successful response was empty or not parseable JSON "
-                    f"({type(exc).__name__})"
-                )
-        elif response.status_code == 400:
-            detail = _provider_http_error_detail(response)
-            retry_reason = "structured-output request returned HTTP 400" + (
-                f": {detail}" if detail else ""
-            )
-        else:
-            detail = _provider_http_error_detail(response)
-            suffix = f": {detail}" if detail else ""
-            raise RuntimeError(
-                f"Groq script provider HTTP {response.status_code}{suffix}; "
-                "falling through to the next provider."
-            )
-
-        if retry_reason:
-            print(
-                "   [Script Writer] Groq primary attempt needs bounded compatibility retry: "
-                + retry_reason
-                + ". Retrying once with GPT-OSS 20B JSON mode.",
-                flush=True,
-            )
-            compatibility_messages = [
-                {
-                    "role": "user",
-                    "content": (
-                        system_prompt
-                        + "\n\n"
-                        + user_content
-                        + "\n\nReturn ONLY a valid JSON object matching the factory schema. "
-                          "Do not output Markdown or any commentary."
-                    ),
-                }
-            ]
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "openai/gpt-oss-20b",
-                    "messages": compatibility_messages,
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "viral_shorts_script_compat",
-                            "strict": True,
-                            "schema": _groq_script_output_schema(),
-                        },
-                    },
-                    "include_reasoning": False,
-                    "reasoning_effort": "low",
-                    "temperature": 0.2,
-                    "max_completion_tokens": 900,
-                },
-                timeout=30,
-            )
-            if response.status_code != 200:
-                detail = _provider_http_error_detail(response)
-                suffix = f": {detail}" if detail else ""
-                raise RuntimeError(
-                    f"Groq script provider HTTP {response.status_code}{suffix}; "
-                    "falling through to the next provider."
-                )
-            try:
-                raw_content = response.json()["choices"][0]["message"]["content"]
-                data = parse_groq_json_response(raw_content)
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise ValueError(
-                    "Groq compatibility response was not parseable JSON."
-                ) from exc
-
-        if not isinstance(data, dict):
-            raise ValueError(
-                "Groq script provider returned invalid JSON; falling through to the next provider."
-            )
-
-        data["hook_type"] = classify_hook_style(data)
-        data["hook_style_used"] = data["hook_type"]
-        data["structure_used"] = "Top 5" if format_mode_key == "top5" else "Editorial Explainer"
-        data["persona_used"] = persona_name.title()
-
+        payload={"model":"openai/gpt-oss-120b","messages":messages,"response_format":{"type":"json_schema","json_schema":{"name":"viral_shorts_script","strict":True,"schema":_groq_script_output_schema()}},"include_reasoning":False,"reasoning_effort":"low","temperature":0.5,"max_completion_tokens":900}
+        response=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},json=payload,timeout=30)
+        data=None; retry=""
+        if response.status_code==200:
+            try: data=parse_groq_json_response(response.json()["choices"][0]["message"]["content"])
+            except (KeyError,TypeError,ValueError,json.JSONDecodeError) as exc: retry=f"unparseable JSON ({type(exc).__name__})"
+        elif response.status_code==400: retry="structured-output HTTP 400: "+_provider_http_error_detail(response)
+        else: raise RuntimeError(f"Groq script provider HTTP {response.status_code}: {_provider_http_error_detail(response)}")
+        if retry:
+            print("   [Script Writer] Groq compatibility retry: "+retry,flush=True)
+            response=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"user","content":system_prompt+"\n\n"+user+"\n\nReturn ONLY valid JSON."}],"response_format":{"type":"json_schema","json_schema":{"name":"viral_shorts_script_compat","strict":True,"schema":_groq_script_output_schema()}},"include_reasoning":False,"reasoning_effort":"low","temperature":0.2,"max_completion_tokens":900},timeout=30)
+            if response.status_code!=200: raise RuntimeError(f"Groq compatibility HTTP {response.status_code}: {_provider_http_error_detail(response)}")
+            data=parse_groq_json_response(response.json()["choices"][0]["message"]["content"])
+        if not isinstance(data,dict): raise ValueError("Groq returned no usable script object.")
+        data["hook_type"]=classify_hook_style(data); data["hook_style_used"]=data["hook_type"]
+        data["structure_used"]="Top 5" if mode=="top5" else "Complete Editorial Story"; data["persona_used"]=persona.title(); data["delivery_profile"]=persona
         return data
     except Exception as exc:
-        print(f"   [Script Writer] Groq failed: {type(exc).__name__}: {exc}", flush=True)
+        print(f"   [Script Writer] Groq failed: {type(exc).__name__}: {exc}",flush=True)
         raise
 
-
 async def generate_voiceover_and_timestamps(script_data, language_cfg):
-    print(f"\n🎙️ Generating Audio & Mapping Karaoke Timestamps...")
-    audio_paths, word_timings = [], []
-    profile = PERSONA_PROFILES[next((k for k in PERSONA_PROFILES.keys() if k in script_data.get("persona_used", "LISTICLE HOST").upper()), "LISTICLE HOST")]
-    script_data["voice_gender"] = profile["gender"]
-    
-    scenes = script_data.get("script", [])
-    for idx, seg in enumerate(tqdm(scenes, desc="Generating Audio", unit="scene")):
-        path = os.path.join(ASSETS_DIR, f"voiceover_{idx+1}.mp3")
-        text = re.sub(r'[*_#`\[\]()~^"“”‘’]', '', seg.get("voiceover", "")).strip() or f"Point number {idx+1}."
-        success, scene_timings = False, []
-        for attempt in range(1, 3):
-            try:
-                communicate = edge_tts.Communicate(text, language_cfg["voices"][profile["gender"]], rate=profile["rate"], pitch=profile["pitch"])
-                with open(path, "wb") as f:
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio": f.write(chunk["data"])
-                        elif chunk["type"] == "WordBoundary": scene_timings.append({"word": chunk["text"], "start": chunk["offset"] / 10000000.0, "end": (chunk["offset"] + chunk["duration"]) / 10000000.0})
-                if os.path.exists(path) and os.path.getsize(path) > 500:
-                    audio_paths.append(path); word_timings.append(scene_timings); success = True; break
-            except Exception:
-                pass
-        if not success: return [], []
-    return audio_paths, word_timings
+    """Strict Edge-TTS generation with one measured speed correction when needed."""
+    print("\n🎙️ Generating Audio & Mapping Karaoke Timestamps...")
+    if edge_tts is None: return [], []
+    profile_name=str(script_data.get("delivery_profile") or script_data.get("persona_used") or "LISTICLE HOST").upper()
+    profile=PERSONA_PROFILES.get(profile_name,PERSONA_PROFILES["LISTICLE HOST"])
+    script_data["voice_gender"]=profile["gender"]
+    scenes=script_data.get("script") or []
+    if not isinstance(scenes,list) or not scenes: return [], []
+    try: base_rate=float(str(profile.get("rate","+0%")).replace("%","").strip())
+    except (TypeError,ValueError): base_rate=0.0
+    async def synthesize(rate_percent):
+        paths=[]; timings=[]
+        for idx,seg in enumerate(tqdm(scenes,desc="Generating Audio",unit="scene")):
+            path=os.path.join(ASSETS_DIR,f"voiceover_{idx+1}.mp3")
+            text=re.sub(r'[*_#\[\]()~^"“”‘’]','',str(seg.get("voiceover") or "")).strip()
+            if not text: return [],[]
+            scene_timings=[]; success=False
+            for _ in range(1,3):
+                try:
+                    communicate=edge_tts.Communicate(text,language_cfg["voices"][profile["gender"]],rate=f"{rate_percent:+.0f}%",pitch=profile["pitch"])
+                    with open(path,"wb") as f:
+                        async for chunk in communicate.stream():
+                            if chunk["type"]=="audio": f.write(chunk["data"])
+                            elif chunk["type"]=="WordBoundary": scene_timings.append({"word":chunk["text"],"start":chunk["offset"]/10000000.0,"end":(chunk["offset"]+chunk["duration"])/10000000.0})
+                    if os.path.exists(path) and os.path.getsize(path)>500:
+                        paths.append(path); timings.append(scene_timings); success=True; break
+                except Exception as exc:
+                    print(f"   [TTS] Scene {idx+1} failed: {type(exc).__name__}: {exc}",flush=True)
+            if not success: return [],[]
+        return paths,timings
+    paths,timings=await synthesize(base_rate)
+    if not paths: return [],[]
+    try: duration=measure_audio_duration(paths)["total_seconds"]
+    except Exception: duration=0.0
+    script_data["audio_total_duration"]=round(duration,3); script_data["audio_rate_percent"]=round(base_rate,2); script_data["tts_speed_adjusted"]=False
+    if duration>30.0:
+        target=29.6; multiplier=duration/target; adjusted=((1.0+base_rate/100.0)*multiplier-1.0)*100.0; adjusted=max(base_rate+1.0,min(adjusted,100.0))
+        print(f"   [TTS] {duration:.2f}s > 30s; applying measured minimum speed correction to +{adjusted:.0f}%.",flush=True)
+        new_paths,new_timings=await synthesize(adjusted)
+        if new_paths:
+            try: new_duration=measure_audio_duration(new_paths)["total_seconds"]
+            except Exception: new_duration=duration
+            paths,timings=new_paths,new_timings; duration=new_duration
+            script_data["audio_total_duration"]=round(duration,3); script_data["audio_rate_percent"]=round(adjusted,2); script_data["tts_speed_adjusted"]=True
+    return paths,timings
 
 def get_cached_asset(query):
     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', query.lower().strip()) + ".jpg"
@@ -2399,10 +2248,10 @@ def run_robot(web_config=None):
             f"({duration_estimate['word_count']} words at {duration_estimate['effective_wpm']:.0f} WPM).",
             flush=True,
         )
-        if duration_estimate["seconds"] >= 30.0:
+        if duration_estimate["seconds"] < 16.0:
             raise RuntimeError(
-                f"Initial script duration gate failed ({duration_estimate['seconds']:.1f}s); "
-                "the overlong script was rejected before audio generation."
+                f"Script duration gate failed ({duration_estimate['seconds']:.1f}s); "
+                "the bounded short-script rewrite should have repaired this before audio generation."
             )
 
         if dashboard_manual_control:

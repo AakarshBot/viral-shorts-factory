@@ -250,8 +250,8 @@ def _normalise(text): return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", str(
 def _words(text): return re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
 
 NARRATION_BASE_WPM = 150.0
-NARRATION_IDEAL_MIN_SECONDS = 20.0
-NARRATION_IDEAL_MAX_SECONDS = 28.0
+NARRATION_IDEAL_MIN_SECONDS = 16.0
+NARRATION_IDEAL_MAX_SECONDS = 30.0
 NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 
 # Word count is a safety ceiling, not the duration contract.
@@ -266,68 +266,23 @@ SCENE_1_MAX_WORDS = 14
 SCRIPT_OUTPUT_JSON_SCHEMA = {
     "type": "object",
     "properties": {
-        "creator_insight": {
-            "type": "string",
-            "description": "One concise, evidence-grounded synthesis of why the documented event matters. No speculation."
-        },
-        "editorial_angle": {
-            "type": "string",
-            "description": "The factual editorial lens used to frame the story."
-        },
-        "titles": {
-            "type": "array",
-            "minItems": 3,
-            "maxItems": 3,
-            "items": {"type": "string"}
-        },
-        "recommended_title_index": {
-            "type": "integer",
-            "enum": [1, 2, 3]
-        },
-        "seo_description": {
-            "type": "string"
-        },
-        "pinned_comment": {
-            "type": "string"
-        },
+        "titles": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "string"}},
+        "recommended_title_index": {"type": "integer", "enum": [1, 2, 3]},
+        "seo_description": {"type": "string"},
+        "pinned_comment": {"type": "string"},
         "script": {
-            "type": "array",
-            "minItems": 3,
-            "maxItems": 6,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "voiceover": {"type": "string"},
-                    "narrative_role": {
-                        "type": "string",
-                        "enum": ["hook", "development", "context", "consequence"]
-                    },
-                    "primary_entity": {"type": "string"},
-                    "visual_intent": {"type": "string"},
-                    "specific_search_prompt": {"type": "string"},
-                    "sport_or_topic_category": {"type": "string"}
-                },
-                "required": [
-                    "voiceover",
-                    "narrative_role",
-                    "primary_entity",
-                    "visual_intent",
-                    "specific_search_prompt",
-                    "sport_or_topic_category"
-                ],
-                "additionalProperties": False
-            }
+            "type": "array", "minItems": 4, "maxItems": 5,
+            "items": {"type": "object", "properties": {
+                "voiceover": {"type": "string"},
+                "narrative_role": {"type": "string", "enum": ["hook", "development", "context", "consequence"]},
+                "primary_entity": {"type": "string"},
+                "visual_intent": {"type": "string"},
+                "specific_search_prompt": {"type": "string"},
+                "sport_or_topic_category": {"type": "string"}
+            }, "required": ["voiceover","narrative_role","primary_entity","visual_intent","specific_search_prompt","sport_or_topic_category"], "additionalProperties": False}
         }
     },
-    "required": [
-        "creator_insight",
-        "editorial_angle",
-        "titles",
-        "recommended_title_index",
-        "seo_description",
-        "pinned_comment",
-        "script"
-    ],
+    "required": ["titles","recommended_title_index","seo_description","pinned_comment","script"],
     "additionalProperties": False
 }
 
@@ -1149,8 +1104,8 @@ def assess_release_structure(script_data, format_mode="regular"):
     if mode == "top5":
         if len(scenes) != 6:
             return False, "Top-5 script must contain exactly one opening beat plus five ranked entries.", {}
-    elif len(scenes) not in (3, 4):
-        return False, "Regular Short must contain exactly 3 or 4 scenes.", {}
+    elif len(scenes) not in (4, 5):
+        return False, "Regular Short must contain exactly 4 or 5 scenes.", {}
     assessment = assess_narrative_completeness(script_data)
     if not assessment.get("passed"):
         return False, assessment.get("reason", "Narrative structure is incomplete."), assessment
@@ -1372,8 +1327,6 @@ def _extractive_script_fallback(story_data, language_cfg, genre_key, format_mode
         "step_2_data_points": raw_source,
         "step_3_critique": "Deterministic source-grounded emergency fallback.",
         "step_4_metadata": entity,
-        "creator_insight": f"The documented development centers on {title}.",
-        "editorial_angle": "Emergency source-only mode; original editorial analysis was not generated.",
         "titles": [title, f"{title} | What We Know", f"{title} | Latest Facts"],
         "recommended_title_index": 1,
         "seo_description": raw_source[:700],

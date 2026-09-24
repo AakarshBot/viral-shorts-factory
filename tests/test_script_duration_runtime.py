@@ -26,11 +26,12 @@ def test_duration_estimate_uses_persona_rate():
 
 
 def test_duration_bands_match_initial_writer_policy():
+    assert classify_narration_duration(16) == "ideal_or_acceptable"
     assert classify_narration_duration(20) == "ideal_or_acceptable"
     assert classify_narration_duration(28) == "ideal_or_acceptable"
     assert classify_narration_duration(30) == "too_long"
     assert classify_narration_duration(30.01) == "too_long"
-    assert classify_narration_duration(19.9) == "short_but_valid"
+    assert classify_narration_duration(19.9) == "ideal_or_acceptable"
 
 
 def test_tts_duration_qc_allows_normal_provider_variance():
@@ -207,7 +208,7 @@ def test_unsupported_numeric_metadata_is_rejected():
         "recommended_title_index": 1,
         "script": [
             {
-                "voiceover": "India confirmed the squad change.",
+                "voiceover": "India confirmed the squad change involving 99 affected players.",
                 "narrative_role": "hook",
                 "primary_entity": "India",
                 "visual_intent": "news_event",
@@ -222,6 +223,15 @@ def test_unsupported_numeric_metadata_is_rejected():
                 "specific_search_prompt": "India squad review",
                 "sport_or_topic_category": "Cricket",
             },
+            {
+                "voiceover": "The documented change also affects the team's immediate planning.",
+                "narrative_role": "context",
+                "primary_entity": "India",
+                "visual_intent": "news_event",
+                "specific_search_prompt": "India squad context",
+                "sport_or_topic_category": "Cricket",
+            },
+
             {
                 "voiceover": "The change affects preparation for the next assignment.",
                 "narrative_role": "consequence",
@@ -244,7 +254,6 @@ def test_unsupported_numeric_metadata_is_rejected():
         },
     )
     assert ok is False
-    assert "Creator Insight" in reason
     assert "99" in reason
 
 
