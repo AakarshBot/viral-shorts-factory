@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict
@@ -228,18 +227,19 @@ def _gemini_script_fallback(
         },
         method="POST",
     )
-    for attempt in range(2):
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            break
-        except urllib.error.HTTPError as exc:
-            if exc.code != 503 or attempt >= 1:
-                raise
-            delay = 2.0
-            print(f"   [Gemini] HTTP 503 capacity response; retrying once in {delay:.0f}s.",flush=True)
-            time.sleep(delay)
-    candidates = body.get("candidates") or []
+    try:
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code != 503 or attempt >= 1:
+                    raise
+                delay = 2.0
+                print(f"   [Gemini] HTTP 503 capacity response; retrying once in {delay:.0f}s.", flush=True)
+                time.sleep(delay)
+        candidates = body.get("candidates") or []
         if not candidates:
             raise ValueError("Gemini returned no candidates.")
         parts = ((candidates[0].get("content") or {}).get("parts") or [])
