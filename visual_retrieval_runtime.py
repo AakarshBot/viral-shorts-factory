@@ -1618,8 +1618,7 @@ def collect_manual_visual_search(
     qa_requests = 0
     if candidates:
         if reset_qa_scene:
-            start_visual_qa_scene()
-        batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
+            batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         for offset in range(0, len(candidates), batch_size):
             if len(accepted) >= 10:
                 break
