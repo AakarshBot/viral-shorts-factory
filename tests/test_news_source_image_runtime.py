@@ -6,9 +6,9 @@ from PIL import Image
 from news_source_image_runtime import _ArticleImageParser, _candidate_urls, _publisher
 
 
-def _jpeg_bytes(size=(900, 1200)):
+def _jpeg_bytes(size=(900, 1200), color="white"):
     raw = io.BytesIO()
-    Image.new("RGB", size, "white").save(raw, format="JPEG")
+    Image.new("RGB", size, color).save(raw, format="JPEG")
     return raw.getvalue()
 
 
@@ -71,10 +71,10 @@ def test_extract_news_source_images_returns_multiple_direct_images(monkeypatch, 
 
     monkeypatch.setenv("ASSET_CACHE_DIR", str(tmp_path))
 
-    image_bytes = _jpeg_bytes((900, 1200))
-    image_bytes_two = _jpeg_bytes((901, 1200))
-    image_bytes_three = _jpeg_bytes((902, 1200))
-    image_bytes_four = _jpeg_bytes((903, 1200))
+    image_bytes = _jpeg_bytes((900, 1200), "white")
+    image_bytes_two = _jpeg_bytes((901, 1200), "gray")
+    image_bytes_three = _jpeg_bytes((902, 1200), "black")
+    image_bytes_four = _jpeg_bytes((903, 1200), "blue")
     page_html = """
     <html><head>
       <meta property="og:site_name" content="Example News">
