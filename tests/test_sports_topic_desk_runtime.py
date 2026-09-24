@@ -27,6 +27,93 @@ def test_profile_queries_are_small_and_editorially_distinct():
     assert any("reaction" in query or "fans" in query for query in profiles["social"])
 
 
+
+def test_global_and_niche_profiles_have_real_breadth():
+    global_profiles = desk._profile_queries("Global")
+    niche_profiles = desk._profile_queries("Niche Sports")
+
+    assert all(len(queries) == 3 for queries in global_profiles.values())
+    assert all(len(queries) == 3 for queries in niche_profiles.values())
+
+    global_text = " ".join(" ".join(values) for values in global_profiles.values()).casefold()
+    niche_text = " ".join(" ".join(values) for values in niche_profiles.values()).casefold()
+
+    assert "pakistan" in global_text
+    assert "afghanistan" in global_text
+    assert "women cricket" in global_text
+    assert "uncapped" in global_text or "emerging" in global_text
+    assert "football" in niche_text
+    assert "badminton" in niche_text
+    assert "athletics" in niche_text
+    assert "motorsport" in niche_text
+    assert "chess" in niche_text
+
+
+def test_global_collect_does_not_use_bcci_listing(monkeypatch):
+    google_calls = []
+    direct_calls = []
+
+    monkeypatch.setattr(
+        desk,
+        "_google_search",
+        lambda query, profile, scope: google_calls.append((query, profile, scope)) or [],
+    )
+    monkeypatch.setattr(
+        desk,
+        "_direct_listing_source",
+        lambda name, url: direct_calls.append((name, url)) or [],
+    )
+    monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+
+    desk._collect("Global")
+
+    assert len(google_calls) == 9
+    assert {profile for _, profile, _ in google_calls} == {"news", "emerging", "social"}
+    assert "BCCI" not in {name for name, _ in direct_calls}
+    assert "ICC" in {name for name, _ in direct_calls}
+    assert "ESPNcricinfo" in {name for name, _ in direct_calls}
+    assert "Wisden" in {name for name, _ in direct_calls}
+
+
+def test_niche_sports_collect_uses_all_three_profiles(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        desk,
+        "_google_search",
+        lambda query, profile, scope: calls.append((query, profile, scope)) or [],
+    )
+    monkeypatch.setattr(desk.sr, "_rss_items", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk, "_bluesky", lambda *args, **kwargs: [])
+    monkeypatch.setattr(desk.sr, "_google_trends_items", lambda *args, **kwargs: [])
+
+    assert desk._collect("Niche Sports") == []
+    assert len(calls) == 9
+    assert {profile for _, profile, _ in calls} == {"news", "emerging", "social"}
+
+
+def test_enrich_events_preserves_multiple_discovery_profiles():
+    shared_url = "https://example.com/shared"
+    rows = [
+        _article("India cricket player comment", "news.example", "news"),
+        _article("Fans react to India cricket player", "social.example", "social"),
+    ]
+    for row in rows:
+        row["url"] = shared_url
+    event = {
+        "event_evidence": rows,
+        "event_source_count": 2,
+        "event_article_count": 2,
+    }
+
+    enriched = desk._enrich_events([event], rows)
+
+    assert set(enriched[0]["discovery_profiles"]) >= {"news", "social"}
+
+
+
 def test_cricket_detection_and_scope_are_strict():
     assert desk._is_cricket({"title": "Bumrah returns after injury"}) is True
     assert desk._is_cricket({"title": "Coach announces new football plan"}) is False
