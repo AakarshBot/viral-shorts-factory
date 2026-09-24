@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events
 
-SPORTS_DESK_VERSION = "sports-desk-v15-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v16-2026-09-24"
 LOOKBACK_HOURS = 48
 MAX_DASHBOARD_HEADLINES = 60
 PER_BUCKET = 20
@@ -544,13 +544,37 @@ def _normalise_rows(rows, scope="India / Asia"):
     for raw in rows or []:
         if not isinstance(raw, dict):
             continue
+        collection_source = _clean(raw.get("collection_source")).casefold()
+        if collection_source == "google_trends":
+            # Trends are signals, not article candidates. Keep them available
+            # for trend scoring without applying article-only sport/source gates.
+            item = dict(raw)
+            age = _age_hours(item.get("publishedAt") or item.get("published_at") or item.get("created_at"))
+            if age == 9999.0 or age > LOOKBACK_HOURS:
+                continue
+            safe, _ = sr._safety_gate(item)
+            if not safe:
+                continue
+            url = _clean(item.get("url") or item.get("link"))
+            canonical = sr._canonical_url(url)
+            title_key = " ".join(sorted(_tokens(item.get("title"))))
+            key = canonical or ("title:" + title_key)
+            if key in seen:
+                continue
+            seen.add(key)
+            item["title"] = _clean(item.get("title"))
+            item["source_domain"] = _domain(item)
+            item["age_hours"] = round(age, 2)
+            item["social_engagement"] = 0.0
+            output.append(item)
+            continue
         if niche_scope:
             if not _is_non_cricket_sports(raw):
                 continue
         elif not _is_cricket(raw):
             query_context = _clean(raw.get("discovery_query")).casefold()
             is_cricket_query = (
-                _clean(raw.get("collection_source")).casefold() == "google_news_rss"
+                collection_source == "google_news_rss"
                 and _word_match(query_context, "cricket")
             )
             if not is_cricket_query:
@@ -819,7 +843,18 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
 def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=60, retained_candidates=None):
     raw = _collect(scope)
     all_rows = _normalise_rows(raw, scope=scope)
-    trend_rows = [row for row in all_rows if _clean(row.get("collection_source")).casefold() == "google_trends"]
+    trend_rows = [
+        row for row in all_rows
+        if _clean(row.get("collection_source")).casefold() == "google_trends"
+        and (
+            _is_non_cricket_sports(row)
+            if niche_scope
+            else _is_cricket(row) or _word_match(
+                f"{row.get('trend_query', '')} {row.get('title', '')}",
+                "cricket",
+            )
+        )
+    ]
     rows = [row for row in all_rows if _clean(row.get("collection_source")).casefold() != "google_trends" and _scope_pass(row, scope)]
     events = cluster_news_events(rows)
     events = _enrich_events(events, rows)

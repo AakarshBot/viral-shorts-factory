@@ -138,6 +138,18 @@ def test_normalise_rows_keeps_recent_safe_cricket(monkeypatch):
     assert result[0]["discovery_profile"] == "news"
 
 
+def test_normalise_rows_preserves_trend_rows_for_scoring(monkeypatch):
+    row = _article("Team record enters the daily trend feed", "sports.example", "news")
+    row["collection_source"] = "google_trends"
+    row["trend_query"] = "cricket"
+    monkeypatch.setattr(desk.sr, "_safety_gate", lambda story: (True, []))
+
+    result = desk._normalise_rows([row], scope="India / Asia")
+
+    assert len(result) == 1
+    assert result[0]["collection_source"] == "google_trends"
+
+
 def test_normalise_rows_keeps_cricket_query_matches_without_cricket_in_headline(monkeypatch):
     row = _article("BCCI names surprise squad change", "sports.example", "news")
     row["collection_source"] = "google_news_rss"
