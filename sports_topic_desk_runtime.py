@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 import story_ranker as sr
 from event_discovery_runtime import cluster_news_events
 
-SPORTS_DESK_VERSION = "sports-desk-v14-2026-09-24"
+SPORTS_DESK_VERSION = "sports-desk-v15-2026-09-24"
 LOOKBACK_HOURS = 48
 MAX_DASHBOARD_HEADLINES = 60
 PER_BUCKET = 20
@@ -35,19 +35,19 @@ SPORTS_RSS_URL = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=
 # each profile asks for a different kind of story before clustering happens.
 DISCOVERY_PROFILES = {
     "news": (
-        'India cricket latest selection injury retirement appointment result record when:2d',
-        'India cricket women domestic Ranji U19 latest when:3d',
-        'India cricket player team milestone comeback upset result when:3d',
+        'India cricket when:2d',
+        'India cricket (selection OR injury OR retirement OR appointment OR result OR record) when:3d',
+        'India cricket (women OR domestic OR Ranji OR U19 OR milestone OR comeback) when:3d',
     ),
     "emerging": (
-        'India cricket uncapped player debut breakthrough record milestone when:7d',
-        'India cricket unusual bizarre upset comeback surprise when:7d',
-        'India cricket women domestic Ranji U19 young emerging player latest when:7d',
+        'India cricket (uncapped OR debut OR breakthrough OR milestone OR record OR upset) when:7d',
+        'India cricket (unusual OR bizarre OR surprise OR comeback) when:7d',
+        'India cricket (women OR domestic OR Ranji OR U19) (young OR emerging OR breakout) when:7d',
     ),
     "social": (
-        'India cricket reactions statements controversy debate fans when:3d',
-        'India cricket player coach said comments response when:3d',
-        'India cricket social media reaction viral when:3d',
+        'India cricket (reaction OR reactions OR statement OR debate OR controversy OR fans) when:3d',
+        'India cricket (player OR coach OR former) (said OR comments OR response OR praised OR slammed) when:3d',
+        'India cricket (social media OR viral) (reaction OR controversy OR player OR fans) when:3d',
     ),
 }
 GLOBAL_PROFILE_QUERIES = {
@@ -780,8 +780,6 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
         return not social_first and not emerging_first
 
     # Fill each editorial lane only from candidates that actually belong there.
-    # This prevents the highest-scoring novelty stories from consuming NEWS or
-    # SOCIAL simply because another lane was evaluated first.
     for bucket in ("news", "viral", "social"):
         for _ in range(quotas[bucket]):
             available = [x for x in candidates if id(x) not in used]
@@ -797,6 +795,25 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
             row["bucket_score"] = float(row.get(f"{bucket}_score") or 0)
             row["discovery_profiles"] = list(row.get("discovery_profiles") or ["news"])
             selected.append(row)
+
+    # A sparse specialized lane must not hide otherwise valid current stories.
+    # Remaining candidates that genuinely belong to NEWS fill the unused pool;
+    # they are not re-labeled as NEWS when they are clearly emerging/social-first.
+    if len(selected) < min(limit, len(candidates)):
+        remaining = [
+            x for x in candidates
+            if id(x) not in used and bucket_eligible(x, "news")
+        ]
+        remaining.sort(key=lambda x: score(x, "news"), reverse=True)
+        for candidate in remaining:
+            row = dict(candidate)
+            row["discovery_bucket"] = "news"
+            row["bucket_score"] = float(row.get("news_score") or 0)
+            row["discovery_profiles"] = list(row.get("discovery_profiles") or ["news"])
+            selected.append(row)
+            used.add(id(candidate))
+            if len(selected) >= limit:
+                break
     return selected[:limit]
 
 def discover_sports_topics(bot, conn=None, scope="India / Asia", requested_topic="", max_candidates=60, retained_candidates=None):
