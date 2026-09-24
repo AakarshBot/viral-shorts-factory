@@ -264,6 +264,10 @@ def patch_content_first_visuals(bot):
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
         article_source_assets = await _load_news_source_image_pool(bot, active_config)
+    print(
+        f"   [News Source Image Pool] final scrape candidates={len(article_source_assets)}.",
+        flush=True,
+    )
         article_source_materialized = []
         article_source_hashes: set[str] = set()
         if article_source_assets:
@@ -284,6 +288,7 @@ def patch_content_first_visuals(bot):
                 asset.setdefault("subject", article_subject)
                 asset["manual_query_index"] = 0
                 asset["pool_origin"] = "article-source"
+                asset["provenance_status"] = "provenance-review"
                 image_hash = str(asset.get("hash") or "").strip()
                 if image_hash:
                     article_source_hashes.add(image_hash)

@@ -2067,10 +2067,29 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
 
     st.markdown("### Available manual-search images")
+    article_source_pool = [
+        item for item in available
+        if str(item.get("pool_origin") or "").strip() == "article-source"
+        or str(item.get("source_type") or "").strip() == "news_source"
+        or str(item.get("source") or "").strip() == "news_source"
+    ]
+    manual_verified_pool = [
+        item for item in available
+        if item not in article_source_pool
+    ]
+
+    render_pool_section(
+        "Source-website images",
+        "Images scraped directly from the selected article page. They are provenance-review items, so the source and copyright warning stay visible for your manual decision.",
+        article_source_pool,
+        "article",
+    )
+
+    st.markdown("### AI-verified manual-search images")
     render_pool_section(
         "Manual-search image pool",
-        "All identity-checked pool images are shown here. Already-assigned images stay visible and are marked with the slide using them.",
-        available,
+        "Identity-verified images returned from the factory's searchable visual sources. Already-assigned images stay visible and are marked with the slide using them.",
+        manual_verified_pool,
         "verified",
     )
 

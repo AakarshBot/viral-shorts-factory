@@ -1208,6 +1208,70 @@ def collect_manual_visual_pool(
             if image_url:
                 seen_image_urls.add(image_url)
 
+        # When the exact manual query produces too few verified images, make one
+        # deterministic entity+context refinement before moving on. This keeps
+        # the manual term authoritative while giving sparse person searches
+        # another chance to return action/context photos without extra search loops.
+        if verified_for_query < target:
+            best_scene = None
+            best_overlap = -1
+            query_tokens = {
+                token.casefold()
+                for token in re.findall(r"[\w-]+", exact_query)
+                if len(token) > 2
+            }
+            for scene in scenes or []:
+                if not isinstance(scene, dict):
+                    continue
+                scene_tokens = {
+                    token.casefold()
+                    for token in re.findall(r"[\w-]+", _manual_scene_text(scene))
+                    if len(token) > 2
+                }
+                overlap = len(query_tokens & scene_tokens)
+                if overlap > best_overlap:
+                    best_scene = scene
+                    best_overlap = overlap
+            refined_query = _scene_refinement_query(
+                best_scene or {"visual_intent": "cricket action"},
+                entity_anchor,
+            )
+            if refined_query and refined_query.casefold() != exact_query.casefold():
+                try:
+                    refined_result = collect_manual_visual_search(
+                        runtime,
+                        bot,
+                        refined_query,
+                        video_title=video_title,
+                        used_hashes=seen_hashes,
+                        used_source_image_urls=seen_image_urls,
+                        search_round=1,
+                    )
+                    refined_assets = list(refined_result.get("assets") or [])
+                except Exception as exc:
+                    refined_assets = []
+                    print(
+                        f"   [Manual Visual Pool] refinement failed safely: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                remaining = max(0, target - verified_for_query)
+                for asset in refined_assets[:remaining]:
+                    asset["manual_query_index"] = query_index
+                    asset["pool_origin"] = f"manual:{query_index}:refinement"
+                    assets.append(dict(asset))
+                    image_hash = str(asset.get("hash") or "").strip()
+                    if image_hash:
+                        seen_hashes.add(image_hash)
+                    image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
+                    if image_url:
+                        seen_image_urls.add(image_url)
+                    verified_for_query += 1
+                if refined_assets:
+                    qa_requests += int(
+                        len(refined_assets) > 0
+                    )
+
         query_stats.append(
             {
                 "query": exact_query,

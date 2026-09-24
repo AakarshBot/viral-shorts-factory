@@ -384,6 +384,58 @@ def _store(url: str, data: bytes, metadata: dict[str, str]) -> None:
         pass
 
 
+def fetch_direct_source_image(
+    image_url: str,
+    page_url: str = "",
+    publisher_hint: str = "",
+) -> dict[str, Any] | None:
+    """Fetch one already-discovered story image as a source-page fallback."""
+    clean_url = _clean(image_url)
+    if urlparse(clean_url).scheme not in {"http", "https"}:
+        return None
+    try:
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 Chrome/151.0 Safari/537.36 "
+                    "ViralShortsFactory/3.1 (+article-image-pool)"
+                )
+            }
+        )
+        data, final_url = _download_image(session, clean_url, _clean(page_url))
+        if not data or not _valid_image(data):
+            return None
+        page = _clean(page_url) or final_url or clean_url
+        publisher = _clean(publisher_hint) or (urlparse(page).netloc or "News source").removeprefix("www.")
+        content_key = hashlib.sha256(data).hexdigest()
+        return {
+            "bytes": data,
+            "hash": content_key,
+            "image_url": final_url or clean_url,
+            "page_url": page,
+            "publisher": publisher,
+            "credit": f"Source: {publisher}",
+            "method": "story-image-fallback",
+            "source": "news_source",
+            "source_type": "news_source",
+            "query": "article source",
+            "status": "article-source",
+            "provenance_status": "provenance-review",
+            "used": False,
+            "provenance": {
+                "provider": publisher,
+                "url": final_url or clean_url,
+                "author": publisher,
+                "license": "Unverified article-source license",
+                "license_url": page,
+            },
+        }
+    except (requests.RequestException, OSError, ValueError):
+        return None
+
+
 def extract_news_source_images(
     article_url: str,
     publisher_hint: str = "",
@@ -487,7 +539,7 @@ def extract_news_source_images(
     return output
 
 
-__all__ = ["extract_news_source_images", "_ArticleImageParser", "_candidate_urls", "_publisher"]
+__all__ = ["extract_news_source_images", "fetch_direct_source_image", "_ArticleImageParser", "_candidate_urls", "_publisher"]
 
 
 

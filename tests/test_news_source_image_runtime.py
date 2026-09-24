@@ -66,6 +66,42 @@ def test_no_non_http_image_candidate():
     assert _candidate_urls(parser, "https://example.com/story") == []
 
 
+def test_direct_source_image_fallback_returns_article_image(monkeypatch):
+    import news_source_image_runtime as module
+
+    image_bytes = _jpeg_bytes((900, 1200), "white")
+
+    class Response:
+        url = "https://example.com/images/lead.jpg"
+        headers = {"content-type": "image/jpeg"}
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, _chunk_size):
+            yield image_bytes
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, _url, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(module.requests, "Session", Session)
+
+    asset = module.fetch_direct_source_image(
+        "https://example.com/images/lead.jpg",
+        "https://example.com/story",
+        "Example News",
+    )
+
+    assert asset is not None
+    assert asset["source_type"] == "news_source"
+    assert asset["provenance_status"] == "provenance-review"
+    assert asset["image_url"] == "https://example.com/images/lead.jpg"
+
+
 def test_extract_news_source_images_returns_multiple_direct_images(monkeypatch, tmp_path):
     import news_source_image_runtime as module
 

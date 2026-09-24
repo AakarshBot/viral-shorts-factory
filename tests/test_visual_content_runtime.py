@@ -387,6 +387,14 @@ def test_manual_rights_review_assets_are_not_written_to_verified_cache():
     assert "Rights-review images remain available to the human QC pool" in block
 
 
+def test_article_source_pool_is_marked_for_provenance_review():
+    source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
+    start = source.index("for asset in article_source_materialized:")
+    end = source.index("print(", start)
+    block = source[start:end]
+    assert 'asset["provenance_status"] = "provenance-review"' in block
+
+
 def test_global_manual_queries_remain_available_as_fallback():
     from manual_visual_query_runtime import assign_manual_queries
 
