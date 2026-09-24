@@ -45,14 +45,14 @@ def _contract_scene(text, role):
     }
 
 
-def test_validate_script_rejects_beyond_safety_ceiling():
+def test_validate_script_does_not_apply_a_total_word_ceiling():
     script = {
         "editorial_angle": "This explains the development and practical consequence.",
         "titles": ["India policy update", "India confirms the change", "What the change means"],
         "recommended_title_index": 1,
         "script": [
             _contract_scene("India confirmed the change.", "hook"),
-            _contract_scene(" ".join(["word"] * 90), "development"),
+            _contract_scene(" ".join(["word"] * 100), "development"),
         ],
     }
     valid, reason = validate_script(
@@ -60,8 +60,8 @@ def test_validate_script_rejects_beyond_safety_ceiling():
         "India confirmed a major change in policy.",
         "regular",
     )
-    assert valid is False
-    assert "maximum is 90" in reason
+    assert valid is True, reason
+
 
 
 def test_validate_script_accepts_complete_four_scene_story():
@@ -90,8 +90,10 @@ def test_writer_contract_has_initial_duration_limits():
 
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
     assert "Regular Shorts contain 4–5 scenes and the whole important story." in source
-    assert "Target 16–30 seconds naturally; maximum 30 seconds." in source
-    assert "Never pad merely to reach 16 seconds." in source
+    assert "Target about 22–27 seconds of natural narration; hard maximum 30 seconds." in source
+    assert "Scene 1: target 10–12 words, hard maximum 14." in source
+    assert "Before returning JSON, silently preflight:" in source
+    assert "Make narration materially original" in source
     assert "Use as many scenes as the story genuinely needs" not in source
     assert "_duration_tighten_script" in source
 
