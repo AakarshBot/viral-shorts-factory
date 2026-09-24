@@ -677,7 +677,7 @@ class DashboardWorkflowController(WorkflowController):
             if query:
                 scene["manual_visual_query"] = query
                 scene["manual_visual_query_source"] = "dashboard_slide"
-            else:
+            elif not scene.get("human_visual_metadata_override"):
                 scene.pop("manual_visual_query", None)
                 scene.pop("manual_visual_query_score", None)
                 scene.pop("manual_visual_query_index", None)
