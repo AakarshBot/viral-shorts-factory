@@ -2023,6 +2023,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if query and not credit:
                             caption += f" · {query}"
                         st.caption(caption)
+                        provenance_state = str(
+                            asset.get("provenance_status") or "commercial-verified"
+                        ).strip()
                         if provenance_state != "commercial-verified":
                             st.markdown(
                                 "<div style='color:#d62728;font-weight:700;font-size:.78rem;"
