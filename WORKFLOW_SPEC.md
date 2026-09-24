@@ -14,12 +14,12 @@ The dashboard is a newsroom-style production system. Discovery and production ar
 - Cheap filtering and deduplication happen first.
 - Safety/problematic-content filtering is mandatory.
 - Compare against channel history when available.
-- Produce exactly 3 strong, diverse candidates.
-- Show candidate title/topic, why it was selected, source summary and score dimensions.
+- Produce a ranked pool of up to 60 current candidates for the selected lane; diversity ranking keeps multiple subjects available.
+- Show candidate title/topic, why it was surfaced, source summary and score dimensions.
 - No script/audio/image/render/upload API calls before user selects one candidate.
 
 ## Stage 3 — User story selection
-- User selects one of the 3 candidates.
+- User selects one story from the ranked candidate pool.
 - Rejected candidates are retained locally as rejected/seen to reduce repeat selection.
 
 ## Stage 4 — Research + script

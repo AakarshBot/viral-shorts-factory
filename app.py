@@ -449,11 +449,11 @@ def _remote_startup_guard() -> None:
         st.stop()
     if not any(
         str(os.getenv(name, "")).strip()
-        for name in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
+        for name in ("GEMINI_API_KEY", "GROQ_API_KEY")
     ):
         st.error(
             "Remote mode is enabled, but no script-generation provider key is configured. "
-            "Add GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY to Streamlit Secrets."
+            "Add GEMINI_API_KEY or GROQ_API_KEY to Streamlit Secrets."
         )
         st.stop()
 

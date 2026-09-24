@@ -9,8 +9,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict
 
-from evidence_runtime import DEFAULT_MAX_SOURCES, build_evidence_pack, discover_sources, format_evidence_pack_for_script
-from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA, choose_editorial_angle
+from script_runtime import SCRIPT_OUTPUT_JSON_SCHEMA
 
 
 def _clean(value: Any) -> str:
@@ -328,50 +327,6 @@ def _call_chat_completion(
         raise RuntimeError(f"{provider_name} request failed: {type(exc).__name__}; falling through to the next provider.") from exc
     except Exception as exc:
         raise RuntimeError(f"{provider_name} failed: {type(exc).__name__}: {exc}") from exc
-
-
-def _openrouter_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, Any], genre_key: str, format_mode: str):
-
-    api_key = _clean(os.getenv("OPENROUTER_API_KEY"))
-    source_text = _script_evidence_text(story_data)
-    if not api_key:
-        raise RuntimeError("OpenRouter free unavailable: OPENROUTER_API_KEY is not configured.")
-    if not source_text:
-        raise RuntimeError("OpenRouter free unavailable: script evidence text is empty.")
-    payload = {
-        "model": "openrouter/free",
-        "messages": [
-            {"role": "system", "content": _fallback_prompt(language_cfg, format_mode, story_data)},
-            {"role": "user", "content": "PHASE 2 EVIDENCE PACK:\n" + source_text},
-        ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "viral_shorts_script",
-                "strict": True,
-                "schema": SCRIPT_OUTPUT_JSON_SCHEMA,
-            },
-        },
-        "provider": {
-            "require_parameters": True,
-        },
-        "temperature": 0.2,
-        "max_tokens": 900,
-    }
-    return _call_chat_completion(
-        "https://openrouter.ai/api/v1/chat/completions",
-        payload,
-        {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/AakarshBot/viral-shorts-factory",
-            "X-Title": "Viral Shorts Factory",
-        },
-        45,
-        story_data,
-        format_mode,
-        "openrouter/free",
-    )
 
 
 def _ollama_script_fallback(story_data: Dict[str, Any], language_cfg: Dict[str, Any], genre_key: str, format_mode: str):

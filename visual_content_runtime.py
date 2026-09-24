@@ -10,100 +10,12 @@ has been exhausted.
 import io
 import os
 import re
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from branding_runtime import source_credit_for_type
 from manual_visual_query_runtime import parse_manual_visual_queries
 from visual_licensing_runtime import provenance, rescue_provenance
 from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
-
-
-def _load_brand_font(bot, size, custom_font_name=None):
-    try:
-        resolver = getattr(bot, "get_bold_font", None)
-        if callable(resolver):
-            return resolver(int(size), custom_font_name)
-    except Exception:
-        pass
-
-    paths = []
-    if custom_font_name:
-        paths.extend([str(custom_font_name), os.path.join("/usr/share/fonts/truetype", str(custom_font_name))])
-    paths.extend([
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-        r"C:\Windows\Fonts\segoeprb.ttf",
-        r"C:\Windows\Fonts\arialbd.ttf",
-    ])
-    for path in paths:
-        if os.path.isfile(path):
-            try:
-                return ImageFont.truetype(path, int(size))
-            except Exception:
-                continue
-    return ImageFont.load_default()
-
-
-def _text_size(draw, text, font):
-    try:
-        left, top, right, bottom = draw.textbbox((0, 0), str(text), font=font)
-        return max(1, right - left), max(1, bottom - top)
-    except Exception:
-        try:
-            return max(1, int(draw.textlength(str(text), font=font))), max(1, getattr(font, "size", 20))
-        except Exception:
-            return max(1, len(str(text)) * 10), max(1, getattr(font, "size", 20))
-
-
-def _render_hook_card(bot, image, hook_text, font_name=None):
-    canvas = image.convert("RGBA")
-    width, height = canvas.size
-    accent = tuple(getattr(bot, "PALETTE", {}).get("accent_primary", (0, 191, 255)))
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    draw.rectangle([24, 24, width - 24, 30], fill=accent + (180,))
-
-    font_body, wrapped_lines = _fit_hook_text(bot, hook_text, font_name, width - 140)
-    line_heights = []
-    for line in wrapped_lines:
-        bbox = draw.textbbox((0, 0), line, font=font_body)
-        line_heights.append(max(1, bbox[3] - bbox[1]))
-
-    line_gap = 18
-    total_h = sum(line_heights) + line_gap * max(0, len(wrapped_lines) - 1)
-    y = max(180, (height - total_h) / 2)
-
-    for line, line_h in zip(wrapped_lines, line_heights):
-        bbox = draw.textbbox((0, 0), line, font=font_body)
-        text_w = bbox[2] - bbox[0]
-        x = (width - text_w) / 2
-        draw.text((x + 8, y + 8), line, font=font_body, fill=(0, 0, 0, 210), stroke_width=8, stroke_fill=(0, 0, 0, 180))
-        draw.text((x, y), line, font=font_body, fill=accent + (250,), stroke_width=5, stroke_fill=(0, 0, 0, 245))
-        y += line_h + line_gap
-
-    return Image.alpha_composite(canvas, overlay)
-
-
-def _fit_hook_text(bot, text, font_name, max_width):
-    text = str(text or "").strip() or "THIS STORY MATTERS"
-    for size in range(92, 44, -4):
-        font = _load_brand_font(bot, size, font_name)
-        lines = []
-        current = ""
-        draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-        for word in text.split():
-            candidate = f"{current} {word}".strip()
-            if not current or draw.textbbox((0, 0), candidate, font=font)[2] <= max_width:
-                current = candidate
-            else:
-                lines.append(current)
-                current = word
-        if current:
-            lines.append(current)
-        if lines and len(lines) <= 5:
-            return font, lines
-    font = _load_brand_font(bot, 44, font_name)
-    return font, [text]
 
 
 async def _load_news_source_image_pool(bot, active_config):

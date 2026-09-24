@@ -211,8 +211,7 @@ def test_visual_process_resets_qa_state_for_run_and_each_scene(monkeypatch, tmp_
     assert calls["run"] == 1
     assert calls["scene"] == 3
 
-def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
-    calls = []
+def test_deep_dive_first_slide_uses_content_first_visual(monkeypatch, tmp_path):
     bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
 
     monkeypatch.setattr(
@@ -224,15 +223,6 @@ def test_deep_dive_first_slide_skips_hook_card(monkeypatch, tmp_path):
     monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
     monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "PERSON")
     monkeypatch.setattr(visual_retrieval_runtime, "make_visual_rescue", lambda *args, **kwargs: bg.copy())
-
-    def fail_hook(*args, **kwargs):
-        raise AssertionError("Deep Dive must never use the first-slide hook-card renderer")
-
-    def standard_overlay(*args, **kwargs):
-        calls.append("scene_overlay")
-        return args[1]
-
-    monkeypatch.setattr(content_runtime, "_render_hook_card", fail_hook)
 
     bot = _fake_bot(tmp_path)
     script_data = {
@@ -272,7 +262,6 @@ def test_top5_first_slide_keeps_dedicated_design(monkeypatch, tmp_path):
         "_render_image_slide",
         lambda *args, **kwargs: calls.append("top5_intro") or args[1],
     )
-    monkeypatch.setattr(content_runtime, "_render_hook_card", lambda *args, **kwargs: calls.append("hook") or args[1])
 
     bot = _fake_bot(tmp_path)
     script_data = {
@@ -286,7 +275,6 @@ def test_top5_first_slide_keeps_dedicated_design(monkeypatch, tmp_path):
     packages = _run_process(bot, script_data, "top5")
 
     assert calls[0] == "top5_intro"
-    assert "hook" not in calls
     assert packages[0][0]["text"] == ""
     assert packages[1][0]["text"] == ""
 
