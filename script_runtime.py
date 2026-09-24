@@ -254,10 +254,8 @@ NARRATION_IDEAL_MIN_SECONDS = 16.0
 NARRATION_IDEAL_MAX_SECONDS = 30.0
 NARRATION_ACCEPTABLE_MAX_SECONDS = 30.0
 
-# Word count is a safety ceiling, not the duration contract.
-# The real acceptance constraint is spoken duration; modestly longer drafts can
-# be tightened once before manual review instead of being discarded prematurely.
-INITIAL_SCRIPT_MAX_WORDS = 90
+# Scene 1 keeps a compact spoken opener; total narration is governed by
+# duration estimation and authoritative TTS measurement rather than a word cap.
 SCENE_1_MAX_WORDS = 14
 
 # Provider-facing schema shared by the primary and fallback writers.
@@ -1112,7 +1110,7 @@ def assess_release_structure(script_data, format_mode="regular"):
     return True, "Narrative structure is production-ready.", assessment
 
 def validate_content_density(script_data, story_data, format_mode, require_visual_metadata=False):
-    """Minimal narration gate; duration is authoritative and word count is only a safety ceiling."""
+    """Minimal narration gate; spoken duration is enforced by estimation/TTS, with only the Scene 1 cap kept here."""
     if not isinstance(script_data, dict):
         return False, "Script is missing."
     scenes = script_data.get("script")
@@ -1135,13 +1133,6 @@ def validate_content_density(script_data, story_data, format_mode, require_visua
                 return False, f"Scene {index} is missing a supported primary entity."
             if not str(scene.get("specific_search_prompt") or "").strip():
                 return False, f"Scene {index} is missing a specific visual search prompt."
-
-    total_words = sum(word_counts)
-    if total_words > INITIAL_SCRIPT_MAX_WORDS:
-        return False, (
-            f"Narration exceeds the safety ceiling: {total_words} words; "
-            f"maximum is {INITIAL_SCRIPT_MAX_WORDS}."
-        )
 
     if word_counts:
         first_words = word_counts[0]
