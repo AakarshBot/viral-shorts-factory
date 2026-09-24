@@ -106,7 +106,7 @@ def _fit_hook_text(bot, text, font_name, max_width):
     return font, [text]
 
 
-def _load_news_source_image_pool(bot, active_config):
+async def _load_news_source_image_pool(bot, active_config):
     """Fetch static images from the selected article for manual dashboard QC only."""
     selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else None
     if not isinstance(selected_story, dict):
