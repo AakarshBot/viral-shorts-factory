@@ -68,7 +68,7 @@ _POLICIES = {
         "A specific person's portrait or headshot.",
     ),
     "PERSON_ACTION": VisualGenrePolicy(
-        ("Commons", "Wikipedia", "DDG", "Pexels", "Unsplash", "Openverse", "Pixabay"),
+        ("Commons", "DDG", "Openverse", "Wikipedia", "Pexels", "Unsplash", "Pixabay"),
         (),
         ("Wikipedia:person", "Commons:person"),
         False,
