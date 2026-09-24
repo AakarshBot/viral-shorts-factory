@@ -1403,10 +1403,13 @@ class DashboardWorkflowController(WorkflowController):
 
         with self._lock:
             self._visual_manual_approved.add(index)
+            # Human approval is the final visual decision after entity QA.
             layer["human_visual_approved"] = True
-            layer["human_visual_qc_override"] = bool(
-                not layer.get("visual_verified") or layer.get("visual_qc_blocked")
-            )
+            layer["human_visual_qc_override"] = True
+            layer["visual_verified"] = True
+            layer["visual_qc_blocked"] = False
+            layer["visual_qc_block_reason"] = ""
+            layer["visual_rights_human_approved"] = True
             total = len(packages)
             approved = len(self._visual_manual_approved.intersection(range(1, total + 1)))
         return True, f"Slide {index} manually approved ({approved}/{total})."

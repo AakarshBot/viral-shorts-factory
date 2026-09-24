@@ -1952,6 +1952,33 @@ def test_script_review_rejects_scene_count_change():
     assert controller._manual_gate_state["script_event"].is_set() is False
 
 
+
+
+def test_manual_visual_approval_overrides_remaining_visual_blocks(tmp_path):
+    controller = DashboardWorkflowController(_Bot())
+    controller.state.stage = "visual_approval"
+    image = tmp_path / "review.jpg"
+    image.write_bytes(b"image")
+    controller._visual_packages = [[{
+        "image": str(image),
+        "visual_verified": True,
+        "visual_qc_blocked": True,
+        "visual_qc_block_reason": "Image provenance/license is not automatically verified.",
+        "asset_provenance": {"provider": "Openverse", "license": ""},
+    }]]
+    controller._ensure_manual_gate_state()
+
+    ok, message = controller.approve_visual(1)
+
+    assert ok, message
+    layer = controller._visual_packages[0][0]
+    assert layer["human_visual_approved"] is True
+    assert layer["human_visual_qc_override"] is True
+    assert layer["visual_verified"] is True
+    assert layer["visual_qc_blocked"] is False
+    assert layer["visual_qc_block_reason"] == ""
+    assert layer["visual_rights_human_approved"] is True
+
 def test_visual_approval_is_fail_closed_in_controller(tmp_path):
     controller = DashboardWorkflowController(_Bot())
     controller.state.stage = "visual_approval"

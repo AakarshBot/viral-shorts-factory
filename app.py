@@ -2023,6 +2023,14 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if query and not credit:
                             caption += f" · {query}"
                         st.caption(caption)
+                        if provenance_state != "commercial-verified":
+                            st.markdown(
+                                "<div style='color:#d62728;font-weight:700;font-size:.78rem;"
+                                "letter-spacing:.02em;margin:2px 0 8px'>"
+                                "⚠ COULD CONTAIN COPYRIGHT ISSUES"
+                                "</div>",
+                                unsafe_allow_html=True,
+                            )
                         choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
                         target_key = f"pool_target_{run_id}_{section_key}_{asset_hash[:12]}"
                         target = st.selectbox(
@@ -2121,6 +2129,14 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if provenance_state == "provenance-review":
                             caption += " · licence review"
                         st.caption(caption)
+                        if provenance_state != "commercial-verified":
+                            st.markdown(
+                                "<div style='color:#d62728;font-weight:700;font-size:.78rem;"
+                                "letter-spacing:.02em;margin:2px 0 8px'>"
+                                "⚠ COULD CONTAIN COPYRIGHT ISSUES"
+                                "</div>",
+                                unsafe_allow_html=True,
+                            )
                         used = bool(asset.get("used"))
                         if used:
                             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")

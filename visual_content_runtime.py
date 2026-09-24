@@ -315,7 +315,7 @@ def patch_content_first_visuals(bot):
                 used_hashes=manual_search_hashes,
                 pool_target=remaining_pool_target,
                 allow_auto_backfill=False,
-                verify_with_ai=False,
+                verify_with_ai=True,
             )
             for asset in manual_pool_result.get("assets") or []:
                 if str(asset.get("provenance_status") or "").strip() != "commercial-verified":

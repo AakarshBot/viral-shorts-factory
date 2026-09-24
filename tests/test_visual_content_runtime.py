@@ -401,3 +401,11 @@ def test_global_manual_queries_remain_available_as_fallback():
 
     assert assignments[0]["query"] == "India Afghanistan cricket match"
     assert assignments[1]["query"] == "Shubman Gill batting"
+
+
+def test_manual_production_pool_keeps_gemini_entity_qa_enabled():
+    source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
+    start = source.index("manual_pool_result = collect_manual_visual_pool(")
+    end = source.index("manual_pool_materialized =", start)
+    block = source[start:end]
+    assert "verify_with_ai=True" in block
