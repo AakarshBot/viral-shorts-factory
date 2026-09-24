@@ -229,10 +229,48 @@ def test_bucket_uses_content_signals_even_when_profile_is_news():
     result = desk._diversify_events(events, limit=3)
     buckets = {item["event_identity_key"]: item["discovery_bucket"] for item in result}
 
-    assert buckets["social-signal"] == "social"
-    assert buckets["viral-signal"] == "viral"
+    assert buckets["social-signal"] == "news"
+    assert buckets["viral-signal"] == "news"
     assert buckets["news-signal"] == "news"
 
+
+
+def test_discovery_buckets_follow_profile_lane():
+    events = [
+        {
+            "title": "Confirmed cricket selection update",
+            "event_identity_key": "news-first",
+            "discovery_profiles": ["news"],
+            "news_score": 80,
+            "viral_score": 10,
+            "social_score": 5,
+        },
+        {
+            "title": "Uncapped player makes breakthrough debut",
+            "event_identity_key": "emerging-first",
+            "discovery_profiles": ["emerging"],
+            "news_score": 20,
+            "viral_score": 80,
+            "social_score": 5,
+        },
+        {
+            "title": "Fans debate surprise selection",
+            "event_identity_key": "social-first",
+            "discovery_profiles": ["social"],
+            "news_score": 10,
+            "viral_score": 30,
+            "social_score": 80,
+        },
+    ]
+
+    result = desk._diversify_events(events, limit=3)
+    buckets = {item["event_identity_key"]: item["discovery_bucket"] for item in result}
+
+    assert buckets == {
+        "news-first": "news",
+        "emerging-first": "viral",
+        "social-first": "social",
+    }
 
 
 def test_confirmed_event_with_social_reactions_stays_out_of_social_bucket():
