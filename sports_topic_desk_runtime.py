@@ -312,6 +312,15 @@ def _source_local_date(text, now=None):
         unit = relative.group(2)
         candidates.append(amount / 60.0 if unit.startswith("min") else amount if unit.startswith("h") else amount * 24.0)
 
+    # Some official sports pages render compact relative timestamps such as
+    # "11h" or "1d" instead of "11 hours ago". Accept that form for direct
+    # listing recovery without weakening the absolute-date parsing above.
+    compact = re.search(r"(?<!\d)(\d{1,3})\s*(m|min|h|hr|d|day)\b", value.casefold())
+    if compact:
+        amount = float(compact.group(1))
+        unit = compact.group(2)
+        candidates.append(amount / 60.0 if unit.startswith(("m", "min")) else amount if unit.startswith(("h", "hr")) else amount * 24.0)
+
     valid = [age for age in candidates if age <= LOOKBACK_HOURS]
     return min(valid) if valid else None
 
