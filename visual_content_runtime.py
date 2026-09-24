@@ -256,6 +256,7 @@ def patch_content_first_visuals(bot):
             materialize_manual_visual_pool,
             materialize_visual_bank,
             select_manual_visual_candidate,
+            MANUAL_POOL_TARGET,
         )
         from visual_entity_grounding_runtime import apply_grounding
     except Exception as exc:
@@ -358,6 +359,18 @@ def patch_content_first_visuals(bot):
             article_source_materialized = materialize_manual_visual_pool(
                 bot, article_source_assets, pool_id=article_pool_id
             )
+            article_subject = next(
+                (
+                    str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
+                    for scene in scenes
+                    if str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
+                ),
+                "Selected story",
+            )
+            for asset in article_source_materialized:
+                asset.setdefault("subject", article_subject)
+                asset["manual_query_index"] = 0
+                asset["pool_origin"] = "article-source"
             print(
                 f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
                 flush=True,
@@ -369,11 +382,12 @@ def patch_content_first_visuals(bot):
 
         manual_pool_result = None
         manual_pool_materialized = []
-        manual_available_pool = []
+        manual_available_pool = [dict(item) for item in article_source_materialized]
         if manual_queries:
             # This is an explicit human-QC workflow. Do not make dashboard entry
             # depend on a remote Gemini identity verdict; candidates stay labelled
             # unverified until the reviewer approves the visual package.
+            remaining_pool_target = max(1, MANUAL_POOL_TARGET - len(article_source_materialized))
             manual_pool_result = collect_manual_visual_pool(
                 visual_runtime,
                 bot,
@@ -381,6 +395,7 @@ def patch_content_first_visuals(bot):
                 manual_queries,
                 video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
                 used_hashes=used_hashes,
+                pool_target=remaining_pool_target,
                 allow_auto_backfill=False,
                 verify_with_ai=False,
             )
@@ -413,9 +428,9 @@ def patch_content_first_visuals(bot):
                 manual_pool_result.get("assets") or [],
                 pool_id=hash(";".join(manual_queries)) & 0xffffffff,
             )
-            manual_available_pool = [dict(item) for item in manual_pool_materialized]
+            manual_available_pool.extend(dict(item) for item in manual_pool_materialized)
             script_data["visual_manual_queries"] = list(manual_queries)
-            script_data["visual_manual_pool_size"] = len(manual_pool_materialized)
+            script_data["visual_manual_pool_size"] = len(manual_available_pool)
             script_data["visual_manual_pool_query_stats"] = list(
                 manual_pool_result.get("query_stats") or []
             )
@@ -448,7 +463,7 @@ def patch_content_first_visuals(bot):
                 bg_img = Image.open(selected_path).convert("RGB")
                 used_ai = False
                 source_type = str(manual_selected.get("source") or "manual-pool")
-                source_credit = source_credit_for_type(source_type)
+                source_credit = str(manual_selected.get("credit") or "").strip() or source_credit_for_type(source_type)
                 selected_status = str(manual_selected.get("status") or "").strip()
                 selected_is_verified = selected_status in {"entity-verified", "factory-rejected-resolution", "new-search-ai-verified"}
                 seg["visual_verified"] = selected_is_verified
@@ -460,6 +475,7 @@ def patch_content_first_visuals(bot):
                 seg["manual_visual_query"] = "; ".join(manual_queries)
                 seg["manual_visual_query_mode"] = True
                 seg["asset_provenance"] = dict(manual_selected.get("provenance") or {})
+                seg["source_image_url"] = str(manual_selected.get("source_image_url") or "").strip()
                 seg["visual_original_path"] = selected_path
                 seg["visual_asset_bank"] = []
                 seg["visual_selected_scene_score"] = 0.0
@@ -600,7 +616,7 @@ def patch_content_first_visuals(bot):
                 "manual_visual_query": seg.get("manual_visual_query", ""),
                 "manual_visual_query_score": seg.get("manual_visual_query_score", 0),
                 "source_credit": source_credit,
-                "source_image_url": news_source_candidate.get("image_url", "") if source_type == "news_source" and isinstance(news_source_candidate, dict) else "",
+                "source_image_url": str(seg.get("source_image_url") or "").strip(),
                 "asset_provenance": dict(seg.get("asset_provenance") or {}),
                 "visual_asset_bank": (
                     []
