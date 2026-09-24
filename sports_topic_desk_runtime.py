@@ -22,13 +22,14 @@ LOOKBACK_HOURS = 48
 MAX_DASHBOARD_HEADLINES = 60
 PER_BUCKET = 20
 REQUEST_TIMEOUT = 4.0
-DISCOVERY_TIMEOUT = 7.0
+DISCOVERY_TIMEOUT = 5.5
 SECONDARY_TIMEOUT = 2.5
 SOURCE_TIMEOUT = REQUEST_TIMEOUT
 SECONDARY_REQUEST_TIMEOUT = SECONDARY_TIMEOUT
 GOOGLE_RESULT_LIMIT = 25
 DIRECT_RESULT_LIMIT = 30
-ICC_RSS_URL = "https://www.icc-cricket.com/index?feed=rss2"
+PRIMARY_QUERIES_PER_PROFILE = 1
+RECOVERY_MIN_RAW_ROWS = 12
 SPORTS_RSS_URL = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en"
 
 # Three retrieval profiles are the architecture. They are not three ranking hacks:
@@ -69,7 +70,7 @@ GLOBAL_PROFILE_QUERIES = {
 }
 NICHE_PROFILE_QUERIES = {
     "news": (
-        'India football soccer (ISL OR I-League OR national team) latest result transfer coach record controversy when:3d',
+        'India sports (football OR soccer OR tennis OR badminton OR hockey OR athletics OR shooting OR wrestling OR boxing OR motorsport OR golf OR kabaddi OR chess) latest result record medal qualification controversy when:3d',
         'India (tennis OR badminton OR table tennis OR squash) latest result record injury retirement selection tournament when:3d',
         'India (hockey OR athletics OR shooting OR archery OR wrestling OR boxing) latest result medal record qualification controversy when:3d',
     ),
@@ -629,40 +630,20 @@ def _collect(scope="India / Asia"):
     key = _clean(scope).casefold()
     jobs = []
 
-    # Exactly one small request set per editorial profile. Search engines provide
-    # breadth; curated feeds provide reliable specialist coverage; social sources
-    # provide reaction-led leads. Nothing else is required for normal discovery.
+    # Normal discovery is deliberately tiny: one broad Google News request per
+    # editorial lane. The three lanes provide breadth without creating a network
+    # burst that can make a hosted Streamlit worker stall.
     for profile, queries in profiles.items():
-        for query in queries:
+        for query in list(queries)[:PRIMARY_QUERIES_PER_PROFILE]:
             jobs.append((f"Google:{profile}", _google_search, (query, profile, scope), {}))
-
-    if key == "niche sports":
-        jobs.append(("Sports RSS", sr._rss_items, (SPORTS_RSS_URL, "sports", "rss", 40), {"timeout": REQUEST_TIMEOUT}))
-    elif key == "global":
-        jobs.append(("ICC RSS", sr._rss_items, (ICC_RSS_URL, "sports_stories_of_day", "official", 35), {"timeout": REQUEST_TIMEOUT}))
-        for name, url in GLOBAL_CRICKET_SOURCES:
-            jobs.append((name, _direct_listing_source, (name, url), {}))
-    else:
-        jobs.append(("ICC RSS", sr._rss_items, (ICC_RSS_URL, "sports_stories_of_day", "official", 35), {"timeout": REQUEST_TIMEOUT}))
-        for name, url in DIRECT_CRICKET_SOURCES:
-            jobs.append((name, _direct_listing_source, (name, url), {}))
-
-    if key == "india / asia":
-        jobs.extend([
-            ("Reddit r/Cricket", _reddit_search, ("Cricket", "India cricket"), {}),
-            ("Reddit r/IndiaCricket", _reddit_search, ("IndiaCricket", "India cricket"), {}),
-            ("Bluesky", _bluesky, ('"India cricket"',), {}),
-        ])
-    elif key == "global":
-        jobs.append(("Bluesky", _bluesky, ("cricket",), {}))
-
-    trend_geo = "IN" if key != "global" else "GB"
-    jobs.append(("Google Trends", sr._google_trends_items, (trend_geo, 20), {"timeout": SECONDARY_TIMEOUT}))
 
     rows = []
     counts = {}
     failures = []
-    pool = ThreadPoolExecutor(max_workers=min(16, max(1, len(jobs))), thread_name_prefix="sports-discovery")
+    pool = ThreadPoolExecutor(
+        max_workers=max(1, len(jobs)),
+        thread_name_prefix="sports-discovery-primary",
+    )
     future_map = {pool.submit(fn, *args, **kwargs): label for label, fn, args, kwargs in jobs}
     try:
         for future in as_completed(future_map, timeout=DISCOVERY_TIMEOUT):
@@ -679,7 +660,72 @@ def _collect(scope="India / Asia"):
                 failures.append(f"{label}:timeout")
                 future.cancel()
     finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+        # Do not hold the dashboard on late provider threads after the bounded
+        # collector window has expired.
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    # Official/specialist pages are a recovery path, not a second normal sweep.
+    # This keeps healthy runs to three network calls while still recovering from
+    # a sparse/blocked Google News intake.
+    if len(rows) < RECOVERY_MIN_RAW_ROWS:
+        recovery_jobs = []
+        if key == "niche sports":
+            recovery_jobs = [(
+                "Sports RSS",
+                sr._rss_items,
+                (SPORTS_RSS_URL, "sports", "rss", 40),
+                {"timeout": REQUEST_TIMEOUT},
+            )]
+        elif key == "global":
+            recovery_jobs = [
+                ("ICC", _direct_listing_source, ("ICC", "https://www.icc-cricket.com/news"), {}),
+                ("ESPNcricinfo", _direct_listing_source, ("ESPNcricinfo", "https://www.espncricinfo.com/cricket-news"), {}),
+            ]
+        else:
+            recovery_jobs = [
+                ("ICC", _direct_listing_source, ("ICC", "https://www.icc-cricket.com/news"), {}),
+                ("BCCI", _direct_listing_source, ("BCCI", "https://www.bcci.tv/news"), {}),
+            ]
+
+        recovery_pool = ThreadPoolExecutor(
+            max_workers=max(1, len(recovery_jobs)),
+            thread_name_prefix="sports-discovery-recovery",
+        )
+        recovery_map = {
+            recovery_pool.submit(fn, *args, **kwargs): label
+            for label, fn, args, kwargs in recovery_jobs
+        }
+        try:
+            for future in as_completed(recovery_map, timeout=DISCOVERY_TIMEOUT):
+                label = recovery_map[future]
+                try:
+                    values = future.result() or []
+                    rows.extend(values)
+                    counts[label] = counts.get(label, 0) + len(values)
+                except Exception as exc:
+                    failures.append(f"{label}:{type(exc).__name__}")
+        except TimeoutError:
+            for future, label in recovery_map.items():
+                if not future.done():
+                    failures.append(f"{label}:timeout")
+                    future.cancel()
+        finally:
+            recovery_pool.shutdown(wait=False, cancel_futures=True)
+
+    # Trends are an enrichment signal, not an intake dependency. Only spend the
+    # extra request when the primary/recovery pool is genuinely sparse.
+    if len(rows) < RECOVERY_MIN_RAW_ROWS:
+        trend_geo = "IN" if key != "global" else "GB"
+        try:
+            trend_rows = sr._google_trends_items(
+                trend_geo,
+                20,
+                timeout=SECONDARY_TIMEOUT,
+            ) or []
+            rows.extend(trend_rows)
+            counts["Google Trends"] = len(trend_rows)
+        except Exception as exc:
+            failures.append(f"Google Trends:{type(exc).__name__}")
 
     print(
         f"   [Sports Desk] Raw intake: {', '.join(f'{k}={v}' for k, v in sorted(counts.items())) or 'none'}",
