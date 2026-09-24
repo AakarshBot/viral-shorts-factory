@@ -1068,9 +1068,8 @@ def collect_manual_visual_pool(
         qa_requests = 0
         verified_for_query = 0
 
-        provider_jobs = []
-        # Manual QC needs enough real choices. Keep the two strongest licensed
-        # providers ahead of DDG, then allow up to two additional fallbacks.
+        # Use two providers at a time. Only open the fallback pair when the
+        # first pair fails to produce enough entity-approved choices.
         manual_sources = [
             item for item in source_plan
             if str(item[0] or "").strip().casefold() not in {"ddg", "duckduckgo"}
@@ -1079,15 +1078,7 @@ def collect_manual_visual_pool(
             item for item in source_plan
             if str(item[0] or "").strip().casefold() in {"ddg", "duckduckgo"}
         )
-        for source_index, (source_name, fetcher) in enumerate(manual_sources[:MANUAL_SOURCE_LIMIT]):
-            if not callable(fetcher):
-                continue
-            source_key = str(source_name or "").strip().casefold()
-            if not source_key:
-                continue
-            provider_jobs.append((source_index, str(source_name), fetcher, source_key))
-
-        provider_results = {}
+        manual_sources = manual_sources[:MANUAL_SOURCE_LIMIT]
 
         def _fetch_manual_pool_provider(job):
             source_index, source_name, fetcher, source_key = job
@@ -1120,75 +1111,89 @@ def collect_manual_visual_pool(
                 return source_index, source_name, cache_key, list(_raw_items(raw_data)), local_used_urls
             return source_index, source_name, cache_key, list(_raw_items(raw_data)), local_used_urls
 
-        if provider_jobs:
-            with ThreadPoolExecutor(
-                max_workers=len(provider_jobs),
-                thread_name_prefix="manual-visual-pool",
-            ) as executor:
-                futures = [
-                    executor.submit(_fetch_manual_pool_provider, job)
-                    for job in provider_jobs
-                ]
-                for future in futures:
-                    (
-                        source_index,
-                        source_name,
-                        cache_key,
-                        raw_items,
-                        local_used_urls,
-                    ) = future.result()
-                    provider_results[source_index] = (
-                        source_name,
-                        cache_key,
-                        raw_items,
-                        local_used_urls,
-                    )
+        for stage_index in range(0, len(manual_sources), 2):
+            if len(assets) >= requested_max:
+                break
+            stage_sources = manual_sources[stage_index : stage_index + 2]
+            provider_jobs = []
+            for source_index, (source_name, fetcher) in enumerate(stage_sources, stage_index + 1):
+                if not callable(fetcher):
+                    continue
+                source_key = str(source_name or "").strip().casefold()
+                if not source_key:
+                    continue
+                provider_jobs.append((source_index, str(source_name), fetcher, source_key))
 
-        for source_index, source_name, fetcher, source_key in provider_jobs:
-            (
-                _source_name,
-                cache_key,
-                raw_items,
-                local_used_urls,
-            ) = provider_results.get(
-                source_index,
-                (source_name, ("query", source_key, exact_query.casefold()), [], set()),
-            )
-            search_cache[cache_key] = list(raw_items)
-            fetch_used_urls.update(local_used_urls)
-            for data in raw_items:
-                candidate = _manual_candidate_from_data(
-                    source_name,
-                    data,
-                    exact_query,
-                    visual_type,
-                    visual_genre,
-                    bot,
-                    query_seen_hashes,
-                    query_seen_urls,
-                    rejected_counts,
+            provider_results = {}
+            if provider_jobs:
+                with ThreadPoolExecutor(
+                    max_workers=min(2, len(provider_jobs)),
+                    thread_name_prefix="manual-visual-pool",
+                ) as executor:
+                    futures = [
+                        executor.submit(_fetch_manual_pool_provider, job)
+                        for job in provider_jobs
+                    ]
+                    for future in futures:
+                        (
+                            source_index,
+                            source_name,
+                            cache_key,
+                            raw_items,
+                            local_used_urls,
+                        ) = future.result()
+                        provider_results[source_index] = (
+                            source_name,
+                            cache_key,
+                            raw_items,
+                            local_used_urls,
+                        )
+
+            stage_candidates: list[dict] = []
+            for source_index, source_name, fetcher, source_key in provider_jobs:
+                (
+                    _source_name,
+                    cache_key,
+                    raw_items,
+                    local_used_urls,
+                ) = provider_results.get(
+                    source_index,
+                    (source_name, ("query", source_key, exact_query.casefold()), [], set()),
                 )
-                if candidate is not None:
-                    query_candidates.append(candidate)
+                search_cache[cache_key] = list(raw_items)
+                fetch_used_urls.update(local_used_urls)
+                for data in raw_items:
+                    candidate = _manual_candidate_from_data(
+                        source_name,
+                        data,
+                        exact_query,
+                        visual_type,
+                        visual_genre,
+                        bot,
+                        query_seen_hashes,
+                        query_seen_urls,
+                        rejected_counts,
+                    )
+                    if candidate is not None:
+                        stage_candidates.append(candidate)
+                        query_candidates.append(candidate)
 
-        # Search the bounded preferred provider set before QA so the strongest
-        # result can win globally without turning manual review into a provider fan-out.
-        query_candidates.sort(
-            key=lambda item: (
-                -float(item.get("priority") or 0.0),
-                str(item.get("source") or "").casefold(),
+            stage_candidates.sort(
+                key=lambda item: (
+                    -float(item.get("priority") or 0.0),
+                    str(item.get("source") or "").casefold(),
+                )
             )
-        )
-        before = len(assets)
-        added, requests_made = _verify(
-            query_candidates,
-            entity_anchor,
-            query_index,
-            target,
-            f"manual:{query_index}",
-        )
-        qa_requests += requests_made
-        verified_for_query = len(assets) - before
+            before = len(assets)
+            added, requests_made = _verify(
+                stage_candidates,
+                entity_anchor,
+                query_index,
+                target,
+                f"manual:{query_index}/stage:{stage_index // 2 + 1}",
+            )
+            qa_requests += requests_made
+            verified_for_query += len(assets) - before
 
         # Carry forward the actual accepted identity-approved candidates into the
         # run-wide dedupe sets. Multiple distinct images from one article are allowed.
