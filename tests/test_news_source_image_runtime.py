@@ -42,6 +42,23 @@ def test_article_image_candidates_use_multiple_page_signals_and_skip_video():
     assert _publisher(parser, "https://example.com/story/one", "") == "Example News"
 
 
+def test_video_first_article_is_not_treated_as_an_image_story():
+    from news_source_image_runtime import _ArticleImageParser, _video_first_story
+
+    html = """
+    <head>
+      <meta property="og:type" content="video.other">
+      <meta property="og:video" content="https://example.com/story.mp4">
+      <meta property="og:image" content="https://example.com/story-thumb.jpg">
+      <meta name="twitter:card" content="player">
+    </head>
+    """
+    parser = _ArticleImageParser()
+    parser.feed(html)
+
+    assert _video_first_story(parser) is True
+
+
 def test_no_non_http_image_candidate():
     html = '<meta property="og:image" content="data:image/png;base64,AAAA">'
     parser = _ArticleImageParser()
