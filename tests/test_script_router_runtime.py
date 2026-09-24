@@ -56,6 +56,9 @@ def test_three_beat_structure_is_retained_without_forcing_three_scenes():
     result, reason = _validate_script_result(_valid_script(), {"title": "India squad change"}, "regular")
     assert result is not None, reason
     assert result["narrative_structure"]["passed"] is True
+    assert result["authoritative_narration"] is True
+    assert all(scene["narration_source"] == "validated_script" for scene in result["script"])
+    assert [scene["scene_id"] for scene in result["script"]] == [1, 2, 3, 4]
     assert {"hook", "context", "consequence"} <= set(result["narrative_structure"]["roles"])
 
 

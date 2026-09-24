@@ -33,6 +33,12 @@ def _validate_script_result(result,story_data,format_mode):
         originality=sr.check_script_originality(cleaned,story_data)
         if not originality.get("passed"): return None,"Script contains copied or near-verbatim source wording."
         cleaned["recommended_title_index"]=idx; cleaned["pipeline_diagnostics"]=diag; cleaned["narrative_structure"]=assessment; cleaned["originality_overlap"]=originality
+        # Canonical handoff: downstream narration must use the script that passed writer QC.
+        cleaned["authoritative_narration"]=True
+        for scene_id, scene in enumerate(cleaned.get("script") or [], 1):
+            if isinstance(scene, dict):
+                scene["scene_id"]=scene_id
+                scene["narration_source"]="validated_script"
         return cleaned,""
     except Exception as exc: return None,f"Script QC failed: {type(exc).__name__}: {exc}"
 
