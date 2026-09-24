@@ -87,19 +87,20 @@ def test_dashboard_wrappers_resolve_canonical_runner():
     assert '_vsf_canonical_run_robot' in source
 
 
-def test_exact_identity_wrapper_preserves_canonical_runner():
+def test_final_qc_has_no_workflow_wrapper_scaffolding():
     source = (REPO_ROOT / "final_qc_runtime.py").read_text(encoding="utf-8")
-    assert '_vsf_canonical_run_robot' in source
-    assert 'exact_identity_runner._canonical_run_robot' in source
+    assert "patch_workflow_qc" not in source
+    assert "_install_exact_run_identity" not in source
+    assert "_mark_exact_run_ready_for_upload" not in source
 
-def test_public_publish_block_is_enforced_before_upload():
+
+def test_public_upload_is_not_blocked_by_script_metadata():
     source = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
     start = source.index("    def upload_manual(")
     end = source.index("\ndef _validate_selected_story", start)
     block = source[start:end]
-    assert 'bool((script_data or {}).get("public_publish_blocked"))' in block
+    assert "public_publish_blocked" not in block
     assert "publish_mode" in block
-    assert "marked it private-only" in block
 
 
 def test_legacy_creator_comment_uploader_is_only_a_compatibility_shim():
@@ -165,7 +166,7 @@ def test_global_manual_search_pagination_is_scoped_per_query():
 
 
 
-def test_dashboard_run_id_is_passed_into_exact_identity_bridge():
+def test_dashboard_run_id_is_passed_into_production_identity_bridge():
     workflow = (REPO_ROOT / "workflow_runtime.py").read_text(encoding="utf-8")
     db_runtime = (REPO_ROOT / "db_runtime.py").read_text(encoding="utf-8")
     assert 'config["run_id"] = run_id' in workflow
