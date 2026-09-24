@@ -235,6 +235,33 @@ def test_bucket_uses_content_signals_even_when_profile_is_news():
 
 
 
+def test_overlapping_news_and_emerging_profile_stays_news():
+    events = [
+        {
+            "title": "Current cricket development",
+            "event_identity_key": "news-emerging-overlap",
+            "discovery_profiles": ["news", "emerging"],
+            "news_score": 80,
+            "viral_score": 90,
+            "social_score": 5,
+        },
+        {
+            "title": "Emerging-only cricket breakthrough",
+            "event_identity_key": "emerging-only",
+            "discovery_profiles": ["emerging"],
+            "news_score": 20,
+            "viral_score": 80,
+            "social_score": 5,
+        },
+    ]
+
+    result = desk._diversify_events(events, limit=2)
+    buckets = {item["event_identity_key"]: item["discovery_bucket"] for item in result}
+
+    assert buckets["news-emerging-overlap"] == "news"
+    assert buckets["emerging-only"] == "viral"
+
+
 def test_discovery_buckets_follow_profile_lane():
     events = [
         {
