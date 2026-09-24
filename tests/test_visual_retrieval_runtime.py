@@ -349,6 +349,33 @@ def _jpeg_bytes(size=(900, 1200), color=(80, 90, 100)):
 
 
 
+
+def test_manual_person_query_preserves_action_context():
+    visual_type, visual_genre = retrieval._manual_query_visual_context(
+        "Vaibhav Sooryavanshi",
+        [{
+            "primary_entity": "Vaibhav Sooryavanshi",
+            "voiceover": "Vaibhav Sooryavanshi batting in the match.",
+            "visual_intent": "batting cricket action",
+        }],
+    )
+
+    assert visual_type == "PERSON"
+    assert visual_genre == "PERSON_ACTION"
+
+
+def test_manual_person_refinement_prefers_action_terms():
+    refined = retrieval._scene_refinement_query(
+        {
+            "primary_entity": "Vaibhav Sooryavanshi",
+            "voiceover": "Vaibhav Sooryavanshi is batting in the cricket match.",
+            "visual_intent": "",
+        },
+        "Vaibhav Sooryavanshi",
+    )
+
+    assert refined == "Vaibhav Sooryavanshi batting cricket"
+
 def test_manual_pool_opens_one_shared_gemini_scene_budget(monkeypatch):
     scene_resets = []
     provider_calls = []
