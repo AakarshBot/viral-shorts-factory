@@ -1152,6 +1152,48 @@ class DashboardWorkflowController(WorkflowController):
                 incoming_scene.get("voiceover", original_scene.get("voiceover") or "")
                 or ""
             ).strip()
+            visual_fields = (
+                "primary_entity",
+                "visual_intent",
+                "specific_search_prompt",
+                "visual_search_subject",
+            )
+            visual_changed = False
+            for field in visual_fields:
+                if field in incoming_scene:
+                    value = str(
+                        incoming_scene.get(field, original_scene.get(field) or "") or ""
+                    ).strip()
+                    if value != str(original_scene.get(field) or "").strip():
+                        visual_changed = True
+                    updated_scene[field] = value
+            incoming_manual_query = str(
+                incoming_scene.get(
+                    "manual_visual_query",
+                    original_scene.get("manual_visual_query") or "",
+                )
+                or ""
+            ).strip()
+            if incoming_manual_query:
+                updated_scene["manual_visual_query"] = incoming_manual_query
+                updated_scene["manual_visual_query_source"] = (
+                    str(incoming_scene.get("manual_visual_query_source") or "dashboard_script_review")
+                    .strip()
+                    or "dashboard_script_review"
+                )
+                visual_changed = True
+            elif "manual_visual_query" in updated_scene:
+                updated_scene.pop("manual_visual_query", None)
+                updated_scene.pop("manual_visual_query_source", None)
+            if visual_changed:
+                updated_scene["human_visual_metadata_override"] = True
+                if not incoming_manual_query:
+                    search_prompt = str(
+                        updated_scene.get("specific_search_prompt") or ""
+                    ).strip()
+                    if search_prompt:
+                        updated_scene["manual_visual_query"] = search_prompt
+                        updated_scene["manual_visual_query_source"] = "dashboard_script_review"
             candidate["script"].append(updated_scene)
 
         if isinstance(reviewed_script.get("titles"), list):
@@ -1208,6 +1250,7 @@ class DashboardWorkflowController(WorkflowController):
                 cleaned,
                 story_data,
                 snapshot.get("format_mode") or "regular",
+                enforce_scene_1_limit=False,
             )
             if valid:
                 valid, reason, _assessment = assess_release_structure(
@@ -1217,37 +1260,28 @@ class DashboardWorkflowController(WorkflowController):
             if not valid:
                 return False, f"Script edits need attention: {reason}"
 
-            try:
-                from audio_direction_runtime import choose_delivery_profile
-                from script_runtime import classify_narration_duration, estimate_narration_duration
-
-                delivery_profile = str(
-                    cleaned.get("delivery_profile")
-                    or choose_delivery_profile(self.bot, cleaned)
-                    or cleaned.get("persona_used")
-                    or "LISTICLE HOST"
-                ).strip()
-                profile = getattr(self.bot, "PERSONA_PROFILES", {}).get(
-                    delivery_profile.upper(),
-                    getattr(self.bot, "PERSONA_PROFILES", {}).get("LISTICLE HOST", {}),
-                )
-                duration_estimate = estimate_narration_duration(cleaned, profile)
-                cleaned["delivery_profile"] = delivery_profile
-                cleaned["estimated_duration_seconds"] = duration_estimate["seconds"]
-                cleaned["estimated_duration_word_count"] = duration_estimate["word_count"]
-                cleaned["estimated_duration_effective_wpm"] = duration_estimate["effective_wpm"]
-                cleaned["duration_band"] = classify_narration_duration(
-                    duration_estimate["seconds"]
-                )
-            except Exception as exc:
-                return False, f"Script edits need attention: duration check failed: {type(exc).__name__}: {exc}"
-
-            if float(cleaned.get("estimated_duration_seconds") or 0.0) >= 30.0:
-                return False, (
-                    "Script edits need attention: edited narration exceeds the 30-second limit "
-                    f"({float(cleaned.get('estimated_duration_seconds')):.1f}s). "
-                    "Shorten the edited narration before approving."
-                )
+            candidate_scenes = candidate.get("script") or []
+            cleaned_scenes = cleaned.get("script") or []
+            for index, source_scene in enumerate(candidate_scenes):
+                if index >= len(cleaned_scenes) or not isinstance(source_scene, dict):
+                    continue
+                if not source_scene.get("human_visual_metadata_override"):
+                    continue
+                target_scene = cleaned_scenes[index]
+                for field in (
+                    "primary_entity",
+                    "visual_intent",
+                    "specific_search_prompt",
+                    "visual_search_subject",
+                    "manual_visual_query",
+                    "manual_visual_query_source",
+                ):
+                    if field in source_scene:
+                        target_scene[field] = source_scene[field]
+                target_scene["human_visual_metadata_override"] = True
+                target_scene["visual_entity_grounding"] = "MANUAL_LOCK"
+                target_scene["visual_entity_grounded"] = True
+                target_scene["visual_entity_grounding_reason"] = "human script-review correction is authoritative"
 
             rank_title_candidates(cleaned, story_data)
             cleaned_titles = cleaned.get("titles") or []
