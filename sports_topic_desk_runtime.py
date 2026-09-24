@@ -754,34 +754,35 @@ def _diversify_events(events, limit=60, scope="India / Asia"):
         return base + profile_bonus - diversity_penalty
 
     def bucket_eligible(item, bucket):
-        profiles = set(item.get("discovery_profiles") or [])
-        social_posts = int(item.get("social_post_count") or 0)
-        article_count = int(item.get("event_article_count") or 0)
+        profiles = {
+            _clean(value).casefold()
+            for value in (item.get("discovery_profiles") or [])
+            if _clean(value)
+        }
 
-        # A reaction word such as "said" or "comments" is common in ordinary
-        # reporting, and broad social search can attach many reactions to one
-        # confirmed event. Keep confirmed reporting in NEWS; SOCIAL is reserved
-        # for genuinely social-first leads.
-        social_only = social_posts > 0 and article_count == 0
+        # Editorial lanes are intentionally mutually exclusive. A broad
+        # one-source story often has a high undercovered score; that is useful
+        # for ranking novelty, but it must not turn every ordinary news item
+        # into VIRAL. Likewise, a Google social-lane hit is a SOCIAL lead even
+        # though it is not a Reddit/Bluesky post.
+        social_first = "social" in profiles and not profiles.intersection({"news", "emerging"})
+        emerging_first = "emerging" in profiles and "social" not in profiles
 
         if bucket == "social":
-            return social_only
+            return social_first
 
         if bucket == "viral":
-            if social_only:
-                return False
-            return (
-                "emerging" in profiles
-                or float(item.get("undercovered_score") or 0.0) >= 8.0
-                or float(item.get("trend_signal_score") or 0.0) > 0.0
+            return emerging_first or (
+                not profiles.intersection({"news", "emerging", "social"})
+                and float(item.get("trend_signal_score") or 0.0) > 0.0
             )
 
-        return not social_only
+        return not social_first and not emerging_first
 
-    # Reserve genuinely social-first and emerging candidates before ordinary
-    # news. Do not force an unrelated story into a bucket when that lane has no
-    # eligible candidates; the dashboard should reflect the actual mix of leads.
-    for bucket in ("social", "viral", "news"):
+    # Fill each editorial lane only from candidates that actually belong there.
+    # This prevents the highest-scoring novelty stories from consuming NEWS or
+    # SOCIAL simply because another lane was evaluated first.
+    for bucket in ("news", "viral", "social"):
         for _ in range(quotas[bucket]):
             available = [x for x in candidates if id(x) not in used]
             if not available:
