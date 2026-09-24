@@ -1,4 +1,5 @@
 import io
+from urllib.parse import urlparse
 
 from PIL import Image
 
@@ -53,7 +54,10 @@ def test_extract_news_source_images_returns_multiple_direct_images(monkeypatch, 
 
     monkeypatch.setenv("ASSET_CACHE_DIR", str(tmp_path))
 
-    image_bytes = _jpeg_bytes()
+    image_bytes = _jpeg_bytes((900, 1200))
+    image_bytes_two = _jpeg_bytes((901, 1200))
+    image_bytes_three = _jpeg_bytes((902, 1200))
+    image_bytes_four = _jpeg_bytes((903, 1200))
     page_html = """
     <html><head>
       <meta property="og:site_name" content="Example News">
@@ -87,7 +91,13 @@ def test_extract_news_source_images_returns_multiple_direct_images(monkeypatch, 
         def get(self, url, **_kwargs):
             if url.endswith("/story"):
                 return Response(url, page_html.encode("utf-8"))
-            return Response(url, image_bytes, "image/jpeg")
+            payload = {
+                "/images/lead.jpg": image_bytes,
+                "/images/two.jpg": image_bytes_two,
+                "/images/three.jpg": image_bytes_three,
+                "/images/four.jpg": image_bytes_four,
+            }
+            return Response(url, payload.get(urlparse(url).path, image_bytes), "image/jpeg")
 
     monkeypatch.setattr(module.requests, "Session", Session)
 
