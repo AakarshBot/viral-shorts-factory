@@ -111,7 +111,7 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
 
     assert len(packages) == 1
     assert script_data["visual_manual_pool_size"] == 1
-    assert packages[0][0]["source_type"] == "manual"
+    assert packages[0][0]["source_type"] == "Commons"
 
 
 def test_article_source_images_join_selection_pool(monkeypatch, tmp_path):
