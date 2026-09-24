@@ -106,7 +106,6 @@ def strict_fallback(story_data, language_cfg=None, genre_key="news", format_mode
     result = dict(result or {})
     result["fallback_mode"] = "strict_source_only"
     result["integrity_version"] = VERSION
-    result["public_publish_blocked"] = True
     return result
 
 
