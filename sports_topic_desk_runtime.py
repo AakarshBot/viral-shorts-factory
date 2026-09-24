@@ -7,6 +7,7 @@ import math
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
@@ -617,6 +618,13 @@ def _reddit_search(subreddit, query):
             "discovery_query": query,
         })
     return output
+
+
+def _is_non_cricket_sports(item):
+    item = item if isinstance(item, dict) else {}
+    text = _clean(" ".join(str(item.get(key) or "") for key in ("title", "text", "description", "summary", "snippet", "trend_query", "event_search_text", "event_entities"))).casefold()
+    terms = ("football", "soccer", "tennis", "badminton", "hockey", "athletics", "basketball", "volleyball", "golf", "rugby", "motorsport", "formula 1", "f1", "motogp", "wrestling", "boxing", "mma", "kabaddi", "table tennis", "squash", "archery", "shooting", "swimming", "aquatics", "cycling", "gymnastics", "weightlifting", "olympics", "olympic")
+    return any(_word_match(text, term) for term in terms)
 
 
 def _normalise_rows(rows, scope="India / Asia"):
