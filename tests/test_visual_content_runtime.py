@@ -63,7 +63,7 @@ def test_article_source_images_are_added_only_to_manual_qc_pool(monkeypatch, tmp
                     "author": "Example News",
                 },
             }
-        ],
+        ]
     monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", fake_article_pool)
     monkeypatch.setattr(
         visual_retrieval_runtime,
