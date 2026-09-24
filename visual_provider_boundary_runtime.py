@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from typing import Any
 
@@ -25,7 +26,8 @@ from visual_licensing_runtime import (
     normalize_license_code,
 )
 
-DEFAULT_TIMEOUT = max(3, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "8")))
+API_TIMEOUT_SECONDS = max(2, min(5, int(os.getenv("VISUAL_PROVIDER_TIMEOUT_SECONDS", "4"))))
+IMAGE_TIMEOUT_SECONDS = max(2, min(5, int(os.getenv("VISUAL_IMAGE_DOWNLOAD_TIMEOUT_SECONDS", "5"))))
 MAX_PROVIDER_CANDIDATES = max(1, min(10, int(os.getenv("VISUAL_PROVIDER_CANDIDATES", "10"))))
 _PROVIDER_429_COOLDOWN_SECONDS = max(10, min(120, int(os.getenv("VISUAL_PROVIDER_429_COOLDOWN_SECONDS", "45"))))
 _PROVIDER_429_UNTIL: dict[str, float] = {}
@@ -103,7 +105,7 @@ def _download_image(url: str, used_urls: set[str] | None = None, metadata: dict[
     try:
         response = requests.get(
             url,
-            timeout=DEFAULT_TIMEOUT,
+            timeout=IMAGE_TIMEOUT_SECONDS,
             headers={"User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
             allow_redirects=True,
         )
@@ -141,7 +143,7 @@ def _api_json(
             url,
             params=params or {},
             headers=headers or {"User-Agent": "ViralShortsFactory/1.0 (+visual-retrieval)"},
-            timeout=DEFAULT_TIMEOUT,
+            timeout=API_TIMEOUT_SECONDS,
         )
         if response.status_code == 429:
             _mark_provider_429(url, response.headers.get("Retry-After", ""))
@@ -412,8 +414,13 @@ def resolve_wikidata_entity(entity: str) -> dict[str, str]:
     return dict(resolved)
 
 
-def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int = MAX_PROVIDER_CANDIDATES) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
+def _bounded_downloads(
+    urls: list[Any],
+    used_urls: set[str] | None,
+    limit: int = MAX_PROVIDER_CANDIDATES,
+) -> list[dict[str, Any]]:
+    """Download only a small reserved URL set concurrently so one provider stays within its deadline."""
+    jobs: list[tuple[str, dict[str, Any]]] = []
     seen_urls: set[str] = set()
     for item in urls:
         metadata = {}
@@ -424,13 +431,29 @@ def _bounded_downloads(urls: list[Any], used_urls: set[str] | None, limit: int =
         url = str(url or "").strip()
         if not url or url in seen_urls:
             continue
+        if used_urls is not None and url in used_urls:
+            continue
         seen_urls.add(url)
-        data = _download_image(url, used_urls, metadata)
-        if data:
-            candidates.append(data)
-            if len(candidates) >= limit:
-                break
-    return candidates
+        if used_urls is not None:
+            used_urls.add(url)
+        jobs.append((url, dict(metadata)))
+        if len(jobs) >= max(1, int(limit)):
+            break
+
+    if not jobs:
+        return []
+
+    def _download(job: tuple[str, dict[str, Any]]):
+        url, metadata = job
+        return _download_image(url, None, metadata)
+
+    with ThreadPoolExecutor(
+        max_workers=min(4, len(jobs)),
+        thread_name_prefix="visual-provider-download",
+    ) as executor:
+        results = list(executor.map(_download, jobs))
+
+    return [item for item in results if item]
 
 
 def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
@@ -518,7 +541,7 @@ def fetch_wikipedia_person_candidates(query: str, used_urls: set[str] | None = N
                     "search_position": position,
                 },
             ))
-    return _bounded_downloads(urls, used_urls)
+    return _bounded_downloads(urls, used_urls, limit=4 if manual_mode else MAX_PROVIDER_CANDIDATES)
 
 def _commons_search_query(query: str) -> str:
     """Use the vocabulary Commons actually uses for match/event media."""
@@ -903,7 +926,7 @@ def fetch_pexels_candidates(query: str, used_urls: set[str] | None = None, *_arg
                         "search_description": str(photo.get("alt") or ""),
                         "search_position": position,
                     }))
-    return _bounded_downloads(urls, used_urls)
+    return _bounded_downloads(urls, used_urls, limit=4 if manual_mode else MAX_PROVIDER_CANDIDATES)
 
 
 def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_args) -> list[dict[str, Any]]:
@@ -944,7 +967,7 @@ def fetch_unsplash_candidates(query: str, used_urls: set[str] | None = None, *_a
                         "search_description": str(item.get("description") or item.get("alt_description") or ""),
                         "search_position": position,
                     }))
-    return _bounded_downloads(urls, used_urls)
+    return _bounded_downloads(urls, used_urls, limit=4 if manual_mode else MAX_PROVIDER_CANDIDATES)
 
 
 def build_raw_source_plan(
