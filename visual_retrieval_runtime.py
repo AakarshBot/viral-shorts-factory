@@ -53,6 +53,7 @@ AUTO_POOL_QUERY_LIMIT = max(1, min(4, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMI
 MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
 MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
 MANUAL_SEARCH_MAX_PAGES = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SEARCH_MAX_PAGES", "3"))))
+MANUAL_SOURCE_LIMIT = 4
 HARD_MIN_IMAGE_SIDE = max(240, min(540, int(os.getenv("VISUAL_HARD_MIN_IMAGE_SIDE", "360"))))
 SOFT_MIN_IMAGE_SIDE = max(HARD_MIN_IMAGE_SIDE, min(900, int(os.getenv("VISUAL_SOFT_MIN_IMAGE_SIDE", "540"))))
 ENTITY_CHECK_PRIMARY_POOL = 10
@@ -1065,7 +1066,17 @@ def collect_manual_visual_pool(
         verified_for_query = 0
 
         provider_jobs = []
-        for source_index, (source_name, fetcher) in enumerate(source_plan[:2]):
+        # Manual QC needs enough real choices. Keep the two strongest licensed
+        # providers ahead of DDG, then allow up to two additional fallbacks.
+        manual_sources = [
+            item for item in source_plan
+            if str(item[0] or "").strip().casefold() not in {"ddg", "duckduckgo"}
+        ]
+        manual_sources.extend(
+            item for item in source_plan
+            if str(item[0] or "").strip().casefold() in {"ddg", "duckduckgo"}
+        )
+        for source_index, (source_name, fetcher) in enumerate(manual_sources[:MANUAL_SOURCE_LIMIT]):
             if not callable(fetcher):
                 continue
             source_key = str(source_name or "").strip().casefold()

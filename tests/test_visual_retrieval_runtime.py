@@ -667,6 +667,59 @@ def test_manual_visual_search_can_rank_a_later_provider_candidate(monkeypatch):
     assert result["assets"][0]["source"] == "Openverse"
 
 
+
+def test_manual_visual_pool_falls_through_to_additional_real_sources(monkeypatch):
+    image_one = _jpeg_bytes((1200, 1600), (20, 80, 120))
+    image_two = _jpeg_bytes((1200, 1600), (120, 80, 20))
+    calls = []
+
+    class FakeBot:
+        pass
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            calls.append(source)
+            return fetcher(*args)
+
+    def empty_provider(*args):
+        return []
+
+    def openverse_provider(*args):
+        candidate = _licensed_candidate(image_one, "cc0")
+        candidate["source_image_url"] = "https://openverse.example/vaibhav-1.jpg"
+        candidate["search_title"] = "Vaibhav Sooryavanshi cricket"
+        return [candidate]
+
+    def ddg_provider(*args):
+        candidate = _licensed_candidate(image_two, "cc0")
+        candidate["source_image_url"] = "https://ddg.example/vaibhav-2.jpg"
+        candidate["search_title"] = "Vaibhav Sooryavanshi batting"
+        return [candidate]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", empty_provider),
+            ("Wikipedia", empty_provider),
+            ("Openverse", openverse_provider),
+            ("DDG", ddg_provider),
+        ],
+    )
+
+    result = retrieval.collect_manual_visual_pool(
+        FakeRuntime(),
+        FakeBot(),
+        [{"primary_entity": "Vaibhav Sooryavanshi"}],
+        ["Vaibhav Sooryavanshi"],
+        verify_with_ai=False,
+    )
+
+    assert set(calls) == {"Commons", "Wikipedia", "Openverse", "DDG"}
+    assert len(result["assets"]) == 2
+    assert {asset["source"] for asset in result["assets"]} == {"Openverse", "DDG"}
+
 def test_canonical_person_source_still_passes_visual_qc(monkeypatch):
     image_bytes = _jpeg_bytes()
 

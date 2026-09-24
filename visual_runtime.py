@@ -13,7 +13,7 @@ import threading
 
 from PIL import Image, ImageDraw
 
-VISUAL_FETCH_TIMEOUT_SECONDS = int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "15"))
+VISUAL_FETCH_TIMEOUT_SECONDS = int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "10"))
 # Hard ceiling: visual strategy may request fewer searches, but deployment
 # configuration can never increase this runtime safety limit above 6.
 VISUAL_MAX_SEARCH_QUERIES = min(6, max(1, int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "6"))))
