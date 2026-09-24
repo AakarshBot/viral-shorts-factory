@@ -1584,8 +1584,9 @@ def test_renderer_has_no_artificial_scene_audio_padding():
 def test_script_writer_prompt_requires_compact_first_scene_and_runtime_budget():
     source = Path(__file__).resolve().parents[1].joinpath("ultimate_bot.py").read_text(encoding="utf-8")
     assert "Regular Shorts contain 4–5 scenes and the whole important story." in source
-    assert "Target 16–30 seconds naturally; maximum 30 seconds." in source
-    assert "Never pad merely to reach 16 seconds." in source
+    assert "Target about 22–27 seconds of natural narration; hard maximum 30 seconds." in source
+    assert "Scene 1: target 10–12 words, hard maximum 14." in source
+    assert "Before returning JSON, silently preflight:" in source
 
 
 def test_dashboard_upload_unlock_is_metadata_only():
