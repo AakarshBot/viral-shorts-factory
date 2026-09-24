@@ -128,6 +128,7 @@ def test_article_source_images_join_selection_pool(monkeypatch, tmp_path):
             "source_type": "news_source",
             "credit": "Source: Example News",
             "image_url": "https://example.com/image.jpg",
+            "source_image_url": "https://example.com/image.jpg",
             "provenance": {
                 "provider": "Example News",
                 "url": "https://example.com/image.jpg",
