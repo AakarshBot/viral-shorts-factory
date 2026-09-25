@@ -49,7 +49,6 @@ MAX_ENTITY_BANK_PER_QUERY = max(10, min(20, int(os.getenv("VISUAL_ENTITY_BANK_PE
 INITIAL_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_INITIAL_CANDIDATE_POOL", "20"))))
 MANUAL_POOL_MAX = max(10, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))))
 MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "10"))))
-AUTO_POOL_QUERY_LIMIT = max(1, min(4, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "4"))))
 MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
 MANUAL_SEARCH_MAX_PAGES = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SEARCH_MAX_PAGES", "3"))))
 MANUAL_SOURCE_LIMIT = 4
@@ -890,10 +889,8 @@ def collect_manual_visual_pool(
     manual_queries: list[str],
     video_title: str = "",
     used_hashes: set[str] | None = None,
-    used_source_pages: set[str] | None = None,
     pool_target: int | None = None,
     pool_max: int | None = None,
-    allow_auto_backfill: bool = True,
     verify_with_ai: bool = True,
 ) -> dict:
     """Build the shared entity-verified pool from bounded staged manual sources."""
@@ -915,7 +912,6 @@ def collect_manual_visual_pool(
         requested_max = min(MANUAL_POOL_TARGET, default_max or MANUAL_POOL_TARGET)
 
     used_hashes = set(used_hashes or set())
-    _ = used_source_pages  # Retained only for compatibility with older callers.
     assets: list[dict] = []
     seen_hashes = set(used_hashes)
     seen_image_urls: set[str] = set()
@@ -1382,107 +1378,6 @@ def collect_manual_visual_pool(
             f"shared-pool={len(assets)}/{requested_max} | Gemini={qa_requests}",
             flush=True,
         )
-
-    # Automatic backfill remains unchanged in purpose, but it only fills a manual
-    # pool when the caller explicitly permits it. The current production path does
-    # not use it once a manual query was supplied.
-    if allow_auto_backfill and not parsed_queries:
-        auto_queries_used = 0
-        for scene_index, scene in enumerate(scenes or []):
-            if auto_queries_used >= AUTO_POOL_QUERY_LIMIT or not isinstance(scene, dict):
-                break
-            auto_scene = dict(scene)
-            auto_entity = str(
-                scene.get("factual_primary_entity")
-                or scene.get("visual_search_subject")
-                or scene.get("primary_entity")
-                or ""
-            ).strip()
-            auto_scene["manual_visual_query"] = ""
-            if auto_entity:
-                auto_scene["primary_entity"] = auto_entity
-                auto_scene["visual_search_subject"] = auto_entity
-            try:
-                intent = resolve_visual_search_intent(auto_scene, video_title)
-            except Exception:
-                continue
-            auto_queries = [str(item).strip() for item in (intent.queries or ()) if str(item).strip()][:2]
-            if not auto_queries:
-                continue
-            visual_type = str(intent.visual_type or "GENERAL_CONTEXT").upper()
-            visual_genre = str(
-                intent.visual_genre
-                or classify_visual_genre(scene, str(intent.subject or ""), visual_type)
-                or "GENERAL_CONTEXT"
-            ).upper()
-            entity_anchor = str(intent.subject or "").strip()
-            if not entity_anchor:
-                continue
-            for query_round, query in enumerate(auto_queries, 1):
-                if auto_queries_used >= AUTO_POOL_QUERY_LIMIT:
-                    break
-                auto_queries_used += 1
-                candidates = []
-                local_hashes = set(seen_hashes)
-                local_urls = set(seen_image_urls)
-                local_asset_keys: set[str] = set()
-                try:
-                    source_plan = _source_plan(bot, visual_type, visual_genre)
-                except TypeError:
-                    source_plan = _source_plan(bot, visual_type)
-                for source_name, fetcher in source_plan[:2]:
-                    if not callable(fetcher):
-                        continue
-                    cache_key = ("automatic", str(source_name).casefold(), str(query).casefold())
-                    raw_data = search_cache.get(cache_key)
-                    if raw_data is None:
-                        try:
-                            raw_data = runtime._call_fetcher_with_timeout(
-                                fetcher,
-                                (query, fetch_used_urls, query, video_title, visual_type, visual_genre),
-                                str(source_name),
-                                str(query),
-                            )
-                        except Exception:
-                            raw_data = []
-                        search_cache[cache_key] = list(_raw_items(raw_data))
-                    for data in search_cache.get(cache_key) or []:
-                        candidate = _manual_candidate_from_data(
-                            str(source_name),
-                            data,
-                            query,
-                            visual_type,
-                            visual_genre,
-                            bot,
-                            local_hashes,
-                            local_urls,
-                            rejected_counts,
-                        )
-                        if candidate is not None:
-                            candidates.append(candidate)
-                        if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
-                            break
-                    if len(candidates) >= REFINEMENT_CANDIDATE_POOL:
-                        break
-                candidates.sort(key=lambda item: -float(item.get("priority") or 0.0))
-                added, qa_requests = _verify(
-                    candidates,
-                    entity_anchor,
-                    0,
-                    max(1, requested_max - len(assets)),
-                    f"automatic:{scene_index}:{query_round}",
-                )
-                query_stats.append(
-                    {
-                        "query": query,
-                        "verified": added,
-                        "qa_requests": qa_requests,
-                        "visual_type": visual_type,
-                        "visual_genre": visual_genre,
-                        "pool_origin": "automatic_backfill",
-                        "scene_index": scene_index + 1,
-                    }
-                )
 
     deduped: dict[str, dict] = {}
     for asset in assets:
