@@ -63,6 +63,42 @@ def test_title_match_rejects_headline_only_false_positive():
     ) == 0
 
 
+def test_google_news_rss_article_redirect_is_usable_but_publisher_rss_is_not():
+    google_news_url = "https://news.google.com/rss/articles/CBMiExample?ceid=IN:en"
+    publisher_rss_url = "https://example.com/rss/articles/story"
+
+    assert crawler._article_url_is_usable(google_news_url)
+    assert not crawler._article_url_is_usable(publisher_rss_url)
+
+
+def test_recent_articles_accept_google_news_rss_fallback(monkeypatch):
+    now = datetime.now(timezone.utc)
+    fresh = (now - timedelta(hours=2)).isoformat()
+    google_news_url = "https://news.google.com/rss/articles/CBMiExample?ceid=IN:en"
+
+    monkeypatch.setattr(crawler, "_ddgs_news", lambda *_args: [])
+    monkeypatch.setattr(
+        crawler,
+        "_google_news_rss",
+        lambda *_args: [{
+            "title": "Virat Kohli reacts to retirement rumours",
+            "url": google_news_url,
+            "date": fresh,
+            "body": "",
+            "source": "Example Sports",
+        }],
+    )
+
+    articles = crawler._collect_recent_articles(
+        ["Virat Kohli reacts to retirement rumours"],
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
+    )
+
+    assert [item["url"] for item in articles] == [google_news_url]
+
+
 def test_recent_articles_require_query_terms_in_title_and_rank_newest(monkeypatch):
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=3)).isoformat()
