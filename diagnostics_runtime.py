@@ -74,7 +74,7 @@ def _test_visual_strategy():
     from manual_visual_query_runtime import assign_manual_queries, parse_manual_visual_queries
     from visual_strategy_runtime import build_deep_queries, build_scene_visual_brief
     from visual_qa_runtime import GEMINI_VISUAL_BATCH_SIZE, strict_gemini_check_batch
-    from visual_runtime import _cache_key, _context_fingerprint
+    from visual_runtime import _cache_key
 
     cases = [
         ({"primary_entity": "Amina Rahman", "voiceover": "Amina Rahman presented the documentary.", "visual_intent": "person portrait"}, "Amina Rahman", "PERSON"),
@@ -143,11 +143,10 @@ def _test_visual_strategy():
     entity_prompt = strict_gemini_check_batch.__doc__ or ""
     if "entity" not in entity_prompt.casefold():
         raise AssertionError("entity-only batch QA contract is not exposed")
-    c1 = _context_fingerprint("person portrait", "Amina documentary", "Amina presented it", "story")
-    c2 = _context_fingerprint("person portrait", "Amina interview", "Amina discussed it", "story")
-    if c1 == c2 or _cache_key("Amina Rahman", "PERSON", c1) == _cache_key("Amina Rahman", "PERSON", c2):
-        raise AssertionError("context-aware cache identity failed")
-    return "Identity-first semantic visual strategy, multilingual identity, manual query routing and context-aware cache checks passed"
+    cache_context = "PERSON_ACTION"
+    if _cache_key("Amina Rahman", "PERSON", cache_context) == _cache_key("Amina Rahman", "PERSON", "PERSON_PORTRAIT"):
+        raise AssertionError("visual kind must separate action and portrait cache entries")
+    return "Identity-first semantic visual strategy, multilingual identity, manual query routing and semantic cache checks passed"
 
 
 def _test_visual_queries():
