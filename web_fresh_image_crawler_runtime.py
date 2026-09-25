@@ -513,6 +513,18 @@ def _scrape_browser_pages(
             title_mismatch += 1
             continue
         page_assets = list(result.get("assets") or [])
+        if not page_assets:
+            # Browser rendering is primary; use the existing lightweight HTML
+            # parser only as same-site rescue when a page exposes images server-side.
+            try:
+                from news_source_image_runtime import extract_news_source_images
+                page_assets = extract_news_source_images(
+                    str(page.get("url") or ""),
+                    str(page.get("source") or ""),
+                    max_images=max_images_per_page,
+                )
+            except Exception:
+                page_assets = []
         image_count += len(page_assets)
         enriched_page = {
             **page,
