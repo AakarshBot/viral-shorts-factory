@@ -41,14 +41,17 @@ def test_automatic_visual_search_fails_closed_without_grounding():
         raise AssertionError("Ungrounded automatic visual identity was allowed to search")
 
 
-def test_manual_visual_query_remains_authoritative_without_grounding():
+def test_manual_visual_query_remains_authoritative_without_grounding(monkeypatch):
     calls = []
 
     class FakeVisualRuntime:
-        @staticmethod
-        def _relevant_asset(bot, scene, category, used_urls, used_hashes, video_title):
-            calls.append(scene)
-            return _jpeg_bytes(), False, "manual"
+        pass
+
+    def fake_retrieval(runtime, bot, scene, category, used_urls, used_hashes, video_title):
+        calls.append(scene)
+        return _jpeg_bytes(), False, "manual"
+
+    monkeypatch.setattr(retrieval, "run_visual_retrieval", fake_retrieval)
 
     scene = {
         "primary_entity": "Unsupported generated identity",
