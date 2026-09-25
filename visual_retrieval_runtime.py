@@ -97,11 +97,6 @@ def _source_plan(
     return build_raw_source_plan(visual_type, visual_genre, allow_unlicensed=allow_unlicensed)
 
 
-def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
-    raw = " | ".join(str(value or "").strip().lower() for value in (intent, prompt, voice, video_title))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-
 def _as_image_bytes(data: Any) -> bytes | None:
     if data is None:
         return None
@@ -1944,9 +1939,6 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
         seg["visual_query_used"] = ""
         return rescue, False, "visual-rescue"
 
-    intent = str(seg.get("factual_visual_intent") or seg.get("visual_intent") or "").strip()
-    prompt = str(seg.get("specific_search_prompt") or entity).strip()
-    voice = str(seg.get("factual_voiceover") or seg.get("voiceover") or "").strip()
     # Cache by semantic kind rather than narration/title so a verified visual
     # can be reused across scenes of the same kind without another provider/QA pass.
     context = visual_genre
