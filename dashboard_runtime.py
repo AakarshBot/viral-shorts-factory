@@ -1718,6 +1718,9 @@ class DashboardWorkflowController(WorkflowController):
                 "queries": list(result.get("queries") or ([query] if method == "Website Scrape" else [])),
                 "articles": int(result.get("articles") or 0),
                 "profile_pages": int(result.get("profile_pages") or 0),
+                "publishers": list(result.get("publishers") or []),
+                "domains": list(result.get("domains") or []),
+                "browser_failures": int((result.get("rejection_counts") or {}).get("browser_failures") or 0),
                 "browser_pages_attempted": int(
                     result.get("articles") or 0
                 ) + int(result.get("profile_pages") or 0),
