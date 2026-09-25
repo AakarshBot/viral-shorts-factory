@@ -199,7 +199,7 @@ def patch_content_first_visuals(bot):
         from visual_quality_runtime import fit_visual_image, install as install_visual_quality
         from visual_safety_runtime import install as install_visual_safety
         from visual_retrieval_runtime import (
-                    collect_manual_visual_pool,
+            collect_manual_visual_pool,
             make_visual_rescue,
             materialize_manual_visual_pool,
             materialize_visual_bank,
@@ -229,6 +229,20 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
+        manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
+        manual_queries = parse_manual_visual_queries(manual_raw)
+        if manual_queries:
+            print(
+                f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
+                "building one shared entity-verified pool before scene selection.",
+                flush=True,
+            )
+        else:
+            print(
+                "   [Manual Visual Queries] No global manual queries supplied; "
+                "using the automatic per-slide visual flow.",
+                flush=True,
+            )
         article_source_assets = []
         article_source_materialized = []
         article_source_hashes: set[str] = set()
@@ -288,7 +302,6 @@ def patch_content_first_visuals(bot):
                 video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
                 used_hashes=manual_search_hashes,
                 pool_target=remaining_pool_target,
-                allow_auto_backfill=False,
                 verify_with_ai=True,
             )
             manual_pool_materialized = materialize_manual_visual_pool(
