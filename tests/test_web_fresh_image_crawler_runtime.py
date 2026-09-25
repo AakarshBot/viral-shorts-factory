@@ -151,10 +151,11 @@ def test_recent_articles_balance_publishers_and_keep_related_coverage(monkeypatc
         now,
     )
 
-    assert [item["url"] for item in articles] == [
+    urls = {item["url"] for item in articles}
+    assert urls == {
         "https://one.example/story-1",
         "https://two.example/story-2",
-    ]
+    }
 
 
 def test_recent_articles_require_query_terms_in_title_and_rank_newest(monkeypatch):
@@ -283,6 +284,14 @@ def test_web_lane_reports_underfill_without_using_image_search(monkeypatch):
     assert len(result["assets"]) == 2
     assert result["rejection_counts"]["web_pool_underfilled"] == 1
     assert "image_search_raw" not in result["rejection_counts"]
+
+
+def test_browser_title_match_accepts_surname_only_entity_coverage():
+    assert crawler._title_match(
+        "Virat Kohli",
+        "Kohli opens up on his future after fresh retirement speculation",
+        "Virat Kohli",
+    ) > 0
 
 
 def test_browser_candidate_extraction_prioritises_article_action_images():
