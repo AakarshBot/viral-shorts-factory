@@ -37,6 +37,9 @@ from dashboard_runtime import (
     collect_live_channel_statistics,
     discover_ranked_topics,
     discover_ai_topics,
+    choose_website_test_topic,
+    fetch_website_test_topics,
+    run_website_image_test,
     factory_function_coverage,
     run_demo_section,
     upload_ready_for_manual_decision,
@@ -595,6 +598,10 @@ def _init_state() -> None:
         "visual_pipeline_label": "Option 1 · Current image sourcing",
         "live_path_ready": False,
         "test_menu_selection": "Offline Diagnostics",
+        "website_test_desk": "Sports & Niche Sports",
+        "website_test_topics": [],
+        "website_test_topic_selection": "Random",
+        "website_test_result": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -3321,6 +3328,250 @@ def render_final_branding_preview() -> None:
         with st.container(border=True):
             st.image(preview_path, caption="Canonical compositor · 1080×1920", width="stretch")
 
+def render_website_image_test() -> None:
+    """Run the website-first image crawler against one lightweight live topic."""
+    _render_section_header(
+        "Visual retrieval lab",
+        "Website Image Fetcher",
+        "A retrieval-only test. It fetches a small live topic pool, chooses one story, scrapes publisher websites, and shows the images here.",
+    )
+
+    st.info(
+        "This test does not start the Live factory. Commons, DDG image search, scripting, audio, video rendering, and YouTube upload are not run.",
+        icon="🧪",
+    )
+
+    desk_options = {
+        "Sports & Niche Sports": {
+            "format_mode": "regular",
+            "category": "sports",
+            "language": "english",
+            "cricket_pipeline": False,
+            "requested_topic": "",
+        },
+        "Cricket — India / Asia": {
+            "format_mode": "cricket",
+            "category": "sports_stories_of_day",
+            "language": "english",
+            "cricket_pipeline": True,
+            "cricket_category": "India / Asia",
+            "requested_topic": "",
+        },
+        "Cricket — Global": {
+            "format_mode": "cricket",
+            "category": "sports_stories_of_day",
+            "language": "english",
+            "cricket_pipeline": True,
+            "cricket_category": "Global",
+            "requested_topic": "",
+        },
+        "News": {
+            "format_mode": "regular",
+            "category": "national_global_affairs",
+            "language": "english",
+            "cricket_pipeline": False,
+            "requested_topic": "",
+        },
+        "Technology": {
+            "format_mode": "regular",
+            "category": "technology",
+            "language": "english",
+            "cricket_pipeline": False,
+            "requested_topic": "",
+        },
+    }
+
+    controls = st.columns([2.2, 1, 1], gap="medium")
+    with controls[0]:
+        desk = st.selectbox(
+            "Topic desk",
+            list(desk_options.keys()),
+            key="website_test_desk",
+        )
+    with controls[1]:
+        fetch_topics = st.button(
+            "Fetch fresh topics",
+            type="primary",
+            width="stretch",
+            key="website_test_fetch_topics",
+        )
+    with controls[2]:
+        clear_test = st.button(
+            "Clear test",
+            width="stretch",
+            key="website_test_clear",
+        )
+
+    if clear_test:
+        st.session_state["website_test_topics"] = []
+        st.session_state["website_test_result"] = {}
+        st.session_state["website_test_topic_selection"] = "Random"
+        st.rerun()
+
+    if fetch_topics:
+        config = dict(desk_options[desk])
+        with st.spinner("Fetching a small live topic pool from the factory discovery desk..."):
+            try:
+                topics = fetch_website_test_topics(
+                    ultimate_bot,
+                    config,
+                    max_candidates=12,
+                )
+                st.session_state["website_test_topics"] = list(topics or [])
+                st.session_state["website_test_result"] = {}
+                st.session_state["website_test_topic_selection"] = "Random"
+            except Exception as exc:
+                st.session_state["website_test_topics"] = []
+                st.session_state["website_test_result"] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    topics = [
+        dict(item)
+        for item in (st.session_state.get("website_test_topics") or [])
+        if isinstance(item, dict) and str(item.get("title") or "").strip()
+    ]
+
+    if not topics:
+        error = str((st.session_state.get("website_test_result") or {}).get("error") or "").strip()
+        if error:
+            st.error(f"Topic fetch failed: {error}")
+        else:
+            st.caption("Choose a topic desk and fetch fresh topics to begin.")
+        return
+
+    topic_labels = ["Random"]
+    topic_lookup = {}
+    for topic in topics:
+        key = str(
+            topic.get("story_key")
+            or topic.get("story_url")
+            or topic.get("url")
+            or topic.get("title")
+            or ""
+        ).strip()
+        if not key:
+            continue
+        title = _ui_text(topic.get("title"), "Untitled story")
+        source = _ui_text(topic.get("source_label") or topic.get("source") or "", "")
+        label = f"{title} · {source}" if source else title
+        if label in topic_labels:
+            label = f"{label} · {len(topic_labels)}"
+        topic_labels.append(label)
+        topic_lookup[label] = key
+
+    current_selection = str(
+        st.session_state.get("website_test_topic_selection") or "Random"
+    )
+    if current_selection not in topic_labels:
+        current_selection = "Random"
+
+    selected_label = st.selectbox(
+        "Topic to test",
+        topic_labels,
+        index=topic_labels.index(current_selection),
+        key="website_test_topic_selector",
+    )
+    st.session_state["website_test_topic_selection"] = selected_label
+
+    chosen_key = topic_lookup.get(selected_label, "")
+    chosen_topic = choose_website_test_topic(
+        topics,
+        "Random" if selected_label == "Random" else chosen_key,
+    )
+
+    if chosen_topic:
+        st.markdown(
+            f"<div class='topic-card'>"
+            f"<div class='topic-kicker'><span>SELECTED STORY</span><span>#{int(chosen_topic.get('discovery_rank') or 0) or '—'}</span></div>"
+            f"<div class='topic-title'>{_ui_html(chosen_topic.get('title'))}</div>"
+            f"<div class='topic-subtitle'>"
+            f"{_ui_html(chosen_topic.get('source_label') or chosen_topic.get('source') or '')}"
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
+
+    if st.button(
+        "Scrape this story's websites",
+        type="primary",
+        width="stretch",
+        key="website_test_run",
+        disabled=not chosen_topic,
+    ):
+        with st.spinner("Opening current publisher pages and extracting website images..."):
+            try:
+                result = run_website_image_test(
+                    chosen_topic,
+                    category=str(desk_options[desk].get("category") or ""),
+                )
+                st.session_state["website_test_result"] = result
+            except Exception as exc:
+                st.session_state["website_test_result"] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    result = st.session_state.get("website_test_result") or {}
+    error = str(result.get("error") or "").strip()
+    assets = [
+        dict(item)
+        for item in (result.get("assets") or [])
+        if isinstance(item, dict) and item.get("bytes")
+    ]
+
+    if error:
+        st.error(f"Website scraper failed: {error}")
+        return
+    if not result or "assets" not in result:
+        return
+
+    st.markdown("---")
+    metric_cols = st.columns(4, gap="small")
+    metric_cols[0].metric("Website images", len(assets))
+    metric_cols[1].metric("Articles scraped", int(result.get("articles") or 0))
+    metric_cols[2].metric("Profile pages", int(result.get("profile_pages") or 0))
+    metric_cols[3].metric("AI checked", int(result.get("ai_checked") or 0))
+
+    if len(assets) >= int(result.get("success_threshold") or 10):
+        st.success("The website-first pool reached the 10-image target. Provider fallback was not needed.")
+    else:
+        st.warning(
+            f"The website-first pool returned {len(assets)} image(s), below the 10-image target. "
+            "In this test, the downstream Commons/DDG fallback is intentionally not run."
+        )
+
+    rejection_counts = result.get("rejection_counts") or {}
+    if rejection_counts:
+        with st.expander("Retrieval diagnostics", expanded=False):
+            st.json(rejection_counts)
+
+    for row_start in range(0, len(assets), 3):
+        row = assets[row_start:row_start + 3]
+        cols = st.columns(len(row), gap="medium")
+        for col, asset in zip(cols, row):
+            with col:
+                with st.container(border=True):
+                    st.image(
+                        asset["bytes"],
+                        width="stretch",
+                    )
+                    title = _ui_text(asset.get("article_title") or "Website image")
+                    publisher = _ui_text(asset.get("publisher") or "Web source")
+                    method = _ui_text(asset.get("crawler_image_method") or "browser image")
+                    age = asset.get("crawler_age_hours")
+                    age_text = f"{float(age):.1f}h old" if age is not None else "profile page"
+                    confidence = _ui_text(asset.get("crawler_confidence") or "review")
+                    st.caption(
+                        f"{publisher} · {method} · {age_text} · {confidence}\n{title}"
+                    )
+                    page_url = str(asset.get("source_page_url") or "").strip()
+                    if page_url:
+                        st.link_button(
+                            "Open source article",
+                            page_url,
+                            width="stretch",
+                        )
+
+
 def render_test_page() -> None:
     """Keep engineering/diagnostic tools out of the Live production flow."""
     _render_section_header(
@@ -3330,6 +3581,7 @@ def render_test_page() -> None:
     )
 
     options = [
+        "Website Image Fetcher",
         "Channel Statistics",
         "Offline Diagnostics",
         "Demo",
@@ -3350,7 +3602,9 @@ def render_test_page() -> None:
     )
     st.session_state.test_menu_selection = selected or current
 
-    if st.session_state.test_menu_selection == "Channel Statistics":
+    if st.session_state.test_menu_selection == "Website Image Fetcher":
+        render_website_image_test()
+    elif st.session_state.test_menu_selection == "Channel Statistics":
         render_channel_statistics()
     elif st.session_state.test_menu_selection == "Offline Diagnostics":
         render_offline_page()
