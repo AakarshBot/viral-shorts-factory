@@ -18,6 +18,42 @@ from visual_licensing_runtime import provenance, rescue_provenance
 from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
 
 
+def _build_visual_fallback_queries(scenes, video_title):
+    """Build provider-fallback queries when the fresh web pool is under 10."""
+    queries = []
+    seen = set()
+    for scene in scenes or []:
+        if not isinstance(scene, dict):
+            continue
+        entity = str(
+            scene.get("factual_primary_entity")
+            or scene.get("primary_entity")
+            or scene.get("visual_search_subject")
+            or ""
+        ).strip()
+        context = str(
+            scene.get("factual_visual_intent")
+            or scene.get("visual_intent")
+            or scene.get("visual_context")
+            or scene.get("specific_search_prompt")
+            or ""
+        ).strip()
+        query = " ".join(part for part in (entity, context) if part).strip()
+        if not query:
+            continue
+        query = re.sub(r"\\s+", " ", query)[:220].strip()
+        key = query.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        queries.append(query)
+        if len(queries) >= 4:
+            break
+    if not queries and str(video_title or "").strip():
+        queries.append(str(video_title).strip()[:220])
+    return queries
+
+
 async def _load_web_fresh_image_pool(bot, active_config, scenes, video_title, category):
     """Run the fresh web crawler before every other image provider."""
     selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else {}
@@ -145,16 +181,20 @@ def patch_content_first_visuals(bot):
 
         manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
         manual_queries = parse_manual_visual_queries(manual_raw)
+        fallback_provider_queries = manual_queries or _build_visual_fallback_queries(
+            scenes,
+            video_title,
+        )
         if manual_queries:
             print(
                 f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
-                "used only to fill a sparse fresh-web pool.",
+                "used only after the fresh-web pool misses the 10-image threshold.",
                 flush=True,
             )
         else:
             print(
-                "   [Manual Visual Queries] none supplied; "
-                "provider fallback is used only when the fresh-web pool is sparse.",
+                f"   [Visual Provider Fallback] {len(fallback_provider_queries)} scene-derived "
+                "queries ready for Commons/DDG and the factory's existing fallback sources.",
                 flush=True,
             )
 
@@ -162,7 +202,7 @@ def patch_content_first_visuals(bot):
         manual_pool_materialized = []
         manual_available_pool = [dict(item) for item in web_crawler_materialized]
 
-        if manual_queries and not crawler_satisfies_pool:
+        if not crawler_satisfies_pool and fallback_provider_queries:
             remaining_pool_target = max(
                 1,
                 MANUAL_POOL_TARGET - len(manual_available_pool),
@@ -176,7 +216,7 @@ def patch_content_first_visuals(bot):
                 visual_runtime,
                 bot,
                 scenes,
-                manual_queries,
+                fallback_provider_queries,
                 video_title=video_title,
                 used_hashes=manual_search_hashes,
                 pool_target=remaining_pool_target,
@@ -185,13 +225,14 @@ def patch_content_first_visuals(bot):
             manual_pool_materialized = materialize_manual_visual_pool(
                 bot,
                 manual_pool_result.get("assets") or [],
-                pool_id=hash(";".join(manual_queries)) & 0xffffffff,
+                pool_id=hash(";".join(fallback_provider_queries)) & 0xffffffff,
             )
             manual_available_pool.extend(
                 dict(item) for item in manual_pool_materialized
             )
 
         script_data["visual_manual_queries"] = list(manual_queries)
+        script_data["visual_fallback_provider_queries"] = list(fallback_provider_queries)
         script_data["visual_manual_pool_size"] = len(manual_available_pool)
         script_data["visual_manual_pool_query_stats"] = list(
             (manual_pool_result or {}).get("query_stats") or []
