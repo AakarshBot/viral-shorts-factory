@@ -1312,6 +1312,7 @@ def test_article_source_pool_preserves_publisher_through_assignment_and_crop(mon
             "author": "Example News",
         },
         "source_image_url": "https://example.com/images/article.jpg",
+        "source_page_url": "https://example.com/article",
         "status": "article-source",
         "used": False,
     }]
@@ -1327,6 +1328,7 @@ def test_article_source_pool_preserves_publisher_through_assignment_and_crop(mon
     assert layer["source_credit"] == "credit:Source: Example News"
     assert layer["asset_provenance"]["provider"] == "Example News"
     assert layer["source_image_url"] == "https://example.com/images/article.jpg"
+    assert layer["source_page_url"] == "https://example.com/article"
 
     ok, message = controller.crop_visual(
         1,
