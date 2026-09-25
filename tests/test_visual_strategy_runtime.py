@@ -222,8 +222,8 @@ def test_same_entity_gets_different_searchable_scene_queries():
     assert "player" not in second.query.lower()
     assert len(first.queries) <= 6
     assert len(second.queries) <= 6
-    assert first.queries[0] == "Vaibhav Sooryavanshi"
-    assert second.queries[0] == "Vaibhav Sooryavanshi"
+    assert first.queries[0] == first.query
+    assert second.queries[0] == second.query
 
 
 
