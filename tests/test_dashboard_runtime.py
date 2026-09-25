@@ -130,7 +130,7 @@ def test_dashboard_keeps_initial_website_pool_visible_and_assignable():
 def test_visual_pool_provenance_warning_defines_state_before_use():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index("    def render_pool_section(")
-    end = app_source.index("\n    st.markdown(\"### Source-website images\")", start)
+    end = app_source.index("\n    st.markdown(\"### Static article fallback\")", start)
     source = app_source[start:end]
 
     assignment = source.index("provenance_state = str(")
@@ -610,7 +610,7 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_choices(mon
     ok, message = controller.search_visual_options(1, "Shafali Verma batting")
 
     assert ok is True
-    assert "3 AI-checked" in message
+    assert "3 image option(s)" in message
     snapshot = controller.snapshot()
     stored = snapshot["visual_packages"][0][0]
     assert stored["image"] == str(current)
@@ -1741,7 +1741,7 @@ def test_dashboard_output_summary_reports_visual_qc_readiness():
 
 def test_dashboard_search_result_crop_uses_active_dialog_target():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    assert 'st.session_state["visual_crop_target"] = f"asset:{asset_hash}"' in source
+    assert 'st.session_state["visual_crop_target"] = f"slide:{slide_index}"' in source
     assert 'st.session_state.visual_pool_crop_target = asset_hash' not in source
 
 
