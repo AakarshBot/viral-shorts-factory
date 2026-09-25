@@ -920,11 +920,11 @@ def build_raw_source_plan(
 
     plan.append(("Openverse", fetch_openverse_candidates))
     if str(os.getenv("PIXABAY_API_KEY", "")).strip():
-            plan.append(("Pixabay", fetch_pixabay_candidates))
+        plan.append(("Pixabay", fetch_pixabay_candidates))
     if str(os.getenv("PEXELS_API_KEY", "")).strip():
-            plan.append(("Pexels", fetch_pexels_candidates))
+        plan.append(("Pexels", fetch_pexels_candidates))
     if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
-            plan.append(("Unsplash", fetch_unsplash_candidates))
+        plan.append(("Unsplash", fetch_unsplash_candidates))
 
     if allow_unlicensed:
         plan.append(("DDG", fetch_duckduckgo_candidates))
