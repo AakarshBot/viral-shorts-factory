@@ -63,6 +63,101 @@ def test_title_match_rejects_headline_only_false_positive():
     ) == 0
 
 
+def test_google_news_rss_article_redirect_is_usable_but_publisher_rss_is_not():
+    google_news_url = "https://news.google.com/rss/articles/CBMiExample?ceid=IN:en"
+    publisher_rss_url = "https://example.com/rss/articles/story"
+
+    assert crawler._article_url_is_usable(google_news_url)
+    assert not crawler._article_url_is_usable(publisher_rss_url)
+
+
+def test_recent_articles_accept_google_news_rss_fallback(monkeypatch):
+    now = datetime.now(timezone.utc)
+    fresh = (now - timedelta(hours=2)).isoformat()
+    google_news_url = "https://news.google.com/rss/articles/CBMiExample?ceid=IN:en"
+
+    monkeypatch.setattr(crawler, "_ddgs_news", lambda *_args: [])
+    monkeypatch.setattr(
+        crawler,
+        "_google_news_rss",
+        lambda *_args: [{
+            "title": "Virat Kohli reacts to retirement rumours",
+            "url": google_news_url,
+            "date": fresh,
+            "body": "",
+            "source": "Example Sports",
+        }],
+    )
+
+    articles = crawler._collect_recent_articles(
+        ["Virat Kohli reacts to retirement rumours"],
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
+    )
+
+    assert [item["url"] for item in articles] == [google_news_url]
+
+
+def test_related_article_score_accepts_paraphrased_coverage():
+    assert crawler._related_article_score(
+        "Virat Kohli reacts retirement rumours",
+        "Kohli opens up on his future after fresh retirement speculation",
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+    ) > 0
+
+
+def test_related_article_score_rejects_unrelated_figure_only_story():
+    assert crawler._related_article_score(
+        "Virat Kohli reacts retirement rumours",
+        "Virat Kohli attends a family wedding in Mumbai",
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+    ) == 0
+
+
+def test_recent_articles_balance_publishers_and_keep_related_coverage(monkeypatch):
+    now = datetime.now(timezone.utc)
+    fresh = (now - timedelta(hours=2)).isoformat()
+
+    def fake_search(query):
+        return [
+            {
+                "title": "Kohli opens up on his future after fresh retirement speculation",
+                "url": "https://one.example/story-1",
+                "date": fresh,
+                "body": "",
+            },
+            {
+                "title": "Virat Kohli addresses retirement rumours after recent match",
+                "url": "https://two.example/story-2",
+                "date": fresh,
+                "body": "",
+            },
+            {
+                "title": "Virat Kohli attends a family wedding in Mumbai",
+                "url": "https://three.example/story-3",
+                "date": fresh,
+                "body": "",
+            },
+        ]
+
+    monkeypatch.setattr(crawler, "_news_search", fake_search)
+    articles = crawler._collect_recent_articles(
+        ["Virat Kohli reacts to retirement rumours"],
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
+    )
+
+    urls = {item["url"] for item in articles}
+    assert urls == {
+        "https://one.example/story-1",
+        "https://two.example/story-2",
+    }
+
+
 def test_recent_articles_require_query_terms_in_title_and_rank_newest(monkeypatch):
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=3)).isoformat()
@@ -189,6 +284,16 @@ def test_web_lane_reports_underfill_without_using_image_search(monkeypatch):
     assert len(result["assets"]) == 2
     assert result["rejection_counts"]["web_pool_underfilled"] == 1
     assert "image_search_raw" not in result["rejection_counts"]
+
+
+def test_browser_title_match_accepts_surname_only_entity_coverage():
+    from web_browser_image_runtime import _title_match as browser_title_match
+
+    assert browser_title_match(
+        "Virat Kohli",
+        "Kohli opens up on his future after fresh retirement speculation",
+        "Virat Kohli",
+    ) > 0
 
 
 def test_browser_candidate_extraction_prioritises_article_action_images():
