@@ -171,7 +171,6 @@ def search_slide_visual(
     manual_query="",
 ):
     """Use one canonical manual/automatic query path for the scene."""
-    _install_runtime_query_guard(visual_runtime_module)
     candidate = build_candidate_scene(
         scene,
         lock_visual_subject(scene, video_title),
@@ -206,8 +205,14 @@ def search_slide_visual(
         flush=True,
     )
 
-    result = visual_runtime_module._relevant_asset(
-        bot, candidate, category, used_urls, used_hashes, video_title
+    result = run_visual_retrieval(
+        visual_runtime_module,
+        bot,
+        candidate,
+        category,
+        used_urls,
+        used_hashes,
+        video_title,
     )
 
     if isinstance(scene, dict):
