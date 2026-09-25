@@ -68,6 +68,35 @@ def test_cricket_factual_lane_keeps_valid_headline_without_cricket_keyword():
     ) is True
 
 
+def test_hard_dashboard_gate_rejects_headline_only_candidate():
+    story = _fresh_story(
+        "India cricket star makes surprise statement",
+        description="",
+        event_source_count=1,
+        event_article_count=1,
+    )
+    assert discovery._hard_dashboard_pass(
+        story,
+        "sports_stories_of_day",
+        "",
+    ) is False
+    assert story["discovery_rejection"] == "Headline-only / insufficient story detail"
+
+
+def test_hard_dashboard_gate_keeps_multi_source_headline_with_thin_body():
+    story = _fresh_story(
+        "India cricket star makes surprise statement",
+        description="",
+        event_source_count=2,
+        event_article_count=2,
+    )
+    assert discovery._hard_dashboard_pass(
+        story,
+        "sports_stories_of_day",
+        "",
+    ) is True
+
+
 def test_hard_dashboard_gate_rejects_service_noise():
     story = _fresh_story(
         "India cricket live score and match timings",
@@ -354,9 +383,9 @@ def test_cricket_dashboard_does_not_reject_weird_but_source_backed_headlines(mon
 
 
 
-def test_sports_dashboard_uses_ten_independent_editorial_query_lanes():
+def test_sports_dashboard_uses_fourteen_independent_editorial_query_lanes():
     queries = discovery._query_lanes("sports", {"gnews_q": "sports"})
-    assert len(queries) == 10
+    assert len(queries) == 14
     joined = " ".join(queries).casefold()
     for term in ("football", "tennis", "badminton", "hockey", "athletics", "boxing", "motorsport", "women", "olympics"):
         assert term in joined
@@ -384,7 +413,7 @@ def test_dashboard_collector_does_not_call_reddit_by_default(monkeypatch):
         {"rss_url": ""},
     )
 
-    assert calls["google"] == 10
+    assert calls["google"] == 14
     assert calls["reddit"] == 0
 
 
