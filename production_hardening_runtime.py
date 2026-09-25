@@ -6,23 +6,6 @@ import os
 
 
 
-def _install_authoritative_visual_query_planner() -> None:
-    """Verify that the canonical visual planner is still installed."""
-    try:
-        import visual_strategy_runtime
-        current = getattr(visual_strategy_runtime, "build_deep_queries", None)
-        if not getattr(current, "_authoritative_locked_subject_planner", False):
-            raise RuntimeError("authoritative visual query planner is not installed")
-        print(
-            "   [Visual Strategy Hardening] Strict single-query visual planner preserved.",
-            flush=True,
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            f"Authoritative visual query planner is unavailable: {type(exc).__name__}: {exc}"
-        ) from exc
-
-
 def _patch_script_pipeline(bot) -> None:
     """Verify the canonical script router instead of adding another wrapper."""
     current = getattr(bot, "write_script", None)
@@ -171,6 +154,5 @@ def install_production_wrappers(controller) -> None:
     controller._patched = True
 
 def install_production_hardening(bot) -> None:
-    _install_authoritative_visual_query_planner()
     _patch_script_pipeline(bot)
     # Progress wrappers are installed by WorkflowController when production starts.
