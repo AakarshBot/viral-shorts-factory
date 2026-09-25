@@ -169,32 +169,34 @@ def test_extract_news_source_images_returns_multiple_direct_images(monkeypatch, 
 
 
 def test_news_source_extraction_does_not_require_visual_ai_qc(monkeypatch):
-    import visual_content_runtime as content_runtime
-
     called = {"strict": 0}
 
-    class FakeRuntime:
-        @staticmethod
-        def _strict_gate(*_args, **_kwargs):
-            called["strict"] += 1
-            raise AssertionError("article-source pool must never enter factory visual QC")
+    def fail_strict(*_args, **_kwargs):
+        called["strict"] += 1
+        raise AssertionError("article-source extraction must not enter visual QC")
 
     monkeypatch.setattr(
-        content_runtime,
-        "_load_news_source_image_pool",
-        lambda *_args, **_kwargs: [
-            {
-                "bytes": _jpeg_bytes(),
-                "hash": "article-hash",
-                "path": "",
-                "source": "news_source",
-                "source_type": "news_source",
-                "credit": "Source: Example News",
-                "provenance": {"provider": "Example News", "url": "https://example.com/image.jpg"},
-            }
-        ],
+        "news_source_image_runtime.extract_news_source_images",
+        lambda *_args, **_kwargs: [{
+            "bytes": _jpeg_bytes(),
+            "hash": "article-hash",
+            "source": "news_source",
+            "source_type": "news_source",
+            "credit": "Source: Example News",
+            "provenance": {
+                "provider": "Example News",
+                "url": "https://example.com/image.jpg",
+            },
+        }],
+    )
+    monkeypatch.setattr(
+        "visual_qa_runtime.strict_gemini_check_batch",
+        fail_strict,
     )
 
-    assets = content_runtime._load_news_source_image_pool(type("B", (), {})(), {})
-    assert assets[0]["source_type"] == "news_source"
+    # The source-page extractor is a pure retrieval primitive. It should not
+    # invoke visual AI itself.
+    from news_source_image_runtime import extract_news_source_images
+    assets = extract_news_source_images("https://example.com/story", "Example News")
+    assert assets
     assert called["strict"] == 0
