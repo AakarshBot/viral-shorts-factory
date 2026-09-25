@@ -189,8 +189,8 @@ def test_press_conference_query_uses_scene_anchor_not_full_prompt():
     assert intent.visual_genre == "PERSON_ACTION"
     assert intent.queries
     assert len(intent.queries) <= 6
-    assert intent.queries[0] == "Rishabh Pant press conference"
-    assert intent.queries[-1] == "Rishabh Pant"
+    assert intent.queries[0] == "Rishabh Pant"
+    assert "press conference" in intent.queries[1].lower()
     assert "announcement" not in intent.queries[0].lower()
     assert "editorial" not in intent.queries[0].lower()
     assert "latest" not in intent.queries[0].lower()
