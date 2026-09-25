@@ -137,6 +137,33 @@ def test_direct_image_search_builds_diverse_pool_without_article_scraping(monkey
     assert result["assets"][0]["crawler_freshness_basis"] == "search-window:7d"
 
 
+def test_materialized_direct_crawler_asset_is_tagged_for_dashboard_pool(tmp_path):
+    from types import SimpleNamespace
+    from visual_retrieval_runtime import materialize_manual_visual_pool
+
+    bot = SimpleNamespace(ASSETS_DIR=str(tmp_path))
+    assets = materialize_manual_visual_pool(
+        bot,
+        [{
+            "bytes": _jpeg_bytes(),
+            "hash": "crawler-hash",
+            "source": "web_image_search",
+            "source_type": "web_image_search",
+            "source_page_url": "https://example.com/story",
+            "source_image_url": "https://cdn.example.com/image.jpg",
+            "provenance": {"provider": "Example News", "url": "https://example.com/story"},
+            "status": "crawler-ai-verified",
+            "provenance_status": "provenance-review",
+        }],
+        pool_id="crawler-dashboard-test",
+    )
+
+    assert len(assets) == 1
+    assert assets[0]["pool_origin"] == "web-crawler"
+    assert assets[0]["source_page_url"] == "https://example.com/story"
+    assert assets[0]["source_image_url"] == "https://cdn.example.com/image.jpg"
+
+
 def test_high_confidence_article_images_bypass_gemini(monkeypatch):
     now = datetime.now(timezone.utc)
     query = "Virat Kohli statement after match"
