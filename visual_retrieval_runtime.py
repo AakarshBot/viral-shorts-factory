@@ -1307,6 +1307,8 @@ def collect_manual_visual_pool(
                         used_source_image_urls=seen_image_urls,
                         search_round=1,
                         reset_qa_scene=False,
+                        visual_type=visual_type,
+                        visual_genre=visual_genre,
                     )
                     refined_assets = list(refined_result.get("assets") or [])
                 except Exception as exc:
@@ -1475,6 +1477,8 @@ def collect_manual_visual_search(
     used_source_image_urls: set[str] | None = None,
     search_round: int = 1,
     reset_qa_scene: bool = True,
+    visual_type: str = "",
+    visual_genre: str = "",
 ) -> dict:
     """Fetch up to ten new images from the first two preferred manual sources with identity AI checks.
 
@@ -1495,10 +1499,12 @@ def collect_manual_visual_search(
     if not exact_query:
         return {"assets": [], "target": 10, "rejection_counts": {}}
 
-    visual_type, visual_genre = _manual_query_visual_context(
+    inferred_visual_type, inferred_visual_genre = _manual_query_visual_context(
         exact_query,
         [{"manual_visual_query": exact_query, "primary_entity": exact_query}],
     )
+    visual_type = str(visual_type or inferred_visual_type or "GENERAL_CONTEXT").upper()
+    visual_genre = str(visual_genre or inferred_visual_genre or "GENERAL_CONTEXT").upper()
     entity_anchor = str(
         canonical_manual_entity_anchor(exact_query, "") or exact_query
     ).strip()
