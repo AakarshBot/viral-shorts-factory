@@ -211,46 +211,6 @@ def patch_content_first_visuals(bot):
         verified_count = 0
         rescue_count = 0
 
-        manual_pool_result = None
-        manual_pool_materialized = []
-        manual_available_pool = [dict(item) for item in article_source_materialized]
-        if manual_queries:
-            # This is an explicit human-QC workflow. Do not make dashboard entry
-            # depend on a remote Gemini identity verdict; candidates stay labelled
-            # unverified until the reviewer approves the visual package.
-            remaining_pool_target = max(1, MANUAL_POOL_TARGET - len(article_source_materialized))
-            manual_search_hashes = set(used_hashes)
-            manual_search_hashes.update(article_source_hashes)
-            manual_pool_result = collect_manual_visual_pool(
-                visual_runtime,
-                bot,
-                scenes,
-                manual_queries,
-                video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
-                used_hashes=manual_search_hashes,
-                pool_target=remaining_pool_target,
-                verify_with_ai=True,
-            )
-            manual_pool_materialized = materialize_manual_visual_pool(
-                bot,
-                manual_pool_result.get("assets") or [],
-                pool_id=hash(";".join(manual_queries)) & 0xffffffff,
-            )
-            manual_available_pool.extend(dict(item) for item in manual_pool_materialized)
-            script_data["visual_manual_queries"] = list(manual_queries)
-            script_data["visual_manual_pool_size"] = len(manual_available_pool)
-            script_data["visual_manual_pool_query_stats"] = list(
-                manual_pool_result.get("query_stats") or []
-            )
-            script_data["visual_manual_pool_rejection_counts"] = dict(
-                manual_pool_result.get("rejection_counts") or {}
-            )
-            print(
-                f"   [Manual Visual Pool] total candidates available for manual QC="
-                f"{len(manual_pool_materialized)}; scene selection begins now.",
-                flush=True,
-            )
-
         print("\n🎨 Rendering content-first visual package (multi-source retrieval + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
             start_visual_qa_scene()
@@ -426,7 +386,7 @@ def patch_content_first_visuals(bot):
                 ),
                 "visual_original_path": str(seg.get("visual_original_path") or "").strip(),
                 "visual_manual_pool_mode": bool(seg.get("visual_manual_pool_mode", False)),
-                "visual_manual_pool_size": len(manual_pool_materialized) if seg.get("visual_manual_pool_mode") else 0,
+                "visual_manual_pool_size": len(manual_available_pool) if seg.get("visual_manual_pool_mode") else 0,
                 "visual_manual_pool_query_stats": list((manual_pool_result or {}).get("query_stats") or []) if seg.get("visual_manual_pool_mode") else [],
                 "visual_manual_pool": (
                     [dict(item) for item in manual_available_pool]
