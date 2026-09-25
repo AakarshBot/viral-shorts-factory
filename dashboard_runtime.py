@@ -791,6 +791,12 @@ class DashboardWorkflowController(WorkflowController):
             dict(item) for item in (manual_pool or [])
             if isinstance(item, dict) and str(item.get("path") or "").strip()
         ]
+        script_data["visual_web_crawler_dashboard_pool_size"] = len(self._visual_pool)
+        script_data["visual_web_crawler_dashboard_missing_paths"] = sum(
+            1
+            for item in (manual_pool or [])
+            if isinstance(item, dict) and not str(item.get("path") or "").strip()
+        )
         self._visual_search_groups = []
         self._visual_pool_crop_target = ""
         gate["visual_event"].clear()
