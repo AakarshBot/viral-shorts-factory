@@ -148,6 +148,52 @@ def test_direct_image_failures_fall_back_to_scraping_image_result_source_pages(m
     assert result["rejection_counts"]["image_result_page_images"] == 5
 
 
+def test_general_web_search_recovers_when_image_and_news_search_are_empty(monkeypatch):
+    query = "MS Dhoni latest cricket story"
+
+    class FakeDDGS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def images(self, query, **kwargs):
+            return []
+
+        def news(self, query, **kwargs):
+            return []
+
+        def text(self, query, **kwargs):
+            return [{
+                "title": "MS Dhoni latest cricket story",
+                "href": "https://publisher.example.com/ms-dhoni",
+                "body": "MS Dhoni latest cricket story",
+            }]
+
+    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
+    monkeypatch.setattr(
+        "news_source_image_runtime.extract_news_source_images",
+        lambda url, publisher_hint="", max_images=6: [{
+            "bytes": _jpeg_bytes((140, 80, 60)),
+            "publisher": publisher_hint or "publisher.example.com",
+            "method": "og:image",
+            "image_url": f"{url}/hero.jpg",
+            "page_url": url,
+        }],
+    )
+
+    result = crawler.crawl_fresh_web_images(
+        {"title": query},
+        [{"primary_entity": "MS Dhoni", "voiceover": "MS Dhoni is the subject."}],
+        story_title=query,
+    )
+
+    assert len(result["assets"]) == 1
+    assert result["assets"][0]["source_type"] == "web_crawler"
+    assert result["assets"][0]["crawler_freshness_basis"] == "search-window:7d"
+    assert result["assets"][0]["crawler_age_hours"] is None
+    assert result["rejection_counts"]["web_search_pages"] == 1
+    assert result["rejection_counts"]["web_search_images"] == 1
+
+
 def test_crawler_keeps_only_recent_article_coverage(monkeypatch):
     now = datetime.now(timezone.utc)
     recent = (now - timedelta(hours=20)).isoformat()
