@@ -1050,6 +1050,53 @@ def test_manual_visual_search_can_rank_a_later_provider_candidate(monkeypatch):
 
 
 
+def test_manual_visual_search_accepts_explicit_action_context(monkeypatch):
+    calls = []
+
+    class FakeRuntime:
+        @staticmethod
+        def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=10):
+            calls.append(source)
+            return fetcher(*args)
+
+    class FakeBot:
+        pass
+
+    def provider(*args):
+        candidate = _licensed_candidate(_jpeg_bytes((1200, 1600)), "cc0")
+        candidate["source_image_url"] = "https://example.test/action.jpg"
+        candidate["search_title"] = "Vaibhav Sooryavanshi batting cricket"
+        return [candidate]
+
+    monkeypatch.setattr(
+        retrieval,
+        "_source_plan",
+        lambda *args: [
+            ("Commons", provider),
+            ("DDG", provider),
+            ("Openverse", provider),
+        ],
+    )
+    monkeypatch.setattr(
+        visual_qa,
+        "strict_gemini_check_batch",
+        lambda images, *args, **kwargs: {
+            index: True for index in range(len(images))
+        },
+    )
+
+    result = retrieval.collect_manual_visual_search(
+        FakeRuntime(),
+        FakeBot(),
+        "Vaibhav Sooryavanshi batting cricket",
+        visual_type="PERSON",
+        visual_genre="PERSON_ACTION",
+    )
+
+    assert result["assets"]
+    assert calls[:2] == ["Commons", "DDG"]
+
+
 def test_manual_visual_search_respects_shared_qa_reset_mode(monkeypatch):
     resets = []
 
