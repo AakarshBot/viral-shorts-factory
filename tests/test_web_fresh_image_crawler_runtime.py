@@ -50,6 +50,104 @@ def _install_fake_ddgs_images(monkeypatch, results_by_query):
     monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
 
 
+def test_image_search_uses_explicit_bing_backend(monkeypatch):
+    query = "Virat Kohli cricket photo"
+    calls = []
+
+    class FakeDDGS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def images(self, query, **kwargs):
+            calls.append(dict(kwargs))
+            return [{
+                "title": "Virat Kohli cricket photo",
+                "image": "https://cdn.example.com/virat.jpg",
+                "url": "https://publisher.example.com/story",
+                "width": 1600,
+                "height": 1000,
+                "source": "Bing",
+            }]
+
+    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
+    monkeypatch.setattr(
+        "news_source_image_runtime.fetch_direct_source_image",
+        lambda image_url, page_url="", publisher_hint="": {
+            "bytes": _jpeg_bytes(),
+            "image_url": image_url,
+            "page_url": page_url,
+            "publisher": publisher_hint or "publisher.example.com",
+        },
+    )
+    monkeypatch.setattr(
+        "news_source_image_runtime.extract_news_source_images",
+        lambda *_args, **_kwargs: [],
+    )
+
+    result = crawler.crawl_fresh_web_images(
+        {"title": query},
+        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli story."}],
+        story_title=query,
+    )
+
+    assert len(result["assets"]) == 1
+    assert calls
+    assert calls[0]["backend"] == "bing"
+
+
+def test_direct_image_failures_fall_back_to_scraping_image_result_source_pages(monkeypatch):
+    query = "Virat Kohli cricket action"
+    image_results = [
+        {
+            "title": f"Virat Kohli cricket action photo {index}",
+            "image": f"https://cdn.example.com/{index}.jpg",
+            "url": f"https://publisher.example.com/story/{index}",
+            "width": 1600,
+            "height": 1000,
+            "source": "Bing",
+        }
+        for index in range(6)
+    ]
+    _install_fake_ddgs_images(monkeypatch, {query: image_results})
+
+    monkeypatch.setattr(
+        "news_source_image_runtime.fetch_direct_source_image",
+        lambda *_args, **_kwargs: None,
+    )
+    def scrape_source_page(url, publisher_hint="", max_images=6):
+        index = int(url.rsplit("/", 1)[-1])
+        buffer = io.BytesIO()
+        Image.new("RGB", (1200 + index * 40, 1600), (20 + index * 40, 80, 140)).save(
+            buffer, format="JPEG", quality=95
+        )
+        return [{
+            "bytes": buffer.getvalue(),
+            "publisher": publisher_hint or "publisher.example.com",
+            "method": "og:image",
+            "image_url": f"{url}/hero.jpg",
+            "page_url": url,
+        }]
+
+    monkeypatch.setattr(
+        "news_source_image_runtime.extract_news_source_images",
+        scrape_source_page,
+    )
+
+    result = crawler.crawl_fresh_web_images(
+        {"title": query},
+        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli is the subject."}],
+        story_title=query,
+    )
+
+    assert len(result["assets"]) == 5
+    assert result["assets"][0]["source_type"] == "web_crawler"
+    assert result["assets"][0]["crawler_freshness_basis"] == "search-window:7d"
+    assert result["rejection_counts"]["image_search_raw"] == 6
+    assert result["rejection_counts"]["image_search_downloaded"] == 0
+    assert result["rejection_counts"]["image_result_pages"] == 5
+    assert result["rejection_counts"]["image_result_page_images"] == 5
+
+
 def test_crawler_keeps_only_recent_article_coverage(monkeypatch):
     now = datetime.now(timezone.utc)
     recent = (now - timedelta(hours=20)).isoformat()
