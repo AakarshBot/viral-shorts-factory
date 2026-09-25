@@ -141,14 +141,17 @@ def test_visual_pool_provenance_warning_defines_state_before_use():
 def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index('    st.markdown("### Website image pool")')
-    end = app_source.index('    render_pool_section(', start)
+    end = app_source.index('    st.markdown("---")', start)
     source = app_source[start:end]
 
-    assert "Fresh crawler" in source
+    assert "Automatic website crawler" in source
+    assert "Automatic crawler diagnostics" in source
     assert "visual_web_crawler_ai_checked" in source
     assert "visual_web_crawler_queries" in source
+    assert "visual_web_crawler_publishers" in source
+    assert "visual_web_crawler_domains" in source
     assert 'st.link_button("Open source page"' in app_source
-    assert 'Static article fallback' in source
+    assert 'Static article fallback' in app_source
 
 
 def test_dashboard_live_monitor_uses_controlled_polling():
