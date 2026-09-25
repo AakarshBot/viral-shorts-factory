@@ -110,7 +110,7 @@ def test_dashboard_live_header_uses_canonical_mode():
     assert 'render_header("Live")' not in app_source
 
 
-def test_dashboard_keeps_selected_manual_pool_images_visible():
+def test_dashboard_keeps_initial_website_pool_visible_and_assignable():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     render_start = app_source.index("def render_visual_review")
     available_start = app_source.index("    available = ", render_start)
@@ -118,12 +118,13 @@ def test_dashboard_keeps_selected_manual_pool_images_visible():
     assert app_source[available_start:available_end].strip() == "available = list(pool)"
 
     visual_source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
-    assert 'manual_selected["used"] = True' in visual_source
-    assert 'manual_selected["assigned_slide"] = idx + 1' in visual_source
-    combined_start = visual_source.index("        combined_manual_pool = [")
-    combined_end = visual_source.index('        script_data["visual_manual_pool"]', combined_start)
-    combined_block = visual_source[combined_start:combined_end]
-    assert 'not bool(item.get("used"))' not in combined_block
+    process_start = visual_source.index('    async def process(script_data, language_cfg, format_mode="regular"):')
+    process_end = visual_source.index("    bot.process_visuals_async = process", process_start)
+    process = visual_source[process_start:process_end]
+    assert 'script_data["visual_manual_pool"] = [dict(item) for item in web_pool]' in process
+    assert '"image": ""' in process
+    assert 'No slide was auto-assigned.' in process
+    assert "collect_manual_visual_pool(" not in process
 
 
 def test_visual_pool_provenance_warning_defines_state_before_use():
@@ -140,7 +141,7 @@ def test_visual_pool_provenance_warning_defines_state_before_use():
 def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index('    st.markdown("### Fresh web images")')
-    end = app_source.index('    # All retained images are already shown in the single pool above.', start)
+    end = app_source.index('    st.markdown("---")', start)
     source = app_source[start:end]
 
     assert "Fresh crawler" in source
