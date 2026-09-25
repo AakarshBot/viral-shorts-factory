@@ -127,6 +127,12 @@ def patch_content_first_visuals(bot):
         script_data["visual_web_crawler_queries"] = list(
             web_crawler_result.get("queries") or []
         )
+        script_data["visual_web_crawler_publishers"] = list(
+            web_crawler_result.get("publishers") or []
+        )
+        script_data["visual_web_crawler_domains"] = list(
+            web_crawler_result.get("domains") or []
+        )
         script_data["visual_web_crawler_rejection_counts"] = dict(
             web_crawler_result.get("rejection_counts") or {}
         )
