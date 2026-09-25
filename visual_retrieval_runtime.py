@@ -1947,7 +1947,9 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
     intent = str(seg.get("factual_visual_intent") or seg.get("visual_intent") or "").strip()
     prompt = str(seg.get("specific_search_prompt") or entity).strip()
     voice = str(seg.get("factual_voiceover") or seg.get("voiceover") or "").strip()
-    context = _context_fingerprint(intent, prompt, voice, video_title)
+    # Cache by semantic kind rather than narration/title so a verified visual
+    # can be reused across scenes of the same kind without another provider/QA pass.
+    context = visual_genre
     cache_entity = visual_anchor
     seg["visual_qc_blocked"] = False
     seg["visual_qc_block_reason"] = ""
@@ -2219,7 +2221,9 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             flush=True,
         )
 
-        if len(verified_assets) >= MAX_ENTITY_BANK_PER_QUERY:
+        # One successful identity batch is sufficient for automatic retrieval;
+        # extra candidates from the same search remain available in the bank.
+        if len(verified_assets) >= 3:
             break
 
     if verified_assets:
