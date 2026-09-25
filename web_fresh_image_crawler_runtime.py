@@ -615,7 +615,10 @@ def _scrape_browser_pages(
     max_images_per_page: int = CRAWLER_ARTICLE_IMAGES,
 ):
     if not pages:
-        return [], 0, 0
+        return [], 0, 0, {
+            "browser_failures": len(pages),
+            "static_fallback_images": 0,
+        }
     try:
         from web_browser_image_runtime import scrape_web_pages
     except Exception as exc:
