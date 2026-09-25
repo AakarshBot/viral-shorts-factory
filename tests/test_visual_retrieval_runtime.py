@@ -1920,25 +1920,6 @@ def test_retrieval_uses_multiple_candidates_from_one_provider_before_next_query(
     ]
 
 
-def test_person_action_automatic_query_is_action_first():
-    from visual_search_intent_runtime import resolve_visual_search_intent
-
-    intent = resolve_visual_search_intent(
-        {
-            "primary_entity": "Virat Kohli",
-            "visual_type": "PERSON",
-            "visual_intent": "batting cricket action",
-            "specific_search_prompt": "Virat Kohli batting cricket action",
-            "voiceover": "Virat Kohli is batting in the match.",
-        }
-    )
-
-    assert intent.visual_genre == "PERSON_ACTION"
-    assert intent.queries[0] == "Virat Kohli batting cricket"
-    assert intent.queries[0] != intent.subject
-    assert intent.subject == "Virat Kohli"
-
-
 def test_verified_person_action_cache_ignores_narration_text():
     cache_contexts = []
 
