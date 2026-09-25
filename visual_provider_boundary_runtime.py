@@ -995,7 +995,6 @@ def build_raw_source_plan(
 
     plan = []
     if kind == "PERSON" and genre != "PERSON_ACTION":
-        plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
 
     commons_kinds = {
         "PERSON", "ORGANIZATION", "EVENT", "PRODUCT", "LOCATION", "DOCUMENT",
