@@ -551,6 +551,39 @@ def _commons_search_query(query: str) -> str:
     return q
 
 
+def _commons_team_search_variants(query: str, visual_type: str, visual_genre: str) -> list[str]:
+    """Normalize common women's-team phrasing into Commons-friendly search terms."""
+    exact = _clean_query(query)
+    if not exact:
+        return []
+
+    lowered = exact.casefold()
+    women_team = bool(
+        re.search(r"\bwomen'?s\b", lowered)
+        and re.search(r"\bnational\b", lowered)
+        and re.search(r"\bteam\b", lowered)
+    )
+    if not women_team:
+        return []
+
+    normalized = re.sub(r"\bwomens\b", "women's", exact, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bwomen\s+s\b", "women's", normalized, flags=re.IGNORECASE)
+    core = re.sub(
+        r"\b(?:celebrate|celebrates|celebrating|celebration|pose|poses|pictured)\b",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    core = re.sub(r"\s+", " ", core).strip(" -,:")
+    if not core:
+        return []
+
+    variants = [core]
+    if re.search(r"\b(?:celebrate|celebrates|celebrating|celebration)\b", exact, flags=re.IGNORECASE):
+        variants.insert(0, f"{core} celebration")
+    return list(dict.fromkeys(item.strip() for item in variants if item.strip()))[:2]
+
+
 def _commons_person_seed(query: str) -> str:
     """Extract a compact person-name seed for generic Commons fallback search."""
     tokens = re.findall(r"[A-Za-z][A-Za-z'’.-]*", _clean_query(query))
