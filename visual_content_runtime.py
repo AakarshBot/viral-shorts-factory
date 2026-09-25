@@ -357,30 +357,6 @@ def patch_content_first_visuals(bot):
                 allow_auto_backfill=False,
                 verify_with_ai=True,
             )
-            for asset in manual_pool_result.get("assets") or []:
-                if str(asset.get("provenance_status") or "").strip() != "commercial-verified":
-                    # Rights-review images remain available to the human QC pool,
-                    # but must never enter the verified automatic cache.
-                    continue
-                if str(asset.get("status") or "").strip() == "manual-review-unverified":
-                    # Gemini outage candidates are human-reviewable, but are not
-                    # eligible for the verified automatic cache.
-                    continue
-                try:
-                    visual_runtime.save_to_cache(
-                        bot,
-                        asset.get("bytes"),
-                        str(asset.get("subject") or "").strip(),
-                        str(asset.get("visual_type") or "GENERAL_CONTEXT"),
-                        str(asset.get("source") or "manual"),
-                        context=f"manual:{str(asset.get('query') or '').strip()}:{str(asset.get('hash') or '').strip()}",
-                    )
-                except Exception as exc:
-                    print(
-                        f"   [Visual Cache] Manual pool cache write skipped: "
-                        f"{type(exc).__name__}: {exc}",
-                        flush=True,
-                    )
             manual_pool_materialized = materialize_manual_visual_pool(
                 bot,
                 manual_pool_result.get("assets") or [],
@@ -536,11 +512,7 @@ def patch_content_first_visuals(bot):
                 ).convert("RGBA")
             img_path = os.path.join(bot.ASSETS_DIR, f"scene_{idx+1}_img.jpg")
 
-            try:
-                from visual_strategy_runtime import classify_scene
-                visual_type = classify_scene(seg, category)
-            except Exception:
-                visual_type = str(seg.get("visual_type", "GENERAL_CONTEXT"))
+            visual_type = str(seg.get("visual_type") or "GENERAL_CONTEXT").upper()
 
             if format_mode == "top5" and idx == 0:
                 rendered = visual_runtime._render_image_slide(
@@ -654,11 +626,7 @@ def patch_content_first_visuals(bot):
                 str(seg.get("visual_genre") or "GENERAL_CONTEXT"),
             ).convert("RGBA")
 
-            try:
-                from visual_strategy_runtime import classify_scene
-                visual_type = classify_scene(seg, category)
-            except Exception:
-                visual_type = str(seg.get("visual_type", "GENERAL_CONTEXT"))
+            visual_type = str(seg.get("visual_type") or "GENERAL_CONTEXT").upper()
 
             if format_mode == "top5" and idx == 0:
                 rendered = visual_runtime._render_image_slide(
