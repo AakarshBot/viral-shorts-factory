@@ -263,17 +263,6 @@ def _candidate_search_text(data: Any) -> str:
     return re.sub(r"\s+", " ", " ".join(values)).strip()
 
 
-def _candidate_action_signal(data: Any) -> int:
-    """Return searchable action evidence without performing visual scene QA."""
-    text = _candidate_search_text(data)
-    words = {
-        token.casefold()
-        for token in re.findall(r"[\w-]+", text, flags=re.UNICODE)
-        if len(token) > 2
-    }
-    return len(words & _VISUAL_REFINE_ACTION_TERMS)
-
-
 def _candidate_relevance_score(data: Any, query: str) -> float:
     """Score how closely provider metadata matches the exact search query."""
     metadata = _candidate_search_text(data)
@@ -389,19 +378,6 @@ def _provider_search_query(
 
 
 
-_VISUAL_REFINE_ACTION_TERMS = {
-    "bat", "batted", "batting", "batter", "batsman", "bowling", "bowled", "bowler",
-    "cricket", "match", "innings", "playing", "player", "shot", "shots", "shooting",
-    "scoring", "scores", "scored", "run", "runs", "running", "racing",
-    "hit", "hits", "hitting", "smash", "smashes", "smashed", "six", "sixes",
-    "four", "fours", "boundary", "boundaries", "drive", "drives", "driving",
-    "pull", "pulling", "cut", "cuts", "cutting", "flick", "flicks", "flicking",
-    "sweep", "sweeps", "sweeping", "hook", "hooks", "hooking", "loft", "lofted",
-    "strike", "strikes", "striking", "wicket", "wickets", "fielding", "fielder",
-    "catch", "catches", "catching", "throw", "throws", "throwing",
-    "celebrating", "celebration", "celebrate",
-}
-
 _VISUAL_REFINE_STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
     "with", "from", "by", "is", "are", "was", "were", "be", "been", "this",
@@ -415,10 +391,11 @@ _VISUAL_REFINE_STOPWORDS = {
 
 
 def _scene_refinement_query(seg: dict, entity: str) -> str:
-    """Build one compact entity + 1-2-word scene refinement without inventing facts."""
+    """Build one compact entity + context refinement without special-case genres."""
     entity_text = str(entity or "").strip()
     if not entity_text:
         return ""
+
     entity_tokens = {
         token.casefold()
         for token in re.findall(r"[\w-]+", entity_text, flags=re.UNICODE)
@@ -434,23 +411,18 @@ def _scene_refinement_query(seg: dict, entity: str) -> str:
             "voiceover",
         )
     )
+
     candidates = []
-    action_candidates = []
-    other_candidates = []
     for token in re.findall(r"[\w-]+", source_text, flags=re.UNICODE):
         lowered = token.casefold()
         if len(lowered) < 3 or lowered in _VISUAL_REFINE_STOPWORDS or lowered in entity_tokens:
             continue
-        target = action_candidates if lowered in _VISUAL_REFINE_ACTION_TERMS else other_candidates
-        if lowered not in target:
-            target.append(lowered)
-    candidates.extend(action_candidates)
-    candidates.extend(other_candidates)
+        if lowered not in candidates:
+            candidates.append(lowered)
+
     if not candidates:
         return ""
     return f"{entity_text} {' '.join(candidates[:2])}".strip()
-
-
 
 
 def _manual_scene_text(scene: dict) -> str:
@@ -502,18 +474,6 @@ def _manual_candidate_scene_score(asset: dict, scene: dict) -> float:
     if entity and entity.casefold() in query.casefold():
         score += 90.0
 
-    scene_action_terms = {
-        token
-        for token in re.findall(r"[\w-]+", scene_text.casefold(), flags=re.UNICODE)
-        if token in _VISUAL_REFINE_ACTION_TERMS
-    }
-    query_action_terms = {
-        token
-        for token in re.findall(r"[\w-]+", query.casefold(), flags=re.UNICODE)
-        if token in _VISUAL_REFINE_ACTION_TERMS
-    }
-    if scene_action_terms and scene_action_terms & query_action_terms:
-        score += 80.0
     return round(score, 3)
 
 
@@ -1069,52 +1029,7 @@ def collect_manual_visual_pool(
                 (remaining_slots + remaining_queries - 1) // remaining_queries,
             ),
         )
-        # Reserve action-search capacity only when the matched scene
-        # actually contains sports-action evidence. Other PERSON_ACTION scenes
-        # (for example press conferences) retain their existing pool behavior.
-        action_scene_evidence = ""
-        best_scene_overlap = -1
-        query_tokens = {
-            token.casefold()
-            for token in re.findall(r"[\w-]+", exact_query)
-            if len(token) > 2
-        }
-        for scene in scenes or []:
-            if not isinstance(scene, dict):
-                continue
-            scene_tokens = {
-                token.casefold()
-                for token in re.findall(r"[\w-]+", _manual_scene_text(scene))
-                if len(token) > 2
-            }
-            overlap = len(query_tokens & scene_tokens)
-            if overlap > best_scene_overlap:
-                best_scene_overlap = overlap
-                action_scene_evidence = _manual_scene_text(scene)
-
-        action_tokens = {
-            token.casefold()
-            for token in re.findall(r"[\w-]+", action_scene_evidence)
-        }
-        query_action_tokens = {
-            token.casefold()
-            for token in re.findall(r"[\w-]+", exact_query)
-        }
-        has_sports_action_evidence = bool(action_tokens & _VISUAL_REFINE_ACTION_TERMS)
-        has_query_action_evidence = bool(query_action_tokens & _VISUAL_REFINE_ACTION_TERMS)
-        # Reserve a small action slice only when the exact query does not
-        # already request an action. Action-specific queries should be searched
-        # once before adding any refinement work.
-        action_reserve = (
-            min(3, max(0, target - 1))
-            if (
-                visual_type == "PERSON"
-                and has_sports_action_evidence
-                and not has_query_action_evidence
-            )
-            else 0
-        )
-        exact_target = max(1, target - action_reserve)
+        exact_target = target
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
@@ -1223,21 +1138,12 @@ def collect_manual_visual_pool(
                         stage_candidates.append(candidate)
                         query_candidates.append(candidate)
 
-            if visual_genre == "PERSON_ACTION":
-                stage_candidates.sort(
-                    key=lambda item: (
-                        -_candidate_action_signal(item.get("data")),
-                        -float(item.get("priority") or 0.0),
-                        str(item.get("source") or "").casefold(),
-                    )
+            stage_candidates.sort(
+                key=lambda item: (
+                    -float(item.get("priority") or 0.0),
+                    str(item.get("source") or "").casefold(),
                 )
-            else:
-                stage_candidates.sort(
-                    key=lambda item: (
-                        -float(item.get("priority") or 0.0),
-                        str(item.get("source") or "").casefold(),
-                    )
-                )
+            )
             before = len(assets)
             stage_target = max(0, exact_target - verified_for_query)
             added, requests_made = _verify(
@@ -1261,74 +1167,6 @@ def collect_manual_visual_pool(
             image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
             if image_url:
                 seen_image_urls.add(image_url)
-
-        # Give PERSON_ACTION one deterministic entity+context refinement even
-        # when the exact-name search already filled its non-action share of the
-        # pool. This prevents portraits from satisfying the whole request before
-        # an action-photo search gets a chance.
-        should_refine = verified_for_query < target and (
-            not has_query_action_evidence or verified_for_query == 0
-        )
-        if should_refine:
-            best_scene = None
-            best_overlap = -1
-            query_tokens = {
-                token.casefold()
-                for token in re.findall(r"[\w-]+", exact_query)
-                if len(token) > 2
-            }
-            for scene in scenes or []:
-                if not isinstance(scene, dict):
-                    continue
-                scene_tokens = {
-                    token.casefold()
-                    for token in re.findall(r"[\w-]+", _manual_scene_text(scene))
-                    if len(token) > 2
-                }
-                overlap = len(query_tokens & scene_tokens)
-                if overlap > best_overlap:
-                    best_scene = scene
-                    best_overlap = overlap
-            refined_query = _scene_refinement_query(
-                best_scene or {"visual_intent": "cricket action"},
-                entity_anchor,
-            )
-            if refined_query and refined_query.casefold() != exact_query.casefold():
-                refined_result = {"assets": [], "qa_requests": 0}
-                try:
-                    refined_result = collect_manual_visual_search(
-                        runtime,
-                        bot,
-                        refined_query,
-                        video_title=video_title,
-                        used_hashes=seen_hashes,
-                        used_source_image_urls=seen_image_urls,
-                        search_round=1,
-                        reset_qa_scene=False,
-                        visual_type=visual_type,
-                        visual_genre=visual_genre,
-                    )
-                    refined_assets = list(refined_result.get("assets") or [])
-                except Exception as exc:
-                    refined_assets = []
-                    print(
-                        f"   [Manual Visual Pool] refinement failed safely: "
-                        f"{type(exc).__name__}: {exc}",
-                        flush=True,
-                    )
-                remaining = max(0, target - verified_for_query)
-                for asset in refined_assets[:remaining]:
-                    asset["manual_query_index"] = query_index
-                    asset["pool_origin"] = f"manual:{query_index}:refinement"
-                    assets.append(dict(asset))
-                    image_hash = str(asset.get("hash") or "").strip()
-                    if image_hash:
-                        seen_hashes.add(image_hash)
-                    image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
-                    if image_url:
-                        seen_image_urls.add(image_url)
-                    verified_for_query += 1
-                qa_requests += int(refined_result.get("qa_requests") or 0)
 
         query_stats.append(
             {
@@ -1561,72 +1399,14 @@ def collect_manual_visual_search(
                 continue
             candidates.append(candidate)
 
-    # Action searches get one bounded third-provider fallback only when the
-    # primary pair is sparse or provides no searchable action evidence.
-    if visual_genre == "PERSON_ACTION":
-        action_candidates = [
-            item for item in candidates
-            if _candidate_action_signal(item.get("data")) > 0
-        ]
-        if len(candidates) < 6 or not action_candidates:
-            extra_source = source_plan[2:3]
-            if extra_source and callable(extra_source[0][1]):
-                source_index = 2
-                source_name, fetcher = extra_source[0]
-                source_key = str(source_name or "").strip().casefold()
-                if source_key:
-                    try:
-                        (
-                            _source_index,
-                            _source_name,
-                            extra_items,
-                            extra_used_urls,
-                            extra_cache_updates,
-                        ) = _fetch_manual_provider(
-                            (source_index, str(source_name), fetcher, source_key)
-                        )
-                    except Exception as exc:
-                        print(
-                            f"   [Manual Visual Search] action fallback {source_name} "
-                            f"failed safely: {type(exc).__name__}: {exc}",
-                            flush=True,
-                        )
-                        extra_items, extra_used_urls, extra_cache_updates = [], set(), {}
-                    for cache_key, raw_items in extra_cache_updates.items():
-                        search_cache[cache_key] = list(raw_items)
-                    fetch_used_urls.update(extra_used_urls)
-                    for data in extra_items:
-                        candidate = _manual_candidate_from_data(
-                            str(source_name),
-                            data,
-                            exact_query,
-                            visual_type,
-                            visual_genre,
-                            bot,
-                            seen_hashes,
-                            seen_urls,
-                            rejected_counts,
-                        )
-                        if candidate is not None:
-                            candidates.append(candidate)
-
-    # Only cap after all providers have contributed so ranking can choose the
-    # strongest image regardless of which provider returned it.
-    if visual_genre == "PERSON_ACTION":
-        candidates.sort(
-            key=lambda item: (
-                -_candidate_action_signal(item.get("data")),
-                -float(item.get("priority") or 0.0),
-                str(item.get("source") or "").casefold(),
-            )
+    # Only cap after all providers have contributed so ranking can choose
+    # the strongest candidate without genre-specific action logic.
+    candidates.sort(
+        key=lambda item: (
+            -float(item.get("priority") or 0.0),
+            str(item.get("source") or "").casefold(),
         )
-    else:
-        candidates.sort(
-            key=lambda item: (
-                -float(item.get("priority") or 0.0),
-                str(item.get("source") or "").casefold(),
-            )
-        )
+    )
     candidates = candidates[:20]
 
     accepted: list[dict] = []
