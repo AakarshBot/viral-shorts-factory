@@ -2245,8 +2245,8 @@ def test_dashboard_review_surface_exposes_editable_script_and_visual_replacement
     visual_start = source.index("def render_visual_review")
     visual_end = source.index("\ndef render_live_factory", visual_start)
     visual = source[visual_start:visual_end]
-    assert "Replace image" in visual
-    assert "Find up to 10 alternatives" in visual
+    assert "Retrieve image" in visual
+    assert '["Website Scrape", "Normal Factory Visual Fetch"]' in visual
     assert "Use" in visual
 
 
