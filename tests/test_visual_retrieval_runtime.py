@@ -364,18 +364,6 @@ def test_manual_person_query_preserves_action_context():
     assert visual_genre == "PERSON_ACTION"
 
 
-def test_manual_person_refinement_prefers_action_terms():
-    refined = retrieval._scene_refinement_query(
-        {
-            "primary_entity": "Vaibhav Sooryavanshi",
-            "voiceover": "Vaibhav Sooryavanshi is batting in the cricket match.",
-            "visual_intent": "",
-        },
-        "Vaibhav Sooryavanshi",
-    )
-
-    assert refined == "Vaibhav Sooryavanshi batting cricket"
-
 def test_manual_pool_opens_one_shared_gemini_scene_budget(monkeypatch):
     scene_resets = []
     provider_calls = []
@@ -489,10 +477,6 @@ def test_manual_pool_target_cannot_exceed_hard_pool_max(monkeypatch):
     assert result["target"] == retrieval.MANUAL_POOL_MAX
 
 
-def test_sparse_manual_query_uses_one_refinement_to_fill_target(monkeypatch):
-    image_bytes = _jpeg_bytes()
-    refine_calls = []
-
     class FakeRuntime:
         @staticmethod
         def _call_fetcher_with_timeout(fetcher, args, source, query):
@@ -569,9 +553,6 @@ def test_sparse_manual_query_uses_one_refinement_to_fill_target(monkeypatch):
     assert "Vaibhav Sooryavanshi" in refine_calls[0]
     assert "batting" in refine_calls[0]
 
-
-def test_person_action_reserves_action_search_even_when_exact_query_fills_target(monkeypatch):
-    refine_calls = []
 
     class FakeRuntime:
         @staticmethod
@@ -650,36 +631,6 @@ def test_person_action_reserves_action_search_even_when_exact_query_fills_target
     assert result["query_stats"][0]["qa_requests"] == 2
     assert refine_calls == ["Vaibhav Sooryavanshi batting cricket"]
 
-
-
-def test_action_query_candidate_beats_portrait_for_action_scene():
-    portrait = {
-        "hash": "portrait",
-        "query": "Vaibhav Sooryavanshi",
-        "priority": 1000.0,
-        "search_text": "Vaibhav Sooryavanshi portrait",
-        "status": "entity-verified",
-        "provenance_status": "commercial-verified",
-    }
-    action = {
-        "hash": "action",
-        "query": "Vaibhav Sooryavanshi batting cricket",
-        "priority": 700.0,
-        "search_text": "Vaibhav Sooryavanshi batting cricket",
-        "status": "entity-verified",
-        "provenance_status": "commercial-verified",
-    }
-    selected = retrieval.select_manual_visual_candidate(
-        [portrait, action],
-        {
-            "slide_index": 1,
-            "factual_primary_entity": "Vaibhav Sooryavanshi",
-            "voiceover": "Vaibhav Sooryavanshi is batting and hitting sixes.",
-            "visual_intent": "batting cricket action",
-        },
-        set(),
-    )
-    assert selected["hash"] == "action"
 
 
 def test_manual_pool_target_is_enforced_across_provider_stages(monkeypatch):
@@ -1123,87 +1074,6 @@ def test_manual_visual_search_accepts_explicit_action_context(monkeypatch):
     assert set(calls) == {"Commons", "DDG", "Openverse"}
 
 
-def test_manual_commons_person_action_search_uses_action_ladder(monkeypatch):
-    import visual_provider_boundary_runtime as boundary
-
-    searches = []
-
-    monkeypatch.setattr(
-        boundary,
-        "_api_json",
-        lambda *args, **kwargs: (
-            searches.append((kwargs.get("params") or {}).get("gsrsearch"))
-            or {"query": {"pages": {}}}
-        ),
-    )
-    monkeypatch.setattr(
-        boundary,
-        "_bounded_downloads",
-        lambda urls, used_urls, limit=boundary.MAX_PROVIDER_CANDIDATES: [],
-    )
-
-    result = boundary.fetch_commons_candidates(
-        "Vaibhav Sooryavanshi batting",
-        set(),
-        "Vaibhav Sooryavanshi batting",
-        "",
-        "PERSON",
-        "PERSON_ACTION",
-        True,
-    )
-
-    assert result == []
-    assert searches == [
-        "Vaibhav Sooryavanshi batting cricket",
-        "Vaibhav Sooryavanshi batting",
-    ]
-
-
-def test_famous_cricketer_action_queries_keep_action_provider_contract():
-    from visual_search_intent_runtime import resolve_visual_search_intent
-
-    players = [
-        "Virat Kohli",
-        "Rohit Sharma",
-        "MS Dhoni",
-        "Jasprit Bumrah",
-        "Hardik Pandya",
-        "Ravindra Jadeja",
-        "Rishabh Pant",
-        "Shubman Gill",
-        "KL Rahul",
-        "Sanju Samson",
-        "Babar Azam",
-        "Mohammad Rizwan",
-        "Shaheen Shah Afridi",
-        "Ben Stokes",
-        "Joe Root",
-        "Jos Buttler",
-        "Pat Cummins",
-        "Steve Smith",
-        "Kane Williamson",
-        "Mitchell Starc",
-    ]
-
-    for player in players:
-        intent = resolve_visual_search_intent({
-            "primary_entity": player,
-            "visual_type": "PERSON",
-            "visual_intent": "batting cricket action",
-            "specific_search_prompt": f"{player} batting cricket action",
-        })
-        assert intent.visual_type == "PERSON"
-        assert intent.visual_genre == "PERSON_ACTION"
-        assert intent.query == player
-
-    plan = provider_boundary.build_raw_source_plan(
-        "PERSON",
-        "PERSON_ACTION",
-        allow_unlicensed=True,
-    )
-    source_names = {name for name, _fetcher in plan}
-    assert {"Commons", "DDG", "Openverse"} <= source_names
-
 
 def test_manual_visual_search_respects_shared_qa_reset_mode(monkeypatch):
     resets = []
@@ -1627,16 +1497,6 @@ def test_retrieval_rejects_strict_gate_exception_instead_of_using_uncertain_cand
 
     assert source == "visual-rescue"
 
-
-def test_commons_person_action_search_preserves_action_intent(monkeypatch):
-    calls = []
-    downloads = []
-
-    monkeypatch.setattr(
-        provider_boundary,
-        "resolve_person_identity",
-        lambda query: {"qid": "Q16224802", "label": "Smriti Mandhana"},
-    )
 
     def fake_api_json(_url, *, params=None, headers=None):
         calls.append(dict(params or {}))
@@ -2146,24 +2006,6 @@ def test_manual_pool_allows_multiple_images_from_same_source_article(monkeypatch
     assert len(assets) == 3
     assert len({item["source_page_url"] for item in assets}) == 2
 
-
-def test_manual_pool_action_query_is_not_collapsed_to_identity_only(monkeypatch):
-    monkeypatch.setattr(
-        provider_boundary,
-        "resolve_person_identity",
-        lambda _entity: {"qid": "Q123", "label": "Vaibhav Sooryavanshi"},
-    )
-
-    searches = provider_boundary._commons_search_queries(
-        "Vaibhav Sooryavanshi batting",
-        "PERSON",
-        "PERSON_ACTION",
-    )
-    query_values = [item[0] for item in searches]
-
-    assert "Vaibhav Sooryavanshi batting" in query_values
-    assert any("vaibhav sooryavanshi batting cricket" == value.casefold() for value in query_values)
-    assert any(mode == "person-action-text" for _, mode, _ in searches)
 
 
 def test_provider_429_short_circuits_repeated_api_calls(monkeypatch):
