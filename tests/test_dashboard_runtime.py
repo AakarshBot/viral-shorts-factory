@@ -148,7 +148,7 @@ def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     assert "visual_web_crawler_ai_checked" in source
     assert "visual_web_crawler_queries" in source
     assert 'st.link_button("Open source page"' in app_source
-    assert 'st.markdown("### Source-website images")' in source
+    assert 'Static article fallback' in source
 
 
 def test_dashboard_live_monitor_uses_controlled_polling():
