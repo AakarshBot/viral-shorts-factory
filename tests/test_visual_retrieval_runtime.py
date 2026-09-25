@@ -431,7 +431,6 @@ def test_manual_pool_opens_one_shared_gemini_scene_budget(monkeypatch):
         ["One", "Two", "Three"],
         "Test story",
         pool_target=6,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == 6
@@ -484,7 +483,6 @@ def test_manual_pool_target_cannot_exceed_hard_pool_max(monkeypatch):
         ["One", "Two"],
         "Test story",
         pool_target=retrieval.MANUAL_POOL_MAX + 5,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == retrieval.MANUAL_POOL_MAX
@@ -561,7 +559,6 @@ def test_sparse_manual_query_uses_one_refinement_to_fill_target(monkeypatch):
         ["Vaibhav Sooryavanshi"],
         "Test story",
         pool_target=3,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == 3
@@ -646,7 +643,6 @@ def test_person_action_reserves_action_search_even_when_exact_query_fills_target
         ["Vaibhav Sooryavanshi"],
         "Test story",
         pool_target=10,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == 10
@@ -743,7 +739,6 @@ def test_manual_pool_target_is_enforced_across_provider_stages(monkeypatch):
         ["One", "Two", "Three"],
         "Test story",
         pool_target=10,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == 10
@@ -2164,7 +2159,6 @@ def test_manual_pool_allows_multiple_images_from_same_source_article(monkeypatch
         "Test story",
         pool_target=10,
         pool_max=10,
-        allow_auto_backfill=False,
     )
 
     assets = result["assets"]
@@ -2421,7 +2415,6 @@ def test_manual_pool_uses_ten_image_target_overall(monkeypatch):
         FakeBot(),
         [],
         ["rank 1", "rank 2", "rank 3"],
-        allow_auto_backfill=False,
     )
     assert [row["target"] for row in result["query_stats"]] == [4, 3, 3]
     assert [row["verified"] for row in result["query_stats"]] == [4, 3, 3]
@@ -2469,7 +2462,6 @@ def test_manual_pool_allows_multiple_images_from_same_article(monkeypatch):
         FakeBot(),
         [],
         ["same article"],
-        allow_auto_backfill=False,
     )
     assert len(result["assets"]) == 4
     assert result["rejection_counts"]["duplicate"] == 0
@@ -2616,7 +2608,6 @@ def test_manual_pool_stops_after_first_two_providers_when_target_is_met(monkeypa
         "Test story",
         pool_target=2,
         pool_max=2,
-        allow_auto_backfill=False,
     )
 
     assert calls == ["Commons", "DDG"]
@@ -2674,7 +2665,6 @@ def test_manual_pool_uses_second_provider_stage_only_when_first_stage_fails_qa(m
         "Test story",
         pool_target=2,
         pool_max=2,
-        allow_auto_backfill=False,
     )
 
     assert calls == ["Commons", "Openverse", "Pexels", "Unsplash"]
@@ -2725,7 +2715,6 @@ def test_manual_pool_exposes_candidates_for_human_review_when_gemini_is_temporar
         "IPL logo",
         pool_target=3,
         pool_max=3,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == 3
@@ -2777,7 +2766,6 @@ def test_manual_pool_exposes_candidates_when_gemini_hits_quota(monkeypatch):
         "India cricket image",
         pool_target=3,
         pool_max=3,
-        allow_auto_backfill=False,
     )
 
     assert len(result["assets"]) == 3
@@ -2821,7 +2809,6 @@ def test_manual_pool_human_review_mode_does_not_call_gemini(monkeypatch):
         "IPL logo",
         pool_target=3,
         pool_max=3,
-        allow_auto_backfill=False,
         verify_with_ai=False,
     )
 
