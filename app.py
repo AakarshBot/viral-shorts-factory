@@ -2066,7 +2066,12 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if bool(asset.get("used")):
                             st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
 
-    st.markdown("### Available manual-search images")
+    crawler_pool = [
+        item for item in available
+        if str(item.get("pool_origin") or "").strip() == "web-crawler"
+        or str(item.get("source_type") or "").strip() == "web_crawler"
+        or str(item.get("source") or "").strip() == "web_crawler"
+    ]
     article_source_pool = [
         item for item in available
         if str(item.get("pool_origin") or "").strip() == "article-source"
@@ -2075,12 +2080,21 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     ]
     manual_verified_pool = [
         item for item in available
-        if item not in article_source_pool
+        if item not in crawler_pool and item not in article_source_pool
     ]
 
+    st.markdown("### Fresh web images")
+    render_pool_section(
+        "Fresh web crawler",
+        "Recent images collected from current web coverage. Publisher names are retained for the final source overlay; ambiguous crawler results may require your visual review.",
+        crawler_pool,
+        "crawler",
+    )
+
+    st.markdown("### Source-website images")
     render_pool_section(
         "Source-website images",
-        "Images scraped directly from the selected article page. They are provenance-review items, so the source and copyright warning stay visible for your manual decision.",
+        "Images scraped directly from a selected source page and retained for manual review.",
         article_source_pool,
         "article",
     )
