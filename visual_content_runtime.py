@@ -14,41 +14,6 @@ from PIL import Image
 from visual_qa_runtime import reset_visual_qa_video_budget
 
 
-def _build_visual_fallback_queries(scenes, video_title):
-    """Build provider-fallback queries when the fresh web pool is under 10."""
-    queries = []
-    seen = set()
-    for scene in scenes or []:
-        if not isinstance(scene, dict):
-            continue
-        entity = str(
-            scene.get("factual_primary_entity")
-            or scene.get("primary_entity")
-            or scene.get("visual_search_subject")
-            or ""
-        ).strip()
-        context = str(
-            scene.get("factual_visual_intent")
-            or scene.get("visual_intent")
-            or scene.get("visual_context")
-            or scene.get("specific_search_prompt")
-            or ""
-        ).strip()
-        query = " ".join(part for part in (entity, context) if part).strip()
-        if not query:
-            continue
-        query = re.sub(r"\\s+", " ", query)[:220].strip()
-        key = query.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        queries.append(query)
-        if len(queries) >= 4:
-            break
-    if not queries and str(video_title or "").strip():
-        queries.append(str(video_title).strip()[:220])
-    return queries
-
 
 async def _load_web_fresh_image_pool(bot, active_config, scenes, video_title, category):
     """Run the fresh web crawler before every other image provider."""
@@ -90,25 +55,13 @@ def patch_content_first_visuals(bot):
     if getattr(bot, "_content_first_visuals_patch_installed", False):
         return bot
     try:
-        import visual_runtime
-        from visual_query_entities_runtime import search_slide_visual
-        from visual_quality_runtime import fit_visual_image, install as install_visual_quality
+        from visual_retrieval_runtime import materialize_manual_visual_pool
         from visual_safety_runtime import install as install_visual_safety
-        from visual_retrieval_runtime import (
-            collect_manual_visual_pool,
-            make_visual_rescue,
-            materialize_manual_visual_pool,
-            materialize_visual_bank,
-            select_manual_visual_candidate,
-            MANUAL_POOL_TARGET,
-        )
-        from visual_entity_grounding_runtime import apply_grounding
     except Exception as exc:
         raise RuntimeError(
             f"Content-first visual runtime could not be installed: {type(exc).__name__}: {exc}"
         ) from exc
 
-    install_visual_quality(visual_runtime)
     if not install_visual_safety():
         raise RuntimeError("Visual safety runtime could not be installed.")
 
