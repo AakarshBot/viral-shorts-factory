@@ -12,22 +12,24 @@ article-image matches bypass that AI call.
 """
 from __future__ import annotations
 
+import hashlib
 import io
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from PIL import Image
 
-CRAWLER_MAX_AGE_HOURS = max(24, min(96, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_MAX_AGE_HOURS", "72"))))
-CRAWLER_TARGET = max(10, min(15, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_TARGET", "15"))))
-CRAWLER_SUCCESS = max(10, min(CRAWLER_TARGET, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_SUCCESS", "10"))))
-CRAWLER_NEWS_RESULTS_PER_QUERY = max(6, min(15, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_NEWS_RESULTS", "12"))))
-CRAWLER_MAX_ARTICLES = max(4, min(12, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_ARTICLES", "10"))))
-CRAWLER_ARTICLE_IMAGES = max(3, min(8, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_IMAGES_PER_ARTICLE", "6"))))
-CRAWLER_QUERY_COUNT = max(2, min(4, int(__import__("os").getenv("VISUAL_WEB_CRAWLER_QUERY_COUNT", "3"))))
+CRAWLER_MAX_AGE_HOURS = max(24, min(96, int(os.getenv("VISUAL_WEB_CRAWLER_MAX_AGE_HOURS", "72"))))
+CRAWLER_TARGET = max(10, min(15, int(os.getenv("VISUAL_WEB_CRAWLER_TARGET", "15"))))
+CRAWLER_SUCCESS = max(10, min(CRAWLER_TARGET, int(os.getenv("VISUAL_WEB_CRAWLER_SUCCESS", "10"))))
+CRAWLER_NEWS_RESULTS_PER_QUERY = max(6, min(15, int(os.getenv("VISUAL_WEB_CRAWLER_NEWS_RESULTS", "12"))))
+CRAWLER_MAX_ARTICLES = max(4, min(12, int(os.getenv("VISUAL_WEB_CRAWLER_ARTICLES", "10"))))
+CRAWLER_ARTICLE_IMAGES = max(3, min(8, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGES_PER_ARTICLE", "6"))))
+CRAWLER_QUERY_COUNT = max(2, min(4, int(os.getenv("VISUAL_WEB_CRAWLER_QUERY_COUNT", "3"))))
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "from",
@@ -332,7 +334,7 @@ def _candidate_from_asset(
 
     return {
         "bytes": data,
-        "hash": __import__("hashlib").sha256(data).hexdigest(),
+        "hash": hashlib.sha256(data).hexdigest(),
         "source": "web_crawler",
         "source_type": "web_crawler",
         "source_name": publisher,
@@ -446,8 +448,14 @@ def _verify_ambiguous(
 ) -> tuple[list[dict[str, Any]], int, int]:
     high = [item for item in candidates if item.get("crawler_confidence") == "high"]
     ambiguous = [item for item in candidates if item.get("crawler_confidence") != "high"]
-    if not ambiguous or not entity:
-        return high, 0, 0
+    if not ambiguous:
+        return high[:CRAWLER_TARGET], 0, 0
+
+    if not entity:
+        limited = candidates[:CRAWLER_TARGET]
+        for item in limited:
+            item["status"] = "crawler-review-unverified"
+        return limited, 0, len(limited)
 
     try:
         from visual_qa_runtime import (
@@ -456,16 +464,17 @@ def _verify_ambiguous(
             start_visual_qa_scene,
             strict_gemini_check_batch,
         )
-        import os
 
         api_key = str(os.getenv("GEMINI_API_KEY") or "").strip()
         if not api_key:
-            for item in ambiguous:
+            limited = ambiguous[: max(0, CRAWLER_TARGET - len(high))]
+            for item in limited:
                 item["status"] = "crawler-review-unverified"
-            return high + ambiguous[: max(0, CRAWLER_TARGET - len(high))], 0, len(ambiguous[: max(0, CRAWLER_TARGET - len(high))])
+            return (high + limited)[:CRAWLER_TARGET], 0, len(limited)
 
         start_visual_qa_scene()
-        batch = ambiguous[: max(GEMINI_VISUAL_BATCH_SIZE, min(10, len(ambiguous)))]
+        batch = ambiguous[: min(10, max(GEMINI_VISUAL_BATCH_SIZE, len(ambiguous)))]
+        batch = batch[:10]
         verdicts = strict_gemini_check_batch(
             [item["bytes"] for item in batch],
             entity,
@@ -476,6 +485,7 @@ def _verify_ambiguous(
         )
         checked = len(batch) if get_last_visual_qa_failure() != "circuit_breaker" else 0
         accepted = list(high)
+        ai_rejected = 0
         for index, item in enumerate(batch):
             verdict = verdicts.get(index)
             if verdict is True:
@@ -485,15 +495,16 @@ def _verify_ambiguous(
             elif verdict is None:
                 item["status"] = "crawler-review-unverified"
                 accepted.append(item)
-            # False is excluded.
+            else:
+                ai_rejected += 1
             if len(accepted) >= CRAWLER_TARGET:
                 break
-        return accepted[:CRAWLER_TARGET], checked, max(0, len(batch) - len(accepted) + len(high))
-    except Exception as exc:
-        for item in ambiguous:
-            item["status"] = "crawler-review-unverified"
+        return accepted[:CRAWLER_TARGET], checked, ai_rejected
+    except Exception:
         limited = ambiguous[: max(0, CRAWLER_TARGET - len(high))]
-        return high + limited, 0, len(limited)
+        for item in limited:
+            item["status"] = "crawler-review-unverified"
+        return (high + limited)[:CRAWLER_TARGET], 0, len(limited)
 
 
 def crawl_fresh_web_images(
