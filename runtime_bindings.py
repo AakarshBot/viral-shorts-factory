@@ -2,42 +2,45 @@
 
 import json
 import os
-import threading
-
 from dashboard_theme import apply_dashboard_theme
-
-_VISUAL_CACHE_STATE = threading.local()
 
 
 def _install_visual_cache_safety():
-    """Cache only assets that actually passed the visual verification gate."""
+    """Allow cache writes only when the caller explicitly marks the asset verified."""
     try:
         import visual_runtime
         if getattr(visual_runtime, "_verified_cache_safety_bound", False):
             return True
-        original_gate = getattr(visual_runtime, "_strict_gate", None)
         original_save = getattr(visual_runtime, "save_to_cache", None)
         original_get = getattr(visual_runtime, "get_cached_asset", None)
-        if not original_gate or not original_save or not original_get:
+        if not original_save or not original_get:
             raise RuntimeError(
-                "Visual cache safety guard cannot install because the canonical visual cache API is incomplete."
+                "Visual cache safety guard cannot install because the canonical cache API is incomplete."
             )
 
-        def strict_gate_with_cache_state(*args, **kwargs):
-            result = original_gate(*args, **kwargs)
-            try:
-                _VISUAL_CACHE_STATE.allow_write = bool(result[0])
-            except Exception:
-                _VISUAL_CACHE_STATE.allow_write = False
-            return result
-
-        def verified_only_save(bot, img_bytes, entity, visual_type, source_type, context="", verified=False):
-            allowed = bool(verified) or bool(getattr(_VISUAL_CACHE_STATE, "allow_write", False))
-            _VISUAL_CACHE_STATE.allow_write = False
-            if not allowed:
-                print("   [Visual Cache] Skipping cache write: asset was not semantically verified.", flush=True)
+        def verified_only_save(
+            bot,
+            img_bytes,
+            entity,
+            visual_type,
+            source_type,
+            context="",
+            verified=False,
+        ):
+            if not verified:
+                print(
+                    "   [Visual Cache] Skipping cache write: asset was not explicitly verified.",
+                    flush=True,
+                )
                 return None
-            path = original_save(bot, img_bytes, entity, visual_type, source_type, context)
+            path = original_save(
+                bot,
+                img_bytes,
+                entity,
+                visual_type,
+                source_type,
+                context,
+            )
             if path:
                 try:
                     meta_path = os.path.splitext(path)[0] + ".json"
@@ -48,7 +51,11 @@ def _install_visual_cache_safety():
                     with open(meta_path, "w", encoding="utf-8") as fh:
                         json.dump(meta, fh, ensure_ascii=False, indent=2)
                 except Exception as exc:
-                    print(f"   [Visual Cache] Verification metadata update failed: {type(exc).__name__}: {exc}", flush=True)
+                    print(
+                        f"   [Visual Cache] Verification metadata update failed: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
             return path
 
         def verified_only_get(bot, entity, visual_type, context=""):
@@ -61,16 +68,11 @@ def _install_visual_cache_safety():
                 with open(meta_path, "r", encoding="utf-8") as fh:
                     meta = json.load(fh)
                 if meta.get("verification_version") != 2 or meta.get("verified") is not True:
-                    print("   [Visual Cache] Ignoring legacy/unverified cache entry.", flush=True)
                     return None, None
             except Exception:
                 return None, None
             return image, path
 
-        strict_gate_with_cache_state._verified_cache_safety_bound = True
-        verified_only_save._verified_cache_safety_bound = True
-        verified_only_get._verified_cache_safety_bound = True
-        visual_runtime._strict_gate = strict_gate_with_cache_state
         visual_runtime.save_to_cache = verified_only_save
         visual_runtime.get_cached_asset = verified_only_get
         visual_runtime._verified_cache_safety_bound = True
@@ -80,7 +82,6 @@ def _install_visual_cache_safety():
         raise RuntimeError(
             f"Visual cache safety guard could not be installed: {type(exc).__name__}: {exc}"
         ) from exc
-
 
 
 def _wrap_content_first_visuals(bot):
