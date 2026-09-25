@@ -79,6 +79,10 @@ def test_image_search_uses_explicit_bing_backend(monkeypatch):
             "publisher": publisher_hint or "publisher.example.com",
         },
     )
+    monkeypatch.setattr(
+        "news_source_image_runtime.extract_news_source_images",
+        lambda *_args, **_kwargs: [],
+    )
 
     result = crawler.crawl_fresh_web_images(
         {"title": query},
