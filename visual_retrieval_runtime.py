@@ -584,6 +584,17 @@ def materialize_manual_visual_pool(bot, assets, pool_id: str = "manual") -> list
                 "hash": image_hash,
                 "source": str(asset.get("source") or "").strip(),
                 "source_type": str(asset.get("source_type") or asset.get("source") or "").strip(),
+                "pool_origin": str(
+                    asset.get("pool_origin")
+                    or (
+                        "web-crawler"
+                        if str(asset.get("source_type") or asset.get("source") or "").strip()
+                        in {"web_crawler", "web_image_search"}
+                        else "article-source"
+                        if str(asset.get("source_type") or asset.get("source") or "").strip() == "news_source"
+                        else "manual-search"
+                    )
+                ).strip(),
                 "credit": str(asset.get("credit") or "").strip(),
                 "query": str(asset.get("query") or "").strip(),
                 "visual_type": str(asset.get("visual_type") or "").strip().upper(),
