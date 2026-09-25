@@ -217,7 +217,7 @@ def test_same_entity_gets_different_searchable_scene_queries():
     assert second.visual_genre == "TROPHY_AWARD"
     assert first.query.casefold().startswith("vaibhav sooryavanshi")
     assert second.query.casefold().startswith("vaibhav sooryavanshi")
-    assert any(term in first.query.casefold() for term in ("batting", "cricket", "match", "action"))
+    assert any(term in first.query.casefold() for term in ("batting", "cricket", "match", "action")), first
     assert any(term in second.query.casefold() for term in ("award", "trophy", "presentation", "ceremony"))
     assert first.query != second.query
     assert first.queries[-1].casefold() == "vaibhav sooryavanshi"
