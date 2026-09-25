@@ -116,8 +116,12 @@ def test_direct_image_failures_fall_back_to_scraping_image_result_source_pages(m
     )
     def scrape_source_page(url, publisher_hint="", max_images=6):
         index = int(url.rsplit("/", 1)[-1])
+        buffer = io.BytesIO()
+        Image.new("RGB", (1200 + index * 40, 1600), (20 + index * 40, 80, 140)).save(
+            buffer, format="JPEG", quality=95
+        )
         return [{
-            "bytes": _jpeg_bytes((70 + index, 100, 140)),
+            "bytes": buffer.getvalue(),
             "publisher": publisher_hint or "publisher.example.com",
             "method": "og:image",
             "image_url": f"{url}/hero.jpg",
