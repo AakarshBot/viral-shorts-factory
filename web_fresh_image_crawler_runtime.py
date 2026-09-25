@@ -667,6 +667,8 @@ def _candidate_from_asset(
     story_title: str,
     entity: str,
     now: datetime,
+    *,
+    allow_search_freshness: bool = False,
 ) -> dict[str, Any] | None:
     data = asset.get("bytes")
     if not isinstance(data, (bytes, bytearray, memoryview)):
@@ -678,7 +680,7 @@ def _candidate_from_asset(
 
     published = _parse_datetime(article.get("date"))
     age = _age_hours(published, now)
-    if age is None:
+    if age is None and not allow_search_freshness:
         return None
 
     article_title = _clean(article.get("title"), 500)
@@ -705,7 +707,7 @@ def _candidate_from_asset(
     method_score = 24.0 if image_method in _STRONG_IMAGE_METHODS else 14.0
     resolution_score = min(14.0, 14.0 * min(width, height) / 1600.0)
     priority = round(
-        _freshness_score(age)
+        (_freshness_score(age) if age is not None else 18.0)
         + relevance * 42.0
         + method_score
         + resolution_score,
@@ -753,7 +755,12 @@ def _candidate_from_asset(
         "publisher": publisher,
         "article_title": article_title,
         "published_at": published.isoformat() if published else "",
-        "crawler_age_hours": round(age, 2),
+        "crawler_age_hours": round(age, 2) if age is not None else None,
+        "crawler_freshness_basis": (
+            "publication-date"
+            if age is not None
+            else "search-window:7d"
+        ),
         "crawler_image_method": image_method,
         "crawler_confidence": "high" if high_confidence else "ambiguous",
         "crawler_relevance": round(relevance, 3),
@@ -818,6 +825,68 @@ def _scrape_article(article: dict[str, Any], story_title: str, entity: str, now:
             continue
         candidate = _candidate_from_asset(asset, article, story_title, entity, now)
         if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
+def _scrape_web_search_page(
+    page: dict[str, Any],
+    story_title: str,
+    entity: str,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    """Scrape a general web-search result without inventing a publication date."""
+    try:
+        from news_source_image_runtime import extract_news_source_images
+    except Exception:
+        return []
+
+    page_url = _clean(page.get("url"), 2000)
+    if not page_url:
+        return []
+
+    title = _clean(page.get("title"), 500)
+    body = _clean(page.get("body"), 1500)
+    relevance = _similarity(story_title, f"{title} {body}", entity)
+    if entity and not _entity_match(entity, f"{title} {body} {page_url}"):
+        return []
+    if relevance < 0.08:
+        return []
+
+    publisher = _clean(page.get("source"), 160) or _image_search_publisher({"url": page_url})
+    try:
+        assets = extract_news_source_images(
+            page_url,
+            publisher,
+            max_images=CRAWLER_ARTICLE_IMAGES,
+        )
+    except Exception:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        candidate = _candidate_from_asset(
+            asset,
+            {
+                "url": page_url,
+                "title": title,
+                "body": body,
+                "source": publisher,
+                "date": "",
+            },
+            story_title,
+            entity,
+            now,
+            allow_search_freshness=True,
+        )
+        if candidate:
+            candidate["crawler_freshness_basis"] = "search-window:7d"
+            candidate["crawler_age_hours"] = None
+            candidate["crawler_image_method"] = (
+                _clean(asset.get("method"), 120) or "web-search-page"
+            )
             candidates.append(candidate)
     return candidates
 
@@ -1015,7 +1084,7 @@ def crawl_fresh_web_images(
         if recent_web_pages:
             with ThreadPoolExecutor(max_workers=min(5, len(recent_web_pages))) as executor:
                 futures = [
-                    executor.submit(_scrape_article, page, title, entity, now)
+                    executor.submit(_scrape_web_search_page, page, title, entity, now)
                     for page in recent_web_pages
                 ]
                 for future in futures:
@@ -1032,7 +1101,13 @@ def crawl_fresh_web_images(
     )
     candidates = _dedupe_assets(raw_assets)
     if not image_search_candidates and not image_result_page_assets and not article_candidates:
-        print("   [Fresh Web Crawler] no relevant current image/article candidates found.", flush=True)
+        print(
+            f"   [Fresh Web Crawler] no relevant current image/article candidates found. "
+            f"image_results={len(image_search_results)} direct_images={len(image_search_assets)} "
+            f"source_page_images={len(image_result_page_assets)} news_articles={len(articles)} "
+            f"web_search_pages={web_pages} web_search_images={len(web_page_candidates)}",
+            flush=True,
+        )
         return {
             "assets": [],
             "target": CRAWLER_TARGET,
