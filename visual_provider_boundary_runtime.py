@@ -742,11 +742,14 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
     manual_mode = bool(_args[4]) if len(_args) > 4 else False
     provider_page = _provider_page(_args)
-    searches = (
-        [(_commons_search_query(query), "text", "")]
-        if manual_mode
-        else _commons_search_queries(query, visual_type, visual_genre)
-    )
+    if manual_mode and visual_l == "PERSON" and genre_l == "PERSON_ACTION":
+        # Keep the user's exact phrase authoritative, but let Commons use its
+        # bounded person-action ladder before falling back to the literal query.
+        searches = _commons_search_queries(query, visual_type, visual_genre)
+    elif manual_mode:
+        searches = [(_commons_search_query(query), "text", "")]
+    else:
+        searches = _commons_search_queries(query, visual_type, visual_genre)
     if not searches:
         return []
 
