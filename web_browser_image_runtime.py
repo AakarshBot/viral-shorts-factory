@@ -21,7 +21,7 @@ from PIL import Image, UnidentifiedImageError
 
 BROWSER_NAV_TIMEOUT_MS = max(6000, min(18000, int(os.getenv("VISUAL_BROWSER_NAV_TIMEOUT_MS", "12000"))))
 BROWSER_SETTLE_MS = max(250, min(2500, int(os.getenv("VISUAL_BROWSER_SETTLE_MS", "900"))))
-BROWSER_SCROLLS = max(1, min(5, int(os.getenv("VISUAL_BROWSER_SCROLLS", "3"))))
+BROWSER_SCROLLS = max(1, min(5, int(os.getenv("VISUAL_BROWSER_SCROLLS", "4"))))
 BROWSER_SCROLL_WAIT_MS = max(150, min(1200, int(os.getenv("VISUAL_BROWSER_SCROLL_WAIT_MS", "350"))))
 BROWSER_MAX_PAGES = max(2, min(8, int(os.getenv("VISUAL_BROWSER_MAX_PAGES", "6"))))
 BROWSER_IMAGES_PER_PAGE = max(2, min(8, int(os.getenv("VISUAL_BROWSER_IMAGES_PER_PAGE", "6"))))
@@ -207,10 +207,10 @@ def _image_dimensions(data):
 
 def _browser_user_agent():
     return (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "KHTML, like Gecko) Chrome/151.0 Safari/537.36 "
-        "ViralShortsFactory/4.0 (+current-web-image-crawler)"
-    ).replace("Gecko/537.36) Chrome", "Gecko/537.36 Chrome")
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/151.0.0.0 Safari/537.36"
+    )
 
 
 def _install_browser_once():
@@ -517,6 +517,10 @@ async def _scrape_one(context, request):
             if not page.url:
                 return {"assets": [], "error": "navigation-failed"}
 
+        try:
+            await page.wait_for_load_state("networkidle", timeout=2500)
+        except Exception:
+            pass
         await page.wait_for_timeout(BROWSER_SETTLE_MS)
         for _ in range(BROWSER_SCROLLS):
             try:
@@ -524,6 +528,13 @@ async def _scrape_one(context, request):
             except Exception:
                 break
             await page.wait_for_timeout(BROWSER_SCROLL_WAIT_MS)
+        try:
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+            await page.wait_for_timeout(BROWSER_SCROLL_WAIT_MS)
+            await page.evaluate("window.scrollTo(0, 0);")
+            await page.wait_for_timeout(200)
+        except Exception:
+            pass
 
         try:
             data = await page.evaluate(_PAGE_SCRIPT)
@@ -626,6 +637,9 @@ async def _scrape_pages_async(requests_list):
                     "Accept-Language": "en-IN,en;q=0.9",
                     "Upgrade-Insecure-Requests": "1",
                 },
+            )
+            await context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
             )
             results = await asyncio.gather(
                 *(_scrape_one(context, request) for request in requests_list),
