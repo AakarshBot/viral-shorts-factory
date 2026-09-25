@@ -29,7 +29,7 @@ CRAWLER_SUCCESS = max(10, min(CRAWLER_TARGET, int(os.getenv("VISUAL_WEB_CRAWLER_
 CRAWLER_NEWS_RESULTS_PER_QUERY = max(8, min(20, int(os.getenv("VISUAL_WEB_CRAWLER_NEWS_RESULTS", "15"))))
 CRAWLER_MAX_ARTICLES = max(6, min(12, int(os.getenv("VISUAL_WEB_CRAWLER_ARTICLES", "10"))))
 CRAWLER_ARTICLE_IMAGES = max(3, min(8, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGES_PER_ARTICLE", "6"))))
-CRAWLER_QUERY_COUNT = max(2, min(4, int(os.getenv("VISUAL_WEB_CRAWLER_QUERY_COUNT", "3"))))
+CRAWLER_QUERY_COUNT = max(2, min(4, int(os.getenv("VISUAL_WEB_CRAWLER_QUERY_COUNT", "3")))
 CRAWLER_PROFILE_PAGES = max(2, min(5, int(os.getenv("VISUAL_WEB_CRAWLER_PROFILE_PAGES", "4"))))
 CRAWLER_PROFILE_IMAGES = max(2, min(6, int(os.getenv("VISUAL_WEB_CRAWLER_PROFILE_IMAGES", "5"))))
 
@@ -124,6 +124,41 @@ def _title_match(query: str, title: str, entity: str = "") -> float:
     return min(1.0, overlap * 0.75 + entity_overlap * 0.25)
 
 
+def _related_article_score(query: str, article_title: str, story_title: str, entity: str = "") -> float:
+    """Score related coverage without requiring a near-verbatim headline match."""
+    title_tokens = _tokens(article_title)
+    query_tokens = _tokens(query)
+    story_tokens = _tokens(story_title)
+    entity_tokens = _tokens(entity)
+
+    if not title_tokens:
+        return 0.0
+
+    if entity_tokens:
+        entity_overlap = len(entity_tokens & title_tokens) / max(1, len(entity_tokens))
+        if entity_overlap < 0.75:
+            return 0.0
+    else:
+        entity_overlap = 0.0
+
+    topic_tokens = (story_tokens | query_tokens) - entity_tokens
+    topic_hits = len(topic_tokens & title_tokens)
+    if not entity_tokens:
+        if topic_hits < 2:
+            return 0.0
+    elif topic_hits < 1:
+        return 0.0
+
+    query_overlap = len(query_tokens & title_tokens) / max(1, len(query_tokens))
+    topic_overlap = topic_hits / max(1, len(topic_tokens))
+    return min(
+        1.0,
+        entity_overlap * 0.45
+        + min(1.0, topic_hits / 3.0) * 0.35
+        + query_overlap * 0.20,
+    )
+
+
 def _similarity(query_text: str, candidate_text: str, entity: str) -> float:
     q = _tokens(query_text)
     c = _tokens(candidate_text)
@@ -144,27 +179,40 @@ def _entity_match(entity: str, text: str) -> bool:
 def _build_queries(story_title: str, story_text: str, entity: str, category: str) -> list[str]:
     title = _clean(story_title, 260)
     subject = _clean(entity, 140)
+    entity_tokens = _tokens(subject)
     title_tokens = [
         token for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9'’.-]*", title)
         if len(token) > 2 and token.casefold() not in _STOPWORDS
     ]
-    variants = []
-    if title:
-        variants.append(title)
     distinctive = []
     seen = set()
     for token in title_tokens + list(_tokens(story_text)):
         key = token.casefold()
-        if key in seen:
+        if key in seen or key in entity_tokens:
             continue
         seen.add(key)
         distinctive.append(token)
         if len(distinctive) >= 5:
             break
+
+    variants = []
+    if title:
+        # Lane 1: find the exact/current story across publishers.
+        variants.append(title)
     if subject and distinctive:
-        variants.append(f"{subject} {' '.join(distinctive[:5])}")
-    if subject and category:
-        variants.append(f"{subject} {category} {' '.join(distinctive[:2])}".strip())
+        # Lane 2: find other coverage using the key figure plus story terms.
+        variants.append(f"{subject} {' '.join(distinctive[:4])}")
+        # Lane 3: broader related coverage; this is intentionally less literal.
+        variants.append(f"{subject} {' '.join(distinctive[:2])}")
+    elif distinctive:
+        # No named figure: search the story's strongest topic terms instead.
+        variants.append(" ".join(distinctive[:4]))
+        variants.append(" ".join(distinctive[:2]))
+    elif subject:
+        variants.append(subject)
+    elif category:
+        variants.append(category)
+
     output = []
     seen_queries = set()
     for query in variants:
@@ -290,30 +338,67 @@ def _collect_recent_articles(queries: list[str], story_title: str, entity: str, 
             continue
         if url.casefold() in seen_urls:
             continue
-        match = _title_match(str(item.get("_crawler_query") or ""), article_title, entity)
+
+        query = str(item.get("_crawler_query") or "")
+        exact_match = _title_match(query, article_title, entity)
+        related_match = _related_article_score(query, article_title, story_title, entity)
+        match = max(exact_match, related_match)
         if match <= 0:
             continue
+
         published = _parse_datetime(
             item.get("date") or item.get("published") or item.get("published_at")
         )
         if published is not None and _age_hours(published, now) is None:
             continue
         seen_urls.add(url.casefold())
-        ranked.append((
-            1 if published is None else 0,
-            -(published.timestamp() if published else 0.0),
-            -match,
-            {
-                **item,
-                "url": url,
-                "date": published.isoformat() if published else "",
-                "body": body,
-                "title_match": match,
-            },
-        ))
+        ranked.append({
+            **item,
+            "url": url,
+            "date": published.isoformat() if published else "",
+            "body": body,
+            "title_match": match,
+            "related_match": related_match,
+            "published_at": published.isoformat() if published else "",
+            "_host": urlparse(url).netloc.casefold().split(":")[0],
+        })
 
-    ranked.sort(key=lambda item: (item[0], item[1], item[2], _clean(item[3].get("title")).casefold()))
-    return [item for *_meta, item in ranked[:CRAWLER_MAX_ARTICLES]]
+    # Prefer fresh/high-relevance coverage while preventing one publisher from
+    # consuming the whole browser-page budget.
+    ranked.sort(
+        key=lambda item: (
+            1 if not item.get("published_at") else 0,
+            -(float(_parse_datetime(item.get("published_at")).timestamp()) if item.get("published_at") else 0.0),
+            -float(item.get("title_match") or 0.0),
+            _clean(item.get("title")).casefold(),
+        )
+    )
+    selected = []
+    host_counts = {}
+    for item in ranked:
+        host = item.get("_host") or ""
+        if host and host_counts.get(host, 0) >= 2:
+            continue
+        selected.append(item)
+        if host:
+            host_counts[host] = host_counts.get(host, 0) + 1
+        if len(selected) >= CRAWLER_MAX_ARTICLES:
+            break
+
+    # If relevance is strong but fewer than the target survived the diversity
+    # pass, fill the remaining slots rather than shrinking the article pool.
+    if len(selected) < CRAWLER_MAX_ARTICLES:
+        selected_urls = {str(item.get("url") or "").casefold() for item in selected}
+        for item in ranked:
+            key = str(item.get("url") or "").casefold()
+            if key in selected_urls:
+                continue
+            selected.append(item)
+            selected_urls.add(key)
+            if len(selected) >= CRAWLER_MAX_ARTICLES:
+                break
+
+    return selected
 
 
 def _collect_profile_pages(entity: str) -> list[dict[str, Any]]:
@@ -497,7 +582,7 @@ def _scrape_browser_pages(
     requests = [
         {
             "url": _clean(page.get("url"), 2500),
-            "query": "" if profile_page else _clean(page.get("_crawler_query"), 500),
+            "query": "" if profile_page else _clean(entity, 500),
             "entity": entity,
             "publisher": _clean(page.get("source"), 160),
             "max_images": max_images_per_page,
