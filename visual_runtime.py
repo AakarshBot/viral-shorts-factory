@@ -1,27 +1,20 @@
-"""Scene-aware, bounded visual sourcing for Viral Shorts Factory.
+"""Shared visual cache and bounded fetch runtime.
 
-This module owns visual retrieval, verification and the Top 5 title-card renderer.
-Regular Shorts rendering lives in visual_content_runtime.py so there is only one
-active regular-scene renderer.
+Regular visual retrieval lives in visual_retrieval_runtime.py. This module only
+provides the cache, provider timeout wrapper, and Top 5 title-card renderer.
 """
 import hashlib
 import io
 import json
 import os
-import re
 import threading
 
 from PIL import Image, ImageDraw
 
 VISUAL_FETCH_TIMEOUT_SECONDS = int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "10"))
-# Hard ceiling: visual strategy may request fewer searches, but deployment
-# configuration can never increase this runtime safety limit above 6.
-VISUAL_MAX_SEARCH_QUERIES = min(6, max(1, int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "6"))))
-VISUAL_MAX_VERIFICATION_ATTEMPTS = max(1, int(os.getenv("VISUAL_MAX_VERIFICATION_ATTEMPTS", "4")))
-VISUAL_CACHE_MAX_AGE_SECONDS = int(os.getenv("VISUAL_CACHE_MAX_AGE_SECONDS", str(7 * 86400)))
-
-REAL_ENTITY_TYPES = {"PERSON", "EVENT", "PRODUCT", "LOCATION", "QUOTE", "DOCUMENT"}
-AI_ALLOWED_TYPES = {"PROCESS", "CONCEPT", "GENERAL_CONTEXT"}
+VISUAL_CACHE_MAX_AGE_SECONDS = int(
+    os.getenv("VISUAL_CACHE_MAX_AGE_SECONDS", str(7 * 86400))
+)
 
 
 def _cache_root(bot):
@@ -33,17 +26,32 @@ def _cache_root(bot):
 
 
 def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
-    raw = " | ".join(str(x or "").strip().lower() for x in (intent, prompt, voice, video_title))
+    raw = " | ".join(
+        str(value or "").strip().lower()
+        for value in (intent, prompt, voice, video_title)
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _cache_key(entity, visual_type, context=""):
-    raw = f"{str(entity).strip().lower()}::{str(visual_type).strip().upper()}::{str(context).strip().lower()}"
+    raw = (
+        f"{str(entity).strip().lower()}::"
+        f"{str(visual_type).strip().upper()}::"
+        f"{str(context).strip().lower()}"
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
 
 
+def _local_visual_sanity(img_bytes):
+    try:
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        return min(image.size) >= 540
+    except Exception:
+        return False
+
+
 def get_cached_asset(bot, entity, visual_type, context=""):
-    """Return a previously verified entity/type/context asset, or (None, None)."""
+    """Return a cached entity/type/context visual that passed verification."""
     if not entity or str(entity).strip().lower() in {"none", "unknown", "n/a"}:
         return None, None
     key = _cache_key(entity, visual_type, context)
@@ -53,7 +61,10 @@ def get_cached_asset(bot, entity, visual_type, context=""):
     try:
         if not os.path.exists(image_path) or not os.path.exists(meta_path):
             return None, None
-        if os.path.getmtime(image_path) < __import__("time").time() - VISUAL_CACHE_MAX_AGE_SECONDS:
+        if (
+            os.path.getmtime(image_path)
+            < __import__("time").time() - VISUAL_CACHE_MAX_AGE_SECONDS
+        ):
             return None, None
         with open(meta_path, "r", encoding="utf-8") as fh:
             meta = json.load(fh)
@@ -74,7 +85,7 @@ def get_cached_asset(bot, entity, visual_type, context=""):
 
 
 def save_to_cache(bot, img_bytes, entity, visual_type, source_type, context=""):
-    """Persist only an asset that passed the applicable visual tier."""
+    """Persist an image; runtime bindings require an explicit verified=True flag."""
     if not img_bytes or not entity:
         return None
     key = _cache_key(entity, visual_type, context)
@@ -82,169 +93,64 @@ def save_to_cache(bot, img_bytes, entity, visual_type, source_type, context=""):
     image_path = os.path.join(root, f"{key}.jpg")
     meta_path = os.path.join(root, f"{key}.json")
     try:
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        img.save(image_path, "JPEG", quality=95)
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        image.save(image_path, "JPEG", quality=95)
         with open(meta_path, "w", encoding="utf-8") as fh:
-            json.dump({"entity": str(entity).strip(), "visual_type": str(visual_type).upper(), "source_type": str(source_type), "context": str(context), "verified": True}, fh, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    "entity": str(entity).strip(),
+                    "visual_type": str(visual_type).upper(),
+                    "source_type": str(source_type),
+                    "context": str(context),
+                    "verified": True,
+                },
+                fh,
+                ensure_ascii=False,
+                indent=2,
+            )
         return image_path
     except Exception as exc:
         print(f"   [Visual Cache] Write failed: {type(exc).__name__}: {exc}", flush=True)
         return None
 
 
-def _entity_context(seg, video_title=""):
-    return (
-        str(seg.get("primary_entity", "")).strip(),
-        str(seg.get("visual_intent", "")).strip(),
-        str(seg.get("specific_search_prompt", "")).strip(),
-        str(seg.get("voiceover", "")).strip(),
-        str(video_title or "").strip(),
-    )
-
-
-def _local_visual_sanity(img_bytes):
-    try:
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        if min(img.size) < 540:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def _verification_tier(seg, visual_type, source):
-    """Compatibility boundary to the single authoritative verification tier."""
-    from visual_query_entities_runtime import _install_runtime_query_guard
-    # Resolve the canonical guard on this module and use the installed tier.
-    _install_runtime_query_guard(__import__(__name__))
-    return __import__(__name__)._verification_tier(seg, visual_type, source)
-
-
-def _strict_gemini_check(
-    img_bytes,
-    entity,
-    intent,
-    prompt,
-    voice,
-    video_title,
-    api_key,
-    tier="STRICT",
-    visual_type="",
-    visual_genre="",
+def _call_fetcher_with_timeout(
+    fetcher,
+    args,
+    source,
+    query,
+    timeout=VISUAL_FETCH_TIMEOUT_SECONDS,
 ):
-    try:
-        from visual_qa_runtime import strict_gemini_check
-        return strict_gemini_check(
-            img_bytes,
-            entity,
-            intent,
-            prompt,
-            voice,
-            video_title,
-            api_key,
-            tier=tier,
-            visual_type=visual_type,
-            visual_genre=visual_genre,
-        )
-    except Exception as exc:
-        print(f"   [Visual QA] Gemini bridge unavailable: {exc}", flush=True)
-        return None
-
-
-def _strict_gate(bot, img_bytes, seg, video_title="", source=""):
-    if not img_bytes or not _local_visual_sanity(img_bytes):
-        return False, "LOCAL-REJECT", 0, True
-    entity, intent, prompt, voice, title = _entity_context(seg, video_title)
-    if not entity or entity.lower() in {"none", "unknown", "n/a"}:
-        return False, "LOCAL-REJECT", 0, True
-    visual_type = str(seg.get("visual_type", "")).strip().upper()
-    visual_genre = str(seg.get("visual_genre", "")).strip().upper()
-    if not visual_type:
-        try:
-            from visual_strategy_runtime import classify_scene
-            visual_type = classify_scene(seg, str(seg.get("sport_or_topic_category", "")))
-        except Exception:
-            visual_type = "GENERAL_CONTEXT"
-    tier = _verification_tier(seg, visual_type, source)
-    # Source authority determines ordering and evidence, not acceptance.
-    # Every automatic candidate still passes the same semantic QC gate.
-    # Entity QA should see the original source image. The renderer can crop it
-    # later, but cropping before identity verification can cut the entity out.
-    qa_bytes = img_bytes
-    result = _strict_gemini_check(
-        qa_bytes,
-        entity,
-        intent,
-        prompt,
-        voice,
-        title,
-        os.getenv("GEMINI_API_KEY"),
-        tier=tier,
-        visual_type=visual_type,
-        visual_genre=visual_genre,
-    )
-    source_score = {"wikipedia": 100, "commons": 95, "ddg": 70, "pexels": 65, "unsplash": 65, "ai-generated": 45}.get(str(source).lower(), 50)
-    if result is True:
-        return True, tier, 100, False
-    if result is False:
-        print(f"   [Visual QA] {tier} | REJECTED: semantic check returned NO for '{entity}'.", flush=True)
-        return False, f"{tier}:SEMANTIC_NO", max(0, source_score - 20), True
-    try:
-        import visual_qa_runtime
-        failure_reader = getattr(
-            visual_qa_runtime,
-            "get_last_visual_qa_failure",
-            None,
-        )
-        failure = str(failure_reader() if callable(failure_reader) else "").strip()
-    except Exception:
-        failure = ""
-    normalized_failure = re.sub(r"[^A-Za-z0-9]+", "_", failure).upper().strip("_") or "UNCERTAIN"
-    print(
-        f"   [Visual QA] {tier} | semantic verification unavailable/uncertain; "
-        f"reason={failure or 'uncertain'}; candidate rejected.",
-        flush=True,
-    )
-    return False, f"{tier}:QA_{normalized_failure}", source_score, False
-
-
-def _build_search_variants(seg, video_title=""):
-    """Compatibility boundary to the canonical exact-first search intent."""
-    from visual_search_intent_runtime import resolve_visual_search_intent
-    intent = resolve_visual_search_intent(seg, video_title)
-    if not intent.subject or not intent.query:
-        raise RuntimeError("No grounded visual search intent could be resolved from the scene.")
-    return [intent.query], intent.visual_type
-
-
-def _call_fetcher_with_timeout(fetcher, args, source, query, timeout=VISUAL_FETCH_TIMEOUT_SECONDS):
     result = {"value": None, "error": None}
+
     def worker():
         try:
             result["value"] = fetcher(*args)
         except Exception as exc:
             result["error"] = exc
-    thread = threading.Thread(target=worker, name=f"visual-{source.lower()}-fetch", daemon=True)
-    thread.start(); thread.join(timeout)
+
+    thread = threading.Thread(
+        target=worker,
+        name=f"visual-{source.lower()}-fetch",
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout)
     if thread.is_alive():
-        print(f"   [Visual Source] {source} | timed out after {timeout}s | query='{query}'", flush=True)
+        print(
+            f"   [Visual Source] {source} | timed out after {timeout}s | "
+            f"query='{query}'",
+            flush=True,
+        )
         return None
     if result["error"] is not None:
-        print(f"   [Visual Source] {source} | failed: {result['error']} | query='{query}'", flush=True)
+        print(
+            f"   [Visual Source] {source} | failed: {result['error']} | "
+            f"query='{query}'",
+            flush=True,
+        )
         return None
     return result["value"]
-
-
-def _source_plan(bot, visual_type, category=""):
-    """Compatibility boundary to the authoritative provider plan."""
-    from visual_provider_boundary_runtime import build_raw_source_plan
-    return build_raw_source_plan(visual_type, category)
-
-
-def _relevant_asset(bot, seg, category, used_urls, used_hashes, video_title=""):
-    """Compatibility boundary to the single active retrieval implementation."""
-    from visual_retrieval_runtime import run_visual_retrieval
-    return run_visual_retrieval(__import__(__name__), bot, seg, category, used_urls, used_hashes, video_title)
 
 
 def _render_image_slide(bot, bg_img, title_text, subtitle_text="", font_choice=None, accent=None):
