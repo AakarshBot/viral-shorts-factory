@@ -515,6 +515,12 @@ def _candidate_from_browser_asset(
 
     page_title = _clean(asset.get("page_title") or page.get("title"), 600)
     page_title_match = _title_match(query or entity, page_title, entity)
+    related_match = (
+        _related_article_score(query, page_title, story_title, entity)
+        if query and not profile_page
+        else 0.0
+    )
+    page_title_match = max(page_title_match, related_match)
     if query and page_title_match <= 0:
         return None
     if profile_page and entity and not _entity_match(entity, page_title):
@@ -532,7 +538,10 @@ def _candidate_from_browser_asset(
         ),
         5000,
     )
-    relevance = _similarity(story_title or query, f"{page_title} {context}", entity)
+    relevance = max(
+        _similarity(story_title or query, f"{page_title} {context}", entity),
+        related_match,
+    )
     action_hits = len(_tokens(context) & _ACTION_TERMS)
     image_score = float(asset.get("image_score") or 0.0)
     method = _clean(asset.get("method"), 120)
