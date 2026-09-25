@@ -740,6 +740,8 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     """Search Commons with topic-aware structured/text discovery and open-license filtering."""
     visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
     visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
+    visual_l = visual_type
+    genre_l = visual_genre
     manual_mode = bool(_args[4]) if len(_args) > 4 else False
     provider_page = _provider_page(_args)
     if manual_mode and visual_l == "PERSON" and genre_l == "PERSON_ACTION":
