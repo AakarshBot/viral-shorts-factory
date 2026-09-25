@@ -1086,7 +1086,7 @@ def collect_manual_visual_pool(
         best_scene_overlap = -1
         query_tokens = {
             token.casefold()
-            for token in re.findall(r"[\\w-]+", exact_query)
+            for token in re.findall(r"[\w-]+", exact_query)
             if len(token) > 2
         }
         for scene in scenes or []:
@@ -1094,7 +1094,7 @@ def collect_manual_visual_pool(
                 continue
             scene_tokens = {
                 token.casefold()
-                for token in re.findall(r"[\\w-]+", _manual_scene_text(scene))
+                for token in re.findall(r"[\w-]+", _manual_scene_text(scene))
                 if len(token) > 2
             }
             overlap = len(query_tokens & scene_tokens)
@@ -1104,7 +1104,7 @@ def collect_manual_visual_pool(
 
         action_tokens = {
             token.casefold()
-            for token in re.findall(r"[\\w-]+", action_scene_evidence)
+            for token in re.findall(r"[\w-]+", action_scene_evidence)
         }
         has_sports_action_evidence = bool(action_tokens & _VISUAL_REFINE_ACTION_TERMS)
         action_reserve = (
