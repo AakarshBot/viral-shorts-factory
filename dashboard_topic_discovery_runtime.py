@@ -28,14 +28,14 @@ DASHBOARD_DISCOVERY_CACHE_TTL_SECONDS = 20.0
 _DASHBOARD_DISCOVERY_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
 _DASHBOARD_DISCOVERY_CACHE_LOCK = threading.Lock()
 
-GOOGLE_QUERY_LIMIT = 10
+GOOGLE_QUERY_LIMIT = 14
 GDELT_QUERY_LIMIT = 2
 DISCOVERY_TIMEOUT_SECONDS = 8.0
 CORE_REQUEST_TIMEOUT_SECONDS = 6.0
 SPARSE_CORE_ARTICLE_THRESHOLD = 45
-MAX_RAW_ARTICLES = 500
+MAX_RAW_ARTICLES = 700
 MAX_TREND_ARTICLES = 30
-MAX_EVENTS_FOR_RANKING = 180
+MAX_EVENTS_FOR_RANKING = 240
 DASHBOARD_MAX_AGE_HOURS = 72
 
 CRICKET_MARQUEE_QUERY = (
@@ -56,6 +56,10 @@ CRICKET_INDIA_QUERIES = (
     'Asia cricket (Japan OR Afghanistan OR Nepal OR UAE OR Hong Kong OR Sri Lanka OR Bangladesh) (record OR upset OR controversy OR debut OR milestone)',
     'India cricket (umpire OR law OR ruling OR bizarre OR unusual OR bizarre call OR controversy OR investigation)',
     'cricket (uncapped OR emerging OR grassroots OR club OR academy) India (debut OR record OR milestone OR controversy OR upset)',
+    'cricket (viral video OR social media OR reaction OR fans) India',
+    'cricket (bizarre OR unusual OR dramatic OR controversial) incident decision',
+    'cricket (feud OR row OR statement OR debate OR slammed OR praised) India',
+    'cricket (breakthrough OR debut OR uncapped OR emerging OR surprise) India',
 )
 
 CRICKET_GLOBAL_QUERIES = (
@@ -69,6 +73,10 @@ CRICKET_GLOBAL_QUERIES = (
     'T20 cricket (record OR controversy OR upset OR comeback OR milestone)',
     'cricket India Pakistan rivalry',
     'cricket major tournament final record controversy',
+    'cricket (viral video OR social media OR reaction OR fans)',
+    'cricket (bizarre OR unusual OR dramatic OR controversial) incident decision',
+    'cricket (feud OR row OR statement OR debate OR slammed OR praised)',
+    'cricket (breakthrough OR debut OR uncapped OR emerging OR surprise)',
 )
 
 CRICKET_ALL_QUERIES = (
@@ -82,6 +90,10 @@ CRICKET_ALL_QUERIES = (
     'India Pakistan cricket',
     'cricket major tournament final record controversy',
     'cricket emerging player breakthrough milestone',
+    'cricket (viral video OR social media OR reaction OR fans)',
+    'cricket (bizarre OR unusual OR dramatic OR controversial) incident decision',
+    'cricket (feud OR row OR statement OR debate OR slammed OR praised)',
+    'cricket (breakthrough OR debut OR uncapped OR emerging OR surprise)',
 )
 
 DEFAULT_NON_CRICKET_LANES = {
@@ -95,6 +107,10 @@ DEFAULT_NON_CRICKET_LANES = {
         'women sports India world latest record tournament controversy when:3d',
         'Olympics Asian Games Commonwealth Games sports India latest when:7d',
         'sports emerging athlete breakout upset comeback controversy viral reaction when:3d',
+        'sports viral video reaction social media controversy incident when:3d',
+        'sports bizarre unusual dramatic moment decision when:3d',
+        'sports feud row statement reaction debate when:3d',
+        'sports breakout debut upset shock comeback when:3d',
         '(FIFA ATP WTA BWF FIH IOC) latest sports news India when:3d',
     ),
     "technology": (
@@ -418,6 +434,32 @@ def _sports_relevance_pass(story: dict) -> bool:
     return sr._discovery_category_allowed("sports", story)
 
 
+def _story_exists_pass(story: dict) -> bool:
+    """Keep headline-only records out without requiring every event to be multi-source."""
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).strip()
+    body_chars = len(" ".join(body.split()))
+    source_count = int(story.get("event_source_count") or 0)
+    article_count = int(story.get("event_article_count") or 0)
+    evidence_count = sum(
+        1 for item in (story.get("event_evidence") or [])
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    )
+    story["story_substance_chars"] = body_chars
+    # Short provider snippets can still contain a real story. The gate is only
+    # meant to reject headline-only records, not require long article bodies.
+    if body_chars >= 60:
+        return True
+    if source_count >= 2 and article_count >= 2:
+        return True
+    if evidence_count >= 2:
+        return True
+    story["discovery_rejection"] = "Headline-only / insufficient story detail"
+    return False
+
+
 def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> bool:
     title = str(story.get("title") or "").strip()
     if len(title) < 12:
@@ -430,6 +472,8 @@ def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> b
         return False
 
     if not sr._source_page_pass(story):
+        return False
+    if not _story_exists_pass(story):
         return False
     if genre_key == "sports" and not _sports_relevance_pass(story):
         story["discovery_rejection"] = "Outside selected sports lane"
