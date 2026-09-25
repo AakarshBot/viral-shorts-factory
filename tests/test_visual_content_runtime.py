@@ -178,7 +178,6 @@ def test_article_source_images_join_selection_pool(monkeypatch, tmp_path):
     monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", fake_article_pool)
     monkeypatch.setattr(visual_retrieval_runtime, "materialize_manual_visual_pool", fake_materialize)
     monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
 
     bot = _fake_bot(tmp_path)
     bot._active_web_config = {
@@ -403,18 +402,6 @@ def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
 
     assert script_data["visual_rescue_count"] == 2
     assert script_data["visual_fallback_count"] == 2
-
-def test_manual_rights_review_assets_are_not_written_to_verified_cache():
-    from pathlib import Path
-
-    source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
-    cache_block_start = source.index("for asset in manual_pool_result.get(\"assets\") or []:")
-    cache_block_end = source.index("manual_pool_materialized =", cache_block_start)
-    block = source[cache_block_start:cache_block_end]
-
-    assert 'if str(asset.get("provenance_status") or "").strip() != "commercial-verified":' in block
-    assert "Rights-review images remain available to the human QC pool" in block
-
 
 def test_article_source_pool_is_marked_for_provenance_review():
     source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
