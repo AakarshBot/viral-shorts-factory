@@ -129,7 +129,7 @@ def test_dashboard_keeps_selected_manual_pool_images_visible():
 def test_visual_pool_provenance_warning_defines_state_before_use():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index("    def render_pool_section(")
-    end = app_source.index("\n    st.markdown(\"### Available manual-search images\")", start)
+    end = app_source.index("\n    st.markdown(\"### Source-website images\")", start)
     source = app_source[start:end]
 
     assignment = source.index("provenance_state = str(")
