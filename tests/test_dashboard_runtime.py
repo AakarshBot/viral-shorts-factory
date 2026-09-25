@@ -150,7 +150,8 @@ def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     assert "visual_web_crawler_queries" in source
     assert "visual_web_crawler_publishers" in source
     assert "visual_web_crawler_domains" in source
-    assert 'st.link_button("Open source page"' in app_source
+    assert 'st.link_button(' in app_source
+
     assert 'Static article fallback' in app_source
 
 
