@@ -401,6 +401,31 @@ def test_web_lane_reports_underfill_without_using_image_search(monkeypatch):
     assert "image_search_raw" not in result["rejection_counts"]
 
 
+def test_browser_runtime_self_heals_missing_playwright_package(monkeypatch):
+    import web_browser_image_runtime as browser
+
+    calls = []
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return Completed()
+
+    monkeypatch.setattr(browser, "_PLAYWRIGHT_PACKAGE_INSTALL_ATTEMPTED", False)
+    monkeypatch.setattr(browser.subprocess, "run", fake_run)
+
+    assert browser._install_playwright_package_once()
+    assert calls == [[
+        browser.sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "playwright>=1.52,<2",
+    ]]
+
+
 def test_browser_title_match_accepts_surname_only_entity_coverage():
     from web_browser_image_runtime import _title_match as browser_title_match
 
