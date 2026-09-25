@@ -51,7 +51,11 @@ def test_manual_visual_query_remains_authoritative_without_grounding(monkeypatch
         calls.append(scene)
         return _jpeg_bytes(), False, "manual"
 
-    monkeypatch.setattr(retrieval, "run_visual_retrieval", fake_retrieval)
+    monkeypatch.setattr(
+        __import__("visual_query_entities_runtime"),
+        "run_visual_retrieval",
+        fake_retrieval,
+    )
 
     scene = {
         "primary_entity": "Unsupported generated identity",
