@@ -1125,7 +1125,89 @@ def test_manual_visual_search_accepts_explicit_action_context(monkeypatch):
     )
 
     assert result["assets"]
-    assert calls[:2] == ["Commons", "DDG"]
+    assert set(calls) == {"Commons", "DDG", "Openverse"}
+
+
+def test_manual_commons_person_action_search_uses_action_ladder(monkeypatch):
+    import visual_provider_boundary_runtime as boundary
+
+    searches = []
+
+    monkeypatch.setattr(
+        boundary,
+        "_api_json",
+        lambda *args, **kwargs: (
+            searches.append((kwargs.get("params") or {}).get("gsrsearch"))
+            or {"query": {"pages": {}}}
+        ),
+    )
+    monkeypatch.setattr(
+        boundary,
+        "_bounded_downloads",
+        lambda urls, used_urls, limit=boundary.MAX_PROVIDER_CANDIDATES: [],
+    )
+
+    result = boundary.fetch_commons_candidates(
+        "Vaibhav Sooryavanshi batting cricket",
+        set(),
+        "Vaibhav Sooryavanshi batting cricket",
+        "",
+        "PERSON",
+        "PERSON_ACTION",
+        True,
+    )
+
+    assert result == []
+    assert searches == [
+        "Vaibhav Sooryavanshi batting cricket",
+        "Vaibhav Sooryavanshi batting cricket",
+    ]
+
+
+def test_famous_cricketer_action_queries_keep_action_provider_contract():
+    from visual_search_intent_runtime import resolve_visual_search_intent
+
+    players = [
+        "Virat Kohli",
+        "Rohit Sharma",
+        "MS Dhoni",
+        "Jasprit Bumrah",
+        "Hardik Pandya",
+        "Ravindra Jadeja",
+        "Rishabh Pant",
+        "Shubman Gill",
+        "KL Rahul",
+        "Sanju Samson",
+        "Babar Azam",
+        "Mohammad Rizwan",
+        "Shaheen Shah Afridi",
+        "Ben Stokes",
+        "Joe Root",
+        "Jos Buttler",
+        "Pat Cummins",
+        "Steve Smith",
+        "Kane Williamson",
+        "Mitchell Starc",
+    ]
+
+    for player in players:
+        intent = resolve_visual_search_intent({
+            "primary_entity": player,
+            "visual_type": "PERSON",
+            "visual_intent": "batting cricket action",
+            "specific_search_prompt": f"{player} batting cricket action",
+        })
+        assert intent.visual_type == "PERSON"
+        assert intent.visual_genre == "PERSON_ACTION"
+        assert intent.query == player
+
+    plan = provider_boundary.build_raw_source_plan(
+        "PERSON",
+        "PERSON_ACTION",
+        allow_unlicensed=True,
+    )
+    source_names = {name for name, _fetcher in plan}
+    assert {"Commons", "DDG", "Openverse"} <= source_names
 
 
 def test_manual_visual_search_respects_shared_qa_reset_mode(monkeypatch):
