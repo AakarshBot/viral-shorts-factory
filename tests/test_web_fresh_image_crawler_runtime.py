@@ -99,6 +99,98 @@ def test_recent_articles_accept_google_news_rss_fallback(monkeypatch):
     assert [item["url"] for item in articles] == [google_news_url]
 
 
+def test_news_search_combines_ddgs_and_google_news(monkeypatch):
+    calls = []
+
+    def fake_ddgs(query, timelimit):
+        calls.append((query, timelimit))
+        if timelimit == "d":
+            return [
+                {"title": "Fresh story one", "url": "https://one.example/story"},
+                {"title": "Fresh story two", "url": "https://two.example/story"},
+            ]
+        return [
+            {"title": "Wider story", "url": "https://three.example/story"},
+        ]
+
+    monkeypatch.setattr(crawler, "_ddgs_news", fake_ddgs)
+    monkeypatch.setattr(
+        crawler,
+        "_google_news_rss",
+        lambda _query: [
+            {"title": "RSS story one", "url": "https://four.example/story"},
+            {"title": "Fresh story one", "url": "https://one.example/story"},
+            {"title": "RSS story two", "url": "https://five.example/story"},
+        ],
+    )
+
+    results = crawler._news_search("Virat Kohli latest")
+    urls = [item["url"] for item in results]
+    assert urls[:5] == [
+        "https://one.example/story",
+        "https://two.example/story",
+        "https://four.example/story",
+        "https://five.example/story",
+        "https://three.example/story",
+    ]
+    assert ("Virat Kohli latest", "d") in calls
+    assert ("Virat Kohli latest", "w") in calls
+
+
+def test_static_source_fallback_becomes_candidates_when_playwright_is_missing(monkeypatch):
+    from news_source_image_runtime import extract_news_source_images
+    from web_browser_image_runtime import scrape_web_pages
+
+    now = datetime.now(timezone.utc)
+    page = {
+        "title": "Virat Kohli reacts to retirement rumours",
+        "url": "https://example.com/story",
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "_crawler_query": "Virat Kohli reacts to retirement rumours",
+        "source": "Example Sports",
+    }
+    static_asset = {
+        "bytes": _jpeg_bytes(),
+        "hash": "static-hash",
+        "image_url": "https://cdn.example.com/fallback.jpg",
+        "page_url": "https://example.com/story",
+        "publisher": "Example Sports",
+        "credit": "Source: Example Sports",
+        "method": "og:image",
+        "source": "news_source",
+        "source_type": "news_source",
+        "status": "article-source",
+        "provenance": {},
+    }
+
+    monkeypatch.setattr(
+        "web_browser_image_runtime.scrape_web_pages",
+        lambda _requests: [{
+            "assets": [],
+            "error": "ModuleNotFoundError: No module named 'playwright'",
+        }],
+    )
+    monkeypatch.setattr(
+        "news_source_image_runtime.extract_news_source_images",
+        lambda *_args, **_kwargs: [static_asset],
+    )
+
+    candidates, image_count, title_mismatch = crawler._scrape_browser_pages(
+        [page],
+        page["title"],
+        "Virat Kohli",
+        now,
+        profile_page=False,
+        max_images_per_page=6,
+    )
+
+    assert image_count == 1
+    assert title_mismatch == 0
+    assert len(candidates) == 1
+    assert candidates[0]["source_page_url"] == page["url"]
+    assert candidates[0]["source_image_url"] == static_asset["image_url"]
+
+
 def test_related_article_score_accepts_paraphrased_coverage():
     assert crawler._related_article_score(
         "Virat Kohli reacts retirement rumours",
@@ -115,6 +207,29 @@ def test_related_article_score_rejects_unrelated_figure_only_story():
         "Virat Kohli reacts to retirement rumours",
         "Virat Kohli",
     ) == 0
+
+
+def test_candidate_gate_accepts_paraphrased_publisher_headline():
+    now = datetime.now(timezone.utc)
+    asset = _asset(1)
+    asset["page_title"] = "Kohli opens up on his future after fresh retirement speculation"
+    page = {
+        "title": asset["page_title"],
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "url": asset["source_page_url"],
+        "source": "Example Sports",
+    }
+
+    candidate = crawler._candidate_from_browser_asset(
+        asset,
+        page,
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
+    )
+
+    assert candidate is not None
 
 
 def test_recent_articles_balance_publishers_and_keep_related_coverage(monkeypatch):
