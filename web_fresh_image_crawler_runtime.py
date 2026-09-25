@@ -877,6 +877,8 @@ def crawl_fresh_web_images(
             "high_confidence": 0,
             "ai_checked": 0,
             "rejection_counts": {"no_search_queries": 1},
+            "failure_state": "no_articles_found",
+            "manual_query": manual_query,
         }
 
     now = datetime.now(timezone.utc)
