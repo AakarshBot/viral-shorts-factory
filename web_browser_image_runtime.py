@@ -30,6 +30,7 @@ MAX_IMAGE_BYTES = max(4_000_000, min(15_000_000, int(os.getenv("VISUAL_BROWSER_M
 MIN_IMAGE_SIDE = max(400, min(1000, int(os.getenv("VISUAL_BROWSER_MIN_IMAGE_SIDE", "500"))))
 AUTO_INSTALL_BROWSER = str(os.getenv("VISUAL_BROWSER_AUTO_INSTALL", "1")).strip().lower() not in {"0", "false", "no", "off"}
 _AUTO_INSTALL_ATTEMPTED = False
+_PLAYWRIGHT_PACKAGE_INSTALL_ATTEMPTED = False
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "from",
@@ -218,6 +219,31 @@ def _browser_user_agent():
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/151.0.0.0 Safari/537.36"
     )
+
+
+def _install_playwright_package_once():
+    global _PLAYWRIGHT_PACKAGE_INSTALL_ATTEMPTED
+    if _PLAYWRIGHT_PACKAGE_INSTALL_ATTEMPTED or not AUTO_INSTALL_BROWSER:
+        return False
+    _PLAYWRIGHT_PACKAGE_INSTALL_ATTEMPTED = True
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "playwright>=1.52,<2",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        return completed.returncode == 0
+    except Exception:
+        return False
 
 
 def _install_browser_once():
@@ -628,7 +654,12 @@ async def _scrape_one(context, request):
 
 
 async def _scrape_pages_async(requests_list):
-    from playwright.async_api import async_playwright
+    try:
+        from playwright.async_api import async_playwright
+    except ModuleNotFoundError:
+        if not _install_playwright_package_once():
+            raise
+        from playwright.async_api import async_playwright
 
     requests_list = list(requests_list or [])[:BROWSER_MAX_PAGES]
     if not requests_list:
