@@ -209,6 +209,29 @@ def test_related_article_score_rejects_unrelated_figure_only_story():
     ) == 0
 
 
+def test_candidate_gate_accepts_paraphrased_publisher_headline():
+    now = datetime.now(timezone.utc)
+    asset = _asset(1)
+    asset["page_title"] = "Kohli opens up on his future after fresh retirement speculation"
+    page = {
+        "title": asset["page_title"],
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "url": asset["source_page_url"],
+        "source": "Example Sports",
+    }
+
+    candidate = crawler._candidate_from_browser_asset(
+        asset,
+        page,
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
+    )
+
+    assert candidate is not None
+
+
 def test_recent_articles_balance_publishers_and_keep_related_coverage(monkeypatch):
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=2)).isoformat()
