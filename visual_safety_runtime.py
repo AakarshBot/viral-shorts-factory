@@ -9,7 +9,7 @@ VISUAL_FETCH_TIMEOUT_SECONDS = max(1, int(os.getenv("VISUAL_FETCH_TIMEOUT_SECOND
 GEMINI_VISUAL_MAX_REQUESTS = min(24, max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "16"))))
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = min(10, max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "8"))))
 
-_FETCH_WORKER_SLOTS = threading.BoundedSemaphore(2)
+_FETCH_WORKER_SLOTS = threading.BoundedSemaphore(3)
 _INSTALLED = False
 
 
