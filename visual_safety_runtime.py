@@ -6,8 +6,6 @@ import threading
 import traceback
 
 VISUAL_FETCH_TIMEOUT_SECONDS = max(1, int(os.getenv("VISUAL_FETCH_TIMEOUT_SECONDS", "15")))
-VISUAL_MAX_SEARCH_QUERIES = min(6, max(3, int(os.getenv("VISUAL_MAX_SEARCH_QUERIES", "5"))))
-VISUAL_MAX_VERIFICATION_ATTEMPTS = min(10, max(1, int(os.getenv("VISUAL_MAX_VERIFICATION_ATTEMPTS", "8"))))
 GEMINI_VISUAL_MAX_REQUESTS = min(24, max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_RUN", "16"))))
 GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = min(10, max(1, int(os.getenv("GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE", "8"))))
 
@@ -58,7 +56,6 @@ def install() -> bool:
         visual_qa_runtime.VISUAL_BUDGET_RUNTIME_VERSION = "2026-09-17-v1"
         _INSTALLED = True
         print("   [Visual Safety] Central budgets installed: "
-              f"Gemini/run={GEMINI_VISUAL_MAX_REQUESTS}, Gemini/scene={GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}, "
               f"Gemini/run={GEMINI_VISUAL_MAX_REQUESTS}, Gemini/scene={GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}, "
               f"fetch_deadline={VISUAL_FETCH_TIMEOUT_SECONDS}s, worker_slots=2.", flush=True)
         return True
