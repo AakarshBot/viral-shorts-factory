@@ -12,5 +12,6 @@ python-dotenv
 tqdm
 moviepy==2.2.1
 requests
+playwright>=1.52,<2
 newspaper4k>=0.9.6,<0.10
 streamlit-cropper==0.3.1
