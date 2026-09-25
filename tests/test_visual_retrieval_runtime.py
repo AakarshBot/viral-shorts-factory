@@ -655,6 +655,37 @@ def test_person_action_reserves_action_search_even_when_exact_query_fills_target
     assert refine_calls == ["Vaibhav Sooryavanshi batting cricket"]
 
 
+
+def test_action_query_candidate_beats_portrait_for_action_scene():
+    portrait = {
+        "hash": "portrait",
+        "query": "Vaibhav Sooryavanshi",
+        "priority": 1000.0,
+        "search_text": "Vaibhav Sooryavanshi portrait",
+        "status": "entity-verified",
+        "provenance_status": "commercial-verified",
+    }
+    action = {
+        "hash": "action",
+        "query": "Vaibhav Sooryavanshi batting cricket",
+        "priority": 700.0,
+        "search_text": "Vaibhav Sooryavanshi batting cricket",
+        "status": "entity-verified",
+        "provenance_status": "commercial-verified",
+    }
+    selected = retrieval.select_manual_visual_candidate(
+        [portrait, action],
+        {
+            "slide_index": 1,
+            "factual_primary_entity": "Vaibhav Sooryavanshi",
+            "voiceover": "Vaibhav Sooryavanshi is batting and hitting sixes.",
+            "visual_intent": "batting cricket action",
+        },
+        set(),
+    )
+    assert selected["hash"] == "action"
+
+
 def test_manual_pool_target_is_enforced_across_provider_stages(monkeypatch):
     provider_calls = []
     qa_calls = {"count": 0}
