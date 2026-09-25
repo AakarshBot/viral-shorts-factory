@@ -448,6 +448,8 @@ def _verify_ambiguous(
 ) -> tuple[list[dict[str, Any]], int, int]:
     high = [item for item in candidates if item.get("crawler_confidence") == "high"]
     ambiguous = [item for item in candidates if item.get("crawler_confidence") != "high"]
+    if len(high) >= CRAWLER_SUCCESS:
+        return high[:CRAWLER_TARGET], 0, 0
     if not ambiguous:
         return high[:CRAWLER_TARGET], 0, 0
 
