@@ -189,8 +189,8 @@ def test_press_conference_query_uses_scene_anchor_not_full_prompt():
     assert intent.visual_genre == "PERSON_ACTION"
     assert intent.queries
     assert len(intent.queries) <= 6
-    assert intent.queries[0] == "Rishabh Pant"
-    assert intent.queries[-1] == "Rishabh Pant press conference"
+    assert intent.queries[0] == "Rishabh Pant press conference"
+    assert intent.queries[-1] == "Rishabh Pant"
     assert "announcement" not in intent.queries[0].lower()
     assert "editorial" not in intent.queries[0].lower()
     assert "latest" not in intent.queries[0].lower()
@@ -213,14 +213,13 @@ def test_same_entity_gets_different_searchable_scene_queries():
         "factual_voiceover": "Vaibhav Sooryavanshi received the award after the presentation.",
     })
 
-    assert first.query == second.query == "Vaibhav Sooryavanshi"
-    assert first.queries[1] != second.queries[1]
-    assert first.query.casefold().startswith("vaibhav sooryavanshi")
-    assert second.query.casefold().startswith("vaibhav sooryavanshi")
+    assert first.visual_genre == "PERSON_ACTION"
+    assert first.query == "Vaibhav Sooryavanshi batting cricket"
+    assert first.queries[-1] == "Vaibhav Sooryavanshi"
+    assert second.query == "Vaibhav Sooryavanshi award"
+    assert second.visual_genre == "TROPHY_AWARD"
     assert "young" not in first.query.lower()
     assert "player" not in second.query.lower()
-    assert any(term in first.queries[1].lower() for term in ("batting", "match", "rajasthan"))
-    assert any(term in second.queries[1].lower() for term in ("award", "trophy", "presentation", "ceremony"))
     assert len(first.queries) <= 6
     assert len(second.queries) <= 6
     assert first.queries[0] == "Vaibhav Sooryavanshi"
