@@ -257,7 +257,10 @@ def _article_url_is_usable(url: str) -> bool:
     if host in _BLOCKED_PROFILE_HOSTS:
         return False
     lowered_path = parsed.path.casefold()
-    if any(part in lowered_path for part in _BAD_PATH_PARTS):
+    # Google News RSS article links use /rss/articles/... and redirect to the
+    # publisher page. Keep that specific host usable while continuing to reject
+    # ordinary RSS/feed/search/category URLs from publisher sites.
+    if host != "news.google.com" and any(part in lowered_path for part in _BAD_PATH_PARTS):
         return False
     return True
 
