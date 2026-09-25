@@ -1137,12 +1137,22 @@ def collect_manual_visual_pool(
             token.casefold()
             for token in re.findall(r"[\w-]+", action_scene_evidence)
         }
+        query_action_tokens = {
+            token.casefold()
+            for token in re.findall(r"[\w-]+", exact_query)
+        }
         has_sports_action_evidence = bool(action_tokens & _VISUAL_REFINE_ACTION_TERMS)
-        # Treat concrete sports-action evidence as authoritative even if an
-        # upstream genre classifier fell back to PERSON_PORTRAIT.
+        has_query_action_evidence = bool(query_action_tokens & _VISUAL_REFINE_ACTION_TERMS)
+        # Reserve a small action slice only when the exact query does not
+        # already request an action. Action-specific queries should be searched
+        # once before adding any refinement work.
         action_reserve = (
             min(3, max(0, target - 1))
-            if visual_type == "PERSON" and has_sports_action_evidence
+            if (
+                visual_type == "PERSON"
+                and has_sports_action_evidence
+                and not has_query_action_evidence
+            )
             else 0
         )
         exact_target = max(1, target - action_reserve)
@@ -1309,7 +1319,10 @@ def collect_manual_visual_pool(
         # when the exact-name search already filled its non-action share of the
         # pool. This prevents portraits from satisfying the whole request before
         # an action-photo search gets a chance.
-        if action_reserve or verified_for_query < target:
+        should_refine = verified_for_query < target and (
+            not has_query_action_evidence or verified_for_query == 0
+        )
+        if should_refine:
             best_scene = None
             best_overlap = -1
             query_tokens = {
@@ -2136,23 +2149,40 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
             continue
 
         query_candidates.sort(key=lambda item: (-float(item[4]), str(item[7]).casefold(), int(item[0])))
-        # First inspect only the strongest 10 in one batch. If that does not
-        # produce at least three entity-approved images, inspect the next 10.
-        # This normally costs one Gemini call per search term and never requires
-        # scene-level verification.
+        # Verify the strongest ten first. Only inspect the next ten when the
+        # first batch fails to produce three identity-approved candidates.
         check_candidates = query_candidates[:raw_target]
         primary_count = min(ENTITY_CHECK_PRIMARY_POOL, len(check_candidates))
-        batches = [check_candidates[:primary_count]]
-        if len(check_candidates) > primary_count:
-            batches.append(check_candidates[primary_count:])
         batch_size = max(2, int(GEMINI_VISUAL_BATCH_SIZE))
         local_results = {}
+        primary_verified = 0
 
-        for batch_number, batch_group in enumerate(batches):
-            if not batch_group:
+        for offset in range(0, primary_count, batch_size):
+            batch = check_candidates[offset : offset + batch_size]
+            if not batch:
                 continue
-            for offset in range(0, len(batch_group), batch_size):
-                batch = batch_group[offset : offset + batch_size]
+            result_map = strict_gemini_check_batch(
+                [item[2] for item in batch],
+                cache_entity,
+                os.getenv("GEMINI_API_KEY"),
+                tier="IDENTITY",
+                visual_type=visual_type,
+                visual_genre=visual_genre,
+            )
+            verification_attempts += 1
+            for local_index, verdict in result_map.items():
+                local_results[offset + int(local_index)] = verdict
+                if verdict is True:
+                    primary_verified += 1
+            if verification_attempts >= 4 or primary_verified >= 3:
+                break
+
+        if primary_verified < 3 and len(check_candidates) > primary_count and verification_attempts < 4:
+            secondary = check_candidates[primary_count:]
+            for offset in range(0, len(secondary), batch_size):
+                batch = secondary[offset : offset + batch_size]
+                if not batch:
+                    continue
                 result_map = strict_gemini_check_batch(
                     [item[2] for item in batch],
                     cache_entity,
@@ -2162,16 +2192,13 @@ def run_visual_retrieval(runtime, bot, seg: dict, category: str, used_urls: set[
                     visual_genre=visual_genre,
                 )
                 verification_attempts += 1
-                base_index = (0 if batch_number == 0 else primary_count) + offset
+                base_index = primary_count + offset
                 for local_index, verdict in result_map.items():
                     local_results[base_index + int(local_index)] = verdict
                 if verification_attempts >= 4:
                     break
-            if verification_attempts >= 4:
-                break
-
-            # Continue through the bounded candidate batches so the dashboard
-            # receives more alternatives. The verification-attempt cap remains.
+                if sum(1 for verdict in result_map.values() if verdict is True) + primary_verified >= 3:
+                    break
 
         round_verified = 0
         for local_index, item in enumerate(check_candidates):
