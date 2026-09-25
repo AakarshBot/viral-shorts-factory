@@ -56,6 +56,10 @@ CRICKET_INDIA_QUERIES = (
     'Asia cricket (Japan OR Afghanistan OR Nepal OR UAE OR Hong Kong OR Sri Lanka OR Bangladesh) (record OR upset OR controversy OR debut OR milestone)',
     'India cricket (umpire OR law OR ruling OR bizarre OR unusual OR bizarre call OR controversy OR investigation)',
     'cricket (uncapped OR emerging OR grassroots OR club OR academy) India (debut OR record OR milestone OR controversy OR upset)',
+    'cricket (viral video OR social media OR reaction OR fans) India',
+    'cricket (bizarre OR unusual OR dramatic OR controversial) incident decision',
+    'cricket (feud OR row OR statement OR debate OR slammed OR praised) India',
+    'cricket (breakthrough OR debut OR uncapped OR emerging OR surprise) India',
 )
 
 CRICKET_GLOBAL_QUERIES = (
@@ -69,6 +73,10 @@ CRICKET_GLOBAL_QUERIES = (
     'T20 cricket (record OR controversy OR upset OR comeback OR milestone)',
     'cricket India Pakistan rivalry',
     'cricket major tournament final record controversy',
+    'cricket (viral video OR social media OR reaction OR fans)',
+    'cricket (bizarre OR unusual OR dramatic OR controversial) incident decision',
+    'cricket (feud OR row OR statement OR debate OR slammed OR praised)',
+    'cricket (breakthrough OR debut OR uncapped OR emerging OR surprise)',
 )
 
 CRICKET_ALL_QUERIES = (
@@ -82,6 +90,10 @@ CRICKET_ALL_QUERIES = (
     'India Pakistan cricket',
     'cricket major tournament final record controversy',
     'cricket emerging player breakthrough milestone',
+    'cricket (viral video OR social media OR reaction OR fans)',
+    'cricket (bizarre OR unusual OR dramatic OR controversial) incident decision',
+    'cricket (feud OR row OR statement OR debate OR slammed OR praised)',
+    'cricket (breakthrough OR debut OR uncapped OR emerging OR surprise)',
 )
 
 DEFAULT_NON_CRICKET_LANES = {
@@ -436,7 +448,9 @@ def _story_exists_pass(story: dict) -> bool:
         if isinstance(item, dict) and str(item.get("url") or "").strip()
     )
     story["story_substance_chars"] = body_chars
-    if body_chars >= 100:
+    # Short provider snippets can still contain a real story. The gate is only
+    # meant to reject headline-only records, not require long article bodies.
+    if body_chars >= 60:
         return True
     if source_count >= 2 and article_count >= 2:
         return True
