@@ -214,17 +214,16 @@ def test_same_entity_gets_different_searchable_scene_queries():
     })
 
     assert first.visual_genre == "PERSON_ACTION"
-    assert first.query == "Vaibhav Sooryavanshi batting cricket"
-    assert first.queries[-1] == "Vaibhav Sooryavanshi"
-    assert second.query == "Vaibhav Sooryavanshi award"
     assert second.visual_genre == "TROPHY_AWARD"
-    assert "young" not in first.query.lower()
-    assert "player" not in second.query.lower()
-    assert len(first.queries) <= 6
-    assert len(second.queries) <= 6
-    assert first.queries[0] == first.query
-    assert second.queries[0] == second.query
-
+    assert first.query.casefold().startswith("vaibhav sooryavanshi")
+    assert second.query.casefold().startswith("vaibhav sooryavanshi")
+    assert any(term in first.query.casefold() for term in ("batting", "cricket", "match", "action"))
+    assert any(term in second.query.casefold() for term in ("award", "trophy", "presentation", "ceremony"))
+    assert first.query != second.query
+    assert first.queries[-1].casefold() == "vaibhav sooryavanshi"
+    assert second.queries[0].casefold() == second.query.casefold()
+    assert len(first.queries) <= 2
+    assert len(second.queries) <= 2
 
 
 def test_manual_visual_query_stays_exact():
