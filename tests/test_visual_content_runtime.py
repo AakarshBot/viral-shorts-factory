@@ -143,41 +143,20 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
     assert packages[0][0]["source_type"] == "Commons"
 
 
-def test_article_source_images_join_selection_pool(monkeypatch, tmp_path):
-    image = Image.new("RGB", (900, 1200), (80, 90, 100))
-    raw = io.BytesIO()
-    image.save(raw, format="JPEG")
-    article_path = tmp_path / "article.jpg"
+def test_automatic_visual_run_skips_unused_article_source_scrape(monkeypatch, tmp_path):
+    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
 
-    async def fake_article_pool(*_args, **_kwargs):
-        return [{
-            "bytes": raw.getvalue(),
-            "hash": "article-hash",
-            "source": "news_source",
-            "source_type": "news_source",
-            "credit": "Source: Example News",
-            "image_url": "https://example.com/image.jpg",
-            "source_image_url": "https://example.com/image.jpg",
-            "provenance": {
-                "provider": "Example News",
-                "url": "https://example.com/image.jpg",
-                "author": "Example News",
-            },
-        }]
+    async def fail_article_pool(*_args, **_kwargs):
+        raise AssertionError("article source images should not be scraped without manual visual queries")
 
-    def fake_materialize(_bot, assets, pool_id):
-        Image.open(io.BytesIO(assets[0]["bytes"])).save(article_path, format="JPEG")
-        return [{
-            **dict(assets[0]),
-            "path": str(article_path),
-            "original_path": str(article_path),
-            "status": "article-source",
-            "used": False,
-        }]
-
-    monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", fake_article_pool)
-    monkeypatch.setattr(visual_retrieval_runtime, "materialize_manual_visual_pool", fake_materialize)
+    monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", fail_article_pool)
+    monkeypatch.setattr(
+        visual_query_entities_runtime,
+        "search_slide_visual",
+        lambda *args, **kwargs: (bg.copy(), False, "commons"),
+    )
     monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
+    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
 
     bot = _fake_bot(tmp_path)
     bot._active_web_config = {
@@ -185,7 +164,7 @@ def test_article_source_images_join_selection_pool(monkeypatch, tmp_path):
         "visual_search_queries": "",
     }
     script_data = {
-        "title": "Direct article source",
+        "title": "Automatic visual run",
         "script": [{
             "primary_entity": "Story subject",
             "voiceover": "A current story.",
@@ -195,11 +174,10 @@ def test_article_source_images_join_selection_pool(monkeypatch, tmp_path):
     packages = _run_process(bot, script_data, "regular")
 
     assert len(packages) == 1
-    assert packages[0][0]["source_type"] == "news_source"
-    assert packages[0][0]["source_image_url"] == "https://example.com/image.jpg"
-    assert packages[0][0]["source_credit"] == "Source: Example News"
-    assert packages[0][0]["visual_manual_pool_mode"] is True
-    assert script_data["visual_manual_pool_unused_count"] == 0
+    assert packages[0][0]["source_type"] == "commons"
+    assert script_data["visual_manual_pool"] == []
+
+
 def test_visual_process_resets_qa_state_for_run_and_each_scene(monkeypatch, tmp_path):
     calls = {"run": 0, "scene": 0}
     monkeypatch.setattr(
