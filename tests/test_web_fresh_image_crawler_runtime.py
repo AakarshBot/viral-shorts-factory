@@ -175,7 +175,12 @@ def test_static_source_fallback_becomes_candidates_when_playwright_is_missing(mo
         lambda *_args, **_kwargs: [static_asset],
     )
 
-    candidates, image_count, title_mismatch = crawler._scrape_browser_pages(
+    (
+        candidates,
+        image_count,
+        title_mismatch,
+        diagnostics,
+    ) = crawler._scrape_browser_pages(
         [page],
         page["title"],
         "Virat Kohli",
@@ -186,10 +191,99 @@ def test_static_source_fallback_becomes_candidates_when_playwright_is_missing(mo
 
     assert image_count == 1
     assert title_mismatch == 0
+    assert diagnostics["browser_failures"] == 1
+    assert diagnostics["static_fallback_images"] == 1
     assert len(candidates) == 1
     assert candidates[0]["source_page_url"] == page["url"]
     assert candidates[0]["source_image_url"] == static_asset["image_url"]
 
+
+
+def test_manual_query_uses_same_crawler_without_requiring_original_headline(monkeypatch):
+    now = datetime.now(timezone.utc)
+    calls = []
+
+    articles = [{
+        "title": "Kohli joins batting session before weekend match",
+        "url": "https://one.example/story",
+        "date": (now - timedelta(hours=3)).isoformat(),
+        "_crawler_query": "Virat Kohli batting",
+        "source": "Example Sports",
+    }]
+
+    def fake_collect(queries, story_title, entity, current_time):
+        calls.append((queries, story_title, entity))
+        return articles
+
+    monkeypatch.setattr(crawler, "_collect_recent_articles", fake_collect)
+    monkeypatch.setattr(
+        crawler,
+        "_scrape_browser_pages",
+        lambda *_args, **_kwargs: ([_asset(1)], 1, 0),
+    )
+    monkeypatch.setattr(crawler, "_collect_profile_pages", lambda *_args: [])
+
+    result = crawler.crawl_fresh_web_images(
+        {"title": "Completely different selected headline"},
+        [{"primary_entity": "Virat Kohli"}],
+        manual_query="Virat Kohli batting",
+    )
+
+    assert calls == [(["Virat Kohli batting"], "Virat Kohli batting", "Virat Kohli")]
+    assert len(result["assets"]) == 1
+    assert result["manual_query"] == "Virat Kohli batting"
+    assert result["queries"] == ["Virat Kohli batting"]
+
+
+def test_crawler_distinguishes_no_articles_browser_failure_and_rejected_images(monkeypatch):
+    empty = crawler.crawl_fresh_web_images(
+        {"title": "No coverage story"},
+        [],
+    )
+    assert empty["failure_state"] == "no_articles_found"
+
+    now = datetime.now(timezone.utc)
+    page = {
+        "title": "Virat Kohli story",
+        "url": "https://example.com/story",
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "_crawler_query": "Virat Kohli story",
+        "source": "Example Sports",
+    }
+    monkeypatch.setattr(crawler, "_collect_recent_articles", lambda *_args: [page])
+    monkeypatch.setattr(crawler, "_collect_profile_pages", lambda *_args: [])
+    monkeypatch.setattr(
+        crawler,
+        "_scrape_browser_pages",
+        lambda *_args, **_kwargs: (
+            [],
+            0,
+            0,
+            {"browser_failures": 1, "static_fallback_images": 0},
+        ),
+    )
+    browser_failed = crawler.crawl_fresh_web_images(
+        {"title": page["title"]},
+        [{"primary_entity": "Virat Kohli"}],
+    )
+    assert browser_failed["failure_state"] == "browser_unavailable"
+
+    rejected_asset = _asset(7)
+    monkeypatch.setattr(
+        crawler,
+        "_scrape_browser_pages",
+        lambda *_args, **_kwargs: ([rejected_asset], 1, 0),
+    )
+    monkeypatch.setattr(
+        crawler,
+        "_verify_ambiguous",
+        lambda candidates, entity: ([], 1, len(candidates)),
+    )
+    rejected = crawler.crawl_fresh_web_images(
+        {"title": page["title"]},
+        [{"primary_entity": "Virat Kohli"}],
+    )
+    assert rejected["failure_state"] == "images_found_but_rejected"
 
 def test_related_article_score_accepts_paraphrased_coverage():
     assert crawler._related_article_score(
