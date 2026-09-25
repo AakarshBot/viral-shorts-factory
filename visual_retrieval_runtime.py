@@ -417,9 +417,16 @@ def _provider_search_query(
 
 
 _VISUAL_REFINE_ACTION_TERMS = {
-    "bat", "batting", "batter", "batsman", "bowling", "bowler", "cricket",
-    "match", "innings", "playing", "player", "shot", "shooting", "scoring",
-    "scores", "scored", "celebrating", "celebration", "running", "racing",
+    "bat", "batted", "batting", "batter", "batsman", "bowling", "bowled", "bowler",
+    "cricket", "match", "innings", "playing", "player", "shot", "shots", "shooting",
+    "scoring", "scores", "scored", "run", "runs", "running", "racing",
+    "hit", "hits", "hitting", "smash", "smashes", "smashed", "six", "sixes",
+    "four", "fours", "boundary", "boundaries", "drive", "drives", "driving",
+    "pull", "pulling", "cut", "cuts", "cutting", "flick", "flicks", "flicking",
+    "sweep", "sweeps", "sweeping", "hook", "hooks", "hooking", "loft", "lofted",
+    "strike", "strikes", "striking", "wicket", "wickets", "fielding", "fielder",
+    "catch", "catches", "catching", "throw", "throws", "throwing",
+    "celebrating", "celebration", "celebrate",
 }
 
 _VISUAL_REFINE_STOPWORDS = {
@@ -521,6 +528,19 @@ def _manual_candidate_scene_score(asset: dict, scene: dict) -> float:
     score += len(metadata_words & scene_words) * 6.0
     if entity and entity.casefold() in query.casefold():
         score += 90.0
+
+    scene_action_terms = {
+        token
+        for token in re.findall(r"[\w-]+", scene_text.casefold(), flags=re.UNICODE)
+        if token in _VISUAL_REFINE_ACTION_TERMS
+    }
+    query_action_terms = {
+        token
+        for token in re.findall(r"[\w-]+", query.casefold(), flags=re.UNICODE)
+        if token in _VISUAL_REFINE_ACTION_TERMS
+    }
+    if scene_action_terms and scene_action_terms & query_action_terms:
+        score += 80.0
     return round(score, 3)
 
 
@@ -1107,13 +1127,11 @@ def collect_manual_visual_pool(
             for token in re.findall(r"[\w-]+", action_scene_evidence)
         }
         has_sports_action_evidence = bool(action_tokens & _VISUAL_REFINE_ACTION_TERMS)
+        # Treat concrete sports-action evidence as authoritative even if an
+        # upstream genre classifier fell back to PERSON_PORTRAIT.
         action_reserve = (
             min(3, max(0, target - 1))
-            if (
-                visual_type == "PERSON"
-                and visual_genre == "PERSON_ACTION"
-                and has_sports_action_evidence
-            )
+            if visual_type == "PERSON" and has_sports_action_evidence
             else 0
         )
         exact_target = max(1, target - action_reserve)
