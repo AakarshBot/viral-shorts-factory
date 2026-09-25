@@ -85,6 +85,8 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
         }
 
     def fake_materialize(_bot, assets, pool_id):
+        if not assets:
+            return []
         return [
             {
                 **dict(assets[0]),
