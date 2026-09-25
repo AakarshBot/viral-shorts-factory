@@ -1672,6 +1672,12 @@ def _visual_items(snapshot: Dict[str, Any]) -> list[dict[str, Any]]:
                     and str(option.get("path") or "").strip()
                     and os.path.isfile(str(option.get("path") or "").strip())
                 ],
+                "search_retrieval_method": str(
+                    layer.get("visual_search_retrieval_method") or ""
+                ).strip(),
+                "search_diagnostics": dict(
+                    layer.get("visual_search_diagnostics") or {}
+                ),
                 "bank": unused_verified,
                 "all_bank": bank,
             }
@@ -1864,67 +1870,97 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         dict(item) for item in (snapshot.get("visual_pool") or [])
         if isinstance(item, dict) and str(item.get("path") or "").strip()
     ]
-    search_groups = [
-        dict(group) for group in (snapshot.get("visual_search_groups") or [])
-        if isinstance(group, dict)
-    ]
-    # Every retained image that passed AI identity verification is displayed.
-    # Provider rights/provenance stay visible as metadata for the human reviewer;
-    # they are not an automatic manual-QC acceptance filter.
+    # Initial automatic retrieval is website-first. The existing factory provider
+    # lane is only exposed through the explicit per-slide retrieval selector below.
     available = list(pool)
     ready_count = sum(1 for item in items if item.get("qc_passed"))
     manual_approved = set(
         int(x) for x in (snapshot.get("visual_manual_approved") or []) if str(x).isdigit()
-    )
-    active_search_count = sum(
-        1 for group in search_groups
-        for item in (group.get("items") or [])
-        if isinstance(item, dict) and not bool(item.get("used"))
     )
     script_data = snapshot.get("script_data") or {}
     crawler_rejections = script_data.get("visual_web_crawler_rejection_counts") or {}
 
     st.markdown(
         "<div class='section-kicker'>Visual QC</div>"
-        "<h2 style='margin-top:0'>Choose from the visual pool</h2>",
+        "<h2 style='margin-top:0'>Build the visual storyboard</h2>",
         unsafe_allow_html=True,
     )
     st.caption(
-        "Every slide already has an image. The pools below collect identity-checked choices from the available image sources. "
-        "Assign any unused image to one slide, then reframe it with the cropper when needed."
+        "The website crawler supplies the shared candidate pool first. Every slide starts empty; "
+        "choose an image for each slide, crop when needed, then approve that slide."
     )
 
-    metric_cols = st.columns(4, gap="small")
+    metric_cols = st.columns(3, gap="small")
     metric_cols[0].metric("Slides", len(items))
-    metric_cols[1].metric("Ready", ready_count)
-    metric_cols[2].metric("Pool images", len(available))
-    metric_cols[3].metric("New search", active_search_count)
+    metric_cols[1].metric("Selected", ready_count)
+    metric_cols[2].metric("Website pool", len(available))
 
     crop_target = str(st.session_state.get("visual_crop_target") or "").strip()
     if crop_target:
         _render_crop_dialog(controller, snapshot, crop_target)
 
-    st.markdown("### Current slide images")
+    st.markdown("### Slides")
     for row_start in range(0, len(items), 3):
         row = items[row_start:row_start + 3]
         cols = st.columns(len(row), gap="medium")
         for local_index, item in enumerate(row):
             with cols[local_index]:
                 with st.container(border=True):
-                    st.markdown(f"<div class='story-rank'>SLIDE {item['index']:02d}</div>", unsafe_allow_html=True)
+                    slide_index = int(item["index"])
+                    st.markdown(
+                        f"<div class='story-rank'>SLIDE {slide_index:02d}</div>",
+                        unsafe_allow_html=True,
+                    )
                     if item.get("missing"):
-                        st.error("No image file is available for this slide.", icon="⛔")
+                        st.info("Choose an image for this slide from the website pool or an explicit retrieval below.")
                     else:
                         st.image(item["path"], width=240)
-                    query = str(item.get("query_used") or item.get("manual_query") or "").strip()
+
+                    query = str(
+                        item.get("query_used") or item.get("manual_query") or ""
+                    ).strip()
                     source = str(item.get("source") or "").strip()
                     if source or query:
                         caption = source or "visual"
                         if query:
                             caption += f" · {query}"
                         st.caption(caption)
+
+                    if item.get("search_retrieval_method"):
+                        st.caption(
+                            f"{item['search_retrieval_method']} · "
+                            f"{len(item.get('search_options') or [])} option(s)"
+                        )
+                    diagnostics = item.get("search_diagnostics") or {}
+                    if diagnostics:
+                        with st.expander("Retrieval diagnostics", expanded=False):
+                            diagnostic_pairs = (
+                                ("Query", diagnostics.get("query")),
+                                ("Method", diagnostics.get("method")),
+                                ("Articles", diagnostics.get("articles")),
+                                ("Browser pages", diagnostics.get("browser_pages_attempted")),
+                                ("Browser images", diagnostics.get("browser_images_found")),
+                                ("Static fallback images", diagnostics.get("static_fallback_images")),
+                                ("Candidates", diagnostics.get("candidates")),
+                                ("Duplicates removed", diagnostics.get("duplicates_removed")),
+                                ("AI checked", diagnostics.get("ai_checked")),
+                                ("AI rejected", diagnostics.get("ai_rejected")),
+                                ("Final images", diagnostics.get("final_images")),
+                                ("Failure state", diagnostics.get("failure_state")),
+                            )
+                            st.table(
+                                {
+                                    "Metric": [name for name, _value in diagnostic_pairs if _value not in (None, "")],
+                                    "Value": [value for _name, value in diagnostic_pairs if value not in (None, "")],
+                                }
+                            )
+
                     if not item.get("qc_passed"):
-                        st.caption(item.get("qc_reason") or "This slide still needs a usable image.")
+                        st.caption(
+                            item.get("qc_reason")
+                            or "No image selected yet."
+                        )
+
                     if item["index"] in manual_approved:
                         st.success("✓ Manually approved", icon="✅")
                     else:
@@ -1933,29 +1969,42 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                             type="primary",
                             width="stretch",
                             disabled=bool(item.get("missing")),
-                            key=f"approve_visual_{run_id}_{item['index']}",
+                            key=f"approve_visual_{run_id}_{slide_index}",
                         ):
-                            ok, message = controller.approve_visual(item["index"])
+                            ok, message = controller.approve_visual(slide_index)
                             if ok:
                                 st.rerun()
                             st.error(message)
 
-                    with st.popover("Replace image", width="stretch"):
-                        with st.form(key=f"replace_visual_form_{run_id}_{item['index']}"):
+                    with st.popover("Retrieve image", width="stretch"):
+                        retrieval_method = st.selectbox(
+                            "Retrieval method",
+                            ["Website Scrape", "Normal Factory Visual Fetch"],
+                            index=0,
+                            key=f"visual_retrieval_method_{run_id}_{slide_index}",
+                        )
+                        with st.form(
+                            key=f"retrieve_visual_form_{run_id}_{slide_index}",
+                        ):
                             replacement_query = st.text_input(
-                                "Search",
-                                value=str(item.get("manual_query") or item.get("query_used") or "").strip(),
-                                placeholder="e.g. Smriti Mandhana batting",
-                                label_visibility="collapsed",
+                                "Manual query",
+                                value=str(
+                                    item.get("manual_query")
+                                    or item.get("query_used")
+                                    or ""
+                                ).strip(),
+                                placeholder="e.g. Virat Kohli batting",
                             )
-                            replacement_submitted = st.form_submit_button(
-                                "Find up to 10 alternatives",
+                            retrieval_submitted = st.form_submit_button(
+                                "Search",
+                                type="primary",
                                 width="stretch",
                             )
-                        if replacement_submitted:
+                        if retrieval_submitted:
                             ok, message = controller.search_visual_options(
-                                item["index"],
+                                slide_index,
                                 replacement_query,
+                                retrieval_method=retrieval_method,
                             )
                             if ok:
                                 st.rerun()
@@ -1970,24 +2019,53 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                     ]
                     if replacement_options:
                         with st.expander(
-                            f"Replacement options · {len(replacement_options)}",
+                            f"{item.get('search_retrieval_method') or 'Retrieval'} · "
+                            f"{len(replacement_options)} option(s)",
                             expanded=True,
                         ):
-                            option_cols = st.columns(min(3, len(replacement_options)), gap="small")
-                            for option_index, option in enumerate(replacement_options, 1):
-                                with option_cols[(option_index - 1) % len(option_cols)]:
+                            option_cols = st.columns(
+                                min(3, len(replacement_options)),
+                                gap="small",
+                            )
+                            for option_index, option in enumerate(
+                                replacement_options, 1
+                            ):
+                                with option_cols[
+                                    (option_index - 1) % len(option_cols)
+                                ]:
                                     st.image(option["path"], width=140)
-                                    st.caption(
-                                        str(option.get("source") or "visual source").strip()
-                                    )
+                                    option_credit = str(
+                                        option.get("credit")
+                                        or option.get("source_name")
+                                        or option.get("source")
+                                        or "visual source"
+                                    ).strip()
+                                    st.caption(option_credit)
+                                    source_page_url = str(
+                                        option.get("source_page_url") or ""
+                                    ).strip()
+                                    if source_page_url.startswith(
+                                        ("http://", "https://")
+                                    ):
+                                        st.link_button(
+                                            "Open source page",
+                                            source_page_url,
+                                            width="content",
+                                        )
                                     if st.button(
                                         "Use",
                                         width="stretch",
-                                        key=f"use_search_option_{run_id}_{item['index']}_{option_index}_{str(option.get('hash') or '')[:10]}",
+                                        key=(
+                                            f"use_search_option_{run_id}_"
+                                            f"{slide_index}_{option_index}_"
+                                            f"{str(option.get('hash') or '')[:10]}"
+                                        ),
                                     ):
-                                        ok, message = controller.replace_visual_from_search_option(
-                                            item["index"],
-                                            option_index,
+                                        ok, message = (
+                                            controller.replace_visual_from_search_option(
+                                                slide_index,
+                                                option_index,
+                                            )
                                         )
                                         if ok:
                                             st.rerun()
@@ -1998,20 +2076,28 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if st.button(
                             "Crop",
                             width="stretch",
-                            key=f"crop_slide_{run_id}_{item['index']}",
+                            key=f"crop_slide_{run_id}_{slide_index}",
                         ):
-                            st.session_state["visual_crop_target"] = f"slide:{item['index']}"
+                            st.session_state["visual_crop_target"] = (
+                                f"slide:{slide_index}"
+                            )
                             st.rerun()
 
-
-    def render_pool_section(title: str, description: str, assets: list[dict], section_key: str) -> None:
+    def render_pool_section(
+        title: str,
+        description: str,
+        assets: list[dict],
+        section_key: str,
+    ) -> None:
         st.markdown(
-            f"<div class='qc-pool-heading'><b>{_ui_html(title)}</b><span>{_ui_html(description)}</span></div>",
+            f"<div class='qc-pool-heading'><b>{_ui_html(title)}</b>"
+            f"<span>{_ui_html(description)}</span></div>",
             unsafe_allow_html=True,
         )
         if not assets:
             st.caption("No images in this group.")
             return
+
         for row_start in range(0, len(assets), 3):
             row = assets[row_start:row_start + 3]
             cols = st.columns(len(row), gap="medium")
@@ -2023,15 +2109,21 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if path and os.path.isfile(path):
                             st.image(path, width=220)
                         query = str(asset.get("query") or "").strip()
-                        source = str(asset.get("source") or "").strip()
+                        source = str(asset.get("source_name") or asset.get("source") or "").strip()
                         credit = str(asset.get("credit") or "").strip()
                         caption = credit or source or "visual source"
                         if query and not credit:
                             caption += f" · {query}"
                         st.caption(caption)
+
                         source_page_url = str(asset.get("source_page_url") or "").strip()
                         if source_page_url.startswith(("http://", "https://")):
-                            st.link_button("Open source page", source_page_url, width="content")
+                            st.link_button(
+                                "Open source page",
+                                source_page_url,
+                                width="content",
+                            )
+
                         provenance_state = str(
                             asset.get("provenance_status") or "commercial-verified"
                         ).strip()
@@ -2043,8 +2135,13 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 "</div>",
                                 unsafe_allow_html=True,
                             )
-                        choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
-                        target_key = f"pool_target_{run_id}_{section_key}_{asset_hash[:12]}"
+
+                        choices = ["Choose slide"] + [
+                            f"Slide {index}" for index in range(1, len(items) + 1)
+                        ]
+                        target_key = (
+                            f"pool_target_{run_id}_{section_key}_{asset_hash[:12]}"
+                        )
                         target = st.selectbox(
                             "Use on slide",
                             choices,
@@ -2059,11 +2156,20 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 "Use image",
                                 type="primary",
                                 width="stretch",
-                                disabled=bool(asset.get("used")) or target == "Choose slide",
-                                key=f"assign_pool_{run_id}_{section_key}_{asset_hash[:12]}",
+                                disabled=(
+                                    bool(asset.get("used"))
+                                    or target == "Choose slide"
+                                ),
+                                key=(
+                                    f"assign_pool_{run_id}_"
+                                    f"{section_key}_{asset_hash[:12]}"
+                                ),
                             ):
                                 slide_index = int(target.split()[-1])
-                                ok, message = controller.assign_visual_pool_asset(asset_hash, slide_index)
+                                ok, message = controller.assign_visual_pool_asset(
+                                    asset_hash,
+                                    slide_index,
+                                )
                                 if ok:
                                     st.rerun()
                                 st.error(message)
@@ -2073,176 +2179,86 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                                 width="stretch",
                                 key=f"crop_pool_{run_id}_{section_key}_{asset_hash[:12]}",
                             ):
-                                st.session_state["visual_crop_target"] = f"asset:{asset_hash}"
+                                st.session_state["visual_crop_target"] = (
+                                    f"asset:{asset_hash}"
+                                )
                                 st.rerun()
                         if bool(asset.get("used")):
-                            st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
+                            st.caption(
+                                f"Used on slide {int(asset.get('assigned_slide') or 0)}"
+                            )
 
     crawler_pool = [
-        item for item in available
+        item
+        for item in available
         if str(item.get("pool_origin") or "").strip() == "web-crawler"
         or str(item.get("source_type") or "").strip() == "web_crawler"
         or str(item.get("source") or "").strip() == "web_crawler"
     ]
     article_source_pool = [
-        item for item in available
+        item
+        for item in available
         if str(item.get("pool_origin") or "").strip() == "article-source"
         or str(item.get("source_type") or "").strip() == "news_source"
         or str(item.get("source") or "").strip() == "news_source"
     ]
-    manual_verified_pool = [
-        item for item in available
-        if item not in crawler_pool and item not in article_source_pool
-    ]
 
-    st.markdown("### Fresh web images")
+    st.markdown("### Website image pool")
     crawler_raw = int(crawler_rejections.get("image_search_raw") or 0)
     crawler_downloaded = int(crawler_rejections.get("image_search_downloaded") or 0)
     crawler_page_images = int(crawler_rejections.get("image_result_page_images") or 0)
-    crawler_news_articles = int(crawler_rejections.get("news_articles") or crawler_rejections.get("article_candidates") or 0)
+    crawler_news_articles = int(
+        crawler_rejections.get("news_articles")
+        or crawler_rejections.get("article_candidates")
+        or 0
+    )
     crawler_rejected_total = sum(
         int(value or 0)
         for key, value in crawler_rejections.items()
         if key != "final_images"
+        and isinstance(value, (int, float))
     )
+    crawler_failure_state = str(
+        script_data.get("visual_web_crawler_failure_state") or ""
+    ).strip()
     st.caption(
-        f"Fresh crawler · {len(crawler_pool)} image(s) · "
+        f"Automatic website crawler · {len(crawler_pool) + len(article_source_pool)} image(s) · "
         f"{int(script_data.get('visual_web_crawler_articles') or crawler_news_articles)} article(s) · "
         f"{int(script_data.get('visual_web_crawler_ai_checked') or 0)} AI-checked · "
         f"{len(script_data.get('visual_web_crawler_queries') or [])} query lane(s)"
         + (
-            f" · search results: {crawler_raw} · direct downloads: {crawler_downloaded} · source-page images: {crawler_page_images}"
+            f" · browser images: {crawler_rejections.get('article_browser_images', 0)}"
             if crawler_rejections else ""
         )
         + (
-            f" · rejected: {crawler_rejected_total}"
+            f" · static fallback images: {crawler_rejections.get('static_fallback_images', 0)}"
             if crawler_rejections else ""
         )
+        + (
+            f" · failure: {crawler_failure_state}"
+            if crawler_failure_state else ""
+        )
     )
+
     render_pool_section(
         "Fresh web crawler",
-        "Current indexed images are shown first. Publisher/source-page metadata is retained for review and credit.",
+        "Publisher article images found for the selected story. Choose any image for any slide.",
         crawler_pool,
         "crawler",
     )
-
-    st.markdown("### Source-website images")
-    render_pool_section(
-        "Source-website images",
-        "Images scraped directly from a selected source page and retained for manual review.",
-        article_source_pool,
-        "article",
-    )
-
-    st.markdown("### AI-verified manual-search images")
-    render_pool_section(
-        "Manual-search image pool",
-        "Identity-verified images returned from the factory's searchable visual sources. Already-assigned images stay visible and are marked with the slide using them.",
-        manual_verified_pool,
-        "verified",
-    )
-
-    # All retained images are already shown in the single pool above.
-    st.markdown("### Find 10 more images")
-    st.caption(
-        "Search all available image sources for up to 10 new AI-checked results. "
-        "Licensing/provenance is shown as source metadata; you decide what to use."
-    )
-    with st.form(
-        key=f"global_visual_search_form_{run_id}",
-        clear_on_submit=True,
-        border=True,
-    ):
-        search_query = st.text_input(
-            "New image search",
-            placeholder="e.g. Virat Kohli BCCI India, BCCI logo, India women's cricket",
+    if article_source_pool:
+        render_pool_section(
+            "Static article fallback",
+            "Images recovered by the existing direct/static article extractor when browser rendering did not return assets.",
+            article_source_pool,
+            "article",
         )
-        search_submitted = st.form_submit_button(
-            "Search up to 10 new images",
-            type="secondary",
-            width="stretch",
-        )
-
-    if search_submitted:
-        ok, message = controller.search_visual_pool(search_query)
-        if ok:
-            st.success(message)
-        else:
-            st.error(message)
-        search_groups = [
-            dict(group)
-            for group in (controller.snapshot().get("visual_search_groups") or [])
-            if isinstance(group, dict)
-        ]
-
-    for group in search_groups:
-        group_id = str(group.get("id") or "search")
-        group_items = [dict(item) for item in (group.get("items") or []) if isinstance(item, dict)]
-        st.markdown(
-            f"<div class='qc-pool-heading'><b>Search · {_ui_html(group.get('query',''))}</b><span>{len(group_items)} result(s)</span></div>",
-            unsafe_allow_html=True,
-        )
-        for row_start in range(0, len(group_items), 3):
-            row = group_items[row_start:row_start + 3]
-            cols = st.columns(len(row), gap="medium")
-            for local_index, asset in enumerate(row):
-                with cols[local_index]:
-                    asset_hash = str(asset.get("hash") or "").strip()
-                    path = str(asset.get("path") or "").strip()
-                    with st.container(border=True):
-                        if path and os.path.isfile(path):
-                            st.image(path, width=260)
-                        provenance_state = str(asset.get("provenance_status") or "commercial-verified").strip()
-                        caption = str(asset.get("source") or "visual source").strip()
-                        if provenance_state == "provenance-review":
-                            caption += " · licence review"
-                        st.caption(caption)
-                        if provenance_state != "commercial-verified":
-                            st.markdown(
-                                "<div style='color:#d62728;font-weight:700;font-size:.78rem;"
-                                "letter-spacing:.02em;margin:2px 0 8px'>"
-                                "⚠ COULD CONTAIN COPYRIGHT ISSUES"
-                                "</div>",
-                                unsafe_allow_html=True,
-                            )
-                        used = bool(asset.get("used"))
-                        if used:
-                            st.caption(f"Used on slide {int(asset.get('assigned_slide') or 0)}")
-                        else:
-                            choices = ["Choose slide"] + [f"Slide {index}" for index in range(1, len(items) + 1)]
-                            target = st.selectbox(
-                                "Use on slide",
-                                choices,
-                                index=0,
-                                key=f"search_target_{run_id}_{group_id}_{asset_hash[:12]}",
-                                label_visibility="collapsed",
-                            )
-                            action_cols = st.columns([1.1, 0.9], gap="small")
-                            with action_cols[0]:
-                                if st.button(
-                                    "Use image",
-                                    type="primary",
-                                    width="stretch",
-                                    disabled=target == "Choose slide",
-                                    key=f"assign_search_{run_id}_{group_id}_{asset_hash[:12]}",
-                                ):
-                                    slide_index = int(target.split()[-1])
-                                    ok, message = controller.assign_visual_pool_asset(asset_hash, slide_index)
-                                    if ok:
-                                        st.rerun()
-                                    st.error(message)
-                            with action_cols[1]:
-                                if st.button(
-                                    "Crop",
-                                    width="stretch",
-                                    key=f"crop_search_{run_id}_{group_id}_{asset_hash[:12]}",
-                                ):
-                                    st.session_state["visual_crop_target"] = f"asset:{asset_hash}"
-                                    st.rerun()
 
     st.markdown("---")
     total_slides = len(items)
-    approved_count = len(manual_approved.intersection(set(range(1, total_slides + 1))))
+    approved_count = len(
+        manual_approved.intersection(set(range(1, total_slides + 1)))
+    )
     approve_col, reject_col = st.columns([1.35, 1], gap="medium")
     with approve_col:
         if st.button(
@@ -2255,21 +2271,34 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             ok = controller.approve_visuals()
             if ok:
                 st.rerun()
-            st.error("Review and individually approve every slide before continuing.")
-        unresolved = sum(1 for item in items if not item.get("qc_passed"))
+            st.error(
+                "Select an image and approve every slide before continuing."
+            )
+        unresolved = sum(
+            1 for item in items if not item.get("qc_passed")
+        )
         if unresolved:
-            st.caption(f"{unresolved} slide(s) still need a usable image.")
+            st.caption(
+                f"{unresolved} slide(s) still need an image."
+            )
         elif approved_count < total_slides:
             st.caption(
                 f"{approved_count}/{total_slides} slides manually approved. "
                 "Approve each image above to continue."
             )
         else:
-            st.caption("All slides have been individually approved. Continue to final rendering.")
+            st.caption(
+                "All slides have been individually approved. Continue to final rendering."
+            )
     with reject_col:
-        if st.button("Stop production", width="stretch", key="reject_visuals"):
+        if st.button(
+            "Stop production",
+            width="stretch",
+            key="reject_visuals",
+        ):
             controller.reject_visuals()
             st.rerun()
+
     replacement_count = sum(
         len(history.get(str(item["index"])) or history.get(item["index"]) or [])
         for item in items
