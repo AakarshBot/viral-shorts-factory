@@ -2093,6 +2093,11 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     crawler_downloaded = int(crawler_rejections.get("image_search_downloaded") or 0)
     crawler_page_images = int(crawler_rejections.get("image_result_page_images") or 0)
     crawler_news_articles = int(crawler_rejections.get("news_articles") or crawler_rejections.get("article_candidates") or 0)
+    crawler_rejected_total = sum(
+        int(value or 0)
+        for key, value in crawler_rejections.items()
+        if key != "final_images"
+    )
     st.caption(
         f"Fresh crawler · {len(crawler_pool)} image(s) · "
         f"{int(script_data.get('visual_web_crawler_articles') or crawler_news_articles)} article(s) · "
@@ -2103,7 +2108,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             if crawler_rejections else ""
         )
         + (
-            f" · rejected: {sum(int(v or 0) for k, v in crawler_rejections.items() if k not in {'final_images'}})"
+            f" · rejected: {crawler_rejected_total}"
             if crawler_rejections else ""
         )
     )
