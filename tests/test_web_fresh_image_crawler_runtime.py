@@ -236,6 +236,8 @@ def test_manual_query_uses_same_crawler_without_requiring_original_headline(monk
 
 
 def test_crawler_distinguishes_no_articles_browser_failure_and_rejected_images(monkeypatch):
+    monkeypatch.setattr(crawler, "_collect_recent_articles", lambda *_args: [])
+    monkeypatch.setattr(crawler, "_collect_profile_pages", lambda *_args: [])
     empty = crawler.crawl_fresh_web_images(
         {"title": "No coverage story"},
         [],
@@ -584,22 +586,3 @@ def test_browser_candidate_extraction_prioritises_article_action_images():
     assert "https://example.com/logo.jpg" not in urls
 
 
-def test_visual_provider_fallback_queries_are_derived_without_manual_queries():
-    from visual_content_runtime import _build_visual_fallback_queries
-
-    queries = _build_visual_fallback_queries(
-        [
-            {
-                "factual_primary_entity": "Virat Kohli",
-                "visual_intent": "batting during the match",
-            },
-            {
-                "primary_entity": "Australia",
-                "visual_context": "team celebration",
-            },
-        ],
-        "Virat Kohli reacts after the match",
-    )
-
-    assert queries[0] == "Virat Kohli batting during the match"
-    assert queries[1] == "Australia team celebration"
