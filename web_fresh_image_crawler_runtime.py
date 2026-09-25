@@ -30,6 +30,7 @@ CRAWLER_NEWS_RESULTS_PER_QUERY = max(6, min(15, int(os.getenv("VISUAL_WEB_CRAWLE
 CRAWLER_MAX_ARTICLES = max(4, min(12, int(os.getenv("VISUAL_WEB_CRAWLER_ARTICLES", "10"))))
 CRAWLER_ARTICLE_IMAGES = max(3, min(8, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGES_PER_ARTICLE", "6"))))
 CRAWLER_QUERY_COUNT = max(2, min(4, int(os.getenv("VISUAL_WEB_CRAWLER_QUERY_COUNT", "3"))))
+CRAWLER_IMAGE_RESULTS_PER_QUERY = max(8, min(10, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGE_RESULTS", "10"))))
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "from",
@@ -183,6 +184,178 @@ def _news_search(query: str) -> list[dict[str, Any]]:
             flush=True,
         )
         return []
+
+
+def _image_search(query: str) -> list[dict[str, Any]]:
+    """Search the current web image index without launching a browser or adding a dependency."""
+    try:
+        from ddgs import DDGS
+
+        search = getattr(DDGS(timeout=8), "images", None)
+        if not callable(search):
+            return []
+        results = search(
+            query=query,
+            region="us-en",
+            safesearch="moderate",
+            timelimit="w",
+            max_results=CRAWLER_IMAGE_RESULTS_PER_QUERY,
+            page=1,
+            backend="auto",
+            size="Large",
+            type_image="photo",
+        )
+        return [dict(item) for item in (results or []) if isinstance(item, dict)]
+    except Exception as exc:
+        print(
+            f"   [Fresh Web Crawler] image search failed: {type(exc).__name__}: {exc} | query='{query}'",
+            flush=True,
+        )
+        return []
+
+
+def _image_search_publisher(result: dict[str, Any]) -> str:
+    source = _clean(result.get("source"), 160)
+    if source and source.casefold() not in {"bing", "duckduckgo"}:
+        return source
+    page_url = _clean(result.get("url") or result.get("image"), 2000)
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(page_url).netloc.removeprefix("www.")
+        if host:
+            return host
+    except Exception:
+        pass
+    return source or "Web image source"
+
+
+def _image_search_candidate(
+    result: dict[str, Any],
+    query: str,
+    story_title: str,
+    entity: str,
+) -> dict[str, Any] | None:
+    image_url = _clean(result.get("image"), 2000)
+    page_url = _clean(result.get("url"), 2000)
+    title = _clean(result.get("title"), 500)
+    if not image_url:
+        return None
+
+    try:
+        from news_source_image_runtime import fetch_direct_source_image
+    except Exception:
+        return None
+
+    publisher = _image_search_publisher(result)
+    fetched = fetch_direct_source_image(image_url, page_url, publisher)
+    if not isinstance(fetched, dict) or not fetched.get("bytes"):
+        return None
+
+    data = fetched["bytes"]
+    width, height = _image_dimensions(data)
+    if min(width, height) < 500:
+        return None
+
+    search_text = _clean(
+        " ".join(
+            str(value)
+            for value in (title, result.get("source"), publisher, page_url)
+        ),
+        3500,
+    )
+    relevance = _similarity(query, title or page_url, entity)
+    entity_present = _entity_match(entity, f"{title} {page_url}") if entity else True
+    if entity and not entity_present:
+        return None
+    if relevance < 0.10:
+        return None
+
+    # Image results expose a search freshness window, not a verified publication date.
+    freshness_score = 18.0
+    resolution_score = min(18.0, 18.0 * min(width, height) / 1800.0)
+    source_match_bonus = 18.0 if entity and _entity_match(entity, title) else 0.0
+    priority = round(
+        freshness_score + relevance * 46.0 + resolution_score + source_match_bonus,
+        3,
+    )
+
+    actual_image_url = _clean(fetched.get("image_url") or image_url, 2000)
+    actual_page_url = _clean(fetched.get("page_url") or page_url or actual_image_url, 2000)
+    actual_publisher = _clean(fetched.get("publisher") or publisher, 160) or publisher
+    content_hash = hashlib.sha256(data).hexdigest()
+    provenance = {
+        "provider": actual_publisher,
+        "url": actual_page_url or actual_image_url,
+        "author": actual_publisher,
+        "license": "Unverified web image license",
+        "license_url": actual_page_url or actual_image_url,
+    }
+
+    return {
+        "bytes": data,
+        "hash": content_hash,
+        "source": "web_image_search",
+        "source_type": "web_image_search",
+        "source_name": actual_publisher,
+        "credit": f"Source: {actual_publisher}",
+        "query": query,
+        "source_page_url": actual_page_url,
+        "source_image_url": actual_image_url,
+        "publisher": actual_publisher,
+        "image_search_title": title,
+        "image_search_engine_source": _clean(result.get("source"), 120),
+        "image_width": width,
+        "image_height": height,
+        "crawler_freshness_basis": "search-window:7d",
+        "crawler_age_hours": None,
+        "crawler_image_method": "ddgs-images",
+        "crawler_confidence": "ambiguous",
+        "crawler_relevance": round(relevance, 3),
+        "visual_type": "PERSON" if entity else "GENERAL_CONTEXT",
+        "visual_genre": "PERSON_ACTION" if entity else "GENERAL_PHOTO",
+        "provenance": provenance,
+        "provenance_status": "provenance-review",
+        "priority": priority,
+        "search_text": search_text,
+        "status": "crawler-ai-pending",
+        "used": False,
+    }
+
+
+def _collect_image_search_assets(
+    queries: list[str],
+    story_title: str,
+    entity: str,
+) -> list[dict[str, Any]]:
+    raw_results: list[tuple[str, dict[str, Any]]] = []
+    if not queries:
+        return []
+    with ThreadPoolExecutor(max_workers=min(3, len(queries))) as executor:
+        futures = {executor.submit(_image_search, query): query for query in queries}
+        for future, query in futures.items():
+            try:
+                results = future.result()
+            except Exception:
+                results = []
+            for result in results:
+                raw_results.append((query, result))
+
+    candidates: list[dict[str, Any]] = []
+    if not raw_results:
+        return candidates
+    with ThreadPoolExecutor(max_workers=min(8, len(raw_results))) as executor:
+        futures = [
+            executor.submit(_image_search_candidate, result, query, story_title, entity)
+            for query, result in raw_results
+        ]
+        for future in futures:
+            try:
+                candidate = future.result()
+            except Exception:
+                candidate = None
+            if candidate:
+                candidates.append(candidate)
+    return candidates
 
 
 def _article_rank(article: dict[str, Any], story_title: str, entity: str, now: datetime) -> float:
@@ -564,39 +737,52 @@ def crawl_fresh_web_images(
         }
 
     now = datetime.now(timezone.utc)
-    articles = _collect_recent_articles(queries, title, entity, now)
-    if not articles:
-        print("   [Fresh Web Crawler] no recent relevant articles found.", flush=True)
+
+    # Direct image search is the fast primary lane. Article-page scraping is
+    # deferred until the indexed image pool is too small, reducing runtime and
+    # avoiding a pool dominated by repeated article hero images.
+    image_search_assets = _collect_image_search_assets(queries, title, entity)
+    image_search_candidates = _dedupe_assets(image_search_assets)
+    article_candidates: list[dict[str, Any]] = []
+    articles: list[dict[str, Any]] = []
+
+    if len(image_search_candidates) < CRAWLER_SUCCESS:
+        articles = _collect_recent_articles(queries, title, entity, now)
+        if articles:
+            with ThreadPoolExecutor(max_workers=min(5, len(articles))) as executor:
+                futures = [
+                    executor.submit(_scrape_article, article, title, entity, now)
+                    for article in articles
+                ]
+                for future in futures:
+                    try:
+                        article_candidates.extend(future.result())
+                    except Exception:
+                        continue
+
+    raw_assets = image_search_assets + article_candidates
+    candidates = _dedupe_assets(raw_assets)
+    if not image_search_candidates and not article_candidates:
+        print("   [Fresh Web Crawler] no relevant current image/article candidates found.", flush=True)
         return {
             "assets": [],
             "target": CRAWLER_TARGET,
             "success_threshold": CRAWLER_SUCCESS,
             "queries": queries,
-            "articles": 0,
+            "articles": len(articles),
             "high_confidence": 0,
             "ai_checked": 0,
-            "rejection_counts": {"no_recent_articles": 1},
+            "rejection_counts": {"no_current_visual_candidates": 1},
         }
-
-    raw_assets: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(5, len(articles))) as executor:
-        futures = [
-            executor.submit(_scrape_article, article, title, entity, now)
-            for article in articles
-        ]
-        for future in futures:
-            try:
-                raw_assets.extend(future.result())
-            except Exception:
-                continue
-
-    candidates = _dedupe_assets(raw_assets)
     selected, ai_checked, ai_rejected = _verify_ambiguous(candidates, entity)
     selected = _dedupe_assets(selected)
 
     high_count = sum(1 for item in selected if item.get("crawler_confidence") in {"high", "ai-verified"})
     rejection_counts = {
+        "image_search_raw": len(image_search_assets),
+        "image_search_candidates": len(image_search_candidates),
         "article_candidates": len(articles),
+        "article_images": len(article_candidates),
         "raw_images": len(raw_assets),
         "dedupe_rejected": max(0, len(raw_assets) - len(candidates)),
         "ai_checked": ai_checked,
@@ -605,7 +791,8 @@ def crawl_fresh_web_images(
     }
 
     print(
-        f"   [Fresh Web Crawler] queries={len(queries)} articles={len(articles)} "
+        f"   [Fresh Web Crawler] queries={len(queries)} image_search={len(image_search_assets)} "
+        f"articles={len(articles)} article_images={len(article_candidates)} "
         f"raw_images={len(raw_assets)} final_pool={len(selected)}/{CRAWLER_TARGET} "
         f"verified_or_high={high_count} AI_checked={ai_checked}",
         flush=True,

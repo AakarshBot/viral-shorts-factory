@@ -1874,6 +1874,8 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         for item in (group.get("items") or [])
         if isinstance(item, dict) and not bool(item.get("used"))
     )
+    script_data = snapshot.get("script_data") or {}
+    crawler_rejections = script_data.get("visual_web_crawler_rejection_counts") or {}
 
     st.markdown(
         "<div class='section-kicker'>Visual QC</div>"
@@ -2020,6 +2022,9 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
                         if query and not credit:
                             caption += f" · {query}"
                         st.caption(caption)
+                        source_page_url = str(asset.get("source_page_url") or "").strip()
+                        if source_page_url.startswith(("http://", "https://")):
+                            st.link_button("Open source page", source_page_url, width="content")
                         provenance_state = str(
                             asset.get("provenance_status") or "commercial-verified"
                         ).strip()
@@ -2084,14 +2089,23 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
     ]
 
     st.markdown("### Fresh web images")
+    st.caption(
+        f"Fresh crawler · {len(crawler_pool)} image(s) · "
+        f"{int(script_data.get('visual_web_crawler_articles') or 0)} article(s) · "
+        f"{int(script_data.get('visual_web_crawler_ai_checked') or 0)} AI-checked · "
+        f"{len(script_data.get('visual_web_crawler_queries') or [])} query lane(s)"
+        + (
+            f" · rejected: {sum(int(v or 0) for k, v in crawler_rejections.items() if k not in {'final_images'})}"
+            if crawler_rejections else ""
+        )
+    )
     render_pool_section(
         "Fresh web crawler",
-        "Recent images collected from current web coverage. Publisher names are retained for the final source overlay; ambiguous crawler results may require your visual review.",
+        "Current indexed images are shown first. Publisher/source-page metadata is retained for review and credit.",
         crawler_pool,
         "crawler",
     )
 
-    st.markdown("### Available manual-search images")
     st.markdown("### Source-website images")
     render_pool_section(
         "Source-website images",

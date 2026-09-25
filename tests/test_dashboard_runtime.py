@@ -129,12 +129,25 @@ def test_dashboard_keeps_selected_manual_pool_images_visible():
 def test_visual_pool_provenance_warning_defines_state_before_use():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index("    def render_pool_section(")
-    end = app_source.index("\n    st.markdown(\"### Available manual-search images\")", start)
+    end = app_source.index("\n    st.markdown(\"### Source-website images\")", start)
     source = app_source[start:end]
 
     assignment = source.index("provenance_state = str(")
     warning = source.index("if provenance_state != \"commercial-verified\":")
     assert assignment < warning
+
+
+def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = app_source.index('    st.markdown("### Fresh web images")')
+    end = app_source.index('    # All retained images are already shown in the single pool above.', start)
+    source = app_source[start:end]
+
+    assert "Fresh crawler" in source
+    assert "visual_web_crawler_ai_checked" in source
+    assert "visual_web_crawler_queries" in source
+    assert 'st.link_button("Open source page"' in app_source
+    assert 'st.markdown("### Source-website images")' in source
 
 
 def test_dashboard_live_monitor_uses_controlled_polling():
@@ -999,7 +1012,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     assert "Choose from the visual pool" in source
-    assert "Available manual-search images" in source
+    assert "Source-website images" in source
     assert "Search up to 10 new images" in source
     assert '@st.dialog("Crop / reframe selected image", width="large")' in source
     assert 'st.session_state["visual_crop_target"]' in source
@@ -1312,6 +1325,7 @@ def test_article_source_pool_preserves_publisher_through_assignment_and_crop(mon
             "author": "Example News",
         },
         "source_image_url": "https://example.com/images/article.jpg",
+        "source_page_url": "https://example.com/article",
         "status": "article-source",
         "used": False,
     }]
@@ -1327,6 +1341,7 @@ def test_article_source_pool_preserves_publisher_through_assignment_and_crop(mon
     assert layer["source_credit"] == "credit:Source: Example News"
     assert layer["asset_provenance"]["provider"] == "Example News"
     assert layer["source_image_url"] == "https://example.com/images/article.jpg"
+    assert layer["source_page_url"] == "https://example.com/article"
 
     ok, message = controller.crop_visual(
         1,

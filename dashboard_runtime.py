@@ -2033,9 +2033,19 @@ class DashboardWorkflowController(WorkflowController):
                         selected_credit,
                     ),
                     "bank_selected_status": selected_status,
+                    "source_page_url": str(
+                        selected.get("source_page_url")
+                        or (selected.get("provenance") or {}).get("license_url")
+                        or ""
+                    ).strip(),
                     "source_image_url": str(
                         selected.get("source_image_url")
                         or (selected.get("provenance") or {}).get("url")
+                        or ""
+                    ).strip(),
+                    "pool_origin": str(
+                        selected.get("pool_origin")
+                        or layer.get("pool_origin")
                         or ""
                     ).strip(),
                     "asset_provenance": dict(selected.get("provenance") or {}),
