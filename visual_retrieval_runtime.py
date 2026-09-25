@@ -271,6 +271,17 @@ def _candidate_search_text(data: Any) -> str:
     return re.sub(r"\s+", " ", " ".join(values)).strip()
 
 
+def _candidate_action_signal(data: Any) -> int:
+    """Return searchable action evidence without performing visual scene QA."""
+    text = _candidate_search_text(data)
+    words = {
+        token.casefold()
+        for token in re.findall(r"[\w-]+", text, flags=re.UNICODE)
+        if len(token) > 2
+    }
+    return len(words & _VISUAL_REFINE_ACTION_TERMS)
+
+
 def _candidate_relevance_score(data: Any, query: str) -> float:
     """Score how closely provider metadata matches the exact search query."""
     metadata = _candidate_search_text(data)
@@ -1255,12 +1266,21 @@ def collect_manual_visual_pool(
                         stage_candidates.append(candidate)
                         query_candidates.append(candidate)
 
-            stage_candidates.sort(
-                key=lambda item: (
-                    -float(item.get("priority") or 0.0),
-                    str(item.get("source") or "").casefold(),
+            if visual_genre == "PERSON_ACTION":
+                stage_candidates.sort(
+                    key=lambda item: (
+                        -_candidate_action_signal(item.get("data")),
+                        -float(item.get("priority") or 0.0),
+                        str(item.get("source") or "").casefold(),
+                    )
                 )
-            )
+            else:
+                stage_candidates.sort(
+                    key=lambda item: (
+                        -float(item.get("priority") or 0.0),
+                        str(item.get("source") or "").casefold(),
+                    )
+                )
             before = len(assets)
             stage_target = max(0, exact_target - verified_for_query)
             added, requests_made = _verify(
@@ -1682,14 +1702,72 @@ def collect_manual_visual_search(
                 continue
             candidates.append(candidate)
 
+    # Action searches get one bounded third-provider fallback only when the
+    # primary pair is sparse or provides no searchable action evidence.
+    if visual_genre == "PERSON_ACTION":
+        action_candidates = [
+            item for item in candidates
+            if _candidate_action_signal(item.get("data")) > 0
+        ]
+        if len(candidates) < 6 or not action_candidates:
+            extra_source = source_plan[2:3]
+            if extra_source and callable(extra_source[0][1]):
+                source_index = 2
+                source_name, fetcher = extra_source[0]
+                source_key = str(source_name or "").strip().casefold()
+                if source_key:
+                    try:
+                        (
+                            _source_index,
+                            _source_name,
+                            extra_items,
+                            extra_used_urls,
+                            extra_cache_updates,
+                        ) = _fetch_manual_provider(
+                            (source_index, str(source_name), fetcher, source_key)
+                        )
+                    except Exception as exc:
+                        print(
+                            f"   [Manual Visual Search] action fallback {source_name} "
+                            f"failed safely: {type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+                        extra_items, extra_used_urls, extra_cache_updates = [], set(), {}
+                    for cache_key, raw_items in extra_cache_updates.items():
+                        search_cache[cache_key] = list(raw_items)
+                    fetch_used_urls.update(extra_used_urls)
+                    for data in extra_items:
+                        candidate = _manual_candidate_from_data(
+                            str(source_name),
+                            data,
+                            exact_query,
+                            visual_type,
+                            visual_genre,
+                            bot,
+                            seen_hashes,
+                            seen_urls,
+                            rejected_counts,
+                        )
+                        if candidate is not None:
+                            candidates.append(candidate)
+
     # Only cap after all providers have contributed so ranking can choose the
     # strongest image regardless of which provider returned it.
-    candidates.sort(
-        key=lambda item: (
-            -float(item.get("priority") or 0.0),
-            str(item.get("source") or "").casefold(),
+    if visual_genre == "PERSON_ACTION":
+        candidates.sort(
+            key=lambda item: (
+                -_candidate_action_signal(item.get("data")),
+                -float(item.get("priority") or 0.0),
+                str(item.get("source") or "").casefold(),
+            )
         )
-    )
+    else:
+        candidates.sort(
+            key=lambda item: (
+                -float(item.get("priority") or 0.0),
+                str(item.get("source") or "").casefold(),
+            )
+        )
     candidates = candidates[:20]
 
     accepted: list[dict] = []
