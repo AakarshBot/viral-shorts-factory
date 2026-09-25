@@ -1925,12 +1925,78 @@ def test_retrieval_uses_multiple_candidates_from_one_provider_before_next_query(
     ]
 
 
-def test_strict_gemini_bridge_accepts_visual_genre_argument():
-    import inspect
-    import visual_runtime
+def test_person_action_automatic_query_is_action_first():
+    from visual_search_intent_runtime import resolve_visual_search_intent
 
-    params = inspect.signature(visual_runtime._strict_gemini_check).parameters
-    assert "visual_genre" in params
+    intent = resolve_visual_search_intent(
+        {
+            "primary_entity": "Virat Kohli",
+            "visual_type": "PERSON",
+            "visual_intent": "batting cricket action",
+            "specific_search_prompt": "Virat Kohli batting cricket action",
+            "voiceover": "Virat Kohli is batting in the match.",
+        }
+    )
+
+    assert intent.visual_genre == "PERSON_ACTION"
+    assert intent.queries[0] == "Virat Kohli batting cricket"
+    assert intent.queries[0] != intent.subject
+    assert intent.subject == "Virat Kohli"
+
+
+def test_verified_person_action_cache_ignores_narration_text():
+    cache_contexts = []
+
+    class FakeBot:
+        ASSETS_DIR = "/tmp"
+
+    image = Image.new("RGB", (900, 1200), (80, 90, 100))
+
+    class FakeRuntime:
+        @staticmethod
+        def get_cached_asset(bot, entity, visual_type, context=""):
+            cache_contexts.append((entity, visual_type, context))
+            return image, "cached"
+
+    scenes = [
+        {
+            "primary_entity": "Virat Kohli",
+            "factual_primary_entity": "Virat Kohli",
+            "visual_type": "PERSON",
+            "visual_genre": "PERSON_ACTION",
+            "visual_intent": "batting",
+            "specific_search_prompt": "Virat Kohli batting",
+            "voiceover": "Virat Kohli smashed another boundary.",
+        },
+        {
+            "primary_entity": "Virat Kohli",
+            "factual_primary_entity": "Virat Kohli",
+            "visual_type": "PERSON",
+            "visual_genre": "PERSON_ACTION",
+            "visual_intent": "batting",
+            "specific_search_prompt": "Virat Kohli batting",
+            "voiceover": "Virat Kohli changed the momentum of the innings.",
+        },
+    ]
+
+    for scene in scenes:
+        result = retrieval.run_visual_retrieval(
+            FakeRuntime(),
+            FakeBot(),
+            scene,
+            "cricket",
+            set(),
+            set(),
+            scene["voiceover"],
+        )
+        assert result[2] == "cached"
+        assert scene["visual_cache_reused"] is True
+
+    assert cache_contexts == [
+        ("Virat Kohli", "PERSON", "PERSON_ACTION"),
+        ("Virat Kohli", "PERSON", "PERSON_ACTION"),
+    ]
+
 
 def test_manual_queries_build_one_shared_ten_image_pool_without_duplicates(monkeypatch):
     query_values = ["Rishabh Pant", "BCCI logo", "India cricket team", "New Delhi stadium"]
