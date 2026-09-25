@@ -129,9 +129,6 @@ def test_initial_visual_pass_only_builds_shared_website_pool_and_keeps_slides_em
             for asset in assets
         ]
 
-    for asset in crawler.__name__,:
-        pass
-
     monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", crawler)
     monkeypatch.setattr(
         visual_retrieval_runtime,
