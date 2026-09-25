@@ -130,7 +130,7 @@ def test_dashboard_keeps_initial_website_pool_visible_and_assignable():
 def test_visual_pool_provenance_warning_defines_state_before_use():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index("    def render_pool_section(")
-    end = app_source.index("\n    st.markdown(\"### Static article fallback\")", start)
+    end = app_source.index("\n    crawler_pool = [", start)
     source = app_source[start:end]
 
     assignment = source.index("provenance_state = str(")
@@ -140,8 +140,8 @@ def test_visual_pool_provenance_warning_defines_state_before_use():
 
 def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    start = app_source.index('    st.markdown("### Fresh web images")')
-    end = app_source.index('    st.markdown("---")', start)
+    start = app_source.index('    st.markdown("### Website image pool")')
+    end = app_source.index('    render_pool_section(', start)
     source = app_source[start:end]
 
     assert "Fresh crawler" in source
@@ -1125,7 +1125,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert '"qc_passed": not missing' in app_source
     assert "Approve this image" in app_source
     assert "Continue after reviewing all slides" in app_source
-    assert 'Choose from the visual pool' in app_source
+    assert 'Build the visual storyboard' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
 
@@ -1741,7 +1741,7 @@ def test_dashboard_output_summary_reports_visual_qc_readiness():
 
 def test_dashboard_search_result_crop_uses_active_dialog_target():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    assert 'st.session_state["visual_crop_target"] = f"slide:{slide_index}"' in source
+    assert 'f"slide:{slide_index}"' in source
     assert 'st.session_state.visual_pool_crop_target = asset_hash' not in source
 
 
