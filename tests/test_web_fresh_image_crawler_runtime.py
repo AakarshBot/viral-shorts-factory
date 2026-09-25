@@ -111,6 +111,7 @@ def test_high_confidence_article_images_bypass_gemini(monkeypatch):
 
 
 def test_ambiguous_crawler_images_use_one_bounded_ai_check(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     now = datetime.now(timezone.utc)
     query = "Virat Kohli responds after match"
     _install_fake_ddgs(monkeypatch, {
