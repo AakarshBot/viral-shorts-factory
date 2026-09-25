@@ -287,7 +287,9 @@ def test_web_lane_reports_underfill_without_using_image_search(monkeypatch):
 
 
 def test_browser_title_match_accepts_surname_only_entity_coverage():
-    assert crawler._title_match(
+    from web_browser_image_runtime import _title_match as browser_title_match
+
+    assert browser_title_match(
         "Virat Kohli",
         "Kohli opens up on his future after fresh retirement speculation",
         "Virat Kohli",
