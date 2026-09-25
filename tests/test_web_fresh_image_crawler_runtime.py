@@ -1,6 +1,4 @@
 import io
-import sys
-import types
 from datetime import datetime, timedelta, timezone
 
 from PIL import Image
@@ -8,356 +6,261 @@ from PIL import Image
 import web_fresh_image_crawler_runtime as crawler
 
 
-def _jpeg_bytes(color=(80, 90, 100)):
+def _jpeg_bytes(size=(1200, 1600), color=(80, 90, 100)):
     buffer = io.BytesIO()
-    Image.new("RGB", (1200, 1600), color).save(buffer, format="JPEG", quality=95)
+    Image.new("RGB", size, color).save(buffer, format="JPEG", quality=95)
     return buffer.getvalue()
 
 
-def _news_result(title, url, date, image="", source="Example Cricket"):
+def _asset(index, status="crawler-high-confidence", kind="news-article"):
+    data = _jpeg_bytes(color=(50 + index, 90, 130))
     return {
-        "title": title,
-        "url": url,
-        "date": date,
-        "body": f"{title} {source}",
-        "image": image,
-        "source": source,
+        "bytes": data,
+        "hash": f"hash-{index}",
+        "source": "web_crawler",
+        "source_type": "web_crawler",
+        "source_name": "Example Sports",
+        "credit": "Source: Example Sports",
+        "query": "Virat Kohli latest statement",
+        "source_page_url": f"https://example.com/story/{index}",
+        "source_image_url": f"https://cdn.example.com/{index}.jpg",
+        "publisher": "Example Sports",
+        "article_title": "Virat Kohli latest statement",
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "crawler_age_hours": 4.0 if kind == "news-article" else None,
+        "crawler_freshness_basis": "publication-date" if kind == "news-article" else "profile-page",
+        "crawler_image_method": "og:image",
+        "crawler_confidence": "high" if status == "crawler-high-confidence" else "ai-verified",
+        "crawler_relevance": 0.9,
+        "crawler_action_score": 2,
+        "visual_type": "PERSON",
+        "visual_genre": "PERSON_ACTION",
+        "provenance": {
+            "provider": "Example Sports",
+            "url": f"https://example.com/story/{index}",
+            "license": "Unverified web source",
+            "license_url": f"https://example.com/story/{index}",
+        },
+        "provenance_status": "provenance-review",
+        "priority": 100 - index,
+        "search_text": "Virat Kohli latest statement batting match",
+        "status": status,
+        "used": False,
+        "crawler_page_kind": kind,
     }
 
 
-def _install_fake_ddgs(monkeypatch, results_by_query):
-    class FakeDDGS:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def news(self, query, **kwargs):
-            return list(results_by_query.get(query, []))
-
-    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
-
-
-def _install_fake_ddgs_images(monkeypatch, results_by_query):
-    class FakeDDGS:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def images(self, query, **kwargs):
-            return list(results_by_query.get(query, []))
-
-        def news(self, query, **kwargs):
-            return []
-
-    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
+def test_title_match_rejects_headline_only_false_positive():
+    assert crawler._title_match(
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli reacts to retirement rumours after match",
+        "Virat Kohli",
+    ) > 0
+    assert crawler._title_match(
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli returns for training",
+        "Virat Kohli",
+    ) == 0
 
 
-def test_image_search_uses_explicit_bing_backend(monkeypatch):
-    query = "Virat Kohli cricket photo"
-    calls = []
-
-    class FakeDDGS:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def images(self, query, **kwargs):
-            calls.append(dict(kwargs))
-            return [{
-                "title": "Virat Kohli cricket photo",
-                "image": "https://cdn.example.com/virat.jpg",
-                "url": "https://publisher.example.com/story",
-                "width": 1600,
-                "height": 1000,
-                "source": "Bing",
-            }]
-
-    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
-    monkeypatch.setattr(
-        "news_source_image_runtime.fetch_direct_source_image",
-        lambda image_url, page_url="", publisher_hint="": {
-            "bytes": _jpeg_bytes(),
-            "image_url": image_url,
-            "page_url": page_url,
-            "publisher": publisher_hint or "publisher.example.com",
-        },
-    )
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        lambda *_args, **_kwargs: [],
-    )
-
-    result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli story."}],
-        story_title=query,
-    )
-
-    assert len(result["assets"]) == 1
-    assert calls
-    assert calls[0]["backend"] == "bing"
-
-
-def test_direct_image_failures_fall_back_to_scraping_image_result_source_pages(monkeypatch):
-    query = "Virat Kohli cricket action"
-    image_results = [
-        {
-            "title": f"Virat Kohli cricket action photo {index}",
-            "image": f"https://cdn.example.com/{index}.jpg",
-            "url": f"https://publisher.example.com/story/{index}",
-            "width": 1600,
-            "height": 1000,
-            "source": "Bing",
-        }
-        for index in range(6)
-    ]
-    _install_fake_ddgs_images(monkeypatch, {query: image_results})
-
-    monkeypatch.setattr(
-        "news_source_image_runtime.fetch_direct_source_image",
-        lambda *_args, **_kwargs: None,
-    )
-    def scrape_source_page(url, publisher_hint="", max_images=6):
-        index = int(url.rsplit("/", 1)[-1])
-        buffer = io.BytesIO()
-        Image.new("RGB", (1200 + index * 40, 1600), (20 + index * 40, 80, 140)).save(
-            buffer, format="JPEG", quality=95
-        )
-        return [{
-            "bytes": buffer.getvalue(),
-            "publisher": publisher_hint or "publisher.example.com",
-            "method": "og:image",
-            "image_url": f"{url}/hero.jpg",
-            "page_url": url,
-        }]
-
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        scrape_source_page,
-    )
-
-    result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli is the subject."}],
-        story_title=query,
-    )
-
-    assert len(result["assets"]) == 5
-    assert result["assets"][0]["source_type"] == "web_crawler"
-    assert result["assets"][0]["crawler_freshness_basis"] == "search-window:7d"
-    assert result["rejection_counts"]["image_search_raw"] == 6
-    assert result["rejection_counts"]["image_search_downloaded"] == 0
-    assert result["rejection_counts"]["image_result_pages"] == 5
-    assert result["rejection_counts"]["image_result_page_images"] == 5
-
-
-def test_crawler_keeps_only_recent_article_coverage(monkeypatch):
+def test_recent_articles_require_query_terms_in_title_and_rank_newest(monkeypatch):
     now = datetime.now(timezone.utc)
-    recent = (now - timedelta(hours=20)).isoformat()
-    stale = (now - timedelta(hours=80)).isoformat()
-    query = "Virat Kohli reacts to latest cricket story"
+    fresh = (now - timedelta(hours=3)).isoformat()
+    older = (now - timedelta(hours=18)).isoformat()
+    stale = (now - timedelta(hours=90)).isoformat()
 
-    _install_fake_ddgs(
-        monkeypatch,
-        {
-            query: [
-                _news_result(
-                    "Virat Kohli reacts to latest cricket story",
-                    "https://example.com/recent",
-                    recent,
-                ),
-                _news_result("Virat Kohli old archive story", "https://example.com/stale", stale),
-            ]
-        },
-    )
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        lambda url, publisher_hint="", max_images=6: [{
-            "bytes": _jpeg_bytes(),
-            "publisher": publisher_hint or "Example Cricket",
-            "method": "og:image",
-            "image_url": f"{url}/image.jpg",
-            "page_url": url,
-        }],
+    def fake_search(query):
+        return [
+            {"title": "Virat Kohli returns after retirement rumours", "url": "https://a.example/story", "date": older, "body": ""},
+            {"title": "Virat Kohli reacts to retirement rumours", "url": "https://b.example/story", "date": fresh, "body": ""},
+            {"title": "Virat Kohli training update", "url": "https://c.example/story", "date": fresh, "body": ""},
+            {"title": "Virat Kohli reacts to retirement rumours", "url": "https://d.example/story", "date": stale, "body": ""},
+        ]
+
+    monkeypatch.setattr(crawler, "_news_search", fake_search)
+
+    articles = crawler._collect_recent_articles(
+        ["Virat Kohli reacts to retirement rumours"],
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
     )
 
-    result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli story."}],
-        story_title=query,
-    )
-
-    assert result["articles"] == 1
-    assert len(result["assets"]) == 1
-    assert result["assets"][0]["crawler_age_hours"] < 72
-
-
-def test_direct_image_search_builds_diverse_pool_without_article_scraping(monkeypatch):
-    query = "Virat Kohli reacts after match"
-    image_results = [
-        {
-            "title": f"Virat Kohli action photo {index}",
-            "image": f"https://cdn.example.com/{index}.jpg",
-            "url": f"https://publisher.example.com/story/{index}",
-            "width": 1600,
-            "height": 1000,
-            "source": "Bing",
-        }
-        for index in range(10)
+    assert [item["url"] for item in articles] == [
+        "https://b.example/story",
+        "https://a.example/story",
     ]
-    _install_fake_ddgs_images(monkeypatch, {query: image_results})
+    assert all(item["title_match"] > 0 for item in articles)
+
+
+def test_browser_first_pipeline_skips_profile_rescue_after_ten_images(monkeypatch):
+    now = datetime.now(timezone.utc)
+    pages = [{
+        "title": "Virat Kohli reacts to retirement rumours",
+        "url": "https://example.com/story",
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "_crawler_query": "Virat Kohli reacts to retirement rumours",
+        "source": "Example Sports",
+    }]
+
+    monkeypatch.setattr(crawler, "_collect_recent_articles", lambda *_args: pages)
     monkeypatch.setattr(
-        "news_source_image_runtime.fetch_direct_source_image",
-        lambda image_url, page_url="", publisher_hint="": {
-            "bytes": _jpeg_bytes((40 + int(image_url.rsplit("/", 1)[-1].split(".")[0]) * 10, 80, 120)),
-            "image_url": image_url,
-            "page_url": page_url,
-            "publisher": "publisher.example.com",
-        },
+        crawler,
+        "_scrape_browser_pages",
+        lambda *_args, **kwargs: ([_asset(index) for index in range(10)], 10, 0),
     )
 
-    def fail_article_scrape(*_args, **_kwargs):
-        raise AssertionError("article scraping must not run after the direct image pool reaches 10")
+    def fail_profile(*_args):
+        raise AssertionError("profile-page rescue must not run after ten current images")
 
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        fail_article_scrape,
-    )
+    monkeypatch.setattr(crawler, "_collect_profile_pages", fail_profile)
 
     result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli is the subject."}],
-        story_title=query,
+        {"title": pages[0]["title"]},
+        [{"primary_entity": "Virat Kohli"}],
     )
 
     assert len(result["assets"]) == 10
-    assert result["rejection_counts"]["image_search_raw"] == 10
-    assert result["rejection_counts"]["article_images"] == 0
-    assert result["assets"][0]["source_type"] == "web_image_search"
-    assert result["assets"][0]["source_page_url"].startswith("https://publisher.example.com/story/")
-    assert result["assets"][0]["crawler_freshness_basis"] == "search-window:7d"
+    assert result["profile_pages"] == 0
+    assert result["rejection_counts"]["final_images"] == 10
 
 
-def test_materialized_direct_crawler_asset_is_tagged_for_dashboard_pool(tmp_path):
-    from types import SimpleNamespace
-    from visual_retrieval_runtime import materialize_manual_visual_pool
-
-    bot = SimpleNamespace(ASSETS_DIR=str(tmp_path))
-    assets = materialize_manual_visual_pool(
-        bot,
-        [{
-            "bytes": _jpeg_bytes(),
-            "hash": "crawler-hash",
-            "source": "web_image_search",
-            "source_type": "web_image_search",
-            "source_page_url": "https://example.com/story",
-            "source_image_url": "https://cdn.example.com/image.jpg",
-            "provenance": {"provider": "Example News", "url": "https://example.com/story"},
-            "status": "crawler-ai-verified",
-            "provenance_status": "provenance-review",
-        }],
-        pool_id="crawler-dashboard-test",
-    )
-
-    assert len(assets) == 1
-    assert assets[0]["pool_origin"] == "web-crawler"
-    assert assets[0]["source_page_url"] == "https://example.com/story"
-    assert assets[0]["source_image_url"] == "https://cdn.example.com/image.jpg"
-
-
-def test_high_confidence_article_images_bypass_gemini(monkeypatch):
+def test_profile_pages_fill_sparse_current_news_pool(monkeypatch):
     now = datetime.now(timezone.utc)
-    query = "Virat Kohli statement after match"
-    _install_fake_ddgs(monkeypatch, {
-        query: [_news_result(query, "https://example.com/story", (now - timedelta(hours=8)).isoformat())]
-    })
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        lambda *_args, **_kwargs: [{
-            "bytes": _jpeg_bytes(),
-            "publisher": "Example Cricket",
-            "method": "og:image",
-            "image_url": "https://example.com/hero.jpg",
-            "page_url": "https://example.com/story",
-        }],
-    )
+    articles = [{
+        "title": "Virat Kohli reacts to retirement rumours",
+        "url": "https://example.com/story",
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "_crawler_query": "Virat Kohli reacts to retirement rumours",
+        "source": "Example Sports",
+    }]
+    profiles = [{
+        "title": "Virat Kohli player profile",
+        "url": "https://profile.example.com/virat",
+        "source": "Example Sports",
+    }]
 
-    def fail_ai(*_args, **_kwargs):
-        raise AssertionError("high-confidence crawler image must not invoke Gemini")
+    monkeypatch.setattr(crawler, "_collect_recent_articles", lambda *_args: articles)
+    monkeypatch.setattr(crawler, "_collect_profile_pages", lambda *_args: profiles)
 
-    monkeypatch.setattr("visual_qa_runtime.strict_gemini_check_batch", fail_ai)
+    calls = []
+
+    def fake_scrape(pages, *_args, profile_page=False, **_kwargs):
+        calls.append((profile_page, len(pages)))
+        if profile_page:
+            return [_asset(index, kind="profile") for index in range(7)], 7, 0
+        return [_asset(index) for index in range(3)], 3, 0
+
+    monkeypatch.setattr(crawler, "_scrape_browser_pages", fake_scrape)
 
     result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli story."}],
-        story_title=query,
+        {"title": articles[0]["title"]},
+        [{"primary_entity": "Virat Kohli"}],
     )
 
-    assert len(result["assets"]) == 1
-    assert result["assets"][0]["status"] == "crawler-high-confidence"
-    assert result["ai_checked"] == 0
+    assert len(result["assets"]) == 10
+    assert result["profile_pages"] == 1
+    assert calls == [(False, 1), (True, 1)]
 
 
-def test_ambiguous_crawler_images_use_one_bounded_ai_check(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+def test_web_lane_reports_underfill_without_using_image_search(monkeypatch):
     now = datetime.now(timezone.utc)
-    query = "Virat Kohli responds after match"
-    _install_fake_ddgs(monkeypatch, {
-        query: [_news_result(query, "https://example.com/story", (now - timedelta(hours=12)).isoformat())]
-    })
+    articles = [{
+        "title": "Virat Kohli reacts to retirement rumours",
+        "url": "https://example.com/story",
+        "date": (now - timedelta(hours=2)).isoformat(),
+        "_crawler_query": "Virat Kohli reacts to retirement rumours",
+        "source": "Example Sports",
+    }]
+
+    monkeypatch.setattr(crawler, "_collect_recent_articles", lambda *_args: articles)
+    monkeypatch.setattr(crawler, "_collect_profile_pages", lambda *_args: [])
     monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        lambda *_args, **_kwargs: [{
-            "bytes": _jpeg_bytes((110, 120, 130)),
-            "publisher": "Example Cricket",
-            "method": "article-img",
-            "image_url": "https://example.com/body-image.jpg",
-            "page_url": "https://example.com/story",
-        }],
-    )
-    calls = {"count": 0}
-
-    def fake_ai(images, *args, **kwargs):
-        calls["count"] += 1
-        return {0: True}
-
-    monkeypatch.setattr("visual_qa_runtime.strict_gemini_check_batch", fake_ai)
-    monkeypatch.setattr("visual_qa_runtime.start_visual_qa_scene", lambda: None)
-    monkeypatch.setattr("visual_qa_runtime.get_last_visual_qa_failure", lambda: "")
-
-    result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Virat Kohli", "voiceover": "Virat Kohli story."}],
-        story_title=query,
-    )
-
-    assert len(result["assets"]) == 1
-    assert result["assets"][0]["status"] == "crawler-ai-verified"
-    assert result["ai_checked"] == 1
-    assert calls["count"] == 1
-
-
-def test_crawler_preserves_publisher_for_overlay(monkeypatch):
-    now = datetime.now(timezone.utc)
-    query = "Jasprit Bumrah latest cricket story"
-    _install_fake_ddgs(monkeypatch, {
-        query: [_news_result(query, "https://example.com/bumrah", (now - timedelta(hours=4)).isoformat(), source="Cricket Source")]
-    })
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        lambda *_args, **_kwargs: [{
-            "bytes": _jpeg_bytes((150, 90, 70)),
-            "publisher": "Cricket Source",
-            "method": "og:image",
-            "image_url": "https://example.com/bumrah.jpg",
-            "page_url": "https://example.com/bumrah",
-        }],
+        crawler,
+        "_scrape_browser_pages",
+        lambda *_args, **_kwargs: ([_asset(1), _asset(2)], 2, 0),
     )
 
     result = crawler.crawl_fresh_web_images(
-        {"title": query},
-        [{"primary_entity": "Jasprit Bumrah", "voiceover": "Jasprit Bumrah story."}],
-        story_title=query,
+        {"title": articles[0]["title"]},
+        [{"primary_entity": "Virat Kohli"}],
     )
 
-    assert result["assets"][0]["source"] == "web_crawler"
-    assert result["assets"][0]["source_name"] == "Cricket Source"
-    assert result["assets"][0]["credit"] == "Source: Cricket Source"
-    assert result["assets"][0]["provenance"]["provider"] == "Cricket Source"
+    assert len(result["assets"]) == 2
+    assert result["rejection_counts"]["web_pool_underfilled"] == 1
+    assert "image_search_raw" not in result["rejection_counts"]
+
+
+def test_browser_candidate_extraction_prioritises_article_action_images():
+    from web_browser_image_runtime import _build_candidates
+
+    data = {
+        "meta": {
+            "og:image": "https://example.com/hero.jpg",
+            "og:site_name": "Example Sports",
+        },
+        "jsonLd": [],
+        "linkImages": [],
+        "backgrounds": [],
+        "noscripts": [],
+        "imageData": [
+            {
+                "currentSrc": "https://example.com/batting.jpg",
+                "src": "https://example.com/batting.jpg",
+                "alt": "Virat Kohli batting during the match",
+                "title": "",
+                "className": "article-image",
+                "contextText": "Virat Kohli batting during the match",
+                "inArticle": True,
+                "inFigure": True,
+                "width": 1800,
+                "height": 1200,
+            },
+            {
+                "currentSrc": "https://example.com/logo.jpg",
+                "src": "https://example.com/logo.jpg",
+                "alt": "Example Sports logo",
+                "title": "",
+                "className": "logo",
+                "contextText": "",
+                "inArticle": False,
+                "inFigure": False,
+                "width": 1000,
+                "height": 500,
+            },
+        ],
+    }
+
+    candidates = _build_candidates(
+        data,
+        "https://example.com/story",
+        "Virat Kohli batting during the match",
+        "Virat Kohli",
+        "Virat Kohli batting during the match",
+        4,
+    )
+
+    urls = [item["url"] for item in candidates]
+    assert "https://example.com/batting.jpg" in urls
+    assert "https://example.com/logo.jpg" not in urls
+
+
+def test_visual_provider_fallback_queries_are_derived_without_manual_queries():
+    from visual_content_runtime import _build_visual_fallback_queries
+
+    queries = _build_visual_fallback_queries(
+        [
+            {
+                "factual_primary_entity": "Virat Kohli",
+                "visual_intent": "batting during the match",
+            },
+            {
+                "primary_entity": "Australia",
+                "visual_context": "team celebration",
+            },
+        ],
+        "Virat Kohli reacts after the match",
+    )
+
+    assert queries[0] == "Virat Kohli batting during the match"
+    assert queries[1] == "Australia team celebration"
