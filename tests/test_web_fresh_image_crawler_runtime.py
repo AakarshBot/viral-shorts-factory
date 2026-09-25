@@ -99,6 +99,64 @@ def test_recent_articles_accept_google_news_rss_fallback(monkeypatch):
     assert [item["url"] for item in articles] == [google_news_url]
 
 
+def test_related_article_score_accepts_paraphrased_coverage():
+    assert crawler._related_article_score(
+        "Virat Kohli reacts retirement rumours",
+        "Kohli opens up on his future after fresh retirement speculation",
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+    ) > 0
+
+
+def test_related_article_score_rejects_unrelated_figure_only_story():
+    assert crawler._related_article_score(
+        "Virat Kohli reacts retirement rumours",
+        "Virat Kohli attends a family wedding in Mumbai",
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+    ) == 0
+
+
+def test_recent_articles_balance_publishers_and_keep_related_coverage(monkeypatch):
+    now = datetime.now(timezone.utc)
+    fresh = (now - timedelta(hours=2)).isoformat()
+
+    def fake_search(query):
+        return [
+            {
+                "title": "Kohli opens up on his future after fresh retirement speculation",
+                "url": "https://one.example/story-1",
+                "date": fresh,
+                "body": "",
+            },
+            {
+                "title": "Virat Kohli addresses retirement rumours after recent match",
+                "url": "https://two.example/story-2",
+                "date": fresh,
+                "body": "",
+            },
+            {
+                "title": "Virat Kohli attends a family wedding in Mumbai",
+                "url": "https://three.example/story-3",
+                "date": fresh,
+                "body": "",
+            },
+        ]
+
+    monkeypatch.setattr(crawler, "_news_search", fake_search)
+    articles = crawler._collect_recent_articles(
+        ["Virat Kohli reacts to retirement rumours"],
+        "Virat Kohli reacts to retirement rumours",
+        "Virat Kohli",
+        now,
+    )
+
+    assert [item["url"] for item in articles] == [
+        "https://one.example/story-1",
+        "https://two.example/story-2",
+    ]
+
+
 def test_recent_articles_require_query_terms_in_title_and_rank_newest(monkeypatch):
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=3)).isoformat()
