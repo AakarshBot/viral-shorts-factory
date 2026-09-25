@@ -126,15 +126,6 @@ def install() -> bool:
         }
         patched.append("story_ranker._tokens")
 
-        import visual_retrieval_planner as planner
-        planner._tokens = _planner_tokens
-        planner._key = _planner_key
-        planner._normalise = lambda text: _planner_normalise(planner, text)
-        patched.extend(["visual_retrieval_planner._tokens", "visual_retrieval_planner._key", "visual_retrieval_planner._normalise"])
-
-        import visual_strategy_runtime as visual_strategy
-        visual_strategy._normalise_query = planner._normalise
-        patched.append("visual_strategy_runtime._normalise_query")
 
         import script_guard_runtime as guard
         if guard.install():
