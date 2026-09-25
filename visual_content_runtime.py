@@ -18,71 +18,39 @@ from visual_licensing_runtime import provenance, rescue_provenance
 from visual_qa_runtime import reset_visual_qa_video_budget, start_visual_qa_scene
 
 
-async def _load_news_source_image_pool(bot, active_config):
-    """Fetch static images from the selected article for manual dashboard QC only."""
-    selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else None
+async def _load_web_fresh_image_pool(bot, active_config, scenes, video_title, category):
+    """Run the fresh web crawler before every other image provider."""
+    selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else {}
     if not isinstance(selected_story, dict):
-        return []
-
-    article_url = str(
-        selected_story.get("story_url")
-        or selected_story.get("url")
-        or selected_story.get("link")
-        or ""
-    ).strip()
-    if not article_url:
-        return []
-
-    publisher = str(
-        selected_story.get("source_label")
-        or selected_story.get("source")
-        or selected_story.get("publisher")
-        or ""
-    ).strip()
-
+        selected_story = {}
     try:
-        from news_source_image_runtime import (
-            extract_news_source_images,
-            fetch_direct_source_image,
+        from web_fresh_image_crawler_runtime import crawl_fresh_web_images
+        import asyncio
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            crawl_fresh_web_images,
+            selected_story,
+            scenes,
+            video_title,
+            "",
+            category,
         )
-        assets = await __import__("asyncio").get_running_loop().run_in_executor(
-            None, extract_news_source_images, article_url, publisher
-        )
-        if assets:
-            print(
-                f"   [News Source Image Pool] extracted {len(assets)} image(s) from article HTML.",
-                flush=True,
-            )
-            return assets
-
-        # Discovery often already carries the publisher's hero image. Use it as
-        # a direct fallback when the article page is JS-rendered, blocked, or has
-        # no static <img>/metadata candidate that can be downloaded.
-        for field in ("image_url", "thumbnail", "media_url"):
-            image_url = str(selected_story.get(field) or "").strip()
-            if not image_url:
-                continue
-            fallback = fetch_direct_source_image(
-                image_url,
-                article_url,
-                publisher,
-            )
-            if fallback:
-                print(
-                    f"   [News Source Image Pool] article HTML yielded 0 images; "
-                    f"using discovered {field} as source-image fallback.",
-                    flush=True,
-                )
-                return [fallback]
-
+        return result if isinstance(result, dict) else {"assets": []}
+    except Exception as exc:
         print(
-            "   [News Source Image Pool] article HTML yielded 0 usable images and no discovered-image fallback was available.",
+            f"   [Fresh Web Crawler] failed safely: {type(exc).__name__}: {exc}",
             flush=True,
         )
-        return []
-    except Exception as exc:
-        print(f"   [News Source Image Pool] Extraction failed: {type(exc).__name__}: {exc}", flush=True)
-        return []
+        return {
+            "assets": [],
+            "target": 15,
+            "success_threshold": 10,
+            "queries": [],
+            "articles": 0,
+            "high_confidence": 0,
+            "ai_checked": 0,
+            "rejection_counts": {"crawler_exception": 1},
+        }
 
 
 def patch_content_first_visuals(bot):
@@ -124,77 +92,92 @@ def patch_content_first_visuals(bot):
         reset_visual_qa_video_budget()
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
+        video_title = str(
+            script_data.get("title", "")
+            or (script_data.get("titles") or [""])[0]
+            or ""
+        ).strip()
+        category = str(
+            scenes[0].get("sport_or_topic_category", "")
+            if isinstance(scenes[0], dict) else ""
+        ).lower()
+
+        web_crawler_result = await _load_web_fresh_image_pool(
+            bot,
+            active_config,
+            scenes,
+            video_title,
+            category,
+        )
+        web_crawler_assets = list(web_crawler_result.get("assets") or [])
+        web_crawler_materialized = materialize_manual_visual_pool(
+            bot,
+            web_crawler_assets,
+            pool_id=f"web_{abs(hash(video_title or 'story')) & 0xffffffff}",
+        )
+        crawler_satisfies_pool = len(web_crawler_materialized) >= int(
+            web_crawler_result.get("success_threshold") or 10
+        )
+
+        script_data["visual_web_crawler_pool_size"] = len(web_crawler_materialized)
+        script_data["visual_web_crawler_articles"] = int(
+            web_crawler_result.get("articles") or 0
+        )
+        script_data["visual_web_crawler_high_confidence"] = int(
+            web_crawler_result.get("high_confidence") or 0
+        )
+        script_data["visual_web_crawler_ai_checked"] = int(
+            web_crawler_result.get("ai_checked") or 0
+        )
+        script_data["visual_web_crawler_rejection_counts"] = dict(
+            web_crawler_result.get("rejection_counts") or {}
+        )
+        script_data["visual_web_crawler_queries"] = list(
+            web_crawler_result.get("queries") or []
+        )
+
+        print(
+            f"   [Fresh Web Crawler] pool={len(web_crawler_materialized)}/15 "
+            f"| success=10 | fallback providers="
+            f"{'skipped' if crawler_satisfies_pool else 'allowed'}",
+            flush=True,
+        )
+
         manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
         manual_queries = parse_manual_visual_queries(manual_raw)
         if manual_queries:
             print(
                 f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
-                "building one shared entity-verified pool before scene selection.",
+                "used only to fill a sparse fresh-web pool.",
                 flush=True,
             )
         else:
             print(
-                "   [Manual Visual Queries] No global manual queries supplied; "
-                "using the automatic per-slide visual flow.",
+                "   [Manual Visual Queries] none supplied; "
+                "provider fallback is used only when the fresh-web pool is sparse.",
                 flush=True,
             )
-        article_source_assets = []
-        article_source_materialized = []
-        article_source_hashes: set[str] = set()
-
-        if manual_queries:
-            article_source_assets = await _load_news_source_image_pool(bot, active_config)
-            print(
-                f"   [News Source Image Pool] final scrape candidates={len(article_source_assets)}.",
-                flush=True,
-            )
-            if article_source_assets:
-                story_url = str((active_config.get("selected_story") or {}).get("story_url") or "").strip()
-                article_pool_id = f"article_{abs(hash(story_url or 'story')) & 0xffffffff}"
-                article_source_materialized = materialize_manual_visual_pool(
-                    bot, article_source_assets, pool_id=article_pool_id
-                )
-                article_subject = next(
-                    (
-                        str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
-                        for scene in scenes
-                        if str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
-                    ),
-                    "Selected story",
-                )
-                for asset in article_source_materialized:
-                    asset.setdefault("subject", article_subject)
-                    asset["manual_query_index"] = 0
-                    asset["pool_origin"] = "article-source"
-                    asset["provenance_status"] = "provenance-review"
-                    image_hash = str(asset.get("hash") or "").strip()
-                    if image_hash:
-                        article_source_hashes.add(image_hash)
-                print(
-                    f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
-                    flush=True,
-                )
-
-        ai_count = 0
-        verified_count = 0
-        rescue_count = 0
 
         manual_pool_result = None
         manual_pool_materialized = []
-        manual_available_pool = [dict(item) for item in article_source_materialized]
-        if manual_queries:
-            # This is an explicit human-QC workflow. Do not make dashboard entry
-            # depend on a remote Gemini identity verdict; candidates stay labelled
-            # unverified until the reviewer approves the visual package.
-            remaining_pool_target = max(1, MANUAL_POOL_TARGET - len(article_source_materialized))
-            manual_search_hashes = set(used_hashes)
-            manual_search_hashes.update(article_source_hashes)
+        manual_available_pool = [dict(item) for item in web_crawler_materialized]
+
+        if manual_queries and not crawler_satisfies_pool:
+            remaining_pool_target = max(
+                1,
+                MANUAL_POOL_TARGET - len(manual_available_pool),
+            )
+            manual_search_hashes = {
+                str(item.get("hash") or "").strip()
+                for item in manual_available_pool
+                if str(item.get("hash") or "").strip()
+            }
             manual_pool_result = collect_manual_visual_pool(
                 visual_runtime,
                 bot,
                 scenes,
                 manual_queries,
-                video_title=str(script_data.get("title", "") or (script_data.get("titles") or [""])[0]),
+                video_title=video_title,
                 used_hashes=manual_search_hashes,
                 pool_target=remaining_pool_target,
                 verify_with_ai=True,
@@ -204,20 +187,29 @@ def patch_content_first_visuals(bot):
                 manual_pool_result.get("assets") or [],
                 pool_id=hash(";".join(manual_queries)) & 0xffffffff,
             )
-            manual_available_pool.extend(dict(item) for item in manual_pool_materialized)
-            script_data["visual_manual_queries"] = list(manual_queries)
-            script_data["visual_manual_pool_size"] = len(manual_available_pool)
-            script_data["visual_manual_pool_query_stats"] = list(
-                manual_pool_result.get("query_stats") or []
+            manual_available_pool.extend(
+                dict(item) for item in manual_pool_materialized
             )
-            script_data["visual_manual_pool_rejection_counts"] = dict(
-                manual_pool_result.get("rejection_counts") or {}
-            )
+
+        script_data["visual_manual_queries"] = list(manual_queries)
+        script_data["visual_manual_pool_size"] = len(manual_available_pool)
+        script_data["visual_manual_pool_query_stats"] = list(
+            (manual_pool_result or {}).get("query_stats") or []
+        )
+        script_data["visual_manual_pool_rejection_counts"] = dict(
+            (manual_pool_result or {}).get("rejection_counts") or {}
+        )
+
+        if crawler_satisfies_pool:
             print(
-                f"   [Manual Visual Pool] total candidates available for manual QC="
-                f"{len(manual_pool_materialized)}; scene selection begins now.",
+                f"   [Fresh Web Crawler] {len(web_crawler_materialized)} images "
+                "reached the pool threshold; no other image provider was called.",
                 flush=True,
             )
+
+        ai_count = 0
+        verified_count = 0
+        rescue_count = 0
 
         print("\n🎨 Rendering content-first visual package (multi-source retrieval + strict QA)...", flush=True)
         for idx, seg in enumerate(scenes):
@@ -241,15 +233,15 @@ def patch_content_first_visuals(bot):
                 source_type = str(manual_selected.get("source") or "manual-pool")
                 source_credit = str(manual_selected.get("credit") or "").strip() or source_credit_for_type(source_type)
                 selected_status = str(manual_selected.get("status") or "").strip()
-                selected_is_verified = selected_status in {"entity-verified", "factory-rejected-resolution", "new-search-ai-verified"}
+                selected_is_verified = selected_status in {"entity-verified", "factory-rejected-resolution", "new-search-ai-verified", "crawler-high-confidence", "crawler-ai-verified"}
                 seg["visual_verified"] = selected_is_verified
                 seg["visual_type"] = str(manual_selected.get("visual_type") or "GENERAL_CONTEXT").upper()
                 seg["visual_genre"] = str(manual_selected.get("visual_genre") or "GENERAL_CONTEXT").upper()
                 seg["visual_selected_hash"] = selected_hash
                 seg["visual_query_used"] = str(manual_selected.get("query") or "").strip()
                 seg["visual_provider_query_used"] = str(manual_selected.get("query") or "").strip()
-                seg["manual_visual_query"] = "; ".join(manual_queries)
-                seg["manual_visual_query_mode"] = True
+                seg["manual_visual_query"] = "; ".join(manual_queries) if manual_queries else ""
+                seg["manual_visual_query_mode"] = bool(manual_queries)
                 seg["asset_provenance"] = dict(manual_selected.get("provenance") or {})
                 seg["source_image_url"] = str(manual_selected.get("source_image_url") or "").strip()
                 seg["visual_original_path"] = selected_path
@@ -260,12 +252,14 @@ def patch_content_first_visuals(bot):
                 manual_available_pool = [dict(item) for item in manual_available_pool]
                 seg["visual_manual_pool_mode"] = True
                 seg["visual_rejection_counts"] = dict(
-                    (manual_pool_result or {}).get("rejection_counts") or {}
+                    (manual_pool_result or {}).get("rejection_counts")
+                    or web_crawler_result.get("rejection_counts")
+                    or {}
                 )
                 if manual_selected.get("status") == "factory-rejected-resolution":
                     seg["visual_qc_blocked"] = True
                     seg["visual_qc_block_reason"] = "Entity verified, but this image is below the normal resolution threshold and requires manual visual QC."
-                elif selected_status == "manual-review-unverified":
+                elif selected_status in {"manual-review-unverified", "crawler-review-unverified"}:
                     seg["visual_qc_blocked"] = True
                     seg["visual_qc_block_reason"] = "Gemini identity verification was unavailable; this image requires human visual QC before rendering."
                 elif str(manual_selected.get("provenance_status") or "").strip() == "provenance-review":
@@ -278,7 +272,7 @@ def patch_content_first_visuals(bot):
                 seg["visual_fallback_reason"] = ""
                 used_hashes.add(selected_hash)
                 print(
-                    f"   [Manual Visual Pool] Scene {idx + 1} selected "
+                    f"   [Visual Pool] Scene {idx + 1} selected "
                     f"query='{manual_selected.get('query', '')}' status={manual_selected.get('status', '')}",
                     flush=True,
                 )
@@ -329,7 +323,7 @@ def patch_content_first_visuals(bot):
                     ), False, "visual-rescue"
                     # The source-type branch below records this rescue exactly once.
 
-            if source_type != "news_source":
+            if source_type not in {"news_source", "web_crawler"}:
                 source_credit = source_credit_for_type(source_type)
             scene_verified = bool(seg.get("visual_verified", False))
             if scene_verified:
@@ -392,7 +386,7 @@ def patch_content_first_visuals(bot):
                 ),
                 "visual_original_path": str(seg.get("visual_original_path") or "").strip(),
                 "visual_manual_pool_mode": bool(seg.get("visual_manual_pool_mode", False)),
-                "visual_manual_pool_size": len(manual_pool_materialized) if seg.get("visual_manual_pool_mode") else 0,
+                "visual_manual_pool_size": len(manual_available_pool) if seg.get("visual_manual_pool_mode") else 0,
                 "visual_manual_pool_query_stats": list((manual_pool_result or {}).get("query_stats") or []) if seg.get("visual_manual_pool_mode") else [],
                 "visual_manual_pool": (
                     [dict(item) for item in manual_available_pool]
@@ -408,17 +402,10 @@ def patch_content_first_visuals(bot):
             seg.pop("visual_asset_bank", None)
 
         combined_manual_pool = [
-            dict(item) for item in manual_available_pool
+            dict(item)
+            for item in manual_available_pool
             if isinstance(item, dict) and str(item.get("path") or "").strip()
         ]
-        existing_hashes = {str(item.get("hash") or "").strip() for item in combined_manual_pool if str(item.get("hash") or "").strip()}
-        for item in article_source_materialized:
-            item_hash = str(item.get("hash") or "").strip()
-            if item_hash and (item_hash in existing_hashes or item_hash in used_hashes):
-                continue
-            combined_manual_pool.append(dict(item))
-            if item_hash:
-                existing_hashes.add(item_hash)
 
         script_data["visual_manual_pool"] = combined_manual_pool
         script_data["visual_manual_pool_unused_count"] = sum(

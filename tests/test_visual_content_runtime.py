@@ -1,6 +1,7 @@
 import asyncio
 import io
 from pathlib import Path
+import pytest
 
 from PIL import Image
 
@@ -26,6 +27,23 @@ def _fake_bot(tmp_path):
     return FakeBot()
 
 
+
+@pytest.fixture(autouse=True)
+def _disable_live_web_crawler(monkeypatch):
+    async def empty_crawler(*_args, **_kwargs):
+        return {
+            "assets": [],
+            "target": 15,
+            "success_threshold": 10,
+            "articles": 0,
+            "high_confidence": 0,
+            "ai_checked": 0,
+            "queries": [],
+            "rejection_counts": {},
+        }
+    monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", empty_crawler)
+
+
 def _run_process(bot, script_data, format_mode):
     content_runtime.patch_content_first_visuals(bot)
     return asyncio.run(bot.process_visuals_async(script_data, {"font": ""}, format_mode=format_mode))
@@ -42,34 +60,6 @@ def test_content_first_visuals_installer_is_idempotent(tmp_path):
     assert bot._content_first_visuals_patch_installed is True
 
 
-def test_article_loader_falls_back_to_discovered_story_image(monkeypatch):
-    import news_source_image_runtime as module
-
-    fallback = {
-        "bytes": b"image-bytes",
-        "hash": "fallback-hash",
-        "source": "news_source",
-        "source_type": "news_source",
-        "provenance_status": "provenance-review",
-    }
-
-    monkeypatch.setattr(module, "extract_news_source_images", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(module, "fetch_direct_source_image", lambda *args, **kwargs: dict(fallback))
-
-    assets = asyncio.run(
-        content_runtime._load_news_source_image_pool(
-            type("B", (), {})(),
-            {
-                "selected_story": {
-                    "story_url": "https://example.com/story",
-                    "image_url": "https://example.com/hero.jpg",
-                }
-            },
-        )
-    )
-
-    assert assets == [fallback]
-
 
 def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch, tmp_path):
     image = Image.new("RGB", (900, 1200), (80, 90, 100))
@@ -78,8 +68,6 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
     materialized_path = tmp_path / "manual.jpg"
     image.save(materialized_path, format="JPEG")
 
-    async def no_article_source(*_args, **_kwargs):
-        return []
 
     def fake_collect(*_args, **_kwargs):
         return {
@@ -97,6 +85,8 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
         }
 
     def fake_materialize(_bot, assets, pool_id):
+        if not assets:
+            return []
         return [
             {
                 **dict(assets[0]),
@@ -107,7 +97,6 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
             }
         ]
 
-    monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", no_article_source)
     monkeypatch.setattr(visual_retrieval_runtime, "collect_manual_visual_pool", fake_collect)
     monkeypatch.setattr(
         visual_retrieval_runtime,
@@ -143,39 +132,93 @@ def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch,
     assert packages[0][0]["source_type"] == "Commons"
 
 
-def test_automatic_visual_run_skips_unused_article_source_scrape(monkeypatch, tmp_path):
-    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
+def test_fresh_web_crawler_pool_is_used_before_any_provider_fallback(monkeypatch, tmp_path):
+    image = Image.new("RGB", (1200, 1600), (40, 50, 60))
+    raw = io.BytesIO()
+    image.save(raw, format="JPEG")
 
-    async def fail_article_pool(*_args, **_kwargs):
-        raise AssertionError("article source images should not be scraped without manual visual queries")
+    async def crawler(*_args, **_kwargs):
+        return {
+            "assets": [
+                {
+                    "bytes": raw.getvalue(),
+                    "hash": f"crawler-hash-{index}",
+                    "subject": "Virat Kohli",
+                    "source": "web_crawler",
+                    "source_type": "web_crawler",
+                    "source_name": "Example Cricket",
+                    "credit": "Source: Example Cricket",
+                    "query": "Virat Kohli latest",
+                    "source_page_url": "https://example.com/story",
+                    "source_image_url": f"https://example.com/{index}.jpg",
+                    "visual_type": "PERSON",
+                    "visual_genre": "PERSON_ACTION",
+                    "status": "crawler-high-confidence",
+                    "provenance_status": "provenance-review",
+                    "provenance": {
+                        "provider": "Example Cricket",
+                        "url": "https://example.com/story",
+                        "license": "Unverified web source",
+                        "license_url": "https://example.com/story",
+                    },
+                }
+                for index in range(10)
+            ],
+            "target": 15,
+            "success_threshold": 10,
+            "articles": 4,
+            "high_confidence": 10,
+            "ai_checked": 0,
+            "queries": ["Virat Kohli latest"],
+            "rejection_counts": {"final_images": 10},
+        }
 
-    monkeypatch.setattr(content_runtime, "_load_news_source_image_pool", fail_article_pool)
+    def fail_provider(*_args, **_kwargs):
+        raise AssertionError("provider fallback must not run when crawler reaches 10 images")
+
+    monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", crawler)
     monkeypatch.setattr(
         visual_query_entities_runtime,
         "search_slide_visual",
-        lambda *args, **kwargs: (bg.copy(), False, "commons"),
+        fail_provider,
     )
     monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
     monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
+    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "PERSON")
 
     bot = _fake_bot(tmp_path)
     bot._active_web_config = {
-        "selected_story": {"story_url": "https://example.com/story"},
-        "visual_search_queries": "",
+        "selected_story": {
+            "story_url": "https://example.com/story",
+            "title": "Virat Kohli latest story",
+        },
+        "visual_search_queries": "ignored manual query",
     }
     script_data = {
-        "title": "Automatic visual run",
-        "script": [{
-            "primary_entity": "Story subject",
-            "voiceover": "A current story.",
-        }],
+        "title": "Virat Kohli latest story",
+        "script": [
+            {
+                "primary_entity": "Virat Kohli",
+                "voiceover": "Virat Kohli is the subject.",
+                "visual_intent": "person portrait",
+            },
+            {
+                "primary_entity": "Virat Kohli",
+                "voiceover": "Virat Kohli is featured again.",
+                "visual_intent": "person portrait",
+            },
+        ],
     }
 
     packages = _run_process(bot, script_data, "regular")
 
-    assert len(packages) == 1
-    assert packages[0][0]["source_type"] == "commons"
-    assert script_data["visual_manual_pool"] == []
+    assert len(packages) == 2
+    assert script_data["visual_web_crawler_pool_size"] == 10
+    assert script_data["visual_manual_pool_size"] == 10
+    assert packages[0][0]["source_type"] == "web_crawler"
+    assert packages[0][0]["source_credit"] == "Source: Example Cricket"
+    assert packages[0][0]["visual_verified"] is True
+
 
 
 def test_visual_process_resets_qa_state_for_run_and_each_scene(monkeypatch, tmp_path):
@@ -311,13 +354,6 @@ def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
 
     assert script_data["visual_rescue_count"] == 2
     assert script_data["visual_fallback_count"] == 2
-
-def test_article_source_pool_is_marked_for_provenance_review():
-    source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
-    start = source.index("for asset in article_source_materialized:")
-    end = source.index("print(", start)
-    block = source[start:end]
-    assert 'asset["provenance_status"] = "provenance-review"' in block
 
 
 def test_global_manual_queries_remain_available_as_fallback():

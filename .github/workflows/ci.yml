@@ -53,6 +53,7 @@ jobs:
           import script_guard_runtime, script_router_runtime, script_runtime, story_ranker
           import subtitle_runtime, ultimate_bot, visual_content_runtime, visual_qa_runtime
           import visual_runtime, visual_safety_runtime, visual_strategy_runtime
+          import web_fresh_image_crawler_runtime
           import visual_semantic_guard_runtime, visual_query_entities_runtime
           import visual_retrieval_runtime, visual_provider_boundary_runtime, workflow_runtime
           import youtube_comment_runtime

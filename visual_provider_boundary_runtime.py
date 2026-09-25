@@ -551,58 +551,6 @@ def _commons_search_query(query: str) -> str:
     return q
 
 
-_COMMONS_PERSON_NOISE = {
-    "action",
-    "actions",
-    "bat",
-    "batted",
-    "batter",
-    "batting",
-    "bowler",
-    "bowling",
-    "celebrate",
-    "celebrating",
-    "celebration",
-    "cricket",
-    "game",
-    "games",
-    "inning",
-    "innings",
-    "match",
-    "matches",
-    "playing",
-    "player",
-    "players",
-    "shot",
-    "shots",
-    "sports",
-    "sport",
-    "stadium",
-    "team",
-    "teams",
-    "training",
-    "women",
-    "womens",
-    "woman",
-    "world",
-    "cup",
-}
-
-
-def _commons_person_seed(query: str) -> str:
-    """Extract a compact person-name candidate from a manual search phrase."""
-    tokens = re.findall(r"[A-Za-z][A-Za-z'’.-]*", _clean_query(query))
-    kept = [
-        token
-        for token in tokens
-        if token.casefold() not in _COMMONS_PERSON_NOISE
-        and len(token) > 1
-    ]
-    if len(kept) < 2:
-        return ""
-    return " ".join(kept[:4]).strip()
-
-
 def _commons_team_search_variants(query: str, visual_type: str, visual_genre: str) -> list[str]:
     """Normalize common women's-team phrasing into Commons-friendly search terms."""
     exact = _clean_query(query)
@@ -636,6 +584,14 @@ def _commons_team_search_variants(query: str, visual_type: str, visual_genre: st
     return list(dict.fromkeys(item.strip() for item in variants if item.strip()))[:2]
 
 
+def _commons_person_seed(query: str) -> str:
+    """Extract a compact person-name seed for generic Commons fallback search."""
+    tokens = re.findall(r"[A-Za-z][A-Za-z'’.-]*", _clean_query(query))
+    if len(tokens) < 2:
+        return ""
+    return " ".join(tokens[:2]).strip()
+
+
 def _commons_search_queries(
     query: str,
     visual_type: str = "",
@@ -655,13 +611,12 @@ def _commons_search_queries(
     team_like = bool(team_variants)
 
     person_seed = _commons_person_seed(exact) if (
-        (visual_l == "PERSON" and not team_like)
-        or genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"}
+        visual_l == "PERSON" and not team_like
     ) else ""
 
     person_qid = ""
     person_label = ""
-    if person_seed and genre_l != "PERSON_ACTION":
+    if person_seed:
         resolved_person = resolve_person_identity(person_seed)
         person_qid = str((resolved_person or {}).get("qid") or "").strip()
         person_label = str((resolved_person or {}).get("label") or "").strip()
@@ -675,7 +630,7 @@ def _commons_search_queries(
             )
 
     structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
-    if visual_l in structured_types and not person_qid and genre_l != "PERSON_ACTION":
+    if visual_l in structured_types and not person_qid:
         structured_query = team_core or exact
         resolved_entity = resolve_wikidata_entity(structured_query)
         entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
@@ -706,22 +661,6 @@ def _commons_search_queries(
     for variant in team_variants:
         searches.append((variant, "normalized-team", team_core))
 
-    if person_seed and genre_l == "PERSON_ACTION":
-        action_terms = [
-            token
-            for token in re.findall(r"[A-Za-z][A-Za-z'’.-]*", exact)
-            if token.casefold() in _COMMONS_PERSON_NOISE
-        ]
-        if action_terms:
-            action_phrase = " ".join(dict.fromkeys(action_terms[:2]))
-            searches.append(
-                (
-                    f"{person_seed} {action_phrase} cricket".strip(),
-                    "person-action-text",
-                    person_seed,
-                )
-            )
-
     # Manual queries are never silently replaced: the exact literal always stays in the ladder.
     searches.append((exact, "text", ""))
 
@@ -740,18 +679,9 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     """Search Commons with topic-aware structured/text discovery and open-license filtering."""
     visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
     visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
-    visual_l = visual_type
-    genre_l = visual_genre
     manual_mode = bool(_args[4]) if len(_args) > 4 else False
     provider_page = _provider_page(_args)
-    if manual_mode and visual_l == "PERSON" and genre_l == "PERSON_ACTION":
-        # Keep the user's exact phrase authoritative, but let Commons use its
-        # bounded person-action ladder before falling back to the literal query.
-        searches = _commons_search_queries(query, visual_type, visual_genre)
-    elif manual_mode:
-        searches = [(_commons_search_query(query), "text", "")]
-    else:
-        searches = _commons_search_queries(query, visual_type, visual_genre)
+    searches = _commons_search_queries(query, visual_type, visual_genre)
     if not searches:
         return []
 
@@ -994,7 +924,7 @@ def build_raw_source_plan(
         genre = "PERSON_PORTRAIT" if kind == "PERSON" else "GENERAL_CONTEXT"
 
     plan = []
-    if kind == "PERSON" and genre != "PERSON_ACTION":
+    if kind == "PERSON":
         plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
 
     commons_kinds = {
@@ -1018,22 +948,13 @@ def build_raw_source_plan(
     except Exception:
         fetch_openverse_candidates = fetch_pixabay_candidates = None
 
-    if genre == "PERSON_ACTION":
-        plan.append(("Openverse", fetch_openverse_candidates))
-        if str(os.getenv("PEXELS_API_KEY", "")).strip():
-            plan.append(("Pexels", fetch_pexels_candidates))
-        if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
-            plan.append(("Unsplash", fetch_unsplash_candidates))
-        if str(os.getenv("PIXABAY_API_KEY", "")).strip():
-            plan.append(("Pixabay", fetch_pixabay_candidates))
-    else:
-        plan.append(("Openverse", fetch_openverse_candidates))
-        if str(os.getenv("PIXABAY_API_KEY", "")).strip():
-            plan.append(("Pixabay", fetch_pixabay_candidates))
-        if str(os.getenv("PEXELS_API_KEY", "")).strip():
-            plan.append(("Pexels", fetch_pexels_candidates))
-        if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
-            plan.append(("Unsplash", fetch_unsplash_candidates))
+    plan.append(("Openverse", fetch_openverse_candidates))
+    if str(os.getenv("PIXABAY_API_KEY", "")).strip():
+        plan.append(("Pixabay", fetch_pixabay_candidates))
+    if str(os.getenv("PEXELS_API_KEY", "")).strip():
+        plan.append(("Pexels", fetch_pexels_candidates))
+    if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
+        plan.append(("Unsplash", fetch_unsplash_candidates))
 
     if allow_unlicensed:
         plan.append(("DDG", fetch_duckduckgo_candidates))
