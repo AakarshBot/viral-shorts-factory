@@ -30,7 +30,7 @@ CRAWLER_NEWS_RESULTS_PER_QUERY = max(6, min(15, int(os.getenv("VISUAL_WEB_CRAWLE
 CRAWLER_MAX_ARTICLES = max(4, min(12, int(os.getenv("VISUAL_WEB_CRAWLER_ARTICLES", "10"))))
 CRAWLER_ARTICLE_IMAGES = max(3, min(8, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGES_PER_ARTICLE", "6"))))
 CRAWLER_QUERY_COUNT = max(2, min(4, int(os.getenv("VISUAL_WEB_CRAWLER_QUERY_COUNT", "3"))))
-CRAWLER_IMAGE_RESULTS_PER_QUERY = max(8, min(12, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGE_RESULTS", "12"))))
+CRAWLER_IMAGE_RESULTS_PER_QUERY = max(8, min(10, int(os.getenv("VISUAL_WEB_CRAWLER_IMAGE_RESULTS", "10"))))
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "from",
