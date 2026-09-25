@@ -229,111 +229,42 @@ def patch_content_first_visuals(bot):
         related_reuse_counts: dict[str, int] = {}
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
-        if str(active_config.get("visual_pipeline") or "").strip() == "option2_storyboard":
-            from visual_storyboard_v2_runtime import build_storyboard_visuals
-            print("   [Visual Pipeline] Option 2 selected: building original editorial storyboard graphics.", flush=True)
-            return await build_storyboard_visuals(bot, script_data, language_cfg, format_mode)
-
-        setattr(bot, "_visual_source_search_cache", {})
-        reset_visual_qa_video_budget()
-
-        # Manual queries form one shared retrieval pool. They are not assigned
-        # one-per-slide: scene context is applied only after the pool exists.
-        manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
-        manual_queries = parse_manual_visual_queries(manual_raw)
-        if manual_queries:
-            print(
-                f"   [Manual Visual Queries] {len(manual_queries)} supplied; "
-                "building one shared entity-verified pool before scene selection.",
-                flush=True,
-            )
-        else:
-            print(
-                "   [Manual Visual Queries] No global manual queries supplied; "
-                "using the automatic per-slide visual flow.",
-                flush=True,
-            )
-        # Ground automatic visual identities against the selected story evidence.
-        # Manual queries remain untouched and authoritative.
-        for scene_index, scene in enumerate(scenes, 1):
-            grounded = apply_grounding(scene, script_data)
-            scenes[scene_index - 1] = grounded
-            original_entity = str(grounded.get('visual_entity_original') or '').strip()
-            current_entity = str(grounded.get('primary_entity') or '').strip()
-            reason = str(grounded.get('visual_entity_grounding_reason') or '').strip()
-            if grounded.get('visual_entity_grounding') == 'MANUAL_LOCK':
-                print(
-                    f"   [Visual Grounding] Scene {scene_index} | MANUAL_LOCK | query='{grounded.get('manual_visual_query', '')}'",
-                    flush=True,
-                )
-            elif original_entity and original_entity != current_entity:
-                print(
-                    f"   [Visual Grounding] Scene {scene_index} | REPAIRED | '{original_entity}' -> '{current_entity}' | {reason}",
-                    flush=True,
-                )
-            elif not grounded.get('visual_entity_grounded', False):
-                print(
-                    f"   [Visual Grounding] Scene {scene_index} | UNGROUNDED | entity='{current_entity}' | {reason}",
-                    flush=True,
-                )
-
-        # Only subjects that appear on multiple slides are allowed to build a
-        # related-asset rescue pool. This keeps the fallback useful without
-        # collecting extra images for every one-off subject.
-        subject_counts: dict[str, int] = {}
-        for scene in scenes:
-            subject_key = _related_subject_key(
-                scene.get("factual_primary_entity")
-                or scene.get("primary_entity")
-                or scene.get("visual_search_subject")
-            )
-            if subject_key:
-                subject_counts[subject_key] = subject_counts.get(subject_key, 0) + 1
-
-        for scene in scenes:
-            subject_key = _related_subject_key(
-                scene.get("factual_primary_entity")
-                or scene.get("primary_entity")
-                or scene.get("visual_search_subject")
-            )
-            scene["_related_asset_rescue_eligible"] = bool(
-                subject_key and subject_counts.get(subject_key, 0) >= 2
-            )
-
-        active_config = getattr(bot, "_active_web_config", {}) or {}
-        article_source_assets = await _load_news_source_image_pool(bot, active_config)
-        print(
-            f"   [News Source Image Pool] final scrape candidates={len(article_source_assets)}.",
-            flush=True,
-        )
+        article_source_assets = []
         article_source_materialized = []
         article_source_hashes: set[str] = set()
-        if article_source_assets:
-            story_url = str((active_config.get('selected_story') or {}).get('story_url') or '').strip()
-            article_pool_id = f"article_{abs(hash(story_url or 'story')) & 0xffffffff}"
-            article_source_materialized = materialize_manual_visual_pool(
-                bot, article_source_assets, pool_id=article_pool_id
-            )
-            article_subject = next(
-                (
-                    str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
-                    for scene in scenes
-                    if str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
-                ),
-                "Selected story",
-            )
-            for asset in article_source_materialized:
-                asset.setdefault("subject", article_subject)
-                asset["manual_query_index"] = 0
-                asset["pool_origin"] = "article-source"
-                asset["provenance_status"] = "provenance-review"
-                image_hash = str(asset.get("hash") or "").strip()
-                if image_hash:
-                    article_source_hashes.add(image_hash)
+
+        if manual_queries:
+            article_source_assets = await _load_news_source_image_pool(bot, active_config)
             print(
-                f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
+                f"   [News Source Image Pool] final scrape candidates={len(article_source_assets)}.",
                 flush=True,
             )
+            if article_source_assets:
+                story_url = str((active_config.get("selected_story") or {}).get("story_url") or "").strip()
+                article_pool_id = f"article_{abs(hash(story_url or 'story')) & 0xffffffff}"
+                article_source_materialized = materialize_manual_visual_pool(
+                    bot, article_source_assets, pool_id=article_pool_id
+                )
+                article_subject = next(
+                    (
+                        str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
+                        for scene in scenes
+                        if str(scene.get("factual_primary_entity") or scene.get("primary_entity") or "").strip()
+                    ),
+                    "Selected story",
+                )
+                for asset in article_source_materialized:
+                    asset.setdefault("subject", article_subject)
+                    asset["manual_query_index"] = 0
+                    asset["pool_origin"] = "article-source"
+                    asset["provenance_status"] = "provenance-review"
+                    image_hash = str(asset.get("hash") or "").strip()
+                    if image_hash:
+                        article_source_hashes.add(image_hash)
+                print(
+                    f"   [News Source Image Pool] {len(article_source_materialized)} static article image(s) available for manual QC.",
+                    flush=True,
+                )
 
         ai_count = 0
         verified_count = 0
