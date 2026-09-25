@@ -2239,6 +2239,32 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
             if crawler_failure_state else ""
         )
     )
+    with st.expander("Automatic crawler diagnostics", expanded=False):
+        publishers = list(script_data.get("visual_web_crawler_publishers") or [])
+        domains = list(script_data.get("visual_web_crawler_domains") or [])
+        diagnostic_pairs = (
+            ("Queries", script_data.get("visual_web_crawler_queries") or []),
+            ("Articles discovered", script_data.get("visual_web_crawler_articles") or 0),
+            ("Publishers", publishers),
+            ("Domains", domains),
+            ("Browser failures", crawler_rejections.get("browser_failures", 0)),
+            ("Browser images", crawler_rejections.get("article_browser_images", 0)),
+            ("Static fallback images", crawler_rejections.get("static_fallback_images", 0)),
+            ("Candidates", crawler_rejections.get("raw_images", 0)),
+            ("Duplicates removed", crawler_rejections.get("dedupe_rejected", 0)),
+            ("AI checked", script_data.get("visual_web_crawler_ai_checked") or 0),
+            ("AI rejected", crawler_rejections.get("ai_rejected", 0)),
+            ("Final images", len(crawler_pool) + len(article_source_pool)),
+            ("Dashboard pool", script_data.get("visual_web_crawler_dashboard_pool_size") or 0),
+            ("Missing pool paths", script_data.get("visual_web_crawler_dashboard_missing_paths") or 0),
+            ("Failure state", crawler_failure_state or "ready"),
+        )
+        st.table(
+            {
+                "Metric": [name for name, value in diagnostic_pairs if value not in (None, "", [])],
+                "Value": [value for name, value in diagnostic_pairs if value not in (None, "", [])],
+            }
+        )
 
     render_pool_section(
         "Fresh web crawler",
