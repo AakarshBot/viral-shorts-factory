@@ -330,12 +330,6 @@ def _candidate_priority(
 
     relevance_score = _candidate_relevance_score(data, query)
     source_score = REAL_SOURCE_SCORES.get(str(source or "").strip().casefold(), 50.0)
-    trusted, _tier, trusted_score = _trusted_source_evidence(
-        source,
-        visual_type,
-        query,
-        visual_genre,
-    )
     position = 0.0
     if isinstance(data, dict):
         try:
@@ -349,33 +343,9 @@ def _candidate_priority(
         (relevance_score * 0.60)
         + (quality_score * 0.30)
         + (source_score * 0.08)
-        + (trusted_score * 0.02 if trusted else 0.0)
         + position,
         3,
     )
-
-def _trusted_source_evidence(source: str, visual_type: str, query: str, visual_genre: str = "") -> tuple[bool, str, float]:
-    """Return source-level evidence used for ranking and related-asset reuse.
-
-    Source authority never bypasses the active semantic-QC acceptance gate.
-    """
-    source_l = str(source or "").strip().casefold()
-    visual_l = str(visual_type or "").strip().upper()
-    query_tokens = {re.sub(r"[^a-z0-9]+", "", token.casefold()) for token in re.findall(r"[A-Za-z0-9]+", str(query or ""))}
-
-    genre_l = str(visual_genre or "").strip().upper()
-    if genre_l == "PERSON_PORTRAIT" and source_l in {"wikipedia", "commons"}:
-        return True, "SOURCE-IDENTITY", REAL_SOURCE_SCORES.get(source_l, 95.0)
-    if genre_l in {"ORG_BRANDING", "TEAM_BRANDING"} and source_l == "commons" and query_tokens & _VISUAL_DESCRIPTOR_WORDS:
-        return True, "SOURCE-BRANDED", REAL_SOURCE_SCORES.get(source_l, 96.0)
-    if genre_l in {"MONEY_CURRENCY", "FLAG_SYMBOL", "TROPHY_AWARD"} and source_l == "commons":
-        return True, "SOURCE-ASSET", REAL_SOURCE_SCORES.get(source_l, 94.0)
-    return False, "", 0.0
-
-
-
-_RELATED_SUBJECT_ASSET_LIMIT = 3
-
 
 def _provider_search_query(
     source: str,
