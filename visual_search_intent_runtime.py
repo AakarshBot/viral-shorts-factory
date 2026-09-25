@@ -146,13 +146,6 @@ _GENERIC_TERMS = {
     "depicting", "someone", "individual", "realistic",
 }
 
-_ACTION_QUERY_TERMS = {
-    "batting", "bowling", "fielding", "wicket", "cricket", "match",
-    "innings", "playing", "shot", "scoring", "running", "racing",
-    "celebrating", "celebration",
-}
-
-
 _FIELDS = (
     ("factual_visual_intent", 5),
     ("visual_context", 5),
@@ -265,10 +258,8 @@ def _ranked_scene_terms(scene: dict, subject: str, limit: int = 5) -> list[str]:
 
 
 def _scene_terms(scene: dict, subject: str) -> list[str]:
-    """Return enough evidence-backed anchors to preserve concrete action terms."""
-    return _ranked_scene_terms(scene, subject, limit=6)
-
-
+    """Return the strongest evidence-backed visual anchors for this slide."""
+    return _ranked_scene_terms(scene, subject, limit=4)
 def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
     """Compose a compact image-search query without rewriting the locked subject."""
     subject = _clean(subject)
@@ -297,24 +288,6 @@ def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
             break
 
     return _clean(" ".join([subject, *additions]))
-
-
-def _action_visual_anchor(scene: dict, subject: str) -> str:
-    subject_keys = {key(word) for word in tokens(subject)}
-    for field in (
-        "factual_visual_intent",
-        "visual_intent",
-        "visual_context",
-        "factual_search_prompt",
-        "specific_search_prompt",
-        "factual_voiceover",
-        "voiceover",
-    ):
-        for word in tokens(scene.get(field, "")):
-            token_key = key(word)
-            if token_key in _ACTION_QUERY_TERMS and token_key not in subject_keys:
-                return word
-    return ""
 
 
 def _primary_visual_anchor(scene_terms: list[str]) -> str:
