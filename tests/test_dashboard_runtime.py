@@ -2099,3 +2099,119 @@ def test_dashboard_review_surface_exposes_editable_script_and_visual_replacement
     assert "Replace image" in visual
     assert "Find up to 10 alternatives" in visual
     assert "Use" in visual
+
+
+def test_website_image_test_topic_fetch_is_isolated_from_production(monkeypatch, tmp_path):
+    import dashboard_runtime
+
+    calls = {}
+
+    class Bot:
+        DB_PATH = str(tmp_path / "dashboard_test.db")
+
+    expected_topics = [
+        {
+            "title": "Fresh sports story",
+            "story_key": "fresh-sports-story",
+            "story_url": "https://example.com/story",
+            "primary_entity": "Player One",
+        }
+    ]
+
+    def fake_discover(bot, config, conn, max_candidates, retained_candidates):
+        calls["discovery"] = {
+            "bot": bot,
+            "config": config,
+            "max_candidates": max_candidates,
+            "retained_candidates": retained_candidates,
+            "conn_open": conn is not None and not conn.closed if hasattr(conn, "closed") else conn is not None,
+        }
+        return expected_topics
+
+    monkeypatch.setattr(dashboard_runtime, "discover_ranked_topics", fake_discover)
+
+    topics = dashboard_runtime.fetch_website_test_topics(
+        Bot(),
+        {"format_mode": "regular", "category": "sports", "language": "english"},
+        max_candidates=12,
+    )
+
+    assert topics == expected_topics
+    assert calls["discovery"]["max_candidates"] == 12
+    assert calls["discovery"]["retained_candidates"] == []
+
+
+def test_website_image_test_runs_only_the_web_crawler(monkeypatch):
+    import web_fresh_image_crawler_runtime
+    import dashboard_runtime
+
+    calls = {}
+
+    def fake_crawler(topic, scenes, story_title, entity, category):
+        calls["crawler"] = {
+            "topic": topic,
+            "scenes": scenes,
+            "story_title": story_title,
+            "entity": entity,
+            "category": category,
+        }
+        return {
+            "assets": [{"bytes": b"image", "publisher": "Example Sports"}],
+            "articles": 1,
+            "profile_pages": 0,
+            "success_threshold": 10,
+        }
+
+    monkeypatch.setattr(
+        web_fresh_image_crawler_runtime,
+        "crawl_fresh_web_images",
+        fake_crawler,
+    )
+
+    topic = {
+        "title": "Fresh sports story",
+        "story_key": "fresh-sports-story",
+        "story_url": "https://example.com/story",
+        "primary_entity": "Player One",
+        "category": "sports",
+    }
+
+    result = dashboard_runtime.run_website_image_test(topic, category="sports")
+
+    assert result["selected_topic"] == topic
+    assert result["assets"]
+    assert calls["crawler"]["story_title"] == "Fresh sports story"
+    assert calls["crawler"]["entity"] == "Player One"
+    assert calls["crawler"]["category"] == "sports"
+    assert calls["crawler"]["scenes"] == [{"primary_entity": "Player One"}]
+
+
+def test_dashboard_exposes_website_image_fetcher_as_test_only_tool():
+    app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert '"Website Image Fetcher"' in app_source
+    assert 'def render_website_image_test() -> None:' in app_source
+    assert 'fetch_website_test_topics(' in app_source
+    assert 'run_website_image_test(' in app_source
+    assert 'st.button(' in app_source
+    assert 'Scrape this story\'s websites' in app_source
+    assert "Commons, DDG image search" in app_source
+
+
+def test_website_test_random_topic_selection_is_supported():
+    import dashboard_runtime
+
+    topics = [
+        {"story_key": "one", "title": "One"},
+        {"story_key": "two", "title": "Two"},
+    ]
+
+    monkey = __import__("pytest").MonkeyPatch()
+    try:
+        monkey.setattr(dashboard_runtime.random, "choice", lambda items: items[1])
+        selected = dashboard_runtime.choose_website_test_topic(topics, "Random")
+    finally:
+        monkey.undo()
+
+    assert selected["story_key"] == "two"
+

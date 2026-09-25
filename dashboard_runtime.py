@@ -7,6 +7,7 @@ It adds only a dashboard-side visual review gate and presentation helpers.
 from __future__ import annotations
 
 import hashlib
+import random
 import os
 import re
 import sqlite3
@@ -474,6 +475,77 @@ def _install_dashboard_stream_capture() -> None:
         _DASHBOARD_STDERR.original = sys.stderr
         sys.stderr = _DASHBOARD_STDERR
     _DASHBOARD_STREAMS_INSTALLED = True
+
+
+def fetch_website_test_topics(bot, web_config: dict[str, Any], max_candidates: int = 12) -> list[dict[str, Any]]:
+    """Fetch a small real factory topic pool without starting production."""
+    max_candidates = max(1, min(20, int(max_candidates or 12)))
+    conn = None
+    try:
+        db_path = str(getattr(bot, "DB_PATH", "") or "")
+        if db_path:
+            conn = sqlite3.connect(db_path)
+        return discover_ranked_topics(
+            bot,
+            dict(web_config or {}),
+            conn,
+            max_candidates=max_candidates,
+            retained_candidates=[],
+        )
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def run_website_image_test(
+    topic: dict[str, Any],
+    *,
+    category: str = "",
+) -> dict[str, Any]:
+    """Run only the website image retrieval path for one already-fetched story."""
+    from web_fresh_image_crawler_runtime import crawl_fresh_web_images
+
+    story = dict(topic or {})
+    title = str(story.get("title") or story.get("headline") or "").strip()
+    entity = str(
+        story.get("primary_entity")
+        or story.get("subject")
+        or story.get("visual_search_subject")
+        or ""
+    ).strip()
+    if not title:
+        raise ValueError("The selected test topic has no title.")
+
+    scenes = [{"primary_entity": entity}] if entity else []
+    result = crawl_fresh_web_images(
+        story,
+        scenes,
+        story_title=title,
+        entity=entity,
+        category=str(category or story.get("category") or "").strip(),
+    )
+    if not isinstance(result, dict):
+        result = {"assets": []}
+    result["selected_topic"] = story
+    return result
+
+
+def choose_website_test_topic(topics: list[dict[str, Any]], selection: str = "Random") -> dict[str, Any] | None:
+    """Resolve the dashboard's test topic selector without affecting production state."""
+    valid = [dict(item) for item in (topics or []) if isinstance(item, dict) and str(item.get("title") or "").strip()]
+    if not valid:
+        return None
+    selection = str(selection or "Random").strip()
+    if selection.casefold() == "random":
+        return random.choice(valid)
+    for item in valid:
+        label = str(item.get("story_key") or item.get("story_url") or item.get("url") or item.get("title") or "").strip()
+        if selection == label:
+            return item
+    return valid[0]
 
 
 class DashboardWorkflowController(WorkflowController):
