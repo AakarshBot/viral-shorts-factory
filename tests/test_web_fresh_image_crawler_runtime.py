@@ -148,7 +148,7 @@ def test_profile_pages_fill_sparse_current_news_pool(monkeypatch):
     def fake_scrape(pages, *_args, profile_page=False, **_kwargs):
         calls.append((profile_page, len(pages)))
         if profile_page:
-            return [_asset(index, kind="profile") for index in range(7)], 7, 0
+            return [_asset(index + 100, kind="profile") for index in range(7)], 7, 0
         return [_asset(index) for index in range(3)], 3, 0
 
     monkeypatch.setattr(crawler, "_scrape_browser_pages", fake_scrape)
