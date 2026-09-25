@@ -1079,13 +1079,41 @@ def collect_manual_visual_pool(
                 (remaining_slots + remaining_queries - 1) // remaining_queries,
             ),
         )
-        # PERSON_ACTION needs a guaranteed action-photo search opportunity.
-        # Identity-only results may legitimately fill the exact-name query, so
-        # reserve a small part of the per-query pool for the evidence-backed
-        # action refinement instead of letting portraits consume every slot.
+        # Reserve action-search capacity only when the matched scene
+        # actually contains sports-action evidence. Other PERSON_ACTION scenes
+        # (for example press conferences) retain their existing pool behavior.
+        action_scene_evidence = ""
+        best_scene_overlap = -1
+        query_tokens = {
+            token.casefold()
+            for token in re.findall(r"[\\w-]+", exact_query)
+            if len(token) > 2
+        }
+        for scene in scenes or []:
+            if not isinstance(scene, dict):
+                continue
+            scene_tokens = {
+                token.casefold()
+                for token in re.findall(r"[\\w-]+", _manual_scene_text(scene))
+                if len(token) > 2
+            }
+            overlap = len(query_tokens & scene_tokens)
+            if overlap > best_scene_overlap:
+                best_scene_overlap = overlap
+                action_scene_evidence = _manual_scene_text(scene)
+
+        action_tokens = {
+            token.casefold()
+            for token in re.findall(r"[\\w-]+", action_scene_evidence)
+        }
+        has_sports_action_evidence = bool(action_tokens & _VISUAL_REFINE_ACTION_TERMS)
         action_reserve = (
             min(3, max(0, target - 1))
-            if visual_type == "PERSON" and visual_genre == "PERSON_ACTION"
+            if (
+                visual_type == "PERSON"
+                and visual_genre == "PERSON_ACTION"
+                and has_sports_action_evidence
+            )
             else 0
         )
         exact_target = max(1, target - action_reserve)
@@ -1095,10 +1123,21 @@ def collect_manual_visual_pool(
         qa_requests = 0
         verified_for_query = 0
 
-        # Preserve the authoritative genre ordering from the provider plan.
-        # PERSON_ACTION therefore gets the action-first source order instead of
-        # being silently pushed behind the other providers.
-        manual_sources = list(source_plan[:MANUAL_SOURCE_LIMIT])
+        # Keep the legacy manual-pool source ordering for ordinary searches.
+        # For sports-action person searches, preserve the taxonomy's action-first
+        # ordering so DDG gets an early opportunity to return match photography.
+        if action_reserve:
+            manual_sources = list(source_plan[:MANUAL_SOURCE_LIMIT])
+        else:
+            manual_sources = [
+                item for item in source_plan
+                if str(item[0] or "").strip().casefold() not in {"ddg", "duckduckgo"}
+            ]
+            manual_sources.extend(
+                item for item in source_plan
+                if str(item[0] or "").strip().casefold() in {"ddg", "duckduckgo"}
+            )
+            manual_sources = manual_sources[:MANUAL_SOURCE_LIMIT]
 
         def _fetch_manual_pool_provider(job):
             source_index, source_name, fetcher, source_key = job
