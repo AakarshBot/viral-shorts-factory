@@ -615,7 +615,10 @@ def _scrape_browser_pages(
     max_images_per_page: int = CRAWLER_ARTICLE_IMAGES,
 ):
     if not pages:
-        return [], 0, 0
+        return [], 0, 0, {
+            "browser_failures": len(pages),
+            "static_fallback_images": 0,
+        }
     try:
         from web_browser_image_runtime import scrape_web_pages
     except Exception as exc:
@@ -640,15 +643,20 @@ def _scrape_browser_pages(
     candidates = []
     image_count = 0
     title_mismatch = 0
+    browser_failures = 0
+    static_fallback_image_count = 0
 
     static_fallback_jobs = []
     enriched_results = []
     for index, (page, result) in enumerate(zip(pages, browser_results)):
         if not isinstance(result, dict):
             continue
-        if result.get("error") == "page-title-mismatch":
+        error = str(result.get("error") or "").strip()
+        if error == "page-title-mismatch":
             title_mismatch += 1
             continue
+        if error:
+            browser_failures += 1
         page_assets = list(result.get("assets") or [])
         enriched_page = {
             **page,
@@ -696,7 +704,9 @@ def _scrape_browser_pages(
         assets = page_assets
         if not assets:
             assets = []
-            for source_asset in static_results.get(index, []):
+            fallback_items = list(static_results.get(index, []))
+            static_fallback_image_count += len(fallback_items)
+            for source_asset in fallback_items:
                 # Adapt the existing static extractor's contract into the
                 # browser candidate contract. Previously these objects were
                 # silently discarded because they lacked page_title /
@@ -727,7 +737,15 @@ def _scrape_browser_pages(
             )
             if candidate:
                 candidates.append(candidate)
-    return candidates, image_count, title_mismatch
+    return (
+        candidates,
+        image_count,
+        title_mismatch,
+        {
+            "browser_failures": browser_failures,
+            "static_fallback_images": static_fallback_image_count,
+        },
+    )
 
 
 def _dedupe_assets(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -822,6 +840,7 @@ def crawl_fresh_web_images(
     story_title: str = "",
     entity: str = "",
     category: str = "",
+    manual_query: str = "",
 ) -> dict[str, Any]:
     story = selected_story if isinstance(selected_story, dict) else {}
     title = _clean(story.get("title") or story.get("headline") or story_title, 320)
@@ -840,7 +859,13 @@ def crawl_fresh_web_images(
                 if entity:
                     break
 
-    queries = _build_queries(title, body, entity, category)
+    manual_query = _clean(manual_query, 260)
+    if manual_query:
+        queries = [manual_query]
+        search_story_title = manual_query
+    else:
+        queries = _build_queries(title, body, entity, category)
+        search_story_title = title
     if not queries:
         return {
             "assets": [],
@@ -852,34 +877,51 @@ def crawl_fresh_web_images(
             "high_confidence": 0,
             "ai_checked": 0,
             "rejection_counts": {"no_search_queries": 1},
+            "failure_state": "no_articles_found",
+            "manual_query": manual_query,
         }
 
     now = datetime.now(timezone.utc)
-    articles = _collect_recent_articles(queries, title, entity, now)
-    article_candidates, browser_image_count, article_title_mismatches = _scrape_browser_pages(
+    articles = _collect_recent_articles(queries, search_story_title, entity, now)
+    article_scrape = _scrape_browser_pages(
         articles,
-        title,
+        search_story_title,
         entity,
         now,
         profile_page=False,
         max_images_per_page=CRAWLER_ARTICLE_IMAGES,
     )
+    if len(article_scrape) == 3:
+        article_candidates, browser_image_count, article_title_mismatches = article_scrape
+        article_scrape_diagnostics = {}
+    else:
+        article_candidates, browser_image_count, article_title_mismatches, article_scrape_diagnostics = article_scrape
     candidates = _dedupe_assets(article_candidates)
 
     profile_pages_used = []
     profile_candidates = []
     profile_image_count = 0
     profile_title_mismatches = 0
+    profile_scrape_diagnostics = {}
     if len(candidates) < CRAWLER_SUCCESS and entity:
         profile_pages_used = _collect_profile_pages(entity)
-        profile_candidates, profile_image_count, profile_title_mismatches = _scrape_browser_pages(
+        profile_scrape = _scrape_browser_pages(
             profile_pages_used,
-            title,
+            search_story_title,
             entity,
             now,
             profile_page=True,
             max_images_per_page=CRAWLER_PROFILE_IMAGES,
         )
+        if len(profile_scrape) == 3:
+            profile_candidates, profile_image_count, profile_title_mismatches = profile_scrape
+        else:
+            (
+                profile_candidates,
+                profile_image_count,
+                profile_title_mismatches,
+                profile_scrape_diagnostics,
+            ) = profile_scrape
         candidates = _dedupe_assets(candidates + profile_candidates)
 
     selected, ai_checked, ai_rejected = _verify_ambiguous(candidates, entity)
@@ -888,6 +930,22 @@ def crawl_fresh_web_images(
         1 for item in selected
         if item.get("crawler_confidence") in {"high", "ai-verified"}
     )
+
+    publishers = sorted({
+        _clean(
+            page.get("source")
+            or page.get("publisher")
+            or "",
+            160,
+        )
+        for page in list(articles) + list(profile_pages_used)
+        if _clean(page.get("source") or page.get("publisher") or "", 160)
+    })
+    domains = sorted({
+        urlparse(str(page.get("url") or "").strip()).netloc.removeprefix("www.").lower()
+        for page in list(articles) + list(profile_pages_used)
+        if urlparse(str(page.get("url") or "").strip()).netloc
+    })
 
     rejection_counts = {
         "news_search_queries": len(queries),
@@ -899,6 +957,10 @@ def crawl_fresh_web_images(
         "profile_title_mismatches": profile_title_mismatches,
         "profile_browser_images": profile_image_count,
         "profile_candidates": len(profile_candidates),
+        "browser_failures": int(article_scrape_diagnostics.get("browser_failures") or 0)
+        + int(profile_scrape_diagnostics.get("browser_failures") or 0),
+        "static_fallback_images": int(article_scrape_diagnostics.get("static_fallback_images") or 0)
+        + int(profile_scrape_diagnostics.get("static_fallback_images") or 0),
         "raw_images": len(article_candidates) + len(profile_candidates),
         "dedupe_rejected": max(
             0,
@@ -911,11 +973,27 @@ def crawl_fresh_web_images(
     if len(selected) < CRAWLER_SUCCESS:
         rejection_counts["web_pool_underfilled"] = 1
 
+    if not articles and not profile_pages_used:
+        failure_state = "no_articles_found"
+    elif (
+        (len(articles) + len(profile_pages_used)) > 0
+        and int(rejection_counts.get("browser_failures") or 0)
+        >= (len(articles) + len(profile_pages_used))
+        and int(rejection_counts.get("raw_images") or 0) == 0
+    ):
+        failure_state = "browser_unavailable"
+    elif int(rejection_counts.get("raw_images") or 0) > 0 and not selected:
+        failure_state = "images_found_but_rejected"
+    elif selected:
+        failure_state = "ready"
+    else:
+        failure_state = "no_usable_images"
+
     print(
         f"   [Fresh Web Crawler] articles={len(articles)} profile_pages={len(profile_pages_used)} "
         f"browser_images={browser_image_count + profile_image_count} "
         f"final_pool={len(selected)}/{CRAWLER_TARGET} "
-        f"| fallback_providers={'allowed' if len(selected) < CRAWLER_SUCCESS else 'skipped'}",
+        "| provider_fallback=disabled",
         flush=True,
     )
 
@@ -924,11 +1002,15 @@ def crawl_fresh_web_images(
         "target": CRAWLER_TARGET,
         "success_threshold": CRAWLER_SUCCESS,
         "queries": queries,
+        "publishers": publishers,
+        "domains": domains,
         "articles": len(articles),
         "profile_pages": len(profile_pages_used),
         "high_confidence": high_count,
         "ai_checked": ai_checked,
         "rejection_counts": rejection_counts,
+        "failure_state": failure_state,
+        "manual_query": manual_query,
     }
 
 

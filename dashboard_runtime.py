@@ -560,6 +560,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_packages: list[Any] = []
         self._visual_replacement_history: dict[int, list[dict[str, Any]]] = {}
         self._visual_search_options: dict[int, list[dict[str, Any]]] = {}
+        self._visual_search_diagnostics: dict[int, dict[str, Any]] = {}
         self._visual_pool: list[dict[str, Any]] = []
         self._visual_search_groups: list[dict[str, Any]] = []
         self._visual_search_operation_lock = threading.Lock()
@@ -588,6 +589,7 @@ class DashboardWorkflowController(WorkflowController):
         self._visual_packages = []
         self._visual_replacement_history = {}
         self._visual_search_options = {}
+        self._visual_search_diagnostics = {}
         self._visual_pool = []
         self._visual_search_groups = []
         self._visual_pool_crop_target = ""
@@ -789,6 +791,12 @@ class DashboardWorkflowController(WorkflowController):
             dict(item) for item in (manual_pool or [])
             if isinstance(item, dict) and str(item.get("path") or "").strip()
         ]
+        script_data["visual_web_crawler_dashboard_pool_size"] = len(self._visual_pool)
+        script_data["visual_web_crawler_dashboard_missing_paths"] = sum(
+            1
+            for item in (manual_pool or [])
+            if isinstance(item, dict) and not str(item.get("path") or "").strip()
+        )
         self._visual_search_groups = []
         self._visual_pool_crop_target = ""
         gate["visual_event"].clear()
@@ -1520,8 +1528,13 @@ class DashboardWorkflowController(WorkflowController):
         return True
 
 
-    def search_visual_options(self, visual_index: int, replacement_query: str) -> tuple[bool, str]:
-        """Search the exact manual query and retain up to ten AI-checked choices with no minimum."""
+    def search_visual_options(
+        self,
+        visual_index: int,
+        replacement_query: str,
+        retrieval_method: str = "Normal Factory Visual Fetch",
+    ) -> tuple[bool, str]:
+        """Run exactly one explicit retrieval method for one slide during visual QC."""
         snapshot = self.snapshot()
         if snapshot.get("stage") != "visual_approval":
             return False, "Visual review is no longer active."
@@ -1530,6 +1543,16 @@ class DashboardWorkflowController(WorkflowController):
             index = int(visual_index)
         except (TypeError, ValueError):
             return False, "Invalid visual number."
+
+        method = str(
+            retrieval_method or "Normal Factory Visual Fetch"
+        ).strip()
+        allowed_methods = {
+            "Website Scrape",
+            "Normal Factory Visual Fetch",
+        }
+        if method not in allowed_methods:
+            return False, "Choose Website Scrape or Normal Factory Visual Fetch."
 
         query = str(replacement_query or "").strip()
         packages = snapshot.get("visual_packages") or []
@@ -1559,6 +1582,7 @@ class DashboardWorkflowController(WorkflowController):
 
             used_hashes: set[str] = set()
             used_source_pages: set[str] = set()
+            used_source_image_urls: set[str] = set()
             for package in packages:
                 layer = package[0] if isinstance(package, list) and package else package
                 if not isinstance(layer, dict):
@@ -1567,6 +1591,9 @@ class DashboardWorkflowController(WorkflowController):
                 source_page = str(layer.get("source_page_url") or "").strip().casefold()
                 if source_page:
                     used_source_pages.add(source_page.rstrip("/"))
+                source_image_url = str(layer.get("source_image_url") or "").strip().casefold()
+                if source_image_url:
+                    used_source_image_urls.add(source_image_url.rstrip("/"))
                 provenance_url = str(
                     (layer.get("asset_provenance") or {}).get("url") or ""
                 ).strip().casefold()
@@ -1582,6 +1609,9 @@ class DashboardWorkflowController(WorkflowController):
                     prior_page = str(prior_option.get("source_page_url") or "").strip().casefold()
                     if prior_page:
                         used_source_pages.add(prior_page.rstrip("/"))
+                    prior_image = str(prior_option.get("source_image_url") or "").strip().casefold()
+                    if prior_image:
+                        used_source_image_urls.add(prior_image.rstrip("/"))
 
                 for bank_item in (layer.get("visual_asset_bank") or []):
                     if not isinstance(bank_item, dict):
@@ -1592,6 +1622,9 @@ class DashboardWorkflowController(WorkflowController):
                     bank_page = str(bank_item.get("source_page_url") or "").strip().casefold()
                     if bank_page:
                         used_source_pages.add(bank_page.rstrip("/"))
+                    bank_image = str(bank_item.get("source_image_url") or "").strip().casefold()
+                    if bank_image:
+                        used_source_image_urls.add(bank_image.rstrip("/"))
 
                 image_path = str(layer.get("image") or "").strip()
                 if image_path and os.path.isfile(image_path):
@@ -1608,46 +1641,133 @@ class DashboardWorkflowController(WorkflowController):
                 or (script_data.get("titles") or [""])[0]
                 or ""
             ).strip()
-            attempt = len(self._visual_replacement_history.get(index, [])) + 1
-            result = collect_manual_visual_options(
-                visual_runtime,
-                self.bot,
-                scene,
-                query,
-                video_title=video_title,
-                used_hashes=used_hashes,
-                used_source_pages=used_source_pages,
-                min_options=0,
-                max_options=10,
-                search_round=attempt,
-            )
-            assets = list(result.get("assets") or [])
-            # Zero is a valid result. There is no minimum threshold for a
-            # dashboard search; useful images are retained up to the ten-image cap.
-            if not assets:
-                with self._lock:
-                    self._visual_search_options.pop(index, None)
-                return (
-                    True,
-                    f"No AI-checked images were found for '{query}'. Try a different query.",
+
+            if method == "Website Scrape":
+                from web_fresh_image_crawler_runtime import crawl_fresh_web_images
+
+                entity = str(
+                    scene.get("factual_primary_entity")
+                    or scene.get("primary_entity")
+                    or scene.get("visual_search_subject")
+                    or ""
+                ).strip()
+                category = str(
+                    scene.get("sport_or_topic_category")
+                    or ""
+                ).strip().lower()
+                selected_story = dict(snapshot.get("selected_story") or {})
+                result = crawl_fresh_web_images(
+                    selected_story,
+                    [scene],
+                    video_title,
+                    entity,
+                    category,
+                    manual_query=query,
                 )
+                raw_assets = list(result.get("assets") or [])
+                assets = []
+                seen_hashes = set(used_hashes)
+                seen_image_urls = set(used_source_image_urls)
+                for asset in raw_assets:
+                    if not isinstance(asset, dict):
+                        continue
+                    asset_hash = str(asset.get("hash") or "").strip()
+                    asset_image_url = str(asset.get("source_image_url") or "").strip().casefold().rstrip("/")
+                    if asset_hash and asset_hash in seen_hashes:
+                        continue
+                    if asset_image_url and asset_image_url in seen_image_urls:
+                        continue
+                    item = dict(asset)
+                    item["source"] = "web_crawler"
+                    item["source_type"] = "web_crawler"
+                    item["pool_origin"] = "manual-website"
+                    item["used"] = False
+                    assets.append(item)
+                    if asset_hash:
+                        seen_hashes.add(asset_hash)
+                    if asset_image_url:
+                        seen_image_urls.add(asset_image_url)
+                    if len(assets) >= 15:
+                        break
+                result["assets"] = assets
+                max_options = 15
+                exact_method = "Website Scrape"
+            else:
+                # This is the established provider/QA path. Website retrieval
+                # is not touched or chained into this explicit mode.
+                result = collect_manual_visual_options(
+                    visual_runtime,
+                    self.bot,
+                    scene,
+                    query,
+                    video_title=video_title,
+                    used_hashes=used_hashes,
+                    used_source_pages=used_source_pages,
+                    min_options=0,
+                    max_options=10,
+                    search_round=len(self._visual_replacement_history.get(index, [])) + 1,
+                )
+                assets = list(result.get("assets") or [])
+                max_options = 10
+                exact_method = "Normal Factory Visual Fetch"
+
+            assets = assets[:max_options]
+            diagnostics = {
+                "method": exact_method,
+                "query": query,
+                "queries": list(result.get("queries") or ([query] if method == "Website Scrape" else [])),
+                "articles": int(result.get("articles") or 0),
+                "profile_pages": int(result.get("profile_pages") or 0),
+                "publishers": list(result.get("publishers") or []),
+                "domains": list(result.get("domains") or []),
+                "browser_failures": int((result.get("rejection_counts") or {}).get("browser_failures") or 0),
+                "browser_pages_attempted": int(
+                    result.get("articles") or 0
+                ) + int(result.get("profile_pages") or 0),
+                "browser_images_found": int(
+                    (result.get("rejection_counts") or {}).get("article_browser_images") or 0
+                ) + int(
+                    (result.get("rejection_counts") or {}).get("profile_browser_images") or 0
+                ),
+                "static_fallback_images": int(
+                    (result.get("rejection_counts") or {}).get("static_fallback_images") or 0
+                ),
+                "candidates": int(
+                    (result.get("rejection_counts") or {}).get("raw_images")
+                    or len(assets)
+                    or 0
+                ),
+                "duplicates_removed": int(
+                    (result.get("rejection_counts") or {}).get("dedupe_rejected") or 0
+                ),
+                "ai_checked": int(result.get("ai_checked") or 0),
+                "ai_rejected": int(result.get("rejection_counts", {}).get("ai_rejected") or 0),
+                "final_images": len(assets),
+                "failure_state": str(result.get("failure_state") or "").strip(),
+            }
 
             pool_id = hashlib.sha256(
-                f"qc:{index}:{query}:{attempt}".encode("utf-8")
+                f"qc:{exact_method}:{snapshot.get('run_id','run')}:{index}:{query}:{len(self._visual_replacement_history.get(index, [])) + 1}".encode("utf-8")
             ).hexdigest()[:16]
             options = materialize_manual_visual_pool(
                 self.bot,
-                assets[:10],
+                assets,
                 pool_id=pool_id,
             )
             if not options:
+                with self._lock:
+                    self._visual_search_options.pop(index, None)
+                    self._visual_search_diagnostics[index] = diagnostics
                 return (
                     True,
-                    f"No AI-checked images could be prepared for '{query}'. Try a different query.",
+                    f"No usable images were prepared for slide {index} using {exact_method}.",
                 )
 
             with self._lock:
-                self._visual_search_options[index] = [dict(item) for item in options[:10]]
+                self._visual_search_options[index] = [
+                    dict(item) for item in options[:max_options]
+                ]
+                self._visual_search_diagnostics[index] = diagnostics
                 live_packages = self._visual_packages
                 if 1 <= index <= len(live_packages):
                     live_layer = (
@@ -1656,17 +1776,22 @@ class DashboardWorkflowController(WorkflowController):
                         else live_packages[index - 1]
                     )
                     if isinstance(live_layer, dict):
-                        live_layer["visual_search_options"] = [dict(item) for item in options[:10]]
+                        live_layer["visual_search_options"] = [
+                            dict(item) for item in options[:max_options]
+                        ]
+                        live_layer["visual_search_retrieval_method"] = exact_method
+                        live_layer["visual_search_diagnostics"] = dict(diagnostics)
 
+            count = len(options[:max_options])
             self.update(
                 "visual_approval",
                 76,
-                f"Found {len(options)} AI-checked alternatives for visual {index}. Choose one before continuing.",
+                f"{exact_method} found {count} new image option(s) for slide {index}. Choose one before continuing.",
             )
-            return True, f"Found {len(options)} AI-checked alternatives for visual {index}."
+            return True, f"{exact_method} found {count} image option(s) for slide {index}."
 
         except Exception as exc:
-            return False, f"Visual option search failed: {type(exc).__name__}: {exc}"
+            return False, f"{method} search failed safely: {type(exc).__name__}: {exc}"
 
     def replace_visual_from_search_option(self, visual_index: int, option_index: int) -> tuple[bool, str]:
         """Replace a visual with one of the AI-checked manual-query choices."""
@@ -2075,6 +2200,7 @@ class DashboardWorkflowController(WorkflowController):
             selected_query = str(selected.get("query") or "").strip()
             selected_status = str(selected.get("status") or "entity-verified").strip()
             selected_credit = str(selected.get("credit") or "").strip()
+            selected_source_name = str(selected.get("source_name") or "").strip()
             low_resolution_manual_qc = selected_status == "factory-rejected-resolution"
             new_layer = dict(layer)
             selected_original_path = str(selected.get("original_path") or selected_path).strip()
@@ -2082,11 +2208,7 @@ class DashboardWorkflowController(WorkflowController):
                 {
                     "image": replacement_path,
                     "visual_original_path": selected_original_path,
-                    "source_type": (
-                        selected_source_type
-                        if selected_source_type == "news_source"
-                        else "verified-bank"
-                    ),
+                    "source_type": selected_source_type or selected_source or "verified-bank",
                     "visual_verified": True,
                     "visual_qc_blocked": False,
                     "visual_qc_block_reason": "",
@@ -2122,9 +2244,13 @@ class DashboardWorkflowController(WorkflowController):
                     ).strip(),
                     "asset_provenance": dict(selected.get("provenance") or {}),
                     "visual_asset_bank": new_bank,
+                    "source_name": selected_source_name,
                     "bank_selected_source": selected_source,
                     "bank_selected_source_type": selected_source_type,
                     "bank_selected_query": selected_query,
+                    "visual_search_retrieval_method": str(
+                        layer.get("visual_search_retrieval_method") or ""
+                    ).strip(),
                 }
             )
 
@@ -2132,9 +2258,21 @@ class DashboardWorkflowController(WorkflowController):
                 self._visual_packages[index - 1] = [new_layer]
                 live_script = self.state.script_data
                 if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
-                    live_script["script"][index - 1]["visual_verified"] = True
-                    live_script["script"][index - 1]["visual_source"] = "verified-bank"
-                    live_script["script"][index - 1]["visual_query_used"] = f"bank:{selected_query}"
+                    live_scene = live_script["script"][index - 1]
+                    live_scene["visual_verified"] = True
+                    live_scene["visual_source"] = selected_source_type or selected_source or "verified-bank"
+                    live_scene["visual_query_used"] = f"bank:{selected_query}"
+                    live_scene["visual_selected_hash"] = str(selected.get("hash") or "").strip()
+                    live_scene["visual_original_path"] = selected_original_path
+                    live_scene["source_image_url"] = str(
+                        selected.get("source_image_url")
+                        or (selected.get("provenance") or {}).get("url")
+                        or ""
+                    ).strip()
+                    live_scene["asset_provenance"] = dict(selected.get("provenance") or {})
+                    live_scene["visual_search_retrieval_method"] = str(
+                        layer.get("visual_search_retrieval_method") or ""
+                    ).strip()
                 history.append(
                     {
                         "old_path": old_path,
@@ -2347,6 +2485,10 @@ class DashboardWorkflowController(WorkflowController):
                 "visual_search_options": {
                         key: [dict(item) for item in value]
                         for key, value in self._visual_search_options.items()
+                    },
+                    "visual_search_diagnostics": {
+                        key: dict(value)
+                        for key, value in self._visual_search_diagnostics.items()
                     },
                     "visual_pool": [dict(item) for item in self._visual_pool],
                     "visual_search_groups": [

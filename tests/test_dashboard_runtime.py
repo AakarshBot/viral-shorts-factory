@@ -110,7 +110,7 @@ def test_dashboard_live_header_uses_canonical_mode():
     assert 'render_header("Live")' not in app_source
 
 
-def test_dashboard_keeps_selected_manual_pool_images_visible():
+def test_dashboard_keeps_initial_website_pool_visible_and_assignable():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     render_start = app_source.index("def render_visual_review")
     available_start = app_source.index("    available = ", render_start)
@@ -118,18 +118,19 @@ def test_dashboard_keeps_selected_manual_pool_images_visible():
     assert app_source[available_start:available_end].strip() == "available = list(pool)"
 
     visual_source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
-    assert 'manual_selected["used"] = True' in visual_source
-    assert 'manual_selected["assigned_slide"] = idx + 1' in visual_source
-    combined_start = visual_source.index("        combined_manual_pool = [")
-    combined_end = visual_source.index('        script_data["visual_manual_pool"]', combined_start)
-    combined_block = visual_source[combined_start:combined_end]
-    assert 'not bool(item.get("used"))' not in combined_block
+    process_start = visual_source.index('    async def process(script_data, language_cfg, format_mode="regular"):')
+    process_end = visual_source.index("    bot.process_visuals_async = process", process_start)
+    process = visual_source[process_start:process_end]
+    assert 'script_data["visual_manual_pool"] = [dict(item) for item in web_pool]' in process
+    assert '"image": ""' in process
+    assert 'No slide was auto-assigned.' in process
+    assert "collect_manual_visual_pool(" not in process
 
 
 def test_visual_pool_provenance_warning_defines_state_before_use():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
     start = app_source.index("    def render_pool_section(")
-    end = app_source.index("\n    st.markdown(\"### Source-website images\")", start)
+    end = app_source.index("\n    crawler_pool = [", start)
     source = app_source[start:end]
 
     assignment = source.index("provenance_state = str(")
@@ -139,15 +140,19 @@ def test_visual_pool_provenance_warning_defines_state_before_use():
 
 def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     app_source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    start = app_source.index('    st.markdown("### Fresh web images")')
-    end = app_source.index('    # All retained images are already shown in the single pool above.', start)
+    start = app_source.index('    st.markdown("### Website image pool")')
+    end = app_source.index('    st.markdown("---")', start)
     source = app_source[start:end]
 
-    assert "Fresh crawler" in source
+    assert "Automatic website crawler" in source
+    assert "Automatic crawler diagnostics" in source
     assert "visual_web_crawler_ai_checked" in source
     assert "visual_web_crawler_queries" in source
-    assert 'st.link_button("Open source page"' in app_source
-    assert 'st.markdown("### Source-website images")' in source
+    assert "visual_web_crawler_publishers" in source
+    assert "visual_web_crawler_domains" in source
+    assert 'st.link_button(' in app_source
+
+    assert 'Static article fallback' in app_source
 
 
 def test_dashboard_live_monitor_uses_controlled_polling():
@@ -609,7 +614,7 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_choices(mon
     ok, message = controller.search_visual_options(1, "Shafali Verma batting")
 
     assert ok is True
-    assert "3 AI-checked" in message
+    assert "3 image option(s)" in message
     snapshot = controller.snapshot()
     stored = snapshot["visual_packages"][0][0]
     assert stored["image"] == str(current)
@@ -625,6 +630,146 @@ def test_dashboard_manual_qc_search_keeps_current_visual_and_returns_choices(mon
     assert ok is True
     assert {"hash-1", "hash-2", "hash-3"}.issubset(captured_used_hashes[-1])
     assert snapshot["visual_packages"][0][0]["image"] == str(current)
+
+
+def test_dashboard_explicit_visual_retrieval_methods_are_independent(monkeypatch, tmp_path):
+    from PIL import Image
+    import visual_retrieval_runtime
+
+    bot = _Bot()
+    bot.ASSETS_DIR = str(tmp_path)
+    bot.LANGUAGES = {"english": {"font": "arial.ttf"}}
+    bot._active_web_config = {"format_mode": "regular", "language": "english"}
+
+    controller = DashboardWorkflowController(bot)
+    controller.state.selected_story = {
+        "title": "Virat Kohli batting story",
+        "story_url": "https://example.com/story",
+    }
+    controller.state.script_data = {
+        "title": "Virat Kohli batting story",
+        "script": [{
+            "primary_entity": "Virat Kohli",
+            "factual_primary_entity": "Virat Kohli",
+            "voiceover": "Virat Kohli is batting.",
+            "sport_or_topic_category": "cricket",
+        }],
+    }
+
+    current_image = tmp_path / "current.jpg"
+    Image.new("RGB", (1080, 1920), "white").save(current_image, "JPEG")
+    controller._visual_packages = [[{"image": str(current_image)}]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    website_calls = []
+    factory_calls = []
+
+    def fake_crawler(*args, **kwargs):
+        website_calls.append((args, kwargs))
+        return {
+            "assets": [{
+                "bytes": b"web-image",
+                "hash": "web-hash",
+                "source": "web_crawler",
+                "source_type": "web_crawler",
+                "source_name": "Example Sports",
+                "query": "Virat Kohli batting",
+                "source_page_url": "https://example.com/article",
+                "source_image_url": "https://example.com/article.jpg",
+                "status": "crawler-high-confidence",
+                "provenance": {"provider": "Example Sports", "url": "https://example.com/article"},
+                "provenance_status": "provenance-review",
+            }],
+            "queries": ["Virat Kohli batting"],
+            "articles": 2,
+            "profile_pages": 0,
+            "ai_checked": 0,
+            "rejection_counts": {"raw_images": 1, "final_images": 1},
+            "failure_state": "ready",
+        }
+
+    def fake_collect(*args, **kwargs):
+        factory_calls.append((args, kwargs))
+        return {
+            "assets": [{
+                "bytes": b"factory-image",
+                "hash": "factory-hash",
+                "source": "Commons",
+                "source_type": "Commons",
+                "query": "Virat Kohli batting",
+                "provenance": {"provider": "Commons", "url": "https://commons.wikimedia.org/wiki/File:Kohli.jpg"},
+                "status": "entity-verified",
+            }]
+        }
+
+    monkeypatch.setattr(
+        "web_fresh_image_crawler_runtime.crawl_fresh_web_images",
+        fake_crawler,
+    )
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "collect_manual_visual_options",
+        fake_collect,
+    )
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "materialize_manual_visual_pool",
+        lambda _bot, assets, pool_id: [
+            {
+                **dict(asset),
+                "path": str(tmp_path / f"{asset['hash']}.jpg"),
+                "original_path": str(tmp_path / f"{asset['hash']}.jpg"),
+                "used": False,
+            }
+            for asset in assets
+        ],
+    )
+
+    ok, message = controller.search_visual_options(
+        1,
+        "Virat Kohli batting",
+        retrieval_method="Website Scrape",
+    )
+    assert ok, message
+    assert len(website_calls) == 1
+    assert len(factory_calls) == 0
+    assert website_calls[0][1]["manual_query"] == "Virat Kohli batting"
+
+    first_snapshot = controller.snapshot()
+    first_layer = first_snapshot["visual_packages"][0][0]
+    assert first_layer["visual_search_retrieval_method"] == "Website Scrape"
+    assert first_layer["visual_search_options"][0]["source_type"] == "web_crawler"
+    assert first_snapshot["visual_search_diagnostics"][1]["method"] == "Website Scrape"
+
+    ok, message = controller.search_visual_options(
+        1,
+        "Virat Kohli batting",
+        retrieval_method="Normal Factory Visual Fetch",
+    )
+    assert ok, message
+    assert len(website_calls) == 1
+    assert len(factory_calls) == 1
+    assert controller.snapshot()["visual_search_diagnostics"][1]["method"] == "Normal Factory Visual Fetch"
+
+
+def test_dashboard_retrieval_method_rejects_unknown_mode():
+    controller = DashboardWorkflowController(_Bot())
+    controller.state.script_data = {
+        "title": "Mode test",
+        "script": [{"primary_entity": "Subject", "voiceover": "One."}],
+    }
+    controller._visual_packages = [[{"image": ""}]]
+    controller.update("visual_approval", 76, "Visuals ready.")
+
+    ok, message = controller.search_visual_options(
+        1,
+        "Subject",
+        retrieval_method="Website Scrape then Commons",
+    )
+
+    assert ok is False
+    assert "Website Scrape" in message
+    assert "Normal Factory Visual Fetch" in message
 
 def test_dashboard_controller_rejects_visuals_and_wakes_worker(monkeypatch):
     async def fake_visuals(*_args, **_kwargs):
@@ -984,7 +1129,7 @@ def test_dashboard_primary_menu_and_generated_outputs_contract():
     assert '"qc_passed": not missing' in app_source
     assert "Approve this image" in app_source
     assert "Continue after reviewing all slides" in app_source
-    assert 'Choose from the visual pool' in app_source
+    assert 'Build the visual storyboard' in app_source
     assert 'NEEDS ATTENTION' not in app_source
 
 
@@ -1011,9 +1156,10 @@ def test_dashboard_manual_crop_returns_shorts_frame():
 def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
-    assert "Choose from the visual pool" in source
-    assert "Source-website images" in source
-    assert "Search up to 10 new images" in source
+    assert "Build the visual storyboard" in source
+    assert "Automatic website crawler" in source
+    assert '["Website Scrape", "Normal Factory Visual Fetch"]' in source
+    assert "Manual query" in source
     assert '@st.dialog("Crop / reframe selected image", width="large")' in source
     assert 'st.session_state["visual_crop_target"]' in source
     assert "Apply crop" in source
@@ -1378,16 +1524,19 @@ def test_dashboard_manual_visual_search_releases_operation_lock_after_failure(mo
     controller._visual_search_operation_lock.release()
 
 
-def test_dashboard_manual_visual_search_ui_uses_one_shot_form_without_forced_rerun():
+def test_dashboard_visual_retrieval_ui_has_exactly_two_explicit_methods():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    start = source.index("with st.form(", source.index('st.markdown("### Find 10 more images")'))
-    end = source.index("for group in search_groups:", start)
-    block = source[start:end]
+    visual_start = source.index("def render_visual_review")
+    visual_end = source.index("\ndef render_research_summary", visual_start)
+    block = source[visual_start:visual_end]
 
-    assert "clear_on_submit=True" in block
-    assert "search_submitted = st.form_submit_button(" in block
-    assert "controller.search_visual_pool(search_query)" in block
-    assert "st.rerun()" not in block
+    assert 'retrieval_method = st.selectbox(' in block
+    assert '["Website Scrape", "Normal Factory Visual Fetch"]' in block
+    assert "Manual query" in block
+    assert "controller.search_visual_options(" in block
+    assert 'retrieval_method=retrieval_method' in block
+    assert '"### Find 10 more images"' not in block
+    assert "controller.search_visual_pool(" not in block
 
 
 
@@ -1596,7 +1745,7 @@ def test_dashboard_output_summary_reports_visual_qc_readiness():
 
 def test_dashboard_search_result_crop_uses_active_dialog_target():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
-    assert 'st.session_state["visual_crop_target"] = f"asset:{asset_hash}"' in source
+    assert 'f"slide:{slide_index}"' in source
     assert 'st.session_state.visual_pool_crop_target = asset_hash' not in source
 
 
@@ -2096,8 +2245,8 @@ def test_dashboard_review_surface_exposes_editable_script_and_visual_replacement
     visual_start = source.index("def render_visual_review")
     visual_end = source.index("\ndef render_live_factory", visual_start)
     visual = source[visual_start:visual_end]
-    assert "Replace image" in visual
-    assert "Find up to 10 alternatives" in visual
+    assert "Retrieve image" in visual
+    assert '["Website Scrape", "Normal Factory Visual Fetch"]' in visual
     assert "Use" in visual
 
 

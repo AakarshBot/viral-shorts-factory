@@ -1,31 +1,60 @@
 import asyncio
 import io
 from pathlib import Path
-import pytest
 
+import pytest
 from PIL import Image
 
 import visual_content_runtime as content_runtime
-import visual_quality_runtime
-import visual_query_entities_runtime
 import visual_retrieval_runtime
-import visual_runtime
-import visual_strategy_runtime
+import visual_quality_runtime
 
 
 def _fake_bot(tmp_path):
     class FakeBot:
         ASSETS_DIR = str(tmp_path)
-        PALETTE = {
-            "accent_primary": (0, 191, 255),
-            "accent_secondary": (255, 140, 0),
-        }
-
-        def render_top5_card(self, image, *args, **kwargs):
-            return image
 
     return FakeBot()
 
+
+def _crawler_result(raw_bytes, count=10):
+    return {
+        "assets": [
+            {
+                "bytes": raw_bytes,
+                "hash": f"crawler-hash-{index}",
+                "subject": "Virat Kohli",
+                "source": "web_crawler",
+                "source_type": "web_crawler",
+                "source_name": "Example Cricket",
+                "credit": "Source: Example Cricket",
+                "query": "Virat Kohli batting",
+                "source_page_url": f"https://example.com/story/{index}",
+                "source_image_url": f"https://example.com/{index}.jpg",
+                "visual_type": "PERSON",
+                "visual_genre": "PERSON_ACTION",
+                "status": "crawler-high-confidence",
+                "provenance_status": "provenance-review",
+                "provenance": {
+                    "provider": "Example Cricket",
+                    "url": f"https://example.com/story/{index}",
+                    "license": "Unverified web source",
+                    "license_url": f"https://example.com/story/{index}",
+                },
+            }
+            for index in range(count)
+        ],
+        "target": 15,
+        "success_threshold": 10,
+        "articles": 4,
+        "profile_pages": 0,
+        "high_confidence": count,
+        "ai_checked": 0,
+        "queries": ["Virat Kohli batting"],
+        "rejection_counts": {
+            "final_images": count,
+        },
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -36,17 +65,29 @@ def _disable_live_web_crawler(monkeypatch):
             "target": 15,
             "success_threshold": 10,
             "articles": 0,
+            "profile_pages": 0,
             "high_confidence": 0,
             "ai_checked": 0,
             "queries": [],
             "rejection_counts": {},
         }
-    monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", empty_crawler)
+
+    monkeypatch.setattr(
+        content_runtime,
+        "_load_web_fresh_image_pool",
+        empty_crawler,
+    )
 
 
-def _run_process(bot, script_data, format_mode):
+def _run_process(bot, script_data, format_mode="regular"):
     content_runtime.patch_content_first_visuals(bot)
-    return asyncio.run(bot.process_visuals_async(script_data, {"font": ""}, format_mode=format_mode))
+    return asyncio.run(
+        bot.process_visuals_async(
+            script_data,
+            {"font": ""},
+            format_mode=format_mode,
+        )
+    )
 
 
 def test_content_first_visuals_installer_is_idempotent(tmp_path):
@@ -60,308 +101,218 @@ def test_content_first_visuals_installer_is_idempotent(tmp_path):
     assert bot._content_first_visuals_patch_installed is True
 
 
-
-def test_manual_visual_pool_works_when_article_source_pool_is_empty(monkeypatch, tmp_path):
-    image = Image.new("RGB", (900, 1200), (80, 90, 100))
-    raw = io.BytesIO()
-    image.save(raw, format="JPEG")
-    materialized_path = tmp_path / "manual.jpg"
-    image.save(materialized_path, format="JPEG")
-
-
-    def fake_collect(*_args, **_kwargs):
-        return {
-            "assets": [{
-                "bytes": raw.getvalue(),
-                "hash": "manual-hash",
-                "subject": "Virender Sehwag",
-                "query": "Virender Sehwag",
-                "visual_type": "PERSON",
-                "source": "Commons",
-                "provenance_status": "commercial-verified",
-            }],
-            "query_stats": [],
-            "rejection_counts": {},
-        }
-
-    def fake_materialize(_bot, assets, pool_id):
-        if not assets:
-            return []
-        return [
-            {
-                **dict(assets[0]),
-                "path": str(materialized_path),
-                "original_path": str(materialized_path),
-                "used": False,
-                "status": "manual-review-ready",
-            }
-        ]
-
-    monkeypatch.setattr(visual_retrieval_runtime, "collect_manual_visual_pool", fake_collect)
-    monkeypatch.setattr(
-        visual_retrieval_runtime,
-        "materialize_manual_visual_pool",
-        fake_materialize,
-    )
-    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "PERSON")
-    monkeypatch.setattr(
-        visual_query_entities_runtime,
-        "search_slide_visual",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("automatic visual search must not run before the manual pool is consumed")
-        ),
-    )
-
-    bot = _fake_bot(tmp_path)
-    bot._active_web_config = {"visual_search_queries": "Virender Sehwag"}
-    script_data = {
-        "title": "Manual visual pool scope test",
-        "script": [{
-            "primary_entity": "Virender Sehwag",
-            "voiceover": "Sehwag is the subject.",
-            "visual_intent": "person portrait",
-        }],
-    }
-
-    packages = _run_process(bot, script_data, "regular")
-
-    assert len(packages) == 1
-    assert script_data["visual_manual_pool_size"] == 1
-    assert packages[0][0]["source_type"] == "Commons"
-
-
-def test_fresh_web_crawler_pool_is_used_before_any_provider_fallback(monkeypatch, tmp_path):
+def test_initial_visual_pass_only_builds_shared_website_pool_and_keeps_slides_empty(
+    monkeypatch,
+    tmp_path,
+):
     image = Image.new("RGB", (1200, 1600), (40, 50, 60))
     raw = io.BytesIO()
     image.save(raw, format="JPEG")
 
     async def crawler(*_args, **_kwargs):
-        return {
-            "assets": [
-                {
-                    "bytes": raw.getvalue(),
-                    "hash": f"crawler-hash-{index}",
-                    "subject": "Virat Kohli",
-                    "source": "web_crawler",
-                    "source_type": "web_crawler",
-                    "source_name": "Example Cricket",
-                    "credit": "Source: Example Cricket",
-                    "query": "Virat Kohli latest",
-                    "source_page_url": "https://example.com/story",
-                    "source_image_url": f"https://example.com/{index}.jpg",
-                    "visual_type": "PERSON",
-                    "visual_genre": "PERSON_ACTION",
-                    "status": "crawler-high-confidence",
-                    "provenance_status": "provenance-review",
-                    "provenance": {
-                        "provider": "Example Cricket",
-                        "url": "https://example.com/story",
-                        "license": "Unverified web source",
-                        "license_url": "https://example.com/story",
-                    },
-                }
-                for index in range(10)
-            ],
-            "target": 15,
-            "success_threshold": 10,
-            "articles": 4,
-            "high_confidence": 10,
-            "ai_checked": 0,
-            "queries": ["Virat Kohli latest"],
-            "rejection_counts": {"final_images": 10},
-        }
+        return _crawler_result(raw.getvalue(), count=10)
 
-    def fail_provider(*_args, **_kwargs):
-        raise AssertionError("provider fallback must not run when crawler reaches 10 images")
+    def fail_factory_search(*_args, **_kwargs):
+        raise AssertionError(
+            "the established factory visual search must not run during the automatic website pass"
+        )
+
+    def fake_materialize(_bot, assets, pool_id):
+        return [
+            {
+                **dict(asset),
+                "path": str(tmp_path / f"{asset['hash']}.jpg"),
+                "original_path": str(tmp_path / f"{asset['hash']}.jpg"),
+                "used": False,
+                "pool_origin": "web-crawler",
+            }
+            for asset in assets
+        ]
 
     monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", crawler)
     monkeypatch.setattr(
-        visual_query_entities_runtime,
-        "search_slide_visual",
-        fail_provider,
+        visual_retrieval_runtime,
+        "materialize_manual_visual_pool",
+        fake_materialize,
     )
-    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "PERSON")
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "collect_manual_visual_pool",
+        fail_factory_search,
+    )
 
     bot = _fake_bot(tmp_path)
     bot._active_web_config = {
+        "run_id": "run-web-first",
         "selected_story": {
             "story_url": "https://example.com/story",
-            "title": "Virat Kohli latest story",
+            "title": "Virat Kohli batting story",
         },
-        "visual_search_queries": "ignored manual query",
+        "visual_search_queries": "Virat Kohli batting",
     }
     script_data = {
-        "title": "Virat Kohli latest story",
+        "title": "Virat Kohli batting story",
         "script": [
             {
                 "primary_entity": "Virat Kohli",
                 "voiceover": "Virat Kohli is the subject.",
-                "visual_intent": "person portrait",
+                "visual_intent": "person action",
             },
             {
                 "primary_entity": "Virat Kohli",
-                "voiceover": "Virat Kohli is featured again.",
-                "visual_intent": "person portrait",
+                "voiceover": "The second scene stays empty too.",
+                "visual_intent": "person action",
             },
         ],
     }
 
-    packages = _run_process(bot, script_data, "regular")
+    packages = _run_process(bot, script_data)
 
     assert len(packages) == 2
     assert script_data["visual_web_crawler_pool_size"] == 10
-    assert script_data["visual_manual_pool_size"] == 10
-    assert packages[0][0]["source_type"] == "web_crawler"
-    assert packages[0][0]["source_credit"] == "Source: Example Cricket"
-    assert packages[0][0]["visual_verified"] is True
-
-
-
-def test_visual_process_resets_qa_state_for_run_and_each_scene(monkeypatch, tmp_path):
-    calls = {"run": 0, "scene": 0}
-    monkeypatch.setattr(
-        content_runtime,
-        "reset_visual_qa_video_budget",
-        lambda: calls.__setitem__("run", calls["run"] + 1),
-    )
-    monkeypatch.setattr(
-        content_runtime,
-        "start_visual_qa_scene",
-        lambda: calls.__setitem__("scene", calls["scene"] + 1),
+    assert len(script_data["visual_manual_pool"]) == 10
+    assert script_data["visual_fallback_provider_queries"] == []
+    assert script_data["visuals_verified"] is False
+    assert script_data["visual_coverage"] == 0.0
+    assert all(layer[0]["image"] == "" for layer in packages)
+    assert all(layer[0]["visual_verified"] is False for layer in packages)
+    assert all(
+        layer[0]["visual_qc_block_reason"].startswith("No image selected")
+        for layer in packages
     )
 
-    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
+
+def test_underfilled_website_pool_never_auto_falls_back_to_factory_providers(
+    monkeypatch,
+    tmp_path,
+):
+    image = Image.new("RGB", (1200, 1600), (40, 50, 60))
+    raw = io.BytesIO()
+    image.save(raw, format="JPEG")
+
+    async def crawler(*_args, **_kwargs):
+        return _crawler_result(raw.getvalue(), count=2)
+
+    called = {"factory": 0}
+
+    def fail_factory(*_args, **_kwargs):
+        called["factory"] += 1
+        raise AssertionError("factory providers must not be called for crawler underfill")
+
+    monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", crawler)
     monkeypatch.setattr(
-        visual_query_entities_runtime,
-        "search_slide_visual",
-        lambda *args, **kwargs: (bg.copy(), False, "commons"),
+        visual_retrieval_runtime,
+        "collect_manual_visual_pool",
+        fail_factory,
     )
-    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
 
-    bot = _fake_bot(tmp_path)
-    script_data = {
-        "title": "QA reset test",
-        "script": [
-            {"primary_entity": "Scene One", "voiceover": "One scene."},
-            {"primary_entity": "Scene Two", "voiceover": "Two scene."},
-            {"primary_entity": "Scene Three", "voiceover": "Three scene."},
-        ],
-    }
-
-    packages = _run_process(bot, script_data, "regular")
-
-    assert len(packages) == 3
-    assert calls["run"] == 1
-    assert calls["scene"] == 3
-
-def test_deep_dive_first_slide_uses_content_first_visual(monkeypatch, tmp_path):
-    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
-
-    monkeypatch.setattr(
-        visual_query_entities_runtime,
-        "search_slide_visual",
-        lambda *args, **kwargs: (bg.copy(), False, "wikipedia"),
-    )
-    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "PERSON")
-    monkeypatch.setattr(visual_retrieval_runtime, "make_visual_rescue", lambda *args, **kwargs: bg.copy())
-
-    bot = _fake_bot(tmp_path)
-    script_data = {
-        "title": "Deep Dive story",
-        "script": [
+    def materialize(_bot, assets, pool_id):
+        return [
             {
-                "primary_entity": "Amina Rahman",
-                "voiceover": "Amina Rahman explains the development.",
-                "visual_intent": "person portrait",
-                "specific_search_prompt": "Amina Rahman",
+                **dict(asset),
+                "path": str(tmp_path / f"{asset['hash']}.jpg"),
+                "original_path": str(tmp_path / f"{asset['hash']}.jpg"),
+                "used": False,
             }
+            for asset in assets
+        ]
+
+    monkeypatch.setattr(
+        visual_retrieval_runtime,
+        "materialize_manual_visual_pool",
+        materialize,
+    )
+
+    bot = _fake_bot(tmp_path)
+    bot._active_web_config = {
+        "selected_story": {"title": "Virat Kohli story"},
+        "visual_search_queries": "Virat Kohli batting",
+    }
+    script_data = {
+        "title": "Virat Kohli story",
+        "script": [{"primary_entity": "Virat Kohli", "voiceover": "One."}],
+    }
+
+    packages = _run_process(bot, script_data)
+
+    assert called["factory"] == 0
+    assert script_data["visual_web_crawler_pool_size"] == 2
+    assert len(script_data["visual_manual_pool"]) == 2
+    assert packages[0][0]["image"] == ""
+
+
+def test_initial_visual_stage_supports_actual_script_length_without_hard_coding(
+    monkeypatch,
+    tmp_path,
+):
+    async def crawler(*_args, **_kwargs):
+        return {"assets": [], "target": 15, "success_threshold": 10, "queries": []}
+
+    monkeypatch.setattr(content_runtime, "_load_web_fresh_image_pool", crawler)
+
+    bot = _fake_bot(tmp_path)
+    script_data = {
+        "title": "Five scene test",
+        "script": [
+            {"voiceover": f"Scene {index}."}
+            for index in range(1, 6)
         ],
     }
 
-    packages = _run_process(bot, script_data, "regular")
+    packages = _run_process(bot, script_data)
 
-    assert packages[0][0]["text"] == "Amina Rahman explains the development."
-    assert Path(packages[0][0]["image"]).exists()
+    assert len(packages) == 5
+    assert [layer[0]["text"] for layer in packages] == [
+        f"Scene {index}." for index in range(1, 6)
+    ]
 
 
-def test_top5_first_slide_keeps_dedicated_design(monkeypatch, tmp_path):
-    calls = []
-    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
-
-    monkeypatch.setattr(
-        visual_query_entities_runtime,
-        "search_slide_visual",
-        lambda *args, **kwargs: (bg.copy(), False, "commons"),
-    )
-    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "EVENT")
-    monkeypatch.setattr(visual_retrieval_runtime, "make_visual_rescue", lambda *args, **kwargs: bg.copy())
-
-    monkeypatch.setattr(
-        visual_runtime,
-        "_render_image_slide",
-        lambda *args, **kwargs: calls.append("top5_intro") or args[1],
-    )
-
+def test_top5_visual_acquisition_keeps_slide_slots_empty(tmp_path):
     bot = _fake_bot(tmp_path)
     script_data = {
         "title": "Top 5 story",
         "script": [
-            {"primary_entity": "Story one", "voiceover": "Story one."},
-            {"primary_entity": "Story two", "voiceover": "Story two."},
+            {"voiceover": "Story one.", "primary_entity": "Story one"},
+            {"voiceover": "Story two.", "primary_entity": "Story two"},
         ],
     }
 
     packages = _run_process(bot, script_data, "top5")
 
-    assert calls[0] == "top5_intro"
-    assert packages[0][0]["text"] == ""
-    assert packages[1][0]["text"] == ""
+    assert len(packages) == 2
+    assert all(package[0]["image"] == "" for package in packages)
+    assert all(package[0]["text"] == "" for package in packages)
 
 
-def test_renderer_rescue_count_is_not_double_incremented(monkeypatch, tmp_path):
-    bg = Image.new("RGBA", (1080, 1920), (40, 50, 60, 255))
-
-    monkeypatch.setattr(
-        visual_query_entities_runtime,
-        "search_slide_visual",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic retrieval failure")),
-    )
-    monkeypatch.setattr(visual_quality_runtime, "install", lambda *args, **kwargs: None)
-    monkeypatch.setattr(visual_quality_runtime, "cover_crop", lambda image, size: image.resize(size))
-    monkeypatch.setattr(visual_strategy_runtime, "classify_scene", lambda *args, **kwargs: "GENERAL_CONTEXT")
-    monkeypatch.setattr(visual_retrieval_runtime, "make_visual_rescue", lambda *args, **kwargs: bg.copy())
-
+def test_no_renderer_rescue_runs_during_visual_acquisition(tmp_path):
     bot = _fake_bot(tmp_path)
     script_data = {
-        "title": "Rescue telemetry test",
+        "title": "No rescue test",
         "script": [
-            {"primary_entity": "Scene one", "voiceover": "One."},
-            {"primary_entity": "Scene two", "voiceover": "Two."},
+            {"voiceover": "One.", "primary_entity": "Scene one"},
+            {"voiceover": "Two.", "primary_entity": "Scene two"},
         ],
     }
 
-    _run_process(bot, script_data, "regular")
+    _run_process(bot, script_data)
 
-    assert script_data["visual_rescue_count"] == 2
-    assert script_data["visual_fallback_count"] == 2
+    assert script_data["visual_rescue_count"] == 0
+    assert script_data["visual_fallback_count"] == 0
+    assert script_data["visuals_verified"] is False
 
 
-def test_global_manual_queries_remain_available_as_fallback():
+def test_global_manual_queries_remain_parseable_for_explicit_qc_search():
     from manual_visual_query_runtime import assign_manual_queries
 
     scenes = [
-        {"primary_entity": "India Afghanistan cricket match", "voiceover": "The final match is underway."},
-        {"primary_entity": "Shubman Gill", "voiceover": "Gill is leading the batting."},
+        {
+            "primary_entity": "India Afghanistan cricket match",
+            "voiceover": "The final match is underway.",
+        },
+        {
+            "primary_entity": "Shubman Gill",
+            "voiceover": "Gill is leading the batting.",
+        },
     ]
     assignments = assign_manual_queries(
         scenes,
@@ -372,9 +323,16 @@ def test_global_manual_queries_remain_available_as_fallback():
     assert assignments[1]["query"] == "Shubman Gill batting"
 
 
-def test_manual_production_pool_keeps_gemini_entity_qa_enabled():
-    source = Path(__file__).resolve().parents[1].joinpath("visual_content_runtime.py").read_text(encoding="utf-8")
-    start = source.index("manual_pool_result = collect_manual_visual_pool(")
-    end = source.index("manual_pool_materialized =", start)
-    block = source[start:end]
-    assert "verify_with_ai=True" in block
+def test_automatic_visual_pass_no_longer_contains_provider_fallback_call():
+    source = Path(__file__).resolve().parents[1].joinpath(
+        "visual_content_runtime.py"
+    ).read_text(encoding="utf-8")
+    process = source[
+        source.index('    async def process(script_data, language_cfg, format_mode="regular"):'):
+        source.index("    bot.process_visuals_async = process")
+    ]
+
+    assert "collect_manual_visual_pool(" not in process
+    assert "search_slide_visual(" not in process
+    assert "select_manual_visual_candidate(" not in process
+    assert 'provider fallback=disabled' in process
