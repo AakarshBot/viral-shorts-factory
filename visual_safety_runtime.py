@@ -51,8 +51,6 @@ def install() -> bool:
         import visual_runtime
         import visual_qa_runtime
         visual_runtime.VISUAL_FETCH_TIMEOUT_SECONDS = VISUAL_FETCH_TIMEOUT_SECONDS
-        visual_runtime.VISUAL_MAX_SEARCH_QUERIES = VISUAL_MAX_SEARCH_QUERIES
-        visual_runtime.VISUAL_MAX_VERIFICATION_ATTEMPTS = VISUAL_MAX_VERIFICATION_ATTEMPTS
         visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS = GEMINI_VISUAL_MAX_REQUESTS
         visual_qa_runtime.GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE = GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE
         visual_runtime._call_fetcher_with_timeout = _bounded_fetcher
@@ -60,7 +58,7 @@ def install() -> bool:
         visual_qa_runtime.VISUAL_BUDGET_RUNTIME_VERSION = "2026-09-17-v1"
         _INSTALLED = True
         print("   [Visual Safety] Central budgets installed: "
-              f"searches={VISUAL_MAX_SEARCH_QUERIES}, verification={VISUAL_MAX_VERIFICATION_ATTEMPTS}, "
+              f"Gemini/run={GEMINI_VISUAL_MAX_REQUESTS}, Gemini/scene={GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}, "
               f"Gemini/run={GEMINI_VISUAL_MAX_REQUESTS}, Gemini/scene={GEMINI_VISUAL_MAX_REQUESTS_PER_SCENE}, "
               f"fetch_deadline={VISUAL_FETCH_TIMEOUT_SECONDS}s, worker_slots=2.", flush=True)
         return True
