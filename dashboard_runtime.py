@@ -2191,6 +2191,7 @@ class DashboardWorkflowController(WorkflowController):
             selected_query = str(selected.get("query") or "").strip()
             selected_status = str(selected.get("status") or "entity-verified").strip()
             selected_credit = str(selected.get("credit") or "").strip()
+            selected_source_name = str(selected.get("source_name") or "").strip()
             low_resolution_manual_qc = selected_status == "factory-rejected-resolution"
             new_layer = dict(layer)
             selected_original_path = str(selected.get("original_path") or selected_path).strip()
@@ -2198,11 +2199,7 @@ class DashboardWorkflowController(WorkflowController):
                 {
                     "image": replacement_path,
                     "visual_original_path": selected_original_path,
-                    "source_type": (
-                        selected_source_type
-                        if selected_source_type == "news_source"
-                        else "verified-bank"
-                    ),
+                    "source_type": selected_source_type or selected_source or "verified-bank",
                     "visual_verified": True,
                     "visual_qc_blocked": False,
                     "visual_qc_block_reason": "",
@@ -2238,9 +2235,13 @@ class DashboardWorkflowController(WorkflowController):
                     ).strip(),
                     "asset_provenance": dict(selected.get("provenance") or {}),
                     "visual_asset_bank": new_bank,
+                    "source_name": selected_source_name,
                     "bank_selected_source": selected_source,
                     "bank_selected_source_type": selected_source_type,
                     "bank_selected_query": selected_query,
+                    "visual_search_retrieval_method": str(
+                        layer.get("visual_search_retrieval_method") or ""
+                    ).strip(),
                 }
             )
 
@@ -2248,9 +2249,21 @@ class DashboardWorkflowController(WorkflowController):
                 self._visual_packages[index - 1] = [new_layer]
                 live_script = self.state.script_data
                 if isinstance(live_script, dict) and isinstance(live_script.get("script"), list):
-                    live_script["script"][index - 1]["visual_verified"] = True
-                    live_script["script"][index - 1]["visual_source"] = "verified-bank"
-                    live_script["script"][index - 1]["visual_query_used"] = f"bank:{selected_query}"
+                    live_scene = live_script["script"][index - 1]
+                    live_scene["visual_verified"] = True
+                    live_scene["visual_source"] = selected_source_type or selected_source or "verified-bank"
+                    live_scene["visual_query_used"] = f"bank:{selected_query}"
+                    live_scene["visual_selected_hash"] = str(selected.get("hash") or "").strip()
+                    live_scene["visual_original_path"] = selected_original_path
+                    live_scene["source_image_url"] = str(
+                        selected.get("source_image_url")
+                        or (selected.get("provenance") or {}).get("url")
+                        or ""
+                    ).strip()
+                    live_scene["asset_provenance"] = dict(selected.get("provenance") or {})
+                    live_scene["visual_search_retrieval_method"] = str(
+                        layer.get("visual_search_retrieval_method") or ""
+                    ).strip()
                 history.append(
                     {
                         "old_path": old_path,
