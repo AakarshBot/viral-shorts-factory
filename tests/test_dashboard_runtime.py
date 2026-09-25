@@ -146,7 +146,7 @@ def test_visual_dashboard_exposes_fresh_crawler_and_source_page_controls():
     assert "Fresh crawler" in source
     assert "visual_web_crawler_ai_checked" in source
     assert "visual_web_crawler_queries" in source
-    assert 'st.link_button("Open source page"' in source
+    assert 'st.link_button("Open source page"' in app_source
     assert 'st.markdown("### Source-website images")' in source
 
 
@@ -1012,7 +1012,7 @@ def test_dashboard_visual_review_exposes_manual_pool_and_crop_modal_controls():
     source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     assert "Choose from the visual pool" in source
-    assert "Available manual-search images" in source
+    assert "Source-website images" in source
     assert "Search up to 10 new images" in source
     assert '@st.dialog("Crop / reframe selected image", width="large")' in source
     assert 'st.session_state["visual_crop_target"]' in source
