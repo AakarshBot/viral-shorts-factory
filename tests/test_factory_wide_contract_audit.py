@@ -67,9 +67,9 @@ def test_multilingual_script_grounding_and_metadata():
         assert ok, reason
 
 
-def test_unicode_visual_queries_survive_planner():
+def test_unicode_visual_queries_survive_canonical_search_intent():
     from unicode_runtime import install
-    import visual_retrieval_planner as planner
+    from visual_search_intent_runtime import resolve_visual_search_intent
 
     install()
     for entity, title in (
@@ -83,9 +83,10 @@ def test_unicode_visual_queries_survive_planner():
             "voiceover": title,
             "sport_or_topic_category": "regional_state_news",
         }
-        queries, visual_type = planner.build_deep_queries(scene, title)
-        assert queries, f"planner lost multilingual entity {entity!r}"
-        assert any(entity in query for query in queries), (entity, queries, visual_type)
+        intent = resolve_visual_search_intent(scene, title)
+        queries = list(intent.queries)
+        assert queries, f"canonical search lost multilingual entity {entity!r}"
+        assert any(entity in query for query in queries), (entity, queries, intent.visual_type)
 
 
 def test_ultimate_bot_has_no_unused_legacy_top_level_constant_registries():
