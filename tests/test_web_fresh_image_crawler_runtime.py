@@ -114,15 +114,19 @@ def test_direct_image_failures_fall_back_to_scraping_image_result_source_pages(m
         "news_source_image_runtime.fetch_direct_source_image",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(
-        "news_source_image_runtime.extract_news_source_images",
-        lambda url, publisher_hint="", max_images=6: [{
-            "bytes": _jpeg_bytes((70, 100, 140)),
+    def scrape_source_page(url, publisher_hint="", max_images=6):
+        index = int(url.rsplit("/", 1)[-1])
+        return [{
+            "bytes": _jpeg_bytes((70 + index, 100, 140)),
             "publisher": publisher_hint or "publisher.example.com",
             "method": "og:image",
             "image_url": f"{url}/hero.jpg",
             "page_url": url,
-        }],
+        }]
+
+    monkeypatch.setattr(
+        "news_source_image_runtime.extract_news_source_images",
+        scrape_source_page,
     )
 
     result = crawler.crawl_fresh_web_images(
