@@ -197,6 +197,7 @@ def patch_content_first_visuals(bot):
         import visual_runtime
         from visual_query_entities_runtime import search_slide_visual
         from visual_quality_runtime import fit_visual_image, install as install_visual_quality
+        from visual_safety_runtime import install as install_visual_safety
         from visual_retrieval_runtime import (
                     collect_manual_visual_pool,
             make_visual_rescue,
@@ -212,6 +213,8 @@ def patch_content_first_visuals(bot):
         ) from exc
 
     install_visual_quality(visual_runtime)
+    if not install_visual_safety():
+        raise RuntimeError("Visual safety runtime could not be installed.")
 
     async def process(script_data, language_cfg, format_mode="regular"):
         scenes = script_data.get("script", [])
