@@ -294,11 +294,44 @@ def _google_news_rss(query: str) -> list[dict[str, Any]]:
 
 
 def _news_search(query: str) -> list[dict[str, Any]]:
-    fresh = _ddgs_news(query, "d")
-    if fresh:
-        return fresh
-    wider = _ddgs_news(query, "w")
-    return wider or _google_news_rss(query)
+    # Search independent lanes together. Google News is a second discovery
+    # source, not merely a last-resort fallback, so a weak DDGS result set does
+    # not starve the publisher pool.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        daily_future = executor.submit(_ddgs_news, query, "d")
+        rss_future = executor.submit(_google_news_rss, query)
+        daily = daily_future.result() if daily_future else []
+        rss = rss_future.result() if rss_future else []
+
+    combined = []
+    seen = set()
+    for item in list(daily or []) + list(rss or []):
+        if not isinstance(item, dict):
+            continue
+        key = _clean(item.get("url") or item.get("href"), 2500).casefold()
+        title_key = _clean(item.get("title"), 600).casefold()
+        identity = key or title_key
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        combined.append(item)
+
+    if len(combined) < min(CRAWLER_NEWS_RESULTS_PER_QUERY, 8):
+        wider = _ddgs_news(query, "w")
+        for item in wider or []:
+            if not isinstance(item, dict):
+                continue
+            key = _clean(item.get("url") or item.get("href"), 2500).casefold()
+            title_key = _clean(item.get("title"), 600).casefold()
+            identity = key or title_key
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            combined.append(item)
+            if len(combined) >= CRAWLER_NEWS_RESULTS_PER_QUERY:
+                break
+
+    return combined[:CRAWLER_NEWS_RESULTS_PER_QUERY]
 
 
 def _article_url_is_usable(url: str) -> bool:
@@ -598,26 +631,16 @@ def _scrape_browser_pages(
     candidates = []
     image_count = 0
     title_mismatch = 0
-    for page, result in zip(pages, browser_results):
+
+    static_fallback_jobs = []
+    enriched_results = []
+    for index, (page, result) in enumerate(zip(pages, browser_results)):
         if not isinstance(result, dict):
             continue
         if result.get("error") == "page-title-mismatch":
             title_mismatch += 1
             continue
         page_assets = list(result.get("assets") or [])
-        if not page_assets:
-            # Browser rendering is primary; use the existing lightweight HTML
-            # parser only as same-site rescue when a page exposes images server-side.
-            try:
-                from news_source_image_runtime import extract_news_source_images
-                page_assets = extract_news_source_images(
-                    str(page.get("url") or ""),
-                    str(page.get("source") or ""),
-                    max_images=max_images_per_page,
-                )
-            except Exception:
-                page_assets = []
-        image_count += len(page_assets)
         enriched_page = {
             **page,
             "title": result.get("page_title") or page.get("title"),
@@ -628,11 +651,65 @@ def _scrape_browser_pages(
             ),
             "url": result.get("final_url") or page.get("url"),
         }
+        if page_assets:
+            image_count += len(page_assets)
+        else:
+            static_fallback_jobs.append((index, enriched_page, max_images_per_page))
+        enriched_results.append((index, enriched_page, result, page_assets))
+
+    # Browser rendering is preferred, but the existing lightweight article
+    # extractor is a real second engine, not a dead-end diagnostic fallback.
+    # Run sparse fallbacks concurrently so a missing Playwright install does not
+    # turn a six-page crawl into six serial 12-second HTTP waits.
+    static_results = {}
+    if static_fallback_jobs:
+        try:
+            from news_source_image_runtime import extract_news_source_images
+            with ThreadPoolExecutor(max_workers=min(4, len(static_fallback_jobs))) as executor:
+                futures = {
+                    executor.submit(
+                        extract_news_source_images,
+                        str(page.get("url") or ""),
+                        str(page.get("source") or ""),
+                        max_images=int(limit),
+                    ): index
+                    for index, page, limit in static_fallback_jobs
+                }
+                for future, index in futures.items():
+                    try:
+                        static_results[index] = list(future.result() or [])
+                    except Exception:
+                        static_results[index] = []
+        except Exception:
+            static_results = {index: [] for index, _page, _limit in static_fallback_jobs}
+
+    for index, page, result, page_assets in enriched_results:
+        assets = page_assets
+        if not assets:
+            assets = []
+            for source_asset in static_results.get(index, []):
+                # Adapt the existing static extractor's contract into the
+                # browser candidate contract. Previously these objects were
+                # silently discarded because they lacked page_title /
+                # page_published_at and used image_url/page_url field names.
+                assets.append({
+                    **source_asset,
+                    "image_url": source_asset.get("image_url"),
+                    "page_url": source_asset.get("page_url") or page.get("url"),
+                    "publisher": source_asset.get("publisher") or page.get("source"),
+                    "method": source_asset.get("method") or "article-source",
+                    "image_alt": source_asset.get("alt") or source_asset.get("caption") or "",
+                    "image_context": source_asset.get("context_text") or "",
+                    "image_score": float(source_asset.get("score") or 80.0),
+                    "page_title": page.get("title") or "",
+                    "page_published_at": page.get("date") or "",
+                })
+            image_count += len(assets)
         query = "" if profile_page else _clean(page.get("_crawler_query"), 500)
-        for asset in page_assets:
+        for asset in assets:
             candidate = _candidate_from_browser_asset(
                 asset,
-                enriched_page,
+                page,
                 query,
                 story_title,
                 entity,
