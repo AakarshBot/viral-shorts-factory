@@ -1148,9 +1148,9 @@ def test_manual_commons_person_action_search_uses_action_ladder(monkeypatch):
     )
 
     result = boundary.fetch_commons_candidates(
-        "Vaibhav Sooryavanshi batting cricket",
+        "Vaibhav Sooryavanshi batting",
         set(),
-        "Vaibhav Sooryavanshi batting cricket",
+        "Vaibhav Sooryavanshi batting",
         "",
         "PERSON",
         "PERSON_ACTION",
@@ -1160,7 +1160,7 @@ def test_manual_commons_person_action_search_uses_action_ladder(monkeypatch):
     assert result == []
     assert searches == [
         "Vaibhav Sooryavanshi batting cricket",
-        "Vaibhav Sooryavanshi batting cricket",
+        "Vaibhav Sooryavanshi batting",
     ]
 
 
