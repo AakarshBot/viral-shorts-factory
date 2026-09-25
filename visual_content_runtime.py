@@ -6,17 +6,14 @@ the established factory provider lane is invoked only from that manual QC
 surface.
 """
 
-import io
-import os
 import re
-from PIL import Image
 
 from visual_qa_runtime import reset_visual_qa_video_budget
 
 
 
 async def _load_web_fresh_image_pool(bot, active_config, scenes, video_title, category):
-    """Run the fresh web crawler before every other image provider."""
+    """Run the shared website crawler for the automatic Live visual pass."""
     selected_story = active_config.get("selected_story") if isinstance(active_config, dict) else {}
     if not isinstance(selected_story, dict):
         selected_story = {}
@@ -51,7 +48,7 @@ async def _load_web_fresh_image_pool(bot, active_config, scenes, video_title, ca
 
 
 def patch_content_first_visuals(bot):
-    """Install the content-first visual pipeline once per bot instance."""
+    """Install the website-first visual acquisition pipeline once per bot instance."""
     if getattr(bot, "_content_first_visuals_patch_installed", False):
         return bot
     try:
