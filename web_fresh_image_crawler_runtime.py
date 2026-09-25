@@ -135,8 +135,12 @@ def _related_article_score(query: str, article_title: str, story_title: str, ent
         return 0.0
 
     if entity_tokens:
-        entity_overlap = len(entity_tokens & title_tokens) / max(1, len(entity_tokens))
-        if entity_overlap < 0.75:
+        entity_hits = len(entity_tokens & title_tokens)
+        entity_overlap = entity_hits / max(1, len(entity_tokens))
+        # Other publishers routinely shorten a person's full name to a
+        # surname. Permit that form when the headline also carries multiple
+        # story-specific terms; do not accept a figure-only mention.
+        if entity_overlap < 0.75 and not (entity_hits >= 1 and len(entity_tokens) >= 2):
             return 0.0
     else:
         entity_overlap = 0.0
