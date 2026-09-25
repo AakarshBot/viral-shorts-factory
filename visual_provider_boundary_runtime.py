@@ -578,13 +578,12 @@ def _commons_search_queries(
     team_like = bool(team_variants)
 
     person_seed = _commons_person_seed(exact) if (
-        (visual_l == "PERSON" and not team_like)
-        or genre_l in {"PERSON_PORTRAIT", "PERSON_ACTION"}
+        visual_l == "PERSON" and not team_like
     ) else ""
 
     person_qid = ""
     person_label = ""
-    if person_seed and genre_l != "PERSON_ACTION":
+    if person_seed:
         resolved_person = resolve_person_identity(person_seed)
         person_qid = str((resolved_person or {}).get("qid") or "").strip()
         person_label = str((resolved_person or {}).get("label") or "").strip()
@@ -598,7 +597,7 @@ def _commons_search_queries(
             )
 
     structured_types = {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}
-    if visual_l in structured_types and not person_qid and genre_l != "PERSON_ACTION":
+    if visual_l in structured_types and not person_qid:
         structured_query = team_core or exact
         resolved_entity = resolve_wikidata_entity(structured_query)
         entity_qid = str((resolved_entity or {}).get("qid") or "").strip()
@@ -647,8 +646,6 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     """Search Commons with topic-aware structured/text discovery and open-license filtering."""
     visual_type = str(_args[2] if len(_args) > 2 else "").strip().upper()
     visual_genre = str(_args[3] if len(_args) > 3 else "").strip().upper()
-    visual_l = visual_type
-    genre_l = visual_genre
     manual_mode = bool(_args[4]) if len(_args) > 4 else False
     provider_page = _provider_page(_args)
     searches = _commons_search_queries(query, visual_type, visual_genre)
@@ -894,7 +891,7 @@ def build_raw_source_plan(
         genre = "PERSON_PORTRAIT" if kind == "PERSON" else "GENERAL_CONTEXT"
 
     plan = []
-    if kind == "PERSON" and genre != "PERSON_ACTION":
+    if kind == "PERSON":
         plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
 
     commons_kinds = {
