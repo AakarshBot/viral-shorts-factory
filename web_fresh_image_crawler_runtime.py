@@ -229,10 +229,17 @@ def _image_search(query: str) -> list[dict[str, Any]]:
             "type_image": "photo",
         }
 
-        # Keep both supported image engines in one bounded request so one
-        # backend outage/rate-limit does not collapse the whole image lane.
+        # Keep the primary image lane deterministic: Bing first, then a
+        # separate DuckDuckGo fallback only when Bing returns nothing.
         try:
-            results = search(backend="bing,duckduckgo", **request)
+            results = search(backend="bing", **request)
+        except Exception:
+            results = []
+        if results:
+            return [dict(item) for item in results if isinstance(item, dict)]
+
+        try:
+            results = search(backend="duckduckgo", **request)
             return [dict(item) for item in (results or []) if isinstance(item, dict)]
         except Exception:
             return []
@@ -1078,7 +1085,10 @@ def crawl_fresh_web_images(
     current_visual_count = len(_dedupe_assets(
         image_search_assets + image_result_page_assets + article_candidates
     ))
-    if current_visual_count < CRAWLER_SUCCESS:
+    # General web-text recovery is an emergency discovery lane. Do not pay
+    # for it on every merely-small pool; only invoke it when the normal
+    # image/news discovery produced no usable visual candidates.
+    if current_visual_count == 0:
         recent_web_pages = _collect_recent_web_pages(queries, title, entity, now)
         web_pages = len(recent_web_pages)
         if recent_web_pages:
@@ -1100,7 +1110,7 @@ def crawl_fresh_web_images(
         + web_page_candidates
     )
     candidates = _dedupe_assets(raw_assets)
-    if not image_search_candidates and not image_result_page_assets and not article_candidates:
+    if not candidates:
         print(
             f"   [Fresh Web Crawler] no relevant current image/article candidates found. "
             f"image_results={len(image_search_results)} direct_images={len(image_search_assets)} "
