@@ -51,10 +51,8 @@ MANUAL_POOL_MAX = max(10, min(20, int(os.getenv("VISUAL_MANUAL_POOL_MAX", "20"))
 MANUAL_POOL_TARGET = max(10, min(MANUAL_POOL_MAX, int(os.getenv("VISUAL_MANUAL_POOL_TARGET", "10"))))
 AUTO_POOL_QUERY_LIMIT = max(1, min(4, int(os.getenv("VISUAL_AUTO_POOL_QUERY_LIMIT", "4"))))
 MANUAL_SCENE_GOOD_SCORE = float(os.getenv("VISUAL_MANUAL_SCENE_GOOD_SCORE", "30"))
-MANUAL_QUERY_RAW_POOL = max(10, min(20, int(os.getenv("VISUAL_MANUAL_QUERY_RAW_POOL", "20"))))
 MANUAL_SEARCH_MAX_PAGES = max(1, min(3, int(os.getenv("VISUAL_MANUAL_SEARCH_MAX_PAGES", "3"))))
 MANUAL_SOURCE_LIMIT = 4
-HARD_MIN_IMAGE_SIDE = max(240, min(540, int(os.getenv("VISUAL_HARD_MIN_IMAGE_SIDE", "360"))))
 SOFT_MIN_IMAGE_SIDE = max(HARD_MIN_IMAGE_SIDE, min(900, int(os.getenv("VISUAL_SOFT_MIN_IMAGE_SIDE", "540"))))
 ENTITY_CHECK_PRIMARY_POOL = 10
 REFINEMENT_CANDIDATE_POOL = max(10, min(20, int(os.getenv("VISUAL_REFINEMENT_CANDIDATE_POOL", "20"))))
@@ -1162,21 +1160,9 @@ def collect_manual_visual_pool(
         qa_requests = 0
         verified_for_query = 0
 
-        # Keep the legacy manual-pool source ordering for ordinary searches.
-        # For sports-action person searches, preserve the taxonomy's action-first
-        # ordering so DDG gets an early opportunity to return match photography.
-        if action_reserve:
-            manual_sources = list(source_plan[:MANUAL_SOURCE_LIMIT])
-        else:
-            manual_sources = [
-                item for item in source_plan
-                if str(item[0] or "").strip().casefold() not in {"ddg", "duckduckgo"}
-            ]
-            manual_sources.extend(
-                item for item in source_plan
-                if str(item[0] or "").strip().casefold() in {"ddg", "duckduckgo"}
-            )
-            manual_sources = manual_sources[:MANUAL_SOURCE_LIMIT]
+        # The provider planner already defines the best source order for
+        # this visual genre. Do not reorder it again here.
+        manual_sources = list(source_plan[:MANUAL_SOURCE_LIMIT])
 
         def _fetch_manual_pool_provider(job):
             source_index, source_name, fetcher, source_key = job
