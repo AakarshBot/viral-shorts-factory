@@ -2091,6 +2091,7 @@ def render_visual_review(controller: DashboardWorkflowController, snapshot: Dict
         "crawler",
     )
 
+    st.markdown("### Available manual-search images")
     st.markdown("### Source-website images")
     render_pool_section(
         "Source-website images",
