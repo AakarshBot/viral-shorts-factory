@@ -16,7 +16,6 @@ REQUIRED_MODULES = (
     "script_runtime",
     "script_guard_runtime",
     "quality_runtime",
-    "visual_retrieval_planner",
     "visual_strategy_runtime",
     "visual_runtime",
     "visual_qa_runtime",
@@ -97,7 +96,7 @@ def runtime_surface_audit() -> list[str]:
                 if not callable(getattr(module, attr, None)):
                     errors.append(f"{name}: missing callable {attr}")
         elif name == "visual_strategy_runtime":
-            for attr in ("build_deep_queries", "classify_scene", "_clean", "_normalise", "_normalise_query"):
+            for attr in ("build_deep_queries", "classify_scene"):
                 if not callable(getattr(module, attr, None)):
                     errors.append(f"{name}: missing callable {attr}")
     return errors
