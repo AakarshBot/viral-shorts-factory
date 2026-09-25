@@ -551,89 +551,12 @@ def _commons_search_query(query: str) -> str:
     return q
 
 
-_COMMONS_PERSON_NOISE = {
-    "action",
-    "actions",
-    "bat",
-    "batted",
-    "batter",
-    "batting",
-    "bowler",
-    "bowling",
-    "celebrate",
-    "celebrating",
-    "celebration",
-    "cricket",
-    "game",
-    "games",
-    "inning",
-    "innings",
-    "match",
-    "matches",
-    "playing",
-    "player",
-    "players",
-    "shot",
-    "shots",
-    "sports",
-    "sport",
-    "stadium",
-    "team",
-    "teams",
-    "training",
-    "women",
-    "womens",
-    "woman",
-    "world",
-    "cup",
-}
-
-
 def _commons_person_seed(query: str) -> str:
-    """Extract a compact person-name candidate from a manual search phrase."""
+    """Extract a compact person-name seed for generic Commons fallback search."""
     tokens = re.findall(r"[A-Za-z][A-Za-z'’.-]*", _clean_query(query))
-    kept = [
-        token
-        for token in tokens
-        if token.casefold() not in _COMMONS_PERSON_NOISE
-        and len(token) > 1
-    ]
-    if len(kept) < 2:
+    if len(tokens) < 2:
         return ""
-    return " ".join(kept[:4]).strip()
-
-
-def _commons_team_search_variants(query: str, visual_type: str, visual_genre: str) -> list[str]:
-    """Normalize common women's-team phrasing into Commons-friendly search terms."""
-    exact = _clean_query(query)
-    if not exact:
-        return []
-
-    lowered = exact.casefold()
-    women_team = bool(
-        re.search(r"\bwomen'?s\b", lowered)
-        and re.search(r"\bnational\b", lowered)
-        and re.search(r"\bteam\b", lowered)
-    )
-    if not women_team:
-        return []
-
-    normalized = re.sub(r"\bwomens\b", "women's", exact, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bwomen\s+s\b", "women's", normalized, flags=re.IGNORECASE)
-    core = re.sub(
-        r"\b(?:celebrate|celebrates|celebrating|celebration|pose|poses|pictured)\b",
-        "",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    core = re.sub(r"\s+", " ", core).strip(" -,:")
-    if not core:
-        return []
-
-    variants = [core]
-    if re.search(r"\b(?:celebrate|celebrates|celebrating|celebration)\b", exact, flags=re.IGNORECASE):
-        variants.insert(0, f"{core} celebration")
-    return list(dict.fromkeys(item.strip() for item in variants if item.strip()))[:2]
+    return " ".join(tokens[:2]).strip()
 
 
 def _commons_search_queries(
@@ -706,22 +629,6 @@ def _commons_search_queries(
     for variant in team_variants:
         searches.append((variant, "normalized-team", team_core))
 
-    if person_seed and genre_l == "PERSON_ACTION":
-        action_terms = [
-            token
-            for token in re.findall(r"[A-Za-z][A-Za-z'’.-]*", exact)
-            if token.casefold() in _COMMONS_PERSON_NOISE
-        ]
-        if action_terms:
-            action_phrase = " ".join(dict.fromkeys(action_terms[:2]))
-            searches.append(
-                (
-                    f"{person_seed} {action_phrase} cricket".strip(),
-                    "person-action-text",
-                    person_seed,
-                )
-            )
-
     # Manual queries are never silently replaced: the exact literal always stays in the ladder.
     searches.append((exact, "text", ""))
 
@@ -744,14 +651,7 @@ def fetch_commons_candidates(query: str, used_urls: set[str] | None = None, *_ar
     genre_l = visual_genre
     manual_mode = bool(_args[4]) if len(_args) > 4 else False
     provider_page = _provider_page(_args)
-    if manual_mode and visual_l == "PERSON" and genre_l == "PERSON_ACTION":
-        # Keep the user's exact phrase authoritative, but let Commons use its
-        # bounded person-action ladder before falling back to the literal query.
-        searches = _commons_search_queries(query, visual_type, visual_genre)
-    elif manual_mode:
-        searches = [(_commons_search_query(query), "text", "")]
-    else:
-        searches = _commons_search_queries(query, visual_type, visual_genre)
+    searches = _commons_search_queries(query, visual_type, visual_genre)
     if not searches:
         return []
 
@@ -1018,21 +918,12 @@ def build_raw_source_plan(
     except Exception:
         fetch_openverse_candidates = fetch_pixabay_candidates = None
 
-    if genre == "PERSON_ACTION":
-        plan.append(("Openverse", fetch_openverse_candidates))
-        if str(os.getenv("PEXELS_API_KEY", "")).strip():
-            plan.append(("Pexels", fetch_pexels_candidates))
-        if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
-            plan.append(("Unsplash", fetch_unsplash_candidates))
-        if str(os.getenv("PIXABAY_API_KEY", "")).strip():
+    plan.append(("Openverse", fetch_openverse_candidates))
+    if str(os.getenv("PIXABAY_API_KEY", "")).strip():
             plan.append(("Pixabay", fetch_pixabay_candidates))
-    else:
-        plan.append(("Openverse", fetch_openverse_candidates))
-        if str(os.getenv("PIXABAY_API_KEY", "")).strip():
-            plan.append(("Pixabay", fetch_pixabay_candidates))
-        if str(os.getenv("PEXELS_API_KEY", "")).strip():
+    if str(os.getenv("PEXELS_API_KEY", "")).strip():
             plan.append(("Pexels", fetch_pexels_candidates))
-        if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
+    if str(os.getenv("UNSPLASH_ACCESS_KEY", "")).strip():
             plan.append(("Unsplash", fetch_unsplash_candidates))
 
     if allow_unlicensed:
