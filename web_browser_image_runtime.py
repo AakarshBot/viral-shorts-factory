@@ -78,6 +78,13 @@ def _title_match(query, title, entity=""):
     entity_overlap = len(e & t) / max(1, len(e)) if e else 1.0
     if e and entity_overlap < 0.75:
         return 0.0
+    # A publisher headline may shorten a two-token person/entity query to
+    # one token (for example, "Virat Kohli" -> "Kohli"). Treat that as a
+    # valid entity-page title match; the crawler has already relevance-ranked
+    # the page before it reaches this browser gate.
+    if e and q == e and len(e) >= 2 and len(q & t) >= 1:
+        return 0.75
+
     required = 0.82 if len(q) <= 4 else 0.58
     if overlap < required:
         return 0.0
