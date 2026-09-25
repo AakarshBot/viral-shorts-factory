@@ -931,6 +931,22 @@ def crawl_fresh_web_images(
         if item.get("crawler_confidence") in {"high", "ai-verified"}
     )
 
+    publishers = sorted({
+        _clean(
+            page.get("source")
+            or page.get("publisher")
+            or "",
+            160,
+        )
+        for page in list(articles) + list(profile_pages_used)
+        if _clean(page.get("source") or page.get("publisher") or "", 160)
+    })
+    domains = sorted({
+        urlparse(str(page.get("url") or "").strip()).netloc.removeprefix("www.").lower()
+        for page in list(articles) + list(profile_pages_used)
+        if urlparse(str(page.get("url") or "").strip()).netloc
+    })
+
     rejection_counts = {
         "news_search_queries": len(queries),
         "news_search_articles": len(articles),
@@ -986,6 +1002,8 @@ def crawl_fresh_web_images(
         "target": CRAWLER_TARGET,
         "success_threshold": CRAWLER_SUCCESS,
         "queries": queries,
+        "publishers": publishers,
+        "domains": domains,
         "articles": len(articles),
         "profile_pages": len(profile_pages_used),
         "high_confidence": high_count,
