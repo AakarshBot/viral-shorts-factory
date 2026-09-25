@@ -1079,23 +1079,26 @@ def collect_manual_visual_pool(
                 (remaining_slots + remaining_queries - 1) // remaining_queries,
             ),
         )
+        # PERSON_ACTION needs a guaranteed action-photo search opportunity.
+        # Identity-only results may legitimately fill the exact-name query, so
+        # reserve a small part of the per-query pool for the evidence-backed
+        # action refinement instead of letting portraits consume every slot.
+        action_reserve = (
+            min(3, max(0, target - 1))
+            if visual_type == "PERSON" and visual_genre == "PERSON_ACTION"
+            else 0
+        )
+        exact_target = max(1, target - action_reserve)
         query_candidates: list[dict] = []
         query_seen_hashes: set[str] = set(seen_hashes)
         query_seen_urls: set[str] = set(seen_image_urls)
         qa_requests = 0
         verified_for_query = 0
 
-        # Use two providers at a time. Only open the fallback pair when the
-        # first pair fails to produce enough entity-approved choices.
-        manual_sources = [
-            item for item in source_plan
-            if str(item[0] or "").strip().casefold() not in {"ddg", "duckduckgo"}
-        ]
-        manual_sources.extend(
-            item for item in source_plan
-            if str(item[0] or "").strip().casefold() in {"ddg", "duckduckgo"}
-        )
-        manual_sources = manual_sources[:MANUAL_SOURCE_LIMIT]
+        # Preserve the authoritative genre ordering from the provider plan.
+        # PERSON_ACTION therefore gets the action-first source order instead of
+        # being silently pushed behind the other providers.
+        manual_sources = list(source_plan[:MANUAL_SOURCE_LIMIT])
 
         def _fetch_manual_pool_provider(job):
             source_index, source_name, fetcher, source_key = job
@@ -1129,7 +1132,7 @@ def collect_manual_visual_pool(
             return source_index, source_name, cache_key, list(_raw_items(raw_data)), local_used_urls
 
         for stage_index in range(0, len(manual_sources), 2):
-            if len(assets) >= requested_max or verified_for_query >= target:
+            if len(assets) >= requested_max or verified_for_query >= exact_target:
                 break
             stage_sources = manual_sources[stage_index : stage_index + 2]
             provider_jobs = []
@@ -1202,7 +1205,7 @@ def collect_manual_visual_pool(
                 )
             )
             before = len(assets)
-            stage_target = max(0, target - verified_for_query)
+            stage_target = max(0, exact_target - verified_for_query)
             added, requests_made = _verify(
                 stage_candidates,
                 entity_anchor,
@@ -1225,11 +1228,11 @@ def collect_manual_visual_pool(
             if image_url:
                 seen_image_urls.add(image_url)
 
-        # When the exact manual query produces too few verified images, make one
-        # deterministic entity+context refinement before moving on. This keeps
-        # the manual term authoritative while giving sparse person searches
-        # another chance to return action/context photos without extra search loops.
-        if verified_for_query < target:
+        # Give PERSON_ACTION one deterministic entity+context refinement even
+        # when the exact-name search already filled its non-action share of the
+        # pool. This prevents portraits from satisfying the whole request before
+        # an action-photo search gets a chance.
+        if action_reserve or verified_for_query < target:
             best_scene = None
             best_overlap = -1
             query_tokens = {
