@@ -146,6 +146,13 @@ _GENERIC_TERMS = {
     "depicting", "someone", "individual", "realistic",
 }
 
+_ACTION_QUERY_TERMS = {
+    "batting", "bowling", "fielding", "wicket", "cricket", "match",
+    "innings", "playing", "shot", "scoring", "running", "racing",
+    "celebrating", "celebration",
+}
+
+
 _FIELDS = (
     ("factual_visual_intent", 5),
     ("visual_context", 5),
@@ -292,6 +299,24 @@ def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
     return _clean(" ".join([subject, *additions]))
 
 
+def _action_visual_anchor(scene: dict, subject: str) -> str:
+    subject_keys = {key(word) for word in tokens(subject)}
+    for field in (
+        "factual_visual_intent",
+        "visual_intent",
+        "visual_context",
+        "factual_search_prompt",
+        "specific_search_prompt",
+        "factual_voiceover",
+        "voiceover",
+    ):
+        for word in tokens(scene.get(field, "")):
+            token_key = key(word)
+            if token_key in _ACTION_QUERY_TERMS and token_key not in subject_keys:
+                return word
+    return ""
+
+
 def _primary_visual_anchor(scene_terms: list[str]) -> str:
     """Prefer one concrete multi-word visual anchor over scattered prose."""
     if not scene_terms:
@@ -391,7 +416,8 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
             else:
                 anchor = _primary_visual_anchor(scene_terms)
 
-            refined = _compose_query(subject, anchor)
+            action_anchor = _action_visual_anchor(scene, subject) if visual_genre == "PERSON_ACTION" else ""
+            refined = _compose_query(subject, action_anchor or anchor)
             if visual_genre == "PERSON_ACTION" and refined:
                 queries = [refined]
                 if subject and subject.casefold() != refined.casefold():
