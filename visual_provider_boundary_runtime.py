@@ -995,6 +995,7 @@ def build_raw_source_plan(
 
     plan = []
     if kind == "PERSON" and genre != "PERSON_ACTION":
+        plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
 
     commons_kinds = {
         "PERSON", "ORGANIZATION", "EVENT", "PRODUCT", "LOCATION", "DOCUMENT",
@@ -1025,7 +1026,6 @@ def build_raw_source_plan(
             plan.append(("Unsplash", fetch_unsplash_candidates))
         if str(os.getenv("PIXABAY_API_KEY", "")).strip():
             plan.append(("Pixabay", fetch_pixabay_candidates))
-        plan.append(("Wikipedia", fetch_wikipedia_person_candidates))
     else:
         plan.append(("Openverse", fetch_openverse_candidates))
         if str(os.getenv("PIXABAY_API_KEY", "")).strip():
