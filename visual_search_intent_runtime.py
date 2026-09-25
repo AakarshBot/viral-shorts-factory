@@ -258,8 +258,8 @@ def _ranked_scene_terms(scene: dict, subject: str, limit: int = 5) -> list[str]:
 
 
 def _scene_terms(scene: dict, subject: str) -> list[str]:
-    """Return the strongest evidence-backed visual anchors for this slide."""
-    return _ranked_scene_terms(scene, subject, limit=4)
+    """Return enough evidence-backed anchors to preserve concrete action terms."""
+    return _ranked_scene_terms(scene, subject, limit=6)
 
 
 def _compose_query(subject: str, *anchors: str, max_words: int = 7) -> str:
