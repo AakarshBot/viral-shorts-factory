@@ -2619,7 +2619,7 @@ def test_manual_pool_stops_after_first_two_providers_when_target_is_met(monkeypa
         allow_auto_backfill=False,
     )
 
-    assert calls == ["Commons", "Openverse"]
+    assert calls == ["Commons", "DDG"]
     assert len(result["assets"]) == 2
 
 def test_manual_pool_uses_second_provider_stage_only_when_first_stage_fails_qa(monkeypatch):
