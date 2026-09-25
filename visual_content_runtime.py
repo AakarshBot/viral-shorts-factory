@@ -121,6 +121,7 @@ def patch_content_first_visuals(bot):
         font_choice = language_cfg.get("font")
         packages = [None] * len(scenes)
         used_urls, used_hashes = set(), set()
+        reset_visual_qa_video_budget()
 
         active_config = getattr(bot, "_active_web_config", {}) or {}
         manual_raw = str(active_config.get("visual_search_queries", "") or "").strip()
