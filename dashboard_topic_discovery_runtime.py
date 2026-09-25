@@ -28,14 +28,14 @@ DASHBOARD_DISCOVERY_CACHE_TTL_SECONDS = 20.0
 _DASHBOARD_DISCOVERY_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
 _DASHBOARD_DISCOVERY_CACHE_LOCK = threading.Lock()
 
-GOOGLE_QUERY_LIMIT = 10
+GOOGLE_QUERY_LIMIT = 14
 GDELT_QUERY_LIMIT = 2
 DISCOVERY_TIMEOUT_SECONDS = 8.0
 CORE_REQUEST_TIMEOUT_SECONDS = 6.0
 SPARSE_CORE_ARTICLE_THRESHOLD = 45
-MAX_RAW_ARTICLES = 500
+MAX_RAW_ARTICLES = 700
 MAX_TREND_ARTICLES = 30
-MAX_EVENTS_FOR_RANKING = 180
+MAX_EVENTS_FOR_RANKING = 240
 DASHBOARD_MAX_AGE_HOURS = 72
 
 CRICKET_MARQUEE_QUERY = (
@@ -95,6 +95,10 @@ DEFAULT_NON_CRICKET_LANES = {
         'women sports India world latest record tournament controversy when:3d',
         'Olympics Asian Games Commonwealth Games sports India latest when:7d',
         'sports emerging athlete breakout upset comeback controversy viral reaction when:3d',
+        'sports viral video reaction social media controversy incident when:3d',
+        'sports bizarre unusual dramatic moment decision when:3d',
+        'sports feud row statement reaction debate when:3d',
+        'sports breakout debut upset shock comeback when:3d',
         '(FIFA ATP WTA BWF FIH IOC) latest sports news India when:3d',
     ),
     "technology": (
@@ -418,6 +422,30 @@ def _sports_relevance_pass(story: dict) -> bool:
     return sr._discovery_category_allowed("sports", story)
 
 
+def _story_exists_pass(story: dict) -> bool:
+    """Keep headline-only records out without requiring every event to be multi-source."""
+    body = " ".join(
+        str(story.get(key) or "")
+        for key in ("description", "summary", "snippet", "text", "content")
+    ).strip()
+    body_chars = len(" ".join(body.split()))
+    source_count = int(story.get("event_source_count") or 0)
+    article_count = int(story.get("event_article_count") or 0)
+    evidence_count = sum(
+        1 for item in (story.get("event_evidence") or [])
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    )
+    story["story_substance_chars"] = body_chars
+    if body_chars >= 100:
+        return True
+    if source_count >= 2 and article_count >= 2:
+        return True
+    if evidence_count >= 2:
+        return True
+    story["discovery_rejection"] = "Headline-only / insufficient story detail"
+    return False
+
+
 def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> bool:
     title = str(story.get("title") or "").strip()
     if len(title) < 12:
@@ -430,6 +458,8 @@ def _hard_dashboard_pass(story: dict, genre_key: str, requested_topic: str) -> b
         return False
 
     if not sr._source_page_pass(story):
+        return False
+    if not _story_exists_pass(story):
         return False
     if genre_key == "sports" and not _sports_relevance_pass(story):
         story["discovery_rejection"] = "Outside selected sports lane"
