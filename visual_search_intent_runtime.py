@@ -389,17 +389,11 @@ def resolve_visual_search_intent(scene: dict, video_title: str = "") -> VisualSe
             else:
                 anchor = _primary_visual_anchor(scene_terms)
 
-            action_anchor = _action_visual_anchor(scene, subject) if visual_genre == "PERSON_ACTION" else ""
-            refined = _compose_query(subject, action_anchor or anchor)
-            if visual_genre == "PERSON_ACTION" and refined:
-                queries = [refined]
-                if subject and subject.casefold() != refined.casefold():
-                    queries.append(subject)
-            else:
-                queries = [subject] if subject else []
-                if refined and refined.casefold() not in {item.casefold() for item in queries}:
-                    queries.append(refined)
-                queries = queries[:2]
+            refined = _compose_query(subject, anchor)
+            queries = [subject] if subject else []
+            if refined and refined.casefold() not in {item.casefold() for item in queries}:
+                queries.append(refined)
+            queries = queries[:2]
 
     if manual:
         manual_intent = _clean(scene.get("visual_intent", ""))
