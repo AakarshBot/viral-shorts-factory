@@ -25,14 +25,6 @@ def _cache_root(bot):
     return root
 
 
-def _context_fingerprint(intent="", prompt="", voice="", video_title=""):
-    raw = " | ".join(
-        str(value or "").strip().lower()
-        for value in (intent, prompt, voice, video_title)
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-
 def _cache_key(entity, visual_type, context=""):
     raw = (
         f"{str(entity).strip().lower()}::"
