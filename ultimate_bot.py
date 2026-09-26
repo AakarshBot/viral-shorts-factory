@@ -24,7 +24,6 @@ import subprocess
 load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
-from subtitle_runtime import build_subtitle_plan
 from script_runtime import (
     append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
     estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
@@ -1382,8 +1381,8 @@ def _normalize_audio_loudness(input_path, output_path):
     return output_path
 
 
-def compile_video(scene_visual_packages, audio_paths, subtitle_plan, format_mode):
-    print("\n🎬 Rendering Kinetic Final Video (captions, motion, branding and loudness)...")
+def compile_video(scene_visual_packages, audio_paths, format_mode):
+    print("\n🎬 Rendering Kinetic Final Video (motion, branding and loudness)...")
     if not scene_visual_packages:
         raise ValueError("No visual packages were supplied.")
     if not audio_paths:
@@ -2145,7 +2144,6 @@ def run_robot(web_config=None):
             audio_paths, word_timings = asyncio.run(
                 generate_voiceover_and_timestamps(script_data, lang_cfg)
             )
-            subtitle_plan = build_subtitle_plan(word_timings)
             if not audio_paths:
                 reason = "Voiceover generation failed to produce audio files."
                 _mark_run_status("FAILED", reason)
@@ -2219,7 +2217,7 @@ def run_robot(web_config=None):
                 raise RuntimeError("Manual visual review returned an invalid visual package.")
 
             video_path = compile_video(
-                visuals, audio_paths, subtitle_plan, format_mode
+                visuals, audio_paths, format_mode
             )
         except Exception as exc:
             print("\n\n" + "!" * 60)

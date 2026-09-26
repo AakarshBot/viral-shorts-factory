@@ -7,21 +7,6 @@ from youtube_comment_runtime import build_description_hashtags, ensure_shorts_ti
 from factory_function_coverage import collect_factory_function_coverage
 
 
-def test_compile_video_owns_the_subtitle_render_handoff():
-    import inspect
-
-    source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    signature = inspect.signature(ultimate_bot.compile_video)
-    assert list(signature.parameters) == [
-        "scene_visual_packages",
-        "audio_paths",
-        "subtitle_plan",
-        "format_mode",
-    ]
-    assert "subtitle_plan = build_subtitle_plan(word_timings)" in source
-    assert "generate_karaoke_clip" not in source
-
-
 def test_visual_cuts_keep_beats_at_or_below_four_seconds():
     assert ultimate_bot._scene_visual_segment_count(3.9) == 1
     assert ultimate_bot._scene_visual_segment_count(4.1) == 2

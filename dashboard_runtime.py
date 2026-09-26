@@ -2649,57 +2649,6 @@ def _run_scene_branding_demo() -> dict[str, Any]:
     }
 
 
-def _run_synthetic_renderer_demo() -> dict[str, Any]:
-    """Exercise the current premium subtitle/card renderers without network calls."""
-    from subtitle_runtime import (
-        generate_readable_karaoke_clip,
-        render_premium_top5_card,
-    )
-
-    temp_dir = tempfile.mkdtemp(prefix="vsf_demo_")
-    background_path = os.path.join(temp_dir, "background.png")
-    subtitle_path = os.path.join(temp_dir, "subtitle.png")
-    top5_path = os.path.join(temp_dir, "top5.png")
-
-    Image.new("RGB", (1080, 1920), (28, 42, 58)).save(background_path)
-    generate_readable_karaoke_clip(
-        [
-            {"word": "This"},
-            {"word": "is"},
-            {"word": "a"},
-            {"word": "premium"},
-            {"word": "demo"},
-        ],
-        -1,
-        None,
-        1080,
-        subtitle_path,
-        bg_img_path=background_path,
-    )
-    top5 = render_premium_top5_card(
-        Image.open(background_path),
-        3,
-        5,
-        "This is a sample Top-5 glass card.",
-    )
-    top5.save(top5_path, "PNG")
-
-    from branding_runtime import build_scene_branding_overlays
-    branding_layers = build_scene_branding_overlays(__import__("ultimate_bot"), 1080, 1920, "Source: Reuters")
-    logo_path = os.path.join(temp_dir, "logo_badge.png")
-    Image.fromarray(branding_layers[0], mode="RGBA").crop((900, 0, 1080, 220)).save(logo_path, "PNG")
-
-    return {
-        "status": "PASS",
-        "detail": "Premium subtitle, Top-5 card and glass-logo rendering completed without API calls.",
-        "artifacts": {
-            "subtitle": subtitle_path,
-            "top5": top5_path,
-            "logo": logo_path,
-        },
-    }
-
-
 def factory_function_coverage() -> dict[str, Any]:
     """Return the explicit coverage audit used by Demo Factory and diagnostics."""
     from factory_function_coverage import collect_factory_function_coverage
@@ -2738,9 +2687,6 @@ def run_demo_section(section: str) -> dict[str, Any]:
 
     if section == "scene_branding":
         return _run_scene_branding_demo()
-
-    if section == "premium_renderers":
-        return _run_synthetic_renderer_demo()
 
     if section not in checks:
         return {"status": "FAIL", "detail": f"Unknown demo section: {section}"}

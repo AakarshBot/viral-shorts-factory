@@ -3686,7 +3686,6 @@ def render_demo_page() -> None:
         ("script_audio", "Script cleaning & audio timing"),
         ("runtime_bindings", "Runtime bindings"),
         ("provider_boundary", "Raw provider boundary"),
-        ("premium_renderers", "Subtitles, Top-5 card & glass logo"),
         ("dashboard_architecture", "Dashboard architecture"),
         ("factory_function_coverage", "Function coverage"),
     ]
