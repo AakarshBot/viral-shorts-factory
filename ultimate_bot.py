@@ -24,6 +24,7 @@ import subprocess
 load_dotenv()
 
 from visual_licensing_runtime import append_image_credits
+from subtitle_runtime import build_subtitle_plan
 from script_runtime import (
     append_research_sources, choose_editorial_angle, classify_hook_style, validate_content_density,
     estimate_narration_duration, classify_narration_duration, measure_audio_duration, validate_tts_duration,
@@ -1342,61 +1343,6 @@ def render_hook_card(bg_img, hook_text, width=1080, height=1920, font_choice=Non
         y_text += (bbox[3] - bbox[1]) + 20
     return base
 
-def generate_karaoke_clip(chunk, active_index, font_path, video_width, output_path, bg_img_path=None, source_type="bg"):
-    # Made canvas taller to support massive text
-    canvas_w, canvas_h = int(video_width * 0.95), 450
-    img = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
-    draw = ImageDraw.Draw(img)
-
-    text_color = (255, 255, 255) 
-    active_color = (0, 255, 255) # High-contrast Viral Cyan
-    
-    font_size = 130 # Massive subtitles
-    font = get_bold_font(font_size, font_path)
-    
-    while font_size > 50:
-        total_w = 0
-        for i, wt in enumerate(chunk):
-            f = get_bold_font(int(font_size * 1.15) if i == active_index else font_size, font_path)
-            total_w += draw.textlength(wt['word'], font=f)
-        total_w += draw.textlength(" ", font=font) * (len(chunk) - 1)
-        
-        if total_w < canvas_w - 40: 
-            break
-        font_size -= 5
-        font = get_bold_font(font_size, font_path)
-
-    space_w = draw.textlength(" ", font=get_bold_font(font_size, font_path))
-    word_widths = [draw.textlength(wt['word'], font=get_bold_font(int(font_size * 1.15) if i == active_index else font_size, font_path)) for i, wt in enumerate(chunk)]
-    total_text_w = sum(word_widths) + space_w * (len(chunk) - 1)
-    
-    x = (canvas_w - total_text_w) / 2
-    y = (canvas_h - (font_size * 1.15)) / 2
-
-    # Ultra-thick stroke for supreme legibility without a background box
-    stroke_w = max(6, int(font_size * 0.12))
-
-    for i, wt in enumerate(chunk):
-        w_str = wt['word']
-        is_active = (i == active_index)
-        color = active_color if is_active else text_color
-        
-        current_fs = int(font_size * 1.15) if is_active else font_size
-        current_font = get_bold_font(current_fs, font_path)
-        
-        y_offset = (font_size * 1.15) - current_fs 
-
-        # Heavy Double Drop-Shadow
-        draw.text((x + 10, y + y_offset + 10), w_str, font=current_font, fill=(0,0,0,200))
-        
-        # Main text with thick black stroke
-        draw.text((x, y + y_offset), w_str, font=current_font, fill=color, stroke_width=stroke_w, stroke_fill=(0,0,0,255))
-        
-        x += word_widths[i] + space_w
-
-    img.save(output_path, "PNG")
-    return output_path
-
 def _scene_visual_segment_count(scene_duration):
     """Keep each visual beat no longer than four seconds when narration is long."""
     try:
@@ -1404,16 +1350,6 @@ def _scene_visual_segment_count(scene_duration):
     except (TypeError, ValueError):
         duration = 0.0
     return max(1, int(math.ceil(duration / 4.0)))
-
-
-def _caption_y_position(video_height, scene_source_type="", format_mode="regular"):
-    """Place captions away from Top-5 ranking text and the lower safe area."""
-    if str(format_mode or "").lower() == "top5":
-        return int(video_height * 0.67)
-    if str(scene_source_type or "").lower() == "person":
-        return int(video_height * 0.60)
-    return int(video_height * 0.52)
-
 
 
 def _normalize_audio_loudness(input_path, output_path):
@@ -1446,7 +1382,7 @@ def _normalize_audio_loudness(input_path, output_path):
     return output_path
 
 
-def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg, format_mode):
+def compile_video(scene_visual_packages, audio_paths, subtitle_plan, language_cfg, format_mode):
     print("\n🎬 Rendering Kinetic Final Video (captions, motion, branding and loudness)...")
     if not scene_visual_packages:
         raise ValueError("No visual packages were supplied.")
@@ -1473,7 +1409,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
         f for f in os.listdir(SFX_DIR)
         if f.lower().endswith(".mp3")
     ] if os.path.exists(SFX_DIR) else []
-    font_path = language_cfg.get("font")
 
     try:
         for idx, layer_paths in enumerate(
@@ -1566,78 +1501,6 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
             else:
                 scene_audio = audio
 
-            text_clips = []
-            scene_wt = word_timings[idx] if idx < len(word_timings) else []
-            if not scene_wt:
-                raw_text = (
-                    layer_paths[0].get("narration_text")
-                    or layer_paths[0].get("text")
-                    or ""
-                )
-                words = str(raw_text).split()
-                if words:
-                    dur_per_word = max(0.1, (scene_duration - 0.2) / len(words))
-                    curr_t = 0.1
-                    scene_wt = []
-                    for word in words:
-                        scene_wt.append(
-                            {
-                                "word": word,
-                                "start": curr_t,
-                                "end": min(scene_duration, curr_t + dur_per_word),
-                            }
-                        )
-                        curr_t += dur_per_word
-
-            chunks, current_chunk, current_len = [], [], 0
-            for wt in scene_wt:
-                if not isinstance(wt, dict):
-                    continue
-                raw_word = safe_text(wt.get("word"), "")
-                w_text = re.sub(
-                    r"[^\x00-\x7F\u0900-\u097F\u0C00-\u0C7F]+",
-                    "",
-                    raw_word,
-                ).strip()
-                if not w_text:
-                    continue
-                wt["word"] = w_text
-                if current_len + len(w_text) > 18 and current_chunk:
-                    chunks.append(current_chunk)
-                    current_chunk, current_len = [], 0
-                current_chunk.append(wt)
-                current_len += len(w_text) + 1
-            if current_chunk:
-                chunks.append(current_chunk)
-
-            safe_y_pos = _caption_y_position(height, scene_source_type, format_mode)
-            for chunk_idx, chunk in enumerate(chunks):
-                for active_idx, wt in enumerate(chunk):
-                    start_t = max(0.0, float(wt.get("start", 0.0)))
-                    end_t = min(
-                        scene_duration,
-                        max(
-                            start_t + 0.08,
-                            float(wt.get("end", start_t + 0.08)),
-                        ),
-                    )
-                    if start_t >= scene_duration or end_t <= start_t:
-                        continue
-                    sub_path = os.path.join(
-                        ASSETS_DIR,
-                        f"sub_{idx}_{chunk_idx}_{active_idx}.png",
-                    )
-                    generate_karaoke_clip(
-                        chunk, active_idx, font_path, width, sub_path
-                    )
-                    text_clips.append(
-                        ImageClip(sub_path)
-                        .with_start(start_t)
-                        .with_duration(end_t - start_t)
-                        .with_position(("center", safe_y_pos))
-                    )
-
-
             from branding_runtime import build_scene_branding_overlays
 
             source_provenance = layer_paths[0].get("asset_provenance") or {}
@@ -1652,7 +1515,7 @@ def compile_video(scene_visual_packages, audio_paths, word_timings, language_cfg
                     None, width, height, source_credit
                 )
             ]
-            scene_layers = background_clips + text_clips + branding_layers
+            scene_layers = background_clips + branding_layers
             scene = CompositeVideoClip(
                 scene_layers, size=(width, height)
             ).with_duration(scene_duration)
@@ -2282,6 +2145,7 @@ def run_robot(web_config=None):
             audio_paths, word_timings = asyncio.run(
                 generate_voiceover_and_timestamps(script_data, lang_cfg)
             )
+            subtitle_plan = build_subtitle_plan(word_timings)
             if not audio_paths:
                 reason = "Voiceover generation failed to produce audio files."
                 _mark_run_status("FAILED", reason)
@@ -2355,7 +2219,7 @@ def run_robot(web_config=None):
                 raise RuntimeError("Manual visual review returned an invalid visual package.")
 
             video_path = compile_video(
-                visuals, audio_paths, word_timings, lang_cfg, format_mode
+                visuals, audio_paths, subtitle_plan, lang_cfg, format_mode
             )
         except Exception as exc:
             print("\n\n" + "!" * 60)

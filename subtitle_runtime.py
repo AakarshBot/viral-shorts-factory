@@ -1,310 +1,86 @@
-"""Premium subtitle, Top-5 card and branding finish runtime.
+"""Build the subtitle data handed from audio timing to the render stage.
 
-The visual language is intentionally restrained: clean typography, white text,
-frosted-glass surfaces, subtle highlights, and thin accent borders. The same
-language is shared by Deep Dive subtitles, Top-5 cards, the channel watermark,
-and the final branded finish.
+This module owns only caption grouping and timing. Rendering decides fonts,
+position, colour, animation, and final video composition.
 """
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-from pathlib import Path
 from typing import Any
-
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
-
-
-_WINDOWS_REGULAR_FONTS = (
-    r"C:\\Windows\\Fonts\\arial.ttf",
-    r"C:\\Windows\\Fonts\\segoeui.ttf",
-    r"C:\\Windows\\Fonts\\calibri.ttf",
-)
-_WINDOWS_BOLD_FONTS = (
-    r"C:\\Windows\\Fonts\\arialbd.ttf",
-    r"C:\\Windows\\Fonts\\segoeuib.ttf",
-)
-_LINUX_REGULAR_FONTS = (
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-)
-_LINUX_BOLD_FONTS = (
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-)
-
-
-def _resolve_font_path(font_path: str | None) -> str | None:
-    candidates: list[str] = []
-    if font_path:
-        requested = str(font_path)
-        candidates.append(requested)
-        requested_name = os.path.basename(requested).lower()
-        if "bold" not in requested_name and "bd" not in requested_name:
-            candidates.extend(_WINDOWS_REGULAR_FONTS)
-            candidates.extend(_LINUX_REGULAR_FONTS)
-        else:
-            candidates.extend(_WINDOWS_BOLD_FONTS)
-            candidates.extend(_LINUX_BOLD_FONTS)
-    candidates.extend(_WINDOWS_REGULAR_FONTS)
-    candidates.extend(_WINDOWS_BOLD_FONTS)
-    candidates.extend(_LINUX_REGULAR_FONTS)
-    candidates.extend(_LINUX_BOLD_FONTS)
-    for candidate in candidates:
-        try:
-            if candidate and os.path.isfile(candidate):
-                return candidate
-        except OSError:
-            continue
-    return None
-
-
-def _load_font(font_path: str | None, size: int, bold: bool = False):
-    resolved = _resolve_font_path(font_path)
-    if resolved:
-        try:
-            return ImageFont.truetype(resolved, size=max(1, int(size)))
-        except Exception:
-            pass
-    fallback_names = ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf") if bold else ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
-    for module_font in fallback_names:
-        try:
-            return ImageFont.truetype(module_font, size=max(1, int(size)))
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
-def _load_regular_font(font_path: str | None, size: int):
-    requested = str(font_path or "").lower()
-    if requested.endswith("bold.ttf") or requested.endswith("bd.ttf"):
-        return _load_font(font_path, size, bold=True)
-    if requested:
-        for path in (font_path, *_WINDOWS_REGULAR_FONTS, *_LINUX_REGULAR_FONTS):
-            if path and os.path.isfile(str(path)):
-                try:
-                    return ImageFont.truetype(str(path), size=max(1, int(size)))
-                except Exception:
-                    continue
-    return _load_font(None, size, bold=False)
 
 
 def _clean_word(value: Any) -> str:
-    # Extract scalar/list contents from NumPy and other array-like values before
-    # stringification so their internal representation can never become caption text.
-    if hasattr(value, "tolist") and not isinstance(value, (bytes, bytearray, str)):
-        try:
-            value = value.tolist()
-        except Exception:
-            pass
-    if isinstance(value, (list, tuple)):
-        value = " ".join(_clean_word(item) for item in value)
-    text = str(value or "")
-    # `_arrow` is a formatting artifact, not narration/caption content.
+    text = str(value or "").replace("\u00a0", " ").strip()
     text = re.sub(r"(?<![A-Za-z0-9])_arrow(?:_(?:right|left|up|down))?(?![A-Za-z0-9])", "", text, flags=re.IGNORECASE)
-    text = text.replace("\u00a0", " ")
     text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text)
     return text.strip()
 
 
-def _measure_line(words: list[str], font) -> float:
-    if not words:
-        return 0.0
-    space = font.getlength(" ")
-    return sum(font.getlength(word) for word in words) + space * max(0, len(words) - 1)
+def build_subtitle_plan(
+    word_timings: list[list[dict[str, Any]]] | None,
+    *,
+    max_words: int = 4,
+    max_chars: int = 22,
+    max_duration: float = 2.2,
+    max_gap: float = 0.6,
+    min_duration: float = 0.35,
+) -> list[list[dict[str, Any]]]:
+    """Group authoritative word timings into render-ready caption cues.
 
-
-def _split_lines(words: list[str], font, max_width: int) -> list[list[str]]:
-    if not words:
-        return []
-    lines: list[list[str]] = []
-    current: list[str] = []
-    for word in words:
-        proposed = _measure_line(current + [word], font)
-        if current and proposed > max_width:
-            lines.append(current)
-            current = [word]
-        else:
-            current.append(word)
-    if current:
-        lines.append(current)
-    if len(lines) <= 2:
-        return lines
-
-    best: tuple[tuple[float, float], list[str], list[str]] | None = None
-    for split in range(1, len(words)):
-        left, right = words[:split], words[split:]
-        left_w, right_w = _measure_line(left, font), _measure_line(right, font)
-        overflow = max(0.0, left_w - max_width) + max(0.0, right_w - max_width)
-        balance = abs(left_w - right_w)
-        score = (overflow, balance)
-        if best is None or score < best[0]:
-            best = (score, left, right)
-    return [best[1], best[2]] if best else [words]
-
-
-def _fit_layout(words: list[str], base_font_size: int, font_path: str | None, max_width: int, max_lines: int = 2):
-    for size in range(int(base_font_size), 22, -2):
-        font = _load_regular_font(font_path, size)
-        lines = _split_lines(words, font, max_width)
-        if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width for line in lines):
-            return font, lines
-    for size in range(20, 9, -2):
-        font = _load_regular_font(font_path, size)
-        lines = _split_lines(words, font, max_width)
-        if len(lines) <= max_lines and all(_measure_line(line, font) <= max_width for line in lines):
-            return font, lines
-    font = _load_regular_font(font_path, 12)
-    return font, _split_lines(words, font, max_width)[:max_lines]
-
-
-def generate_readable_karaoke_clip(
-    chunk,
-    active_index,
-    font_path,
-    video_width,
-    output_path,
-    bg_img_path=None,
-    source_type="bg",
-):
-    """Render one stable caption card per timing chunk.
-
-    The active word argument remains for API compatibility, but captions no
-    longer regenerate an image for every word. One lightweight PNG is created
-    per chunk, eliminating the repeated background crop/blur and per-word PNG
-    generation that dominated subtitle overhead.
+    Output is scene-indexed. Each cue contains:
+      start, end, text, words[{text, start, end}]
+    No visual styling or rendering decisions are made here.
     """
-    width = max(1, int(video_width))
-    height = 220
-    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    plan: list[list[dict[str, Any]]] = []
+    for scene in word_timings or []:
+        words = []
+        for item in scene or []:
+            if not isinstance(item, dict):
+                continue
+            text = _clean_word(item.get("word"))
+            if not text:
+                continue
+            try:
+                start = max(0.0, float(item.get("start", 0.0)))
+                end = max(start, float(item.get("end", start)))
+            except (TypeError, ValueError):
+                continue
+            words.append({"text": text, "start": start, "end": end})
 
-    words = [
-        _clean_word(item.get("word") if isinstance(item, dict) else item)
-        for item in chunk
-    ]
-    words = [word for word in words if word]
-    if not words:
-        image.save(output_path, "PNG")
-        return output_path
+        cues: list[dict[str, Any]] = []
+        current: list[dict[str, Any]] = []
 
-    max_text_width = int(width * 0.82)
-    base_font_size = max(48, min(72, int(width * 0.062)))
-    font, lines = _fit_layout(
-        words, base_font_size, font_path, max_text_width, max_lines=2
-    )
-    font_size = int(getattr(font, "size", base_font_size) or base_font_size)
-    line_height = max(42, int(font_size * 1.08))
-    line_gap = max(6, int(font_size * 0.08))
-    text_h = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
+        def flush() -> None:
+            if not current:
+                return
+            start = current[0]["start"]
+            end = max(current[-1]["end"], start + min_duration)
+            cues.append({
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": " ".join(w["text"] for w in current),
+                "words": [dict(w) for w in current],
+            })
+            current.clear()
 
-    # A quiet, translucent panel: no gloss, no white outline, no accent border.
-    panel_h = min(170, max(104, text_h + 42))
-    panel_w = min(width - 96, max(440, int(width * 0.84)))
-    panel_x = (width - panel_w) // 2
-    panel_y = (height - panel_h) // 2
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle(
-        (panel_x, panel_y, panel_x + panel_w - 1, panel_y + panel_h - 1),
-        radius=22,
-        fill=(8, 12, 20, 168),
-    )
+        for word in words:
+            prev = current[-1] if current else None
+            if prev is not None:
+                phrase_chars = len(" ".join(w["text"] for w in current))
+                too_many = len(current) >= max_words
+                too_long = phrase_chars + 1 + len(word["text"]) > max_chars
+                too_slow = word["end"] - current[0]["start"] > max_duration
+                too_big_gap = word["start"] - prev["end"] > max_gap
+                sentence_end = prev["text"].rstrip()[-1:] in ".!?"
+                if too_many or too_long or too_slow or too_big_gap or sentence_end:
+                    flush()
+            current.append(word)
+        flush()
 
-    # Highlight the active spoken word while keeping the rest of the phrase visible.
-    try:
-        active_index = max(0, min(int(active_index), len(words) - 1))
-    except (TypeError, ValueError):
-        active_index = 0
+        for previous, following in zip(cues, cues[1:]):
+            if previous["end"] > following["start"]:
+                previous["end"] = round(max(previous["start"] + 0.1, following["start"] - 0.01), 3)
 
-    global_word_index = 0
-    y = panel_y + max(14, (panel_h - text_h) // 2) - 1
-    for line in lines:
-        line_widths = [draw.textlength(word, font=font) for word in line]
-        spacing = draw.textlength(" ", font=font)
-        line_total = sum(line_widths) + spacing * max(0, len(line) - 1)
-        x = (width - line_total) / 2
+        plan.append(cues)
 
-        for word, word_width in zip(line, line_widths):
-            is_active = global_word_index == active_index
-            fill = (64, 196, 255, 255) if is_active else (248, 249, 250, 255)
-            draw.text(
-                (x + 2, y + 3),
-                word,
-                font=font,
-                fill=(0, 0, 0, 150),
-                stroke_width=1,
-                stroke_fill=(0, 0, 0, 130),
-            )
-            draw.text(
-                (x, y),
-                word,
-                font=font,
-                fill=fill,
-                stroke_width=1,
-                stroke_fill=(0, 0, 0, 170),
-            )
-            x += word_width + spacing
-            global_word_index += 1
-        y += line_height + line_gap
-
-    image.save(output_path, "PNG")
-    return output_path
-
-def render_premium_top5_card(
-    bg_img,
-    item_number,
-    total_items,
-    summary_text,
-    width=1080,
-    height=1920,
-    font_choice=None,
-):
-    """Render a Top-5 card using the same restrained frosted-glass language."""
-    canvas = bg_img.convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
-    box = (64, 330, width - 64, height - 330)
-
-    crop = canvas.crop(box).filter(ImageFilter.GaussianBlur(28))
-    canvas.paste(crop, box)
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    x0, y0, x1, y1 = box
-    draw.rounded_rectangle(box, radius=44, fill=(7, 13, 23, 142), outline=(255, 255, 255, 88), width=2)
-    draw.rounded_rectangle((x0 + 6, y0 + 6, x1 - 6, y0 + 84), radius=36, fill=(255, 255, 255, 18))
-    draw.rectangle((x0 + 42, y0 + 104, x0 + 185, y0 + 108), fill=(64, 196, 255, 160))
-
-    accent = (64, 196, 255, 245)
-    num_font = _load_regular_font(font_choice, 88)
-    clean_summary = _clean_word(summary_text)
-    body_font, lines = _fit_layout(clean_summary.split(), 58, font_choice, width - 220, 3)
-    draw.text((x0 + 54, y0 + 44), f"#{int(item_number)}", font=num_font, fill=accent)
-
-    y = y0 + 230
-    line_height = int(getattr(body_font, "size", 58) * 1.18)
-    for line in lines[:3]:
-        text = " ".join(line)
-        tw = draw.textlength(text, font=body_font)
-        draw.text(((width - tw) / 2 + 2, y + 3), text, font=body_font, fill=(0, 0, 0, 155))
-        draw.text(((width - tw) / 2, y), text, font=body_font, fill=(248, 249, 250, 255))
-        y += line_height + 10
-
-    result = Image.alpha_composite(canvas, overlay)
-    return result.convert("RGBA")
-
-
-def patch_subtitle_pipeline(bot):
-    if getattr(bot, "_subtitle_pipeline_patch_installed", False):
-        return bot
-    run_robot = getattr(bot, "run_robot", None)
-    namespace = getattr(run_robot, "__globals__", None)
-    if not isinstance(namespace, dict):
-        return bot
-
-    namespace["render_top5_card"] = render_premium_top5_card
-    bot.render_top5_card = render_premium_top5_card
-    namespace["generate_karaoke_clip"] = generate_readable_karaoke_clip
-    bot.generate_karaoke_clip = generate_readable_karaoke_clip
-    bot._subtitle_pipeline_patch_installed = True
-    print("   [Subtitle Patch] Clean glass captions + matching Top-5 cards installed.", flush=True)
-    return bot
+    return plan

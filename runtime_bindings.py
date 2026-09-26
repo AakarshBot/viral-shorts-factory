@@ -94,13 +94,6 @@ def _patch_audio_direction(bot):
     return patch_audio_direction(bot)
 
 
-def _patch_subtitles(bot):
-    from subtitle_runtime import patch_subtitle_pipeline
-    return patch_subtitle_pipeline(bot)
-
-
-
-
 def _install_script_pipeline(bot):
     from script_router_runtime import install_script_pipeline
     return install_script_pipeline(bot)
@@ -143,7 +136,6 @@ def bind_dashboard_patches(bot):
         print(f"   [Bindings] Channel intelligence runtime unavailable: {type(exc).__name__}: {exc}", flush=True)
     from production_hardening_runtime import install_production_hardening
     install_production_hardening(bot)
-    _patch_subtitles(bot)
 
     # Keep run_robot's production globals aligned with the live bot bindings.
     # Several pipeline stages are invoked by functions defined in ultimate_bot.py,
@@ -153,7 +145,7 @@ def bind_dashboard_patches(bot):
         "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
         "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async", "compile_video",
         "auto_pilot_selection", "run_analytics_sweep",
-        "upload_to_youtube", "generate_karaoke_clip",
+        "upload_to_youtube",
     )
 
     # Capture the first fully-patched runtime callable set before production

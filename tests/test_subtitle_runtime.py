@@ -1,60 +1,41 @@
-from PIL import Image, ImageDraw
-
-from subtitle_runtime import (
-    generate_readable_karaoke_clip,
-    render_premium_top5_card,
-)
+from subtitle_runtime import build_subtitle_plan
 
 
-def test_subtitle_clip_is_simple_caption_card(tmp_path):
-    background = tmp_path / "scene.png"
-    Image.new("RGB", (1080, 1920), (30, 50, 75)).save(background)
-    output = tmp_path / "subtitle.png"
-
-    path = generate_readable_karaoke_clip(
-        [{"word": "This"}, {"word": "is"}, {"word": "the"}, {"word": "story"}],
-        -1,
-        None,
-        1080,
-        str(output),
-        bg_img_path=str(background),
-        source_type="bg",
-    )
-
-    rendered = Image.open(path).convert("RGBA")
-    alpha = rendered.getchannel("A")
-    assert rendered.size == (1080, 220)
-    assert alpha.getbbox() is not None
-    assert rendered.getpixel((540, 110))[3] > 0
-    # The active subtitle renderer no longer draws the old gloss/accent border.
-    assert rendered.getpixel((20, 20))[3] == 0
+def test_build_subtitle_plan_is_data_only_and_render_ready():
+    plan = build_subtitle_plan([
+        [
+            {"word": "India", "start": 0.0, "end": 0.35},
+            {"word": "won", "start": 0.36, "end": 0.70},
+            {"word": "the", "start": 0.71, "end": 0.90},
+            {"word": "match", "start": 0.91, "end": 1.20},
+            {"word": "today", "start": 1.30, "end": 1.60},
+        ]
+    ])
+    assert len(plan) == 1
+    assert len(plan[0]) == 2
+    assert plan[0][0]["text"] == "India won the match"
+    assert plan[0][0]["start"] == 0.0
+    assert plan[0][0]["end"] == 1.2
+    assert plan[0][0]["words"][2] == {"text": "the", "start": 0.71, "end": 0.9}
 
 
-def test_top5_card_uses_same_glass_language():
-    background = Image.new("RGB", (1080, 1920), (24, 34, 48))
-    rendered = render_premium_top5_card(
-        background,
-        3,
-        5,
-        "A concise premium summary of the third story.",
-        font_choice=None,
-    )
-
-    assert rendered.mode == "RGBA"
-    assert rendered.size == (1080, 1920)
-    assert rendered.getpixel((540, 600))[3] == 255
+def test_subtitle_plan_breaks_on_pause_and_cleans_artifacts():
+    plan = build_subtitle_plan([
+        [
+            {"word": "Lead", "start": 0.0, "end": 0.3},
+            {"word": "_arrow_right", "start": 0.31, "end": 0.35},
+            {"word": "score", "start": 1.1, "end": 1.4},
+        ]
+    ])
+    assert len(plan[0]) == 2
+    assert plan[0][0]["text"] == "Lead"
+    assert plan[0][1]["text"] == "score"
 
 
-def test_array_like_caption_value_is_cleaned():
-    class ArrayLike:
-        def tolist(self):
-            return ["Hello", "world"]
-
-    from subtitle_runtime import _clean_word
-
-    assert _clean_word(ArrayLike()) == "Hello world"
-
-    assert _clean_word("Lead _arrow_right follow") == "Lead follow"
-    assert _clean_word("Lead _arrow_left follow") == "Lead follow"
-    assert _clean_word("Lead _arrow_up follow") == "Lead follow"
-    assert _clean_word("Lead _arrow_down follow") == "Lead follow"
+def test_subtitle_plan_keeps_scenes_separate():
+    plan = build_subtitle_plan([
+        [{"word": "One", "start": 0.0, "end": 0.3}],
+        [{"word": "Two", "start": 0.0, "end": 0.3}],
+    ])
+    assert [cue["text"] for cue in plan[0]] == ["One"]
+    assert [cue["text"] for cue in plan[1]] == ["Two"]
