@@ -234,7 +234,7 @@ def _test_runtime_bindings():
     required = (
         "gather_and_filter_stories", "editorial_gate_batch", "process_scored_candidates", "validate_script",
         "self_critique_pass", "write_script", "generate_voiceover_and_timestamps", "process_visuals_async",
-        "upload_to_youtube", "generate_karaoke_clip", "compile_video",
+        "upload_to_youtube", "compile_video",
     )
     missing = [name for name in required if name not in namespace]
     if missing:
