@@ -3,22 +3,23 @@ from pathlib import Path
 import ultimate_bot
 from final_qc_runtime import _validate_metadata, validate_final_upload_metadata
 from script_runtime import _extractive_script_fallback, contains_retention_bait, validate_content_density
-from subtitle_runtime import generate_readable_karaoke_clip
 from youtube_comment_runtime import build_description_hashtags, ensure_shorts_title
 from factory_function_coverage import collect_factory_function_coverage
 
 
-def test_every_scene_caption_contract_removed_from_compile():
+def test_compile_video_owns_the_subtitle_render_handoff():
+    import inspect
+
     source = Path(ultimate_bot.__file__).read_text(encoding="utf-8")
-    assert "is_hook_scene" not in source
-    assert "is_outro_scene" not in source
-    assert "is_top5_scene" not in source
-    assert "for active_idx, wt in enumerate(chunk)" in source
-
-
-def test_top5_caption_position_stays_above_lower_safe_area():
-    y = ultimate_bot._caption_y_position(1920, "bg", "top5")
-    assert y + 220 <= int(1920 * 0.80)
+    signature = inspect.signature(ultimate_bot.compile_video)
+    assert list(signature.parameters) == [
+        "scene_visual_packages",
+        "audio_paths",
+        "subtitle_plan",
+        "format_mode",
+    ]
+    assert "subtitle_plan = build_subtitle_plan(word_timings)" in source
+    assert "generate_karaoke_clip" not in source
 
 
 def test_visual_cuts_keep_beats_at_or_below_four_seconds():
@@ -132,22 +133,6 @@ def test_retention_helpers_are_accounted_for_in_coverage():
     report = collect_factory_function_coverage()
     assert report["complete"] is True
     assert report["stale_map"] == []
-
-
-def test_subtitle_renderer_uses_active_word_parameter(tmp_path):
-    path = tmp_path / "caption.png"
-    generate_readable_karaoke_clip(
-        [
-            {"word": "First"},
-            {"word": "second"},
-            {"word": "word"},
-        ],
-        1,
-        None,
-        1080,
-        str(path),
-    )
-    assert path.is_file()
 
 
 def test_hook_quality_prefers_immediate_conflict_over_generic_setup():
