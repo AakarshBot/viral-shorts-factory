@@ -1382,7 +1382,7 @@ def _normalize_audio_loudness(input_path, output_path):
     return output_path
 
 
-def compile_video(scene_visual_packages, audio_paths, subtitle_plan, language_cfg, format_mode):
+def compile_video(scene_visual_packages, audio_paths, subtitle_plan, format_mode):
     print("\n🎬 Rendering Kinetic Final Video (captions, motion, branding and loudness)...")
     if not scene_visual_packages:
         raise ValueError("No visual packages were supplied.")
@@ -2219,7 +2219,7 @@ def run_robot(web_config=None):
                 raise RuntimeError("Manual visual review returned an invalid visual package.")
 
             video_path = compile_video(
-                visuals, audio_paths, subtitle_plan, lang_cfg, format_mode
+                visuals, audio_paths, subtitle_plan, format_mode
             )
         except Exception as exc:
             print("\n\n" + "!" * 60)
