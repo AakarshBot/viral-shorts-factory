@@ -187,9 +187,17 @@ async def generate_voiceover_and_timestamps(bot, script_data, language_cfg):
     profile = bot.PERSONA_PROFILES[persona_key]
     script_data["voice_gender"] = profile["gender"]
     scenes = script_data.get("script", [])
+    format_mode = str(
+        (getattr(bot, "_active_web_config", {}) or {}).get("format_mode")
+        or script_data.get("format_mode")
+        or ""
+    ).strip().lower()
 
     if not scenes:
         print("   [Audio] ERROR: script contains no scenes.", flush=True)
+        return [], []
+    if format_mode == "top5" and len(scenes) != 6:
+        print("   [Audio] FATAL: Top-5 audio requires exactly 6 slide headlines.", flush=True)
         return [], []
 
     for idx, seg in enumerate(scenes):
