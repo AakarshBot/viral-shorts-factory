@@ -197,7 +197,8 @@ def _test_scene_branding():
     return "Final branding owns the fixed logo/frame and dynamic source-credit overlays"
 
 def _test_script_and_audio():
-    from audio_runtime import clean_audio_text, normalise_word_timings, validate_audio_timing, validate_timing_against_duration
+    import inspect
+    from audio_runtime import clean_audio_text, generate_voiceover_and_timestamps, normalise_word_timings, validate_audio_timing, validate_timing_against_duration
     from script_guard_runtime import looks_like_instructional_narration
     raw = [
         {"word": "A", "start": 0.00, "end": 0.10},
@@ -222,8 +223,21 @@ def _test_script_and_audio():
         raise AssertionError("instructional narration guard failed")
     if looks_like_instructional_narration("Amina Rahman presented the documentary."):
         raise AssertionError("real narration was flagged as instructional")
-    return "Script guard + audio cleaning + timing/duration alignment passed"
 
+    audio_source = inspect.getsource(generate_voiceover_and_timestamps)
+    if 'format_mode == "top5"' not in audio_source or "len(scenes) != 6" not in audio_source:
+        raise AssertionError("Top-5 six-slide audio guard is missing")
+    if 'seg.get("voiceover", "")' not in audio_source:
+        raise AssertionError("Top-5 audio no longer uses the canonical slide narration field")
+
+    from ultimate_bot import compile_video, run_robot
+    renderer_params = list(inspect.signature(compile_video).parameters)
+    if renderer_params != ["scene_visual_packages", "audio_paths", "format_mode"]:
+        raise AssertionError(f"renderer audio handoff contract changed: {renderer_params}")
+    if getattr(run_robot, "__globals__", {}).get("compile_video") is not compile_video:
+        raise AssertionError("run_robot is not handing off to the canonical renderer")
+
+    return "Script guard + audio cleaning/timing + Top-5 six-headline audio guard + renderer handoff contract passed"
 
 def _test_runtime_bindings():
     import factory_runtime, provider_runtime, runtime_bindings, ultimate_bot
