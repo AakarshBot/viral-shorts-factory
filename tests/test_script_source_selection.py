@@ -180,3 +180,54 @@ def test_title_ranking_uses_one_based_index_consistently():
         "regular",
     )
     assert ok, reason
+
+
+
+def test_top5_writer_payload_keeps_all_five_ranks_bounded():
+    import os
+    from unittest.mock import Mock, patch
+    import ultimate_bot
+
+    stories = [
+        {
+            "title": f"Top-5 Story {index}",
+            "summary": f"Summary for story {index}.",
+            "text": "evidence " * 2000,
+        }
+        for index in range(1, 6)
+    ]
+    provider_result = {
+        "choices": [{
+            "message": {
+                "content": '{"titles":["Top 5 today","Top 5 stories","Today in five"],"recommended_title_index":1,"seo_description":"x","pinned_comment":"x","script":['
+                + ",".join(
+                    '{"voiceover":"Story","narrative_role":"%s","primary_entity":"Story","visual_intent":"news_event","specific_search_prompt":"Story","sport_or_topic_category":"News"}'
+                    % ("hook" if index == 1 else "consequence" if index == 6 else "development")
+                    for index in range(1, 7)
+                )
+                + ']}'
+            }
+        }]
+    }
+    response = Mock(status_code=200)
+    response.json.return_value = provider_result
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}, clear=False):
+        with patch.object(ultimate_bot.requests, "post", return_value=response) as request:
+            ultimate_bot.write_script(
+                {
+                    "title": "Top Five",
+                    "text": json.dumps(stories, ensure_ascii=False),
+                },
+                {"script_instruction": ""},
+                "news",
+                None,
+                "top5",
+            )
+
+    payload = request.call_args.kwargs["json"]
+    user_text = payload["messages"][1]["content"]
+    assert len(user_text) <= 7000
+    for index in range(1, 6):
+        assert f'"rank":{index}' in user_text
+        assert f'"Top-5 Story {index}"' in user_text
