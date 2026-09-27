@@ -3683,7 +3683,7 @@ def render_demo_page() -> None:
         ("visual_strategy", "Visual strategy & identity"),
         ("visual_queries", "Visual queries"),
         ("scene_branding", "Scene overlay"),
-        ("script_audio", "Script cleaning & audio timing"),
+        ("script_audio", "Script, Top-5 audio & renderer handoff"),
         ("runtime_bindings", "Runtime bindings"),
         ("provider_boundary", "Raw provider boundary"),
         ("dashboard_architecture", "Dashboard architecture"),
