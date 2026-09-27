@@ -1082,7 +1082,27 @@ def write_script(story_data, language_cfg, genre_key, conn, format_mode):
     """Restored simple editorial writer with a complete 4–5 scene contract."""
     mode=str(format_mode or "").strip().lower()
     print(f"\n✍️ Generating Complete Editorial Script ({mode.upper()} MODE)...")
-    source=str(story_data.get("research_evidence_text") or story_data.get("text") or story_data.get("summary") or story_data.get("description") or story_data.get("title") or story_data.get("topic") or "")[:12000]
+    if mode == "top5":
+        try:
+            top5_items = json.loads(str(story_data.get("text") or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            top5_items = []
+        if isinstance(top5_items, list):
+            compact_items = []
+            for rank, item in enumerate(top5_items[:5], 1):
+                if not isinstance(item, dict):
+                    continue
+                title = re.sub(r"\s+", " ", str(item.get("title") or "").strip())[:240]
+                summary = re.sub(r"\s+", " ", str(item.get("summary") or item.get("description") or "").strip())
+                body = re.sub(r"\s+", " ", str(item.get("text") or "").strip())
+                evidence = " ".join(part for part in (summary, body) if part).strip()[:900]
+                compact_items.append({"rank": rank, "title": title, "text": evidence})
+            source = json.dumps(compact_items, ensure_ascii=False, separators=(",", ":"))
+        else:
+            source = str(story_data.get("text") or "")
+        source = source[:6500]
+    else:
+        source = str(story_data.get("research_evidence_text") or story_data.get("text") or story_data.get("summary") or story_data.get("description") or story_data.get("title") or story_data.get("topic") or "")[:12000]
     persona=("LISTICLE HOST" if mode=="top5" else "TECH REVIEWER" if genre_key=="tech_reviews" else "HYPE COMMENTATOR" if genre_key in ["sports","sports_stories_of_day"] else "ANALYTICAL INSIDER" if genre_key in ["national_global_affairs","business_finance","technology"] else "CYNICAL CRITIC")
     repair=story_data.get("_duration_tighten_script") or story_data.get("_duration_expand_script")
     instruction=story_data.get("_duration_tighten_instruction") if story_data.get("_duration_tighten_script") else story_data.get("_duration_expand_instruction")
